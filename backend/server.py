@@ -4715,7 +4715,7 @@ DECK_PIPELINE_PINS = {
     12: "3b5a7de53dd0081e",  # Frozen calibration suppression input seam; organic defaults preserved.
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
-    15: "a1901555b630076a",  # D-212 trade_block: owner context strips it when trades.roster_setup is off (flag-off terms/order byte-identical); assignment hash sorts it.
+    15: "1a34729ff2b291ac",  # D-212 trade_block: the job carries the viewer's list into viewer_preferences; owner context strips it when trades.roster_setup is off (flag-off terms/order byte-identical); assignment hash sorts it.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -13035,12 +13035,16 @@ def _run_trade_job(
         untouchable_ids: set = set()
         target_ids: set = set()
         not_interested_ids: set = set()
+        # D-212: read by the owner arms only, via viewer_preferences below
+        # (`_owner_generation_context` strips it when trades.roster_setup is off).
+        trade_block_ids: list = []
         if FLAGS.trade_preference_lists:
             try:
                 ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
                 untouchable_ids = set(ap.get("untouchables", []))
                 target_ids = set(ap.get("targets", []))
                 not_interested_ids = set(ap.get("not_interested", []))
+                trade_block_ids = list(ap.get("trade_block", []))
             except Exception as ap_err:
                 log.warning("trade-job: asset prefs load failed: %s", ap_err)
 
@@ -13282,7 +13286,8 @@ def _run_trade_job(
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
                         "untouchables": list(untouchable_ids), "targets": list(target_ids),
-                        "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions},
+                        "not_interested": list(not_interested_ids), "avoid_positions": avoid_positions,
+                        "trade_block": trade_block_ids},
                     pinned_give_players=pinned_give, pinned_receive_players=pinned_receive,
                     opponent_user_id=opponent_user_id, trade_intent=trade_intent,
                     **({"require_all_give": True} if pinned_give and pinned_give_mode == "all" else {}))

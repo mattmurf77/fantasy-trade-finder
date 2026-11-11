@@ -26,6 +26,7 @@ import backend.trade_service as ts
 from backend import trade_gen_bilateral as bilateral, trade_gen_owner as owner
 from backend.ranking_service import Player
 from backend.tests.test_fair_packages import harness, LEAGUE, ME, OPP, SEED  # noqa: F401
+from backend.tests.test_owner_generator_routes import owner_harness, worker  # noqa: F401
 
 
 # ───────────────────────── constructor level (hermetic) ─────────────────────────
@@ -187,3 +188,36 @@ def test_flag_off_strips_viewer_preferences_override_too(harness):
         viewer_preferences={"trade_block": ["a1"], "targets": ["b1"]})
     assert "trade_block" not in context["manager_preferences"][ME]
     assert context["manager_preferences"][ME]["targets"] == ["b1"]
+
+
+# ───────────────────────── the live job path (review fix) ─────────────────────────
+
+@pytest.mark.parametrize("flag_on", [False, True])
+def test_live_job_carries_the_viewer_s_own_trade_block_to_the_constructor(
+        owner_harness, monkeypatch, flag_on):
+    """`_run_trade_job` builds `viewer_preferences` itself from its one asset
+    prefs read, and `_owner_generation_context` then skips the viewer's DB
+    load. The viewer's Move tags must ride that dict, or only league-mates'
+    tags would ever reach the engine (review finding on 12166a94)."""
+    ff._flags_cache["trades.roster_setup"] = flag_on
+    db.set_asset_preference(ME, LEAGUE, "a1", "trade_block")
+    db.set_asset_preference(OPP, LEAGUE, "b2", "trade_block")
+    seen = []
+    real = server._bakeoff.owner_generator
+
+    def spy(config=None):
+        generate = real(config)
+
+        def capture(**context):
+            seen.append(copy.deepcopy(context["manager_preferences"]))
+            return generate(**context)
+        return capture
+    monkeypatch.setattr(server._bakeoff, "owner_generator", spy)
+    worker(owner_harness, monkeypatch)
+    assert seen, "the owner constructor never ran on the live job path"
+    for prefs in seen:
+        if flag_on:
+            assert prefs[ME]["trade_block"] == ["a1"]
+            assert prefs[OPP]["trade_block"] == ["b2"]
+        else:
+            assert all("trade_block" not in p for p in prefs.values())
