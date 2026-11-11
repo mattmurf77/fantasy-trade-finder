@@ -237,7 +237,8 @@ position the trade moves, gains and losses both. The other team's block comes fi
    same league data, and stored with the card.
 2. **Lead phrase.** One per team, from WS4's plan and need rules, shortened to the mockup's
    form ("Rebuild-leaning: adds Eli Brandt, 23"). When a team has no gain, its block says
-   only what moves ("Gets …, gives …") with no praise, and shows its losses.
+   only what moves ("Gets …, gives …") with no praise, and shows its losses. (Changed
+   2026-11-11 on the operator's TestFlight feedback: a league-rank fact, never the player list.)
 3. **Outlook tag.** A small tag beside each team's name with its outlook. The viewer's tag is
    the outlook they declared, or the app's read of their roster when they have not declared
    one. The other team's tag is always the app's read of their roster, in the same words

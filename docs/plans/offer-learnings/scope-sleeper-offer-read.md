@@ -118,18 +118,22 @@ another's offer.
 
 ### 0.6 Decisions for the operator
 
-1. **Settled at integration (coordinator, operator away): consent covers every private read.** The
-   operator's condition was "with explicit user permission", so `_sleeper_offers_sync` returns
-   `no_consent` and makes no private call unless the user has turned the switch on, for offers
-   sent through the app as much as for the import. A user who has not opted in keeps WS2's
-   public-data outcomes (accepted, completed on different terms) and gets no revised-offer cards.
-2. **Counter terms** are therefore stored only for consenting users.
+1. **Trades sent from the app are followed without the switch (operator, 2026-11-11: "Yes to
+   sleeper data").** `_sleeper_offers_sync` reads when the user has an offer sent through the app
+   that Sleeper may still move (`database.has_open_app_offers`), or has turned the switch on;
+   otherwise it returns `nothing_to_read` and makes no private call. Without the switch only the
+   app's own rows change and nothing is imported, so revised-offer cards reach every Send in
+   Sleeper user. This reverses the integration choice of 2026-11-10 (consent covered every private
+   read, made while the operator was away) and matches the published Terms line and D-225.
+2. **Counter terms** of a counter to an app-sent offer are stored on that offer's row without the
+   switch: a counter is treated as part of what happened to the trade the user sent. Every other
+   offer the user sends or receives is kept only with the switch on.
 3. **The Terms line** (below) was approved by the operator on 2026-11-10 ("New wording approved")
    and is published verbatim in `web/terms.html` §6, with matching lines in `web/privacy.html`
    (§1, §3, §4, §5, §6); both pages' effective date moved to November 10, 2026 and the consent
    version became `offer-import-1`. The switch shows its own short version, served by the backend
    (`sleeper_offer_read.TERMS_LINE`). The published line says the read also covers trades sent from
-   the app; the app is stricter than that and reads nothing until the switch is on (decision 1).
+   the app, and since 2026-11-11 the app does the same (decision 1).
 4. **WS2's unique key changed** to include `user_id`. WS2 is not on `main`, so no production table
    has the old constraint; a local DB created from the integrated branch before this commit keeps the
    old one (re-create it, or two consenting managers of one league collide on import).

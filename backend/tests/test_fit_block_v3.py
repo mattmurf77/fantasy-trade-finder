@@ -8,7 +8,8 @@ docs/plans/offer-learnings/scope-fit-block-v3.md. Replaces WS4's `fit_lines`
   noise bar at its edge; picks have no rank; fewer than three valued teams
   means no ranks; a context that disagrees with the card means no ranks;
 - the lead table: every plan and need phrase, declared vs roster-read
-  variants, and the moves-only phrase (no praise, losses still shown);
+  variants, and the rank-fact fallback for a team with no supported reason
+  (no praise, never the card's player list, losses still shown);
 - the outlook tags: the viewer's declared word or roster read, the other
   team's roster read ALWAYS, never their declared setting, no tag for
   not_sure;
@@ -156,7 +157,10 @@ def test_ranks_equal_power_rankings_before_and_after_on_random_leagues():
             moved[other] = [p for p in moved[other] if p not in receive] + give
             after = power_rankings.compute_power_rankings(members(moved), seed, players)
             for label, uid in (("you", "me"), ("them", other)):
-                shown = {m["pos"]: m for m in rows[label]}
+                shown = {m["pos"]: m for m in rows[label]["moves"]}
+                held = {h["pos"]: h["rank"] for h in rows[label]["held"]}
+                moving = {players[p].position for p in give + receive}
+                assert rows[label]["touched"] is True
                 for pos in ("QB", "RB", "WR", "TE"):
                     old = next(t for t in before if t["user_id"] == uid)["positions"][pos]["value"]
                     new = next(t for t in after if t["user_id"] == uid)["positions"][pos]["value"]
@@ -167,6 +171,10 @@ def test_ranks_equal_power_rankings_before_and_after_on_random_leagues():
                     if expected:
                         assert shown[pos] == {"pos": pos, "before": b, "after": a}
                         checked += 1
+                    # Held = touched and the rank does not move; never a move too.
+                    assert (pos in held) is (pos in moving and b == a), (league, uid, pos, b, a)
+                    if pos in held:
+                        assert held[pos] == b and pos not in shown
     assert checked > 200
 
 
@@ -180,8 +188,9 @@ def test_ties_share_a_rank():
     rosters = {"me": ["mw", "mw2"], "x": ["xw"], "y": ["yw"], "opp": ["ow", "pk"]}
     ctx = context(rosters, values, players)
     rows = tn._fit_rank_rows(ctx, "opp", ["mw2"], ["pk"], {"mw2": {"pos": "WR"}, "pk": {"pos": "PICK"}})
-    assert rows["them"] == [{"pos": "WR", "before": 4, "after": 2}]
-    assert rows["you"] == []          # 2nd before, tied 2nd after: no move
+    assert rows["them"]["moves"] == [{"pos": "WR", "before": 4, "after": 2}]
+    assert rows["you"]["moves"] == []          # 2nd before, tied 2nd after: no move
+    assert rows["you"]["held"] == [{"pos": "WR", "rank": 2}]
 
 
 @pytest.mark.parametrize("sent,shown", [(147.5, True), (147.4, False)])
@@ -195,8 +204,10 @@ def test_noise_bar_is_five_percent_of_the_league_median(sent, shown):
     ctx = context(rosters, values, players)
     assert ctx.medians["WR"] == 2950.0
     rows = tn._fit_rank_rows(ctx, "opp", ["mw2"], ["pk"], {"mw2": {"pos": "WR"}, "pk": {"pos": "PICK"}})
-    assert rows["you"] == ([{"pos": "WR", "before": 2, "after": 3}] if shown else [])
-    assert rows["them"] == ([{"pos": "WR", "before": 3, "after": 2}] if shown else [])
+    assert rows["you"]["moves"] == ([{"pos": "WR", "before": 2, "after": 3}] if shown else [])
+    assert rows["them"]["moves"] == ([{"pos": "WR", "before": 3, "after": 2}] if shown else [])
+    # Under the bar the rank still differs, so it is not called unchanged either.
+    assert rows["you"]["held"] == rows["them"]["held"] == []
 
 
 def test_picks_have_no_rank_and_a_pick_only_side_shows_none():
@@ -208,7 +219,8 @@ def test_picks_have_no_rank_and_a_pick_only_side_shows_none():
     assert side(out, "them")["ranks"] == [{"pos": "QB", "before": 3, "after": 1}]
     pick_for_pick = tn._fit_rank_rows(context(), "opp", ["vpk"], ["opk"],
                                       {"vpk": {"pos": "PICK"}, "opk": {"pos": "PICK"}})
-    assert pick_for_pick == {"them": [], "you": []}
+    untouched = {"moves": [], "held": [], "touched": False}
+    assert pick_for_pick == {"them": untouched, "you": untouched}
 
 
 def test_fewer_than_three_valued_teams_means_no_ranks():
@@ -217,7 +229,8 @@ def test_fewer_than_three_valued_teams_means_no_ranks():
     assert ctx.valued == 2
     out = tn.fit_block(proof(["vwr"], ["owr"], viewer=team("contender", benefits=["outlook"])),
                        card(["vwr"], ["owr"]), P, ctx)
-    assert [t["ranks"] for t in out["teams"]] == [[], []]
+    # No rank can be stated, so the team with no supported reason is left out.
+    assert [(t["side"], t["ranks"]) for t in out["teams"]] == [("you", [])]
     assert side(out, "you")["lead"]["code"] == "plan_win_now.you"
     big = context()
     assert big.valued == 4 and tn._fit_rank_rows(
@@ -274,7 +287,7 @@ def test_viewer_declared_extremes(outlook, text):
 
 def test_viewer_plan_needs_the_engines_plan_benefit():
     out = block(["vqb"], ["opk"], viewer=team("rebuilder", benefits=["market_terms"]))
-    assert side(out, "you")["lead"]["code"] == "moves.you"
+    assert side(out, "you")["lead"]["code"] == "shifts.you"
 
 
 def test_their_roster_read_plan_lead_and_tag():
@@ -294,12 +307,12 @@ def test_their_win_now_lead():
 def test_their_plan_needs_the_public_shift():
     # They get an older player for a young one: not a rebuild shape.
     out = block(["vrb"], ["ote"], reads={"opp": "rebuilder"})
-    assert side(out, "them")["lead"]["code"] == "moves.them"
+    assert side(out, "them")["lead"]["code"] == "shifts.them"
 
 
 def test_rebuild_never_names_a_young_rb():
     out = block(["vqb"], ["orb"], viewer=team("rebuilder", benefits=["outlook"]))
-    assert side(out, "you")["lead"]["code"] == "moves.you"
+    assert side(out, "you")["lead"]["code"] == "shifts.you"
 
 
 @pytest.mark.parametrize("lift,fires", [(0.10, True), (0.09, False)])
@@ -315,7 +328,7 @@ def test_need_is_not_written_for_a_backup_body():
     def lead(delta):
         viewer = {**team("contender", delta={"WR": delta}), "usable_depth_before": small}
         return side(block(["vqb"], ["owr"], viewer=viewer), "you")["lead"]["code"]
-    assert lead(backup) == "moves.you"
+    assert lead(backup) == "shifts.you"
     assert lead(backup + 1) == "need.you"
 
 
@@ -327,15 +340,67 @@ def test_their_need_lead_uses_the_roster_read_not_their_declared_outlook():
     assert side(out, "them")["lead"]["code"] != "need.them"       # the read is a rebuild
 
 
-def test_moves_only_has_no_praise_and_still_shows_losses():
-    # The mockup's weak case: neither side has a reason; ranks still move.
+def test_no_reason_reads_rank_facts_not_the_cards_player_list():
+    # The weak case: neither side has a reason; ranks still move. The card
+    # already names the players, so the lead says what moves in the league.
     out = block(["vwr"], ["orb"])
     them, you = out["teams"]
-    assert them["lead"] == {"code": "moves.them", "text": "Gets Finn Calder, gives Otto Vail"}
-    assert you["lead"] == {"code": "moves.you", "text": "Gets Otto Vail, gives Finn Calder"}
+    assert them["lead"] == {"code": "shifts.them", "text": "Up at WR, down at RB"}
+    assert you["lead"] == {"code": "shifts.you", "text": "Up at RB, down at WR"}
     assert any(m["after"] > m["before"] for m in them["ranks"] + you["ranks"])
-    multi = block(["vwr", "vpk"], ["orb", "opk"])
-    assert side(multi, "them")["lead"]["text"] == "Gets Finn Calder + 2027 1st, gives Otto Vail + 2028 2nd"
+
+
+def test_a_rank_that_holds_leads_and_the_moves_stay_in_the_rank_row():
+    # The viewer sends a TE worth 800 for an RB: last at TE before and after
+    # (TE: y 1700, opp 1500, x 1200, viewer 800), 3rd to 1st at RB.
+    out = block(["vte"], ["orb"])
+    you, them = side(out, "you"), side(out, "them")
+    assert you["lead"] == {"code": "holds.you", "text": "Still TE 4th"}
+    assert you["ranks"] == [{"pos": "RB", "before": 3, "after": 1}]
+    assert them["lead"] == {"code": "shifts.them", "text": "Up at TE, down at RB"}
+    assert tn._fit_rank_fallback("them", [], [{"pos": "RB", "rank": 4}, {"pos": "WR", "rank": 9}],
+                                 True) == ("holds.them", {"ranks": "RB 4th, WR 9th"})
+
+
+@pytest.mark.parametrize("moves,text", [
+    ([("RB", 3, 1)], "Up at RB"),
+    ([("WR", 6, 8)], "Down at WR"),
+    ([("WR", 6, 8), ("QB", 5, 2), ("RB", 4, 3), ("TE", 2, 9)], "Up at QB and RB, down at WR and TE"),
+])
+def test_shift_wording(moves, text):
+    rows = [{"pos": p, "before": b, "after": a} for p, b, a in moves]
+    assert tn._fit_rank_fallback("you", rows, [], True) == ("shifts.you", {"shift": text})
+
+
+def test_under_the_noise_bar_and_picks_only_have_their_own_words():
+    assert tn._fit_rank_fallback("you", [], [], True) == ("flat.you", {})
+    assert tn._fit_rank_fallback("them", [], [], False) == ("none.them", {})
+    # A pick for a pick: the rebuilder has a reason, the other team no rank to move.
+    out = block(["vpk"], ["opk"], viewer=team("rebuilder", benefits=["outlook"]))
+    assert side(out, "you")["lead"]["code"] == "plan_rebuild.you"
+    assert side(out, "them")["lead"] == {"code": "none.them", "text": "No league rank change"}
+    assert side(out, "them")["ranks"] == []
+
+
+@pytest.mark.parametrize("n,text", [(1, "1st"), (2, "2nd"), (3, "3rd"), (4, "4th"), (11, "11th"),
+                                    (12, "12th"), (13, "13th"), (21, "21st"), (22, "22nd"),
+                                    (23, "23rd"), (101, "101st"), (111, "111th")])
+def test_ordinals_match_the_apps(n, text):
+    assert tn._fit_ordinal(n) == text
+
+
+def test_a_lead_without_a_reason_never_names_an_asset():
+    names = {p.name for p in P.values()}
+    seen = set()
+    for give in (["vqb"], ["vwr"], ["vrb"], ["vte"], ["vwr", "vpk"], ["vrb", "vte"]):
+        for receive in (["oqb"], ["owr"], ["orb"], ["ote"], ["orb", "opk"], ["owr", "ote"]):
+            out = block(give, receive)
+            for t in (out or {"teams": []})["teams"]:
+                code = t["lead"]["code"].split(".")[0]
+                seen.add(code)
+                if code in ("holds", "shifts", "flat", "none"):
+                    assert not any(name in t["lead"]["text"] for name in names), t["lead"]
+    assert {"holds", "shifts"} <= seen
 
 
 def test_no_lead_and_no_rank_move_means_no_block():
@@ -423,9 +488,16 @@ def test_template_table_tags_and_version_are_pinned():
         "plan_win_now.them":       "Win-now-leaning: adds {asset}",
         "need.you":                "Upgrades {pos}: adds {name}",
         "need.them":               "Upgrades {pos}: adds {name}",
-        "moves.you":               "Gets {gets}, gives {gives}",
-        "moves.them":              "Gets {gets}, gives {gives}",
+        "holds.you":               "Still {ranks}",
+        "holds.them":              "Still {ranks}",
+        "shifts.you":              "{shift}",
+        "shifts.them":             "{shift}",
+        "flat.you":                "Little change in league rank",
+        "flat.them":               "Little change in league rank",
+        "none.you":                "No league rank change",
+        "none.them":               "No league rank change",
     }
+    assert not any("{gets}" in t or "{gives}" in t for t in tn.FIT_TEMPLATES.values())
     assert tn.FIT_TAGS == {
         "declared": {"championship": "All-in", "contender": "Contending",
                      "rebuilder": "Rebuilding", "jets": "Tanking"},

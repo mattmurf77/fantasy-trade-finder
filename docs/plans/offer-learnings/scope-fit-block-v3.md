@@ -26,8 +26,10 @@ Contending        WR 3rd → 4th
 
 - **Left column:** the team label (THEM / YOU) over its outlook tag.
 - **Line 1, the lead:** the single strongest proof-backed reason, plan then need; or, with no
-  supported gain, only what moves ("Gets Tomas Reyes, gives Kenji Oduya"), no praise. Truncated,
-  never wrapped.
+  supported gain, a league-rank fact, no praise: the ranks that hold ("Still RB 2nd"), else the
+  direction of the moves ("Up at RB, down at WR"). Truncated, never wrapped. (Until 2026-11-11
+  this fallback read "Gets Tomas Reyes, gives Kenji Oduya"; the operator, on TestFlight 184: "It's
+  just listing the players. The card itself already does that.")
 - **Line 2, the ranks:** the team's league rank at each position the trade moves, gains first, then
   losses, in IBM Plex Mono. Absent when nothing moves a rank. Truncated, never wrapped.
 - The block is absent when neither team has a supported lead or a rank move: today's card.
@@ -87,7 +89,14 @@ moves). Per team the first that fires wins.
 | `plan_win_now.you_roster` | `Win-now-leaning: adds {asset}` | as above, inferred |
 | `plan_win_now.them` | `Win-now-leaning: adds {asset}` | roster read ∈ {contender, championship}, shift ≥ +0.05, receives a player with `_now_lean ≥ 0.05` |
 | `need.you` / `need.them` | `Upgrades {pos}: adds {name}` | the side's outlook (the viewer's proof outlook; the other team's roster read) is not rebuilder/jets; at a position P where it receives a player (the highest-market one there, age known), `usable_depth_delta[P]` > the proxy's backup credit for him (0.15 × market × `age_now_mult`) and ≥ 10% of `usable_depth_before[P]`. Highest relative lift wins |
-| `moves.you` / `moves.them` | `Gets {gets}, gives {gives}` | no plan or need phrase fires. Names joined by ` + `, picks by label. No praise |
+| `holds.you` / `holds.them` | `Still {ranks}` | no plan or need phrase fires, and at least one position the trade touches keeps its league rank. `{ranks}` = `"<POS> <ordinal>"` for each such position in QB/RB/WR/TE order, joined by `, ` ("Still RB 4th, WR 9th"). The ranks that move are line 2 |
+| `shifts.you` / `shifts.them` | `{shift}` | no plan or need phrase, no rank holds, at least one rank move: "Up at RB, down at WR" (ups first; positions in QB/RB/WR/TE order, joined by ` and `) |
+| `flat.you` / `flat.them` | `Little change in league rank` | no plan or need phrase; every touched position's value change is under the noise bar and its rank differs (so it is neither a move nor unchanged) |
+| `none.you` / `none.them` | `No league rank change` | no plan or need phrase; the trade touches no ranked position (picks only) |
+
+A team with no supported lead is left out of the block when no rank can be stated at all (fewer
+than three valued teams, or a context that disagrees with the card). No fallback names a player or
+a pick: the card already does.
 
 `{asset}` is `{name}, {age}` for a player (`Eli Brandt, 23`) and `the {label}` for a pick
 (`the 2027 1st`); a player with no age never fills it.
@@ -103,7 +112,7 @@ moves). Per team the first that fires wins.
 No tag for `not_sure` or no read (Team Review drops a read that declined to commit). The roster
 read never yields the extremes. A league-mate's declared outlook is never read, shown or implied:
 the other team's plan and need rules use the roster read in place of the proof's outlook, so even
-the choice between a need phrase and "Gets …, gives …" cannot depend on what they declared.
+the choice between a need phrase and a rank fact cannot depend on what they declared.
 
 ### 3.4 Privacy
 
@@ -194,8 +203,9 @@ Measured on recorded production requests: §8 "Speed".
      and Pass / Like without scrolling. Each team takes at most two lines; a long lead ends in "…"
      rather than wrapping.
   3. Every lead names a player or pick on the card, on the right side ("adds X" for THEM: X is under
-     YOU SEND; for YOU: under YOU GET). A team with no reason reads "Gets …, gives …" and nothing
-     else; no card says "good fit", carries an emoji or an exclamation mark.
+     YOU SEND; for YOU: under YOU GET). A team with no reason reads a league-rank fact ("Still RB
+     2nd", "Up at RB, down at WR") and never the players' names again; no card says "good fit",
+     carries an emoji or an exclamation mark.
   4. Open League rankings, pick the other team, and compare: each "before" rank on the card equals
      the rank chip on that position's header there (All view, consensus). Do the same for your
      team. After accepting a trade in a test league and re-syncing, the "after" ranks match.

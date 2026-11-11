@@ -41,7 +41,7 @@
 - Nothing in code. [Release record](../docs/business/ops/2026-11-10-offer-learnings.md); next steps in [NEXT](NEXT.md).
 
 **Blocked on**
-- The operator: TestFlight checklists on 184; whether the app should read Sleeper offers for app-sent trades without the switch (the Terms line allows it, the app does not); models-eng review of pipeline 15 → 21.
+- The operator: TestFlight checklists on 184; models-eng review of pipeline 15 → 21. The Sleeper read's reach is settled (D-227, 2026-11-11: app-sent trades are followed without the switch).
 
 **Don't repeat**
 - A flag turned on in `config/features.json` breaks tests that read the shipped config and assume it is off. Run the full suite on the turn-on commit, not only on the dark one.
@@ -49,4 +49,4 @@
 - CI's backend job takes about 40 minutes on this tree.
 - Off on purpose: revision 4's selector and `trade.partner_activity` (graded first); `trade.fast_deck_shadow`.
 - Local only, never commit: `data/sleeper-export/` and `data/prod-requests/` in the main checkout.
-- Left for the next sweep: worktree `.claude/worktrees/offer-import-terms` (branch `docs/offer-learnings-release`, this record's PR). Every other worktree and branch of this programme is in [the ledger](../docs/recovery/2026-11-10-offer-learnings.md).
+- Left for the next sweep: worktree `.claude/worktrees/offer-import-terms` (branches `docs/offer-learnings-release`, PR #644, and `feat/sleeper-read-app-sent`, the D-227 change). Every other worktree and branch of this programme is in [the ledger](../docs/recovery/2026-11-10-offer-learnings.md).

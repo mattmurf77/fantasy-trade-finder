@@ -921,9 +921,12 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // flag on, present only when a team has a supported lead
                                                // or a rank move. Replaces WS4's `fit_lines` (fit-1),
                                                // which is no longer emitted or read.
-                       "v": "fit-2",           // trade_narrative.FIT_TMPL_VERSION; clients accept only
-                                               // versions they know and drop the block otherwise
-                       "teams": [              // always both teams, "them" first
+                       "v": "fit-2",           // trade_narrative.FIT_TMPL_VERSION: the payload shape.
+                                               // Clients accept only versions they know and drop
+                                               // the block otherwise, so a wording change keeps it
+                                               // (TestFlight 184 checks for exactly "fit-2")
+                       "teams": [              // "them" first; a team with no supported lead and no
+                                               // rank that can be stated is left out
                          { "side": "them"|"you",
                            "tag":  { "code": "rebuilder", "source": "declared"|"roster",
                                      "text": "Looks rebuilding" },   // OPTIONAL — absent when there is
@@ -931,7 +934,10 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                            "lead": { "code": "plan_rebuild.them",
                                      "text": "Rebuild-leaning: adds Eli Brandt, 23" },
                                                // codes: plan_rebuild.*, plan_win_now.*, need.*,
-                                               // moves.* ("Gets …, gives …": no supported gain)
+                                               // and, with no supported gain, a league-rank
+                                               // fact: holds.* ("Still RB 2nd"), shifts.* ("Up
+                                               // at RB, down at WR"), flat.*, none.* (2026-11-11;
+                                               // never the card's own player list)
                            "ranks": [ { "pos": "QB"|"RB"|"WR"|"TE",
                                         "before": 9, "after": 7 } ] } ] },
                                                // league rank by consensus position value
