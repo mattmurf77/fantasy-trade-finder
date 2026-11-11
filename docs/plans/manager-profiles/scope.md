@@ -85,5 +85,5 @@ Design: [design.md](design.md).
 - **CI green:** `backend-tests` must pass on the pushed sha; no mobile files changed.
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry for this branch.
 - **TestFlight verification:** none (waived above).
-- Express lane declared by the operator? **No** — full gates. Not pushed or merged to `main` by
-  this session.
+- Express lane declared by the operator? **No** — full gates. Merged to `main` as #635 (`9b14c47b`) on
+  the operator's instruction, 2026-11-10.
