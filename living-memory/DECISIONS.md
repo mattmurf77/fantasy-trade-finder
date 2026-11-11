@@ -1,27 +1,40 @@
 # Decisions — Fantasy Trade Finder
 
-## D-213 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
+## D-215 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
 
 **Date:** 2026-11-10 · **Who:** operator ("make the necessary pushes and code changes to enable the fast trade suggestions"); coordinating session.
 **Context:** The worker's path from generation to publication is one long pass whose final checks have side effects: exposure events, suppression grants, one candidate set and one evidence seal per job, and a publication assert that the published prefix is the head of the finished inventory. Running it once for a page and again for the inventory is not safe without changing those contracts.
 **Decision:** `trade.fast_deck` (default off) swaps the owner generator's result for the page-first search's proven first 150 cards and runs the unchanged pass once (`backend/trade_fast_deck.py`). Interactive jobs only; prepared inventories, replenishment and Calibration keep the full solve, as do unsupported generators, pinned requests, unproven or budget-bound pages and any error. `trade.fast_deck_shadow` serves the full deck and logs a per-job comparison. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
 **Consequences:**
 - A fast deck ends at 150 cards. The deepest card acted on in production from 2026-09-01 to 2026-11-10 was index 65; decks today hold a median of 316 cards.
-- `_run_trade_job` changed, so the deck pipeline moved 14 → 15 (stored first pages rebuild once; models-eng review owed).
+- `_run_trade_job` changed, so the deck pipeline moved 15 → 16 (stored first pages rebuild once; models-eng review owed).
 - Appending the inventory behind the page is still open; the existing deck paging with `rebased` is the likely route.
 - Page and full solve are compared inside one process only: the full engine's output varies between processes.
 
-## D-212 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
+## D-214 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
 
 **Date:** 2026-11-10 · **Who:** operator (asked for near-real-time construction without pre-generation, then a 3× per-process gain); coordinating session with Opus subagents.
 **Context:** A cold owner-bilateral search evaluates about 45,000 candidates and ranks about 3,900 survivors before any card shows (3–4 s of construction locally). An exact, byte-identical fast kernel for that full solve was built first and measured 1.15–1.18× with about 75% more peak memory: the work left is unique per candidate.
 **Decision:** `backend/trade_first_page.py` orders candidates by an admissible upper bound on `weaker_support`, verifies best-first with the unchanged evaluator, and stops once k + 31 eligible cards beat every remaining bound (the ranker's lookahead). Repeated work is memoised by content, never by league or user, and only returned cards are serialised. The fast kernel was dropped. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
 **Consequences:**
 - Synthetic league, bilateral-1: first 30 cards in 44–45 ms once a league has been seen. Revision 2 is exact only with family completion (each page card's cheaper same-family alternatives are evaluated too), which costs more: 70–130 ms synthetic, about 0.28 s on recorded production requests.
-- Served only through the fast deck (D-213). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
+- Served only through the fast deck (D-215). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
 - A change to `trade_service` market package pricing must re-run `test_trade_first_page.py`: the pre-pricing bound is proved from that code's current shape.
 - No NumPy: a measured 10% was not worth a new runtime dependency and a second copy of the bound arithmetic.
 
+## D-213 — Roster setup's "Keep" is the existing `untouchable` tag, with a guard past 40% of the roster
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q2](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** The roster-first setup step gives every asset Move / — / Keep. Keep could reuse `untouchable` or become a softer new list.
+**Decision:** Keep writes `asset_preferences.list_type = 'untouchable'` through the existing `POST /api/league/asset-prefs`. The step shows a guard note once more than ~40% of the roster is marked Keep.
+**Consequences:** No new engine reads for Keep. Every arm already honours it, but differently: legacy and likes-you paths hard-exclude untouchables, and owner-v1 lets one go only at a market gain with a same-position player coming back. That is why the guard exists: heavy Keep use can empty a legacy deck. Users get one word for one thing.
+
+## D-212 — Roster setup's "Move" is a new `asset_preferences` list type, `trade_block`
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q1](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** Nothing stores "I would move this player". `trade_away_positions` is per position, so mapping one player onto it makes the whole position shoppable. `targets` is per player but is read only on the receive side.
+**Decision:** Add `trade_block` as a fourth `list_type` value in `asset_preferences` (the give-side twin of `target`). `list_type` is a plain string, so there is no migration. Persistence is ungated; the engine reads it only behind `trades.roster_setup`.
+**Consequences:** Single membership still holds (one tag per player per league). The value becomes part of the asset-prefs API contract, the mobile `AssetPrefs` type and `docs/cross-client-invariants.md` when built. The owner and bilateral constructors need new give-side reads (prd §4.3).
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

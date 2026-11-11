@@ -4,7 +4,8 @@ Flags ``trade.fast_deck`` and ``trade.fast_deck_shadow``, both default off.
 
 Helper (``backend/trade_fast_deck.py``), on the synthetic league:
 - ``serve`` returns the full solve's first k cards, in order, with equal
-  proofs, for both parity-tested bilateral generators;
+  proofs, for both parity-tested bilateral generators, with and without a
+  trade-block preference;
 - it passes the page its own work limit;
 - it declines (None) a generator without a parity suite, a pinned request, an
   unproven page and a league where the incumbent's stream budgets bind;
@@ -72,6 +73,20 @@ def test_serve_is_the_full_solves_first_k(module, k):
     data = report.diagnostics()
     assert data["page_first_version"] == fp.PAGE_FIRST_VERSION and data["k"] == k
     assert data["generator_version"] == module.VERSION and data["complete"] is True
+
+
+@pytest.mark.parametrize("module", [bilateral, candidate])
+def test_serve_is_the_full_solves_first_k_with_a_trade_block(module):
+    # Roster-first setup's give-side list (D-212) moves both the pools and the
+    # support score; the page must follow it exactly.
+    roster = league()["user_roster"]
+    preferences = {"me": {"trade_block": roster[1:9:2] + roster[-2:], "untouchables": [roster[0]]}}
+    want = module.generate_bilateral_trades(**league(), manager_preferences=preferences)[0][:30]
+    assert identities(want) != identities(full(module)[:30])  # the list changes the page
+    cards, report = fast.serve(module.generate_bilateral_trades,
+                               {**league(), "manager_preferences": preferences}, k=30)
+    assert identities(cards) == identities(want) and report.diagnostics()["complete"] is True
+    assert [c.owner_evaluation.snapshot_json for c in cards] == [c.owner_evaluation.snapshot_json for c in want]
 
 
 def test_deck_size_covers_every_observed_session():

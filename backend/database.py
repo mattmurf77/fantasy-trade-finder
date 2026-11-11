@@ -1802,6 +1802,11 @@ league_preferences_table = Table("league_preferences", metadata,
 #   list_type='not_interested' → never suggest ACQUIRING this player (#163 —
 #                                hard filter on the receive side; give side
 #                                untouched)
+#   list_type='trade_block'    → willing to MOVE this player (D-212, roster-
+#                                first setup) — the give-side twin of
+#                                'target': a soft owner/bilateral bonus, read
+#                                only behind trades.roster_setup; never a
+#                                hard "only offer these" filter
 # A player can't be on two lists in the same league (the unique constraint
 # is on the player; the route enforces single membership). Add/remove history
 # for the #65 label stream is captured via record_event (user_events), not here.
@@ -1811,7 +1816,7 @@ asset_preferences_table = Table("asset_preferences", metadata,
     Column("user_id",    String,  nullable=False),
     Column("league_id",  String,  nullable=False),
     Column("player_id",  String,  nullable=False),
-    Column("list_type",  String,  nullable=False),   # 'untouchable' | 'target'
+    Column("list_type",  String,  nullable=False),   # ASSET_PREF_LISTS value
     Column("created_at", String),
     UniqueConstraint("user_id", "league_id", "player_id", name="uq_asset_pref"),
 )
@@ -12734,16 +12739,19 @@ def load_league_preferences_bulk(user_ids: list, league_id: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # Asset preferences — untouchables + targets + not-interested (backlog #2, #163)
+# + trade block (roster-first setup, D-212: the give-side twin of `target`)
 # ---------------------------------------------------------------------------
 
-ASSET_PREF_LISTS = ("untouchable", "target", "not_interested")
+ASSET_PREF_LISTS = ("untouchable", "target", "not_interested", "trade_block")
 
 
 def load_asset_preferences(user_id: str, league_id: str) -> dict:
     """Return {"untouchables": [player_id, ...], "targets": [...],
-    "not_interested": [...]} for (user_id, league_id). Empty lists when none
-    saved."""
-    out = {"untouchables": [], "targets": [], "not_interested": []}
+    "not_interested": [...], "trade_block": [...]} for (user_id, league_id).
+    Empty lists when none saved. `trade_block` is returned in every flag
+    state (persistence is never gated); the engine reads it only behind
+    `trades.roster_setup` (server._owner_generation_context)."""
+    out = {"untouchables": [], "targets": [], "not_interested": [], "trade_block": []}
     with engine.connect() as conn:
         rows = conn.execute(
             select(asset_preferences_table).where(
@@ -12760,6 +12768,8 @@ def load_asset_preferences(user_id: str, league_id: str) -> dict:
             out["targets"].append(r.player_id)
         elif r.list_type == "not_interested":
             out["not_interested"].append(r.player_id)
+        elif r.list_type == "trade_block":
+            out["trade_block"].append(r.player_id)
     return out
 
 
@@ -12778,7 +12788,8 @@ def load_asset_preferences_bulk(user_ids: list, league_id: str) -> dict:
         return {}
     _KEY = {"untouchable":    "untouchables",
             "target":         "targets",
-            "not_interested": "not_interested"}
+            "not_interested": "not_interested",
+            "trade_block":    "trade_block"}
     out: dict = {}
     with engine.connect() as conn:
         rows = conn.execute(
@@ -12796,7 +12807,7 @@ def load_asset_preferences_bulk(user_ids: list, league_id: str) -> dict:
         bucket = out.get(r.user_id)
         if bucket is None:
             bucket = out[r.user_id] = {"untouchables": [], "targets": [],
-                                       "not_interested": []}
+                                       "not_interested": [], "trade_block": []}
         bucket[key].append(r.player_id)
     return out
 
@@ -12805,7 +12816,7 @@ def set_asset_preference(
     user_id: str, league_id: str, player_id: str, list_type: str | None,
 ) -> dict:
     """Add/move/remove a player's tag for a league, returning the refreshed
-    lists. `list_type` ∈ {'untouchable','target','not_interested'} adds
+    lists. `list_type` ∈ {'untouchable','target','not_interested','trade_block'} adds
     (replacing any prior tag for that player — single membership), None
     removes. Idempotent. Raises ValueError on an unknown list_type."""
     if list_type is not None and list_type not in ASSET_PREF_LISTS:

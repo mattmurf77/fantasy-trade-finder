@@ -117,7 +117,7 @@ without changing those contracts.
   30 MB and 17 MB.
 - It is intricate. About 1,220 lines and 172 tests; the plain version is recoverable from
   this branch's history if the trade is ever judged not worth it.
-- `_run_trade_job` changed, so `DECK_PIPELINE_VERSION` moved 14 → 15 and stored first pages
+- `_run_trade_job` changed, so `DECK_PIPELINE_VERSION` moved 15 → 16 and stored first pages
   rebuild once after deploy. The two modules are in the stored-page engine hash.
 - Publishing a page and then appending the inventory would change the owner publication
   contract (published prefix equals the head of the finished inventory; global impression

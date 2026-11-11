@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
-  FlatList,
   TextInput,
   KeyboardAvoidingView,
   Platform,
@@ -28,7 +27,8 @@ import {
   type,
   fonts,
 } from '../theme/chalkline';
-import { TickLabel, Button, Text as ChalkText } from '../components/chalkline';
+import { TickLabel, Button } from '../components/chalkline';
+import RankChipGrid from '../components/RankChipGrid';
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
@@ -42,12 +42,6 @@ import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
 const POSITIONS: Position[] = ['QB', 'RB', 'WR', 'TE'];
-
-// #140 — same conditional-POS rule as the Quick set walk: this walk is
-// position-scoped (the active tab names the position), so the chip's POS
-// token is redundant and its width goes to TEAM + AGE. Conditional, not
-// deleted: cross-position reuse flips this on.
-const SHOW_POSITION = false;
 
 // #136 — Quick Rank: the within-tier polish pass after Quick Set. Same
 // guided construction as QuickSetTiersScreen (position tabs, tier-by-tier
@@ -77,8 +71,8 @@ export default function QuickRankScreen() {
   // #137 — SF/1QB toggle in the walk header, same wiring as Quick set's.
   const { setFormat, switching: formatSwitching } = useScoringFormat();
 
-  // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): 9px chip metas
-  // rise to the 11px type floor; faint content text promotes to dim.
+  // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): faint content
+  // text promotes to dim (the chip-meta floor lives in RankChipGrid).
   const cleanup = useFlag('visual.chalkline_cleanup');
 
   // S3 PRD-01 — report the pinned walk footer to the feedback FAB (same
@@ -169,14 +163,6 @@ export default function QuickRankScreen() {
     [members, query],
   );
 
-  const rankOf = useCallback(
-    (pid: string) => {
-      const i = clicked.indexOf(pid);
-      return i === -1 ? null : i + 1;
-    },
-    [clicked],
-  );
-
   const toggle = useCallback((pid: string) => {
     setClicked((prev) =>
       prev.includes(pid) ? prev.filter((id) => id !== pid) : [...prev, pid],
@@ -260,62 +246,6 @@ export default function QuickRankScreen() {
       setSearch('');
     },
     [setFormat],
-  );
-
-  const renderChip = useCallback(
-    ({ item }: { item: RankedPlayer }) => {
-      const rank = rankOf(item.id);
-      const posKey = String(item.position).toLowerCase() as keyof typeof positionColors;
-      return (
-        <Pressable
-          testID={`quick-rank.chip.${item.id}`}
-          accessibilityRole="button"
-          accessibilityState={{ selected: rank != null }}
-          accessibilityLabel={
-            rank != null ? `${item.name}, ranked ${rank}` : item.name
-          }
-          onPress={() => toggle(item.id)}
-          style={[styles.chip, rank != null && styles.chipSelected]}
-        >
-          <View style={styles.chipTop}>
-            <Text style={styles.chipName} numberOfLines={1}>
-              {item.name}
-            </Text>
-            {rank != null ? (
-              <View style={styles.rankBadge}>
-                <Text style={styles.rankBadgeText}>{rank}</Text>
-              </View>
-            ) : null}
-          </View>
-          {/* S2 PRD-04 ride-along — meta row through the chalkline Text
-              primitive (dense Dynamic-Type tier); the 9px sizes rise to
-              the 11px floor under visual.chalkline_cleanup. */}
-          <View style={styles.chipMeta}>
-            {SHOW_POSITION ? (
-              <ChalkText
-                scale="dense"
-                style={[
-                  styles.chipPos,
-                  cleanup && styles.chipMetaFloor,
-                  { color: positionColors[posKey] ?? chalk.dim },
-                ]}
-              >
-                {item.position}
-              </ChalkText>
-            ) : null}
-            <ChalkText scale="dense" style={[styles.chipTeam, cleanup && styles.chipMetaFloor]}>
-              {item.team ?? 'FA'}
-            </ChalkText>
-            {item.age != null ? (
-              <ChalkText scale="dense" style={[styles.chipAge, cleanup && styles.chipMetaFloor]}>
-                {item.age}
-              </ChalkText>
-            ) : null}
-          </View>
-        </Pressable>
-      );
-    },
-    [rankOf, toggle, cleanup],
   );
 
   const saving = saveMutation.isPending;
@@ -456,15 +386,12 @@ export default function QuickRankScreen() {
             accessibilityLabel="Search players in this step"
           />
 
-          <FlatList
-            data={visibleMembers}
-            keyExtractor={(p) => p.id}
-            renderItem={renderChip}
-            extraData={clicked}
-            numColumns={3}
-            columnWrapperStyle={styles.gridRow}
-            contentContainerStyle={styles.grid}
-            keyboardShouldPersistTaps="handled"
+          {/* Chip grid — shared with roster-first setup's rank step. */}
+          <RankChipGrid
+            testID="quick-rank.chip"
+            players={visibleMembers}
+            clicked={clicked}
+            onToggle={toggle}
             ListEmptyComponent={
               query.length > 0 ? (
                 <Text style={[styles.emptyText, cleanup && styles.emptyTextDim]}>
@@ -585,85 +512,6 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   stepHint: { ...type.bodySm, marginTop: space.xs },
-  grid: {
-    paddingHorizontal: space.lg,
-    paddingBottom: 96, // room for the footer bar
-    gap: space.xs,
-  },
-  gridRow: { gap: space.xs },
-  // Same small selectable card as the quick-set grid; selected = ice
-  // border + the rank number badge (two signals).
-  chip: {
-    flex: 1,
-    minHeight: 48,
-    backgroundColor: ink.ink1,
-    borderWidth: 1,
-    borderColor: ink.line,
-    borderRadius: radii.sm,
-    paddingHorizontal: space.sm,
-    paddingVertical: 6,
-    justifyContent: 'center',
-  },
-  chipSelected: { borderColor: ice.base },
-  chipTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  chipName: {
-    fontFamily: fonts.uiSemi,
-    fontSize: 12,
-    color: chalk.base,
-    flexShrink: 1,
-  },
-  // Rank number badge: data numeral (Plex Mono) on an ice-bordered square
-  // — radius xs per the badge spec; number is the click order.
-  rankBadge: {
-    marginLeft: 'auto',
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 2,
-    borderRadius: radii.xs,
-    borderWidth: 1,
-    borderColor: ice.base,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankBadgeText: {
-    fontFamily: fonts.dataSemi,
-    fontSize: 10,
-    color: ice.base,
-  },
-  chipMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  chipPos: {
-    fontFamily: fonts.uiSemi,
-    fontSize: 9,
-    letterSpacing: 0.5,
-  },
-  chipTeam: {
-    fontFamily: fonts.uiSemi,
-    fontSize: 9,
-    letterSpacing: 0.5,
-    color: chalk.dim,
-    textTransform: 'uppercase',
-  },
-  // #140 — age numeral: 9px Plex Mono (data-numeral rule), chalk-dim,
-  // bare-gap separated like the rest of the meta row.
-  chipAge: {
-    fontFamily: fonts.data,
-    fontSize: 9,
-    color: chalk.dim,
-  },
-  // S2 PRD-04 (visual.chalkline_cleanup) — 11px type floor for the chip
-  // meta row (was 9px; components.md updated). The 10px rank-badge numeral
-  // is untouched: it sits inside a fixed 16px badge (raising it means
-  // resizing the badge — a coordinated spec change, not a ride-along).
-  chipMetaFloor: { fontSize: 11 },
   emptyText: {
     ...type.bodySm,
     color: chalk.faint,

@@ -1230,6 +1230,20 @@ FLAG_KEYS: tuple[str, ...] = (
     # and roster gates. Remains dark until point coverage and intent qualify.
     "trade.mutual_benefit_v1",
     "trade.value_core",
+    # ── Roster-first setup for Find a Trade — 2026-11-10, ships DARK ──────
+    # docs/plans/roster-first-trade-setup/ (D-212, D-213). ON ⇒ the mobile
+    # RosterSetupScreen / entry card / Trade DNA row render, and the owner +
+    # bilateral constructors read the per-player `trade_block` asset-pref
+    # list on the GIVE side (the mirror of `targets`: +priority on outgoing,
+    # +0.1 owner interest / +0.3 bilateral declared when direction < 0, and
+    # a focal outgoing `trade_block` player counts as declared intent).
+    # OFF ⇒ server._owner_generation_context strips `trade_block` from every
+    # member's prefs, so constructor inputs, evidence and request hashes are
+    # byte-identical to pre-feature. Legacy v2/v3 and likes-you never read it.
+    #
+    # PERSISTENCE IS DELIBERATELY NOT GATED (the #360 rule): GET/POST
+    # /api/league/asset-prefs always return and accept `trade_block`.
+    "trades.roster_setup",
     # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
     "grading.blind",
     "grading.outlook_round",

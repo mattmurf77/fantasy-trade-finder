@@ -227,7 +227,7 @@ diversity rules exist; the cross-user version does not.
 ## 5. Rollout for what is built
 
 With both flags off nothing changes in serving beyond a one-time rebuild of stored first
-pages (the deck pipeline version moved 14 → 15).
+pages (the deck pipeline version moved 15 → 16).
 
 1. Merge with both flags off. models-eng reviews the pipeline bump.
 2. Turn on `trade.fast_deck_shadow` for a day. Each cold build logs whether the 150-card page

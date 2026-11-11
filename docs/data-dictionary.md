@@ -1377,10 +1377,10 @@ Per-player trade preferences, per league (backlog #2). Where `league_preferences
 | `user_id` | str | |
 | `league_id` | str | |
 | `player_id` | str | Sleeper player id |
-| `list_type` | str | `'untouchable'` (never suggest giving away) \| `'target'` (bias toward acquiring) |
+| `list_type` | str | `ASSET_PREF_LISTS`: `'untouchable'` (never suggest giving away) \| `'target'` (bias toward acquiring) \| `'not_interested'` (never suggest acquiring, #163) \| `'trade_block'` (willing to move — soft give-side bonus, engine read gated by `trades.roster_setup`, D-212). Free `String`; no DB enum, so a new value needs no migration |
 | `created_at` | str | ISO UTC |
 
-Constraint: `uq_asset_pref` on `(user_id, league_id, player_id)` — a player holds at most one tag per league; `set_asset_preference` deletes any prior tag before inserting (single membership), so setting `target` on an existing untouchable moves it. Read via `load_asset_preferences` → `{"untouchables": [...], "targets": [...]}`; written via `set_asset_preference(..., list_type)` where `list_type=None` removes. Add/remove history for the #65 label stream is captured in `user_events` (`asset_pref_added`/`asset_pref_removed`), not here.
+Constraint: `uq_asset_pref` on `(user_id, league_id, player_id)` — a player holds at most one tag per league; `set_asset_preference` deletes any prior tag before inserting (single membership), so setting `target` (or `trade_block`) on an existing untouchable moves it. `player_id` is unvalidated, so owned pick ids (`draft_picks.pick_id`) can be tagged too. Read via `load_asset_preferences` (and the per-user-identical `load_asset_preferences_bulk`) → `{"untouchables": [...], "targets": [...], "not_interested": [...], "trade_block": [...]}`; written via `set_asset_preference(..., list_type)` where `list_type=None` removes. Add/remove history for the #65 label stream is captured in `user_events` (`asset_pref_added`/`asset_pref_removed`), not here.
 
 ---
 

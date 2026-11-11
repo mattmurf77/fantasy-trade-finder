@@ -71,7 +71,7 @@ against.
   and in `config/features.json` ([config reference](../../config-reference.md))
 - New env vars / `model_config` keys: none. The deck size (150) and the work limit (12,000)
   are constants in `backend/trade_fast_deck.py`.
-- `DECK_PIPELINE_VERSION` 14 → 15: `_run_trade_job` gained the hook, so stored first pages
+- `DECK_PIPELINE_VERSION` 15 → 16: `_run_trade_job` gained the hook, so stored first pages
   rebuild once after deploy, as on every pipeline bump. `trade_first_page.py` and
   `trade_fast_deck.py` join `_ENGINE_CODE_MODULES`, the stored-page engine hash.
   **models-eng review of the bump is owed** (the guard's standing rule).
@@ -163,7 +163,7 @@ Limits of this evidence:
 | `docs/api-reference.md` | n/a | no route added or changed; payload shape unchanged |
 | `docs/config-reference.md` | updated | "Flags — Fast deck (ADR-028)" |
 | `docs/data-dictionary.md` | updated | `trade_page_store.engine_version`: the two new hashed modules |
-| `living-memory/LLD.md` | updated | deck pipeline 15 and the fast-deck hook |
+| `living-memory/LLD.md` | updated | deck pipeline 16 and the fast-deck hook |
 | `docs/architecture.md` | updated | "Page-first trade search and the fast deck" |
 | `living-memory/HLD.md` | updated | the cold path's flagged branch |
 | `docs/cross-client-invariants.md` | n/a | no shared constant |
