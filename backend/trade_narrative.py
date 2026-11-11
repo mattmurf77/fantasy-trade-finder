@@ -375,7 +375,10 @@ def hesitation_line(objection: dict, players: dict) -> Optional[str]:
 # preferences or their outlook as the proof records it (which is their
 # DECLARED setting when they have one).
 
-#: Bump on ANY wording change (whitespace and punctuation included).
+#: The payload's `v`. Installed apps (TestFlight 1.22.0 (184) on) show the block
+#: only when it is exactly this (mobile/src/api/trades.ts), so it names the
+#: payload SHAPE: a wording change keeps it, a shape change needs a new value
+#: and an app that reads it.
 FIT_TMPL_VERSION = "fit-2"
 
 #: Need: the receiving side's usable-depth proxy at the named position rises
@@ -415,9 +418,20 @@ FIT_TEMPLATES: dict[str, str] = {
     "plan_win_now.them":       "Win-now-leaning: adds {asset}",
     "need.you":                "Upgrades {pos}: adds {name}",
     "need.them":               "Upgrades {pos}: adds {name}",
-    # No supported gain: only what moves, no praise.
-    "moves.you":               "Gets {gets}, gives {gives}",
-    "moves.them":              "Gets {gets}, gives {gives}",
+    # No supported gain: no praise and no restating the card. What the trade
+    # does to the team's league rank at the positions it touches instead.
+    # `holds`: ranks that do not move ("Still RB 4th, WR 9th"); the moves
+    # are the rank row beneath. `shifts`: every touched rank moves ("Up at
+    # RB, down at WR"). `flat`: the value changes are under the noise bar.
+    # `none`: no ranked position is touched (picks only).
+    "holds.you":               "Still {ranks}",
+    "holds.them":              "Still {ranks}",
+    "shifts.you":              "{shift}",
+    "shifts.them":             "{shift}",
+    "flat.you":                "Little change in league rank",
+    "flat.them":               "Little change in league rank",
+    "none.you":                "No league rank change",
+    "none.them":               "No league rank change",
 }
 
 #: Outlook tag words. `declared`: the app's display name for a declared
@@ -602,11 +616,39 @@ def _fit_tag(source: str, outlook) -> Optional[dict]:
     return {"code": outlook, "source": source, "text": text} if text else None
 
 
+def _fit_ordinal(n: int) -> str:
+    """A league rank as the app writes it (TradeCard.tsx fitRankOrdinal)."""
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _fit_rank_fallback(side: str, moves: list, held: list,
+                       touched: bool) -> tuple[str, dict]:
+    """The lead for a team with no supported reason: rank facts, never the
+    card's own player list."""
+    if held:
+        return f"holds.{side}", {"ranks": ", ".join(
+            f"{h['pos']} {_fit_ordinal(h['rank'])}" for h in held)}
+    if moves:
+        order = sorted(moves, key=lambda m: _FIT_DEPTH_POSITIONS.index(m["pos"]))
+        parts = [f"{word} at {' and '.join(m['pos'] for m in group)}"
+                 for word, group in (
+                     ("up", [m for m in order if m["after"] < m["before"]]),
+                     ("down", [m for m in order if m["after"] > m["before"]]))
+                 if group]
+        text = ", ".join(parts)
+        return f"shifts.{side}", {"shift": text[0].upper() + text[1:]}
+    return f"{'flat' if touched else 'none'}.{side}", {}
+
+
 def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: list,
                    assets: dict) -> Optional[dict]:
-    """{"them": [...], "you": [...]}: league rank moves per team, or None when
-    no rank can be shown (too few valued teams, or a team or an asset the
-    context does not place where the card does)."""
+    """Per team ("them", "you"): `moves` (league rank moves, the payload's
+    `ranks`), `held` (touched positions whose rank does not move) and
+    `touched` (the trade moves a ranked position at all). None when no rank
+    can be stated (too few valued teams, or a team or an asset the context
+    does not place where the card does)."""
     you, them = context.viewer_id, other_id
     if (context.valued < FIT_RANK_MIN_TEAMS or you not in context.values
             or them not in context.values or you == them):
@@ -637,25 +679,27 @@ def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: lis
 
     rows = {}
     for side, uid in (("them", them), ("you", you)):
-        moves = []
+        moves, held = [], []
         for pos in _FIT_DEPTH_POSITIONS:
             if pos not in touched[uid]:
                 continue
             was, now = context.values[uid][pos], after[uid][pos]
-            if now == was or abs(now - was) < FIT_RANK_MIN_MOVE * context.medians[pos]:
-                continue
             # Ties share a rank: 1 + the teams strictly above (League rankings).
             # After the trade only the two teams' values differ, so swap their
             # before values for their after values in the count.
             before = 1 + above(pos, was)
             later = 1 + above(pos, now) + sum(
                 (after[t][pos] > now) - (context.values[t][pos] > now) for t in after)
-            if before != later:
+            if before == later:
+                held.append({"pos": pos, "rank": before})
+            elif abs(now - was) >= FIT_RANK_MIN_MOVE * context.medians[pos]:
                 moves.append({"pos": pos, "before": before, "after": later})
+            # else: a rank move on a value change under the noise bar is
+            # neither shown as a move nor called unchanged.
         # Gains first, larger moves first, then position order.
         moves.sort(key=lambda m: (m["after"] > m["before"], -abs(m["after"] - m["before"]),
                                   _FIT_DEPTH_POSITIONS.index(m["pos"])))
-        rows[side] = moves
+        rows[side] = {"moves": moves, "held": held, "touched": bool(touched[uid])}
     return rows
 
 
@@ -666,8 +710,9 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
     `proof` is `card.owner_evaluation.as_dict()`, already matched to `card`;
     `context` is the job's `FitLeagueContext`. Returned only when at least
     one team has a supported lead (plan, then need) or a rank move; a team
-    without a supported lead gets the moves-only phrase. Pure; raises nothing
-    (any malformed input yields None).
+    without a supported lead gets a rank fact (`_fit_rank_fallback`), never
+    the card's player list, and is left out when no rank can be stated for
+    it. Pure; raises nothing (any malformed input yields None).
     """
     try:
         if (not isinstance(proof, dict) or proof.get("generator") != _FIT_ARM
@@ -686,7 +731,7 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
         if any(a is None for a in assets.values()):
             return None
         other = card.target_user_id
-        ranks = _fit_rank_rows(context, other, give, receive, assets) or {"them": [], "you": []}
+        ranks = _fit_rank_rows(context, other, give, receive, assets)
         teams, shown = [], False
         for side, incoming, outgoing in (("them", give, receive), ("you", receive, give)):
             inc = [assets[p] for p in incoming]
@@ -708,19 +753,22 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
                                else "roster", view.get("outlook"))
             chosen = (_fit_plan(side, view, inc, out, market)
                       or _fit_need(side, view, inc, market))
+            row = ranks[side] if ranks else None
             if chosen:
                 shown = True
                 code, values = chosen
+            elif row is None:
+                continue               # nothing true to say for this team
             else:
-                code = f"moves.{side}"
-                values = {"gets": " + ".join(a["name"] for a in inc),
-                          "gives": " + ".join(a["name"] for a in out)}
+                code, values = _fit_rank_fallback(side, row["moves"], row["held"],
+                                                  row["touched"])
+            moves = row["moves"] if row else []
             entry = {"side": side, "lead": {"code": code,
                                             "text": FIT_TEMPLATES[code].format(**values)},
-                     "ranks": ranks[side]}
+                     "ranks": moves}
             if tag:
                 entry["tag"] = tag
-            shown = shown or bool(ranks[side])
+            shown = shown or bool(moves)
             teams.append(entry)
         return {"v": FIT_TMPL_VERSION, "teams": teams} if shown else None
     except Exception:

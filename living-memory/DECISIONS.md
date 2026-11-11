@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-228 — A fit-block team with no supported reason reads a league-rank fact, never the card's player list; the payload version stays `fit-2`
+
+**Date:** 2026-11-11 · **Who:** the operator, from TestFlight 1.22.0 (184): "This copy is bad. It's just listing the players. The card itself already does that."
+**Context:** D-222's block gave a team with no plan or need phrase the line "Gets X, gives Y" (the approved mockup's weak case). On a real card both teams read that way, repeating YOU SEND / YOU GET.
+**Decision:** That fallback is gone. In its place, from the same league context: the ranks that hold at the positions the trade touches ("Still RB 2nd"; the moves stay in the rank row), else the direction when every touched rank moves ("Up at RB, down at WR"), else "Little change in league rank" (under the noise bar) or "No league rank change" (picks only). A team with nothing true to say is left out. Server-only: build 184 requires a non-empty lead and shows the block only for `v == "fit-2"`, so the wording changed and the version did not; `FIT_TMPL_VERSION` now names the payload shape.
+**Consequences:**
+- No new build. `trade_narrative.py` is in the stored-page engine hash, so stored first pages rebuild once after deploy.
+- "Up at RB, down at WR" above a rank row that says the same in numbers is a known redundancy; a lead-less layout needs an app change.
+- The card in the report ran against both teams' outlooks (an All-in team sending a veteran for a rookie); that is the engine's ordering, which revision 4 addresses, not copy.
+
 ## D-227 — Trades sent from the app are followed on Sleeper without the import switch
 
 **Date:** 2026-11-11 · **Who:** the operator ("Yes to sleeper data"), answering the release record's open decision.

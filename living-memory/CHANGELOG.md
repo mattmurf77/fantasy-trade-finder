@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-11 — Fit block: no more player lists in the lead (D-228)
+
+- Operator feedback from TestFlight 184: a team with no supported reason read "Gets X, gives Y", repeating the card. It now reads a league-rank fact: "Still RB 2nd" (ranks that hold), "Up at RB, down at WR" (every touched rank moves), "Little change in league rank" or "No league rank change".
+- Server-only (`backend/trade_narrative.py`); the payload version stays `fit-2` because build 184 checks for it. Stored first pages rebuild once (the module is in the engine hash).
+
+
 ## 2026-11-11 — Sleeper read follows app-sent trades without the switch (D-227)
 
 - The operator answered the release's open decision ("Yes to sleeper data"). `_sleeper_offers_sync` reads when the user has an offer sent through the app that Sleeper may still move, or the Settings switch is on; without the switch only the app's own rows change and nothing is imported.
