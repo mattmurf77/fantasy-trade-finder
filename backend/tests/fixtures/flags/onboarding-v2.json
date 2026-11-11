@@ -259,5 +259,6 @@
   "outlook.championship_probabilities": true,
   "trades.roster_setup": false,
   "trade.next_move": false,
-  "trade.fit_first_copy": false
+  "trade.fit_first_copy": false,
+  "trade.partner_activity": false
 }

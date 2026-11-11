@@ -1,7 +1,9 @@
 """manager_profiles.py — per-manager revealed-preference profiles (pure leaf).
 
 Design: docs/plans/manager-profiles/design.md. Flag `market.manager_profiles`
-(default OFF). CAPTURE ONLY: nothing in trade generation, ordering or any
+(default OFF). One dark reader: revision 4's partner-activity rule reads
+`n_trades` (flag `trade.partner_activity`, database.load_manager_trade_counts).
+Otherwise CAPTURE ONLY: nothing in trade generation, ordering or any
 client response reads a profile yet.
 
 Turns one league's public Sleeper transaction history — completed trades

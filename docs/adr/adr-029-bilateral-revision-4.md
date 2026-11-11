@@ -27,6 +27,16 @@ pair under one round id.
 5. Calibration folds revision 4 into each *new* round build after the paired v2/v3 order is
    fixed: same capture and gates, shared cards credited, new cards inserted without
    reordering the pair, failure isolated. Exposed and completed decks are never changed.
+6. **Fourth rule, partner activity (WS7, 2026-11-10), behind flag `trade.partner_activity`.**
+   The worker passes `partner_activity` (each league manager's completed public trades this
+   league year, from `manager_profiles`) only when the flag is on and revision 4 is selected;
+   the generator stays a leaf. The threshold is the league's own: flagged at or below a third
+   of the league median, only when the median is at least 2 and at least half the managers
+   have a profile; no profile is never flagged, and a league where everyone trades flags
+   nobody. A flagged manager's offers drop `.05` on both support scores (half the best-asset
+   demotion, past the comparable set), so, like decision 2, order changes and inventory does
+   not. With the input, proofs gain `revision_4.partner_activity` and rules version
+   `offer-learnings-1+partner-activity-1`; without it, revision 4's bytes are unchanged.
 
 ## Consequences
 
@@ -37,3 +47,7 @@ pair under one round id.
 - Pairs whose deck is already exposed get no revision-4 cards in this round; extending them
   needs an operator decision (scope §6).
 - Starting values (20/10/0 premium, .10 demotion) are effects to grade, not fitted parameters.
+- Partner activity (decision 6): Calibration captures are built with the revision-4 selector
+  at 0, so the Calibration revision-4 arm carries no `partner_activity` and grades WS1's
+  three rules only, until the operator decides otherwise. A profile rebuild marks no stored
+  first page stale; a page can carry the previous count's order until its next invalidation.

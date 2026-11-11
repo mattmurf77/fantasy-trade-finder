@@ -146,7 +146,7 @@ from .database import (
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
-    load_league_preferences_bulk,
+    load_league_preferences_bulk, load_manager_trade_counts,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
@@ -21928,6 +21928,11 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         exclusion_keys=(_load_presentment_exclusions(user_id, league.league_id)
                         if FLAGS.trade_presentment_rules else set()),
         config=config, **selection)
+    if FLAGS.trade_partner_activity and _bakeoff.owner_revision_4_enabled(config):
+        # WS7: one read per job of the public completed-trade counts revision 4
+        # compares within the league. Only revision 4 accepts the key, and
+        # flag-off contexts, evidence and request hashes never carry it.
+        context["partner_activity"] = load_manager_trade_counts(league.league_id)
     if _bakeoff.owner_revision_enabled(config):
         from .trade_input_evidence import detached_context, PoolInputEvidence
         pool = (g_universal_by_format.get(scoring_format)

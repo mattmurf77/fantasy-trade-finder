@@ -768,8 +768,9 @@ sleeper_trades_table = Table("sleeper_trades", metadata,
 Index("ix_sleeper_trades_league", sleeper_trades_table.c.league_id)
 
 # Manager revealed-preference profiles (docs/plans/manager-profiles/, flag
-# `market.manager_profiles`, default OFF). Capture only — nothing reads
-# these tables to generate, order or describe a trade.
+# `market.manager_profiles`, default OFF). Capture only, except one dark
+# reader: revision 4's partner-activity rule reads manager_profiles.n_trades
+# (flag trade.partner_activity, load_manager_trade_counts) to ORDER trades.
 #
 # sleeper_waiver_moves: the waiver + free-agent rows of the SAME
 # /league/<id>/transactions/<week> payloads the trade sweep already fetches
@@ -10968,6 +10969,18 @@ def load_manager_profiles(league_id: str) -> list[dict]:
             .order_by(t.c.roster_id.asc())
         ).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+def load_manager_trade_counts(league_id: str) -> dict[str, int]:
+    """{owner_id: n_trades} for a league's manager_profiles rows: completed
+    public trades this league year. Two narrow columns, one indexed read; the
+    revision-4 partner-activity input (flag trade.partner_activity)."""
+    t = manager_profiles_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(t.c.owner_id, t.c.n_trades).where(t.c.league_id == league_id)
+        ).fetchall()
+    return {str(owner_id): int(n) for owner_id, n in rows}
 
 
 def set_league_scoring(league_id: str, scoring_format: str) -> None:

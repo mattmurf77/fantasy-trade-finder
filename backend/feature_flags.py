@@ -1284,6 +1284,11 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.fit_first_copy",
     # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
     "grading.revision4_arm",
+    # docs/plans/offer-learnings/scope-partner-activity.md (WS7, R8). ON and
+    # revision 4 selected ⇒ the owner context carries each manager's completed
+    # trades this league year (stored public profiles) and revision 4 demotes
+    # offers to a manager trading clearly less than their league. OFF ⇒ no key.
+    "trade.partner_activity",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
