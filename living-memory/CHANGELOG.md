@@ -16,7 +16,7 @@
 
 - The fit block's rank facts are now a table, one row per position involved (position, rank before, rank after), under one Before / After header. The "RB stays 5th" and "Up at RB, down at WR" lines go away where the table states them; a reason line ("Win-now: adds …") stays.
 - Server: each team entry gains `positions`. Additive, payload stays `fit-2`; builds 184 and 185 render as before. The table needs a TestFlight build.
-- Unchanged on purpose: a rank move on a value change under the noise bar is still left out.
+- The table lists every position the trade touches with its true ranks, including a rank change on a very small value change (operator, 2026-11-11). The noise bar still governs the lead line and the legacy `ranks` list, so a team can read "Little change in league rank" above a row.
 
 ## 2026-11-11 — Roster setup: one page of tier placement replaces the per-position rank step (D-233)
 

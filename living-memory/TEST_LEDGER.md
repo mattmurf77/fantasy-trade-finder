@@ -1,3 +1,9 @@
+## 2026-11-11 — Rank table lists every touched position, branch `feat/fit-rank-table-all-positions`
+
+- **`test_fit_block_v3.py`: 74 pass** (main session re-run). `positions` is every ranked position the trade touches with its true rank before and after, noise-level changes included; `ranks`, the lead (`flat.*` for a noise-only team), `tag`, `v` and whether the block shows are unchanged; a noise-only card with no lead still has no block. Fit, narrative, digest, fast-deck and revised-offer subset: 514 passed (subagent). `check-fit-first-copy.js`: 14 of 14; the app needed no change.
+- **Sabotages, red then restored (7, Opus subagent):** held-plus-moves only; held omitted; untouched positions listed; reversed order; `shown` driven by `positions`; `ranks` taking the `positions` list; the lead counting noise-level changes as moves.
+- Operator decision ("Yes. We should just show it"). Server-only. FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Fit block before/after rank table, branch `feat/fit-block-rank-table`
 
 - **`test_fit_block_v3.py`: 73 pass.** `positions` is held ranks plus moves in QB/RB/WR/TE order; a noise-level move is in neither list nor `positions`; `v`, `lead`, `ranks` and `tag` are byte-identical to before for pinned cases; a team with no rank rows has `[]`. Fit, narrative, deck-digest, fast-deck and revised-offer subset: **512 passed** (main session). Full suite by the subagent: 14,481 passed, 42 skipped.
