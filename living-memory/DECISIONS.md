@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-215 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
+## D-216 — The fast deck is one pass over a bounded deck, not a page followed by the inventory
 
 **Date:** 2026-11-10 · **Who:** operator ("make the necessary pushes and code changes to enable the fast trade suggestions"); coordinating session.
 **Context:** The worker's path from generation to publication is one long pass whose final checks have side effects: exposure events, suppression grants, one candidate set and one evidence seal per job, and a publication assert that the published prefix is the head of the finished inventory. Running it once for a page and again for the inventory is not safe without changing those contracts.
@@ -11,16 +11,26 @@
 - Appending the inventory behind the page is still open; the existing deck paging with `rebased` is the likely route.
 - Page and full solve are compared inside one process only: the full engine's output varies between processes.
 
-## D-214 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
+## D-215 — The first page of trades is found by bound-verify-stop, not by speeding up the full solve
 
 **Date:** 2026-11-10 · **Who:** operator (asked for near-real-time construction without pre-generation, then a 3× per-process gain); coordinating session with Opus subagents.
 **Context:** A cold owner-bilateral search evaluates about 45,000 candidates and ranks about 3,900 survivors before any card shows (3–4 s of construction locally). An exact, byte-identical fast kernel for that full solve was built first and measured 1.15–1.18× with about 75% more peak memory: the work left is unique per candidate.
 **Decision:** `backend/trade_first_page.py` orders candidates by an admissible upper bound on `weaker_support`, verifies best-first with the unchanged evaluator, and stops once k + 31 eligible cards beat every remaining bound (the ranker's lookahead). Repeated work is memoised by content, never by league or user, and only returned cards are serialised. The fast kernel was dropped. [ADR-028](../docs/adr/adr-028-page-first-trade-search.md).
 **Consequences:**
 - Synthetic league, bilateral-1: first 30 cards in 44–45 ms once a league has been seen. Revision 2 is exact only with family completion (each page card's cheaper same-family alternatives are evaluated too), which costs more: 70–130 ms synthetic, about 0.28 s on recorded production requests.
-- Served only through the fast deck (D-215). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
+- Served only through the fast deck (D-216). Publishing a page and then appending the inventory (recommendation R3) changes the owner publication contract and needs its own scope.
 - A change to `trade_service` market package pricing must re-run `test_trade_first_page.py`: the pre-pricing bound is proved from that code's current shape.
 - No NumPy: a measured 10% was not worth a new runtime dependency and a second copy of the bound arithmetic.
+## D-214 — Manager profiles: keyed on roster `owner_id`, current season only, one backfill is the only extra Sleeper cost, rookie drafts deferred
+
+**Date:** 2026-11-10 · **Who:** side session from the trade-quality evaluation (built dark; operator decides the open questions in the design).
+**Context:** ~80% of suggestions go to league-mates who never ranked, and testers like those far less. Public Sleeper league history (trades, FAAB waiver bids including lost ones) says what those managers actually do, but FAAB rows were discarded by the trade sweep and no per-manager profile existed. [Design](../docs/plans/manager-profiles/design.md).
+**Decision:** Capture behind `market.manager_profiles` (default off), riding the `market.trade_capture` sweep: keep the waiver / free-agent rows of the payloads already fetched (`sleeper_waiver_moves`) and rebuild one `manager_profiles` row per owned roster from everything stored. Key on the roster's `owner_id` (league identity, ADR-012); attribute moves by `roster_id`; exclude waiver/FA moves whose `creator` fails `owns_roster`. The only extra Sleeper traffic is an 18-leg backfill per league, once; its marker is the presence of profile rows, written only after a backfill with no failed leg. No roster map ⇒ skip entirely. Current season only; rookie-draft selections deferred (needs `/drafts` + `/draft/<id>/picks` reads and a draft-dated board — `dp_values_history` is research-only and has no May–August boards, `player_value_history` starts 2026-07-26).
+**Consequences:**
+- No consumer: trade generation, ordering and every response are unchanged; a consumer gets its own flag and scope block.
+- Trade signals are thin in one season (prod: median 2 trades per manager per season, 19% zero); prior seasons need one `/rosters` read per prior league to attribute (design open question 2).
+- `accounts.delete_user_data` deletes a deleted account's profile rows and export includes them, but a league-mate's next sweep can rebuild one from public data (design open question 1).
+- 2026-11-10: the operator turned the flag on in `config/features.json` ("flip it on") before answering open question 1; it takes effect when PR #635 merges. Production's `FTF_FLAGS` does not pin this key (G-076), so the file value applies. Turning it on exposed one bug, fixed in the same change: the caller's own profile was rebuilt when their account was deleted mid-daemon. `replace_manager_profiles` now takes the caller's users-row lock (`live_user`), like the roster-history writes; a league-mate's later sync can still rebuild a deleted account's profile (open question 1).
 
 ## D-213 — Roster setup's "Keep" is the existing `untouchable` tag, with a guard past 40% of the roster
 

@@ -1,0 +1,55 @@
+[
+ {
+  "co_owners": null,
+  "league_id": "1000000000000000001",
+  "owner_id": "9000000000000000001",
+  "players": [
+   "1002",
+   "1003",
+   "1005",
+   "TB"
+  ],
+  "roster_id": 1,
+  "settings": {
+   "waiver_budget_used": 80
+  }
+ },
+ {
+  "co_owners": [
+   "9000000000000000022"
+  ],
+  "league_id": "1000000000000000001",
+  "owner_id": "9000000000000000002",
+  "players": [
+   "1001"
+  ],
+  "roster_id": 2,
+  "settings": {
+   "waiver_budget_used": 0
+  }
+ },
+ {
+  "co_owners": null,
+  "league_id": "1000000000000000001",
+  "owner_id": "9000000000000000003",
+  "players": [
+   "1006"
+  ],
+  "roster_id": 3,
+  "settings": {
+   "waiver_budget_used": 0
+  }
+ },
+ {
+  "co_owners": null,
+  "league_id": "1000000000000000001",
+  "owner_id": null,
+  "players": [
+   "1007"
+  ],
+  "roster_id": 4,
+  "settings": {
+   "waiver_budget_used": 0
+  }
+ }
+]

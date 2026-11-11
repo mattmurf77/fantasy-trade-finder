@@ -27,7 +27,15 @@ import logging
 import urllib.request
 from datetime import date, datetime, timezone
 
-from .database import has_sleeper_trades, record_sleeper_trades
+from .database import (
+    has_manager_profile_capture,
+    has_sleeper_trades,
+    load_sleeper_trades,
+    load_sleeper_waiver_moves,
+    record_sleeper_trades,
+    record_sleeper_waiver_moves,
+    replace_manager_profiles,
+)
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +156,8 @@ def current_nfl_week(today: date | None = None) -> int | None:
     return week if 1 <= week <= LAST_WEEK else None
 
 
-def sweep_weeks(league_id: str, today: date | None = None) -> list[int]:
+def sweep_weeks(league_id: str, today: date | None = None,
+                *, profiles: bool = False) -> list[int]:
     """Which legs `sync_league_trades` should fetch for this league.
 
     A league with NO captured rows gets the full 1..18 backfill once. After
@@ -160,8 +169,16 @@ def sweep_weeks(league_id: str, today: date | None = None) -> list[int]:
     offseason trade on leg 1 of the league's season (see the module note),
     and dynasty's heaviest trading window IS the offseason, so an
     already-swept league keeps one live leg all year.
+
+    `profiles=True` (flag `market.manager_profiles`) adds ONE more reason to
+    backfill: a league whose profile capture has not completed a season
+    sweep yet (`has_manager_profile_capture`). That is the only extra
+    Sleeper traffic the profile capture ever causes — 18 legs, once per
+    league — because waiver history before the live legs is otherwise lost.
+    `profiles=False` is byte-identical to the pre-profile behavior.
     """
-    if not has_sleeper_trades(league_id):
+    if not has_sleeper_trades(league_id) or (
+            profiles and not has_manager_profile_capture(league_id)):
         return list(WEEKS)
     week = current_nfl_week(today)
     if week is None:
@@ -169,21 +186,88 @@ def sweep_weeks(league_id: str, today: date | None = None) -> list[int]:
     return [w for w in (week - 1, week) if w >= 1]
 
 
-def sync_league_trades(league_id: str, *, _opener=None) -> int:
+def sync_league_trades(league_id: str, *, _opener=None,
+                       profiles: bool = False,
+                       rosters: list | None = None,
+                       league_meta: dict | None = None,
+                       players_fn=None,
+                       live_user: str | None = None) -> int:
     """Sweep this league's live legs (or backfill all 18 on the first pass),
     store completed trades. Returns the number of NEW trades captured (0 in
     steady state).
 
     Per-week fetch failures are logged and skipped — one bad leg must not
     drop the rest of the sweep.
+
+    `profiles=True` (flag `market.manager_profiles`, decided by the caller)
+    also keeps the waiver / free-agent rows of the SAME payloads and then
+    rebuilds the league's manager profiles — no extra fetch beyond the
+    one-time backfill in `sweep_weeks`. It needs the caller's `rosters`
+    (the daemon's shared `/rosters` read) to attribute anything; without
+    them the profile step is skipped entirely, backfill included, so a
+    missing roster map can never cost 18 calls per sync. The profile step
+    is best-effort and can never fail or change the trade capture.
+    `live_user` (the daemon's caller) puts the profile write under that
+    account's users-row lock; a deleted account writes no profile.
     """
+    profiles = bool(profiles and rosters)
+    weeks = sweep_weeks(league_id, profiles=profiles)
     rows: list[dict] = []
-    for week in sweep_weeks(league_id):
+    moves: list[dict] = []
+    failed_weeks = 0
+    for week in weeks:
         try:
             txns = fetch_week_transactions(league_id, week, _opener=_opener)
         except Exception as e:
+            failed_weeks += 1
             log.warning("trade capture: league %s week %d fetch failed: %s",
                         league_id, week, e)
             continue
         rows.extend(parse_trade_transactions(txns, league_id))
-    return record_sleeper_trades(rows)
+        if profiles:
+            from .manager_profiles import parse_waiver_transactions
+            moves.extend(parse_waiver_transactions(txns, league_id))
+    n_new = record_sleeper_trades(rows)
+    if profiles:
+        try:
+            record_sleeper_waiver_moves(moves)
+            # A backfill that lost a leg writes no profile — no profile rows
+            # means no `has_manager_profile_capture` marker, so the next sync
+            # re-runs the whole (idempotent) backfill instead of leaving a
+            # permanent hole in the season.
+            if not (failed_weeks and len(weeks) == len(WEEKS)):
+                capture_manager_profiles(league_id, rosters=rosters,
+                                         league_meta=league_meta,
+                                         players_fn=players_fn,
+                                         live_user=live_user)
+        except Exception as e:
+            log.warning("manager profiles: league %s capture failed: %s",
+                        league_id, e)
+    return n_new
+
+
+def capture_manager_profiles(league_id: str, *, rosters: list,
+                             league_meta: dict | None,
+                             players_fn=None, now=None,
+                             live_user: str | None = None) -> int:
+    """Rebuild one league's manager_profiles from everything stored for it
+    (sleeper_trades + sleeper_waiver_moves). No network: the rosters and
+    league meta are the caller's already-fetched payloads, players come
+    from our own table. Returns rows written (0 = nothing to attribute,
+    previous rows kept)."""
+    from .manager_profiles import build_league_profiles
+    trades = [json.loads(r["raw"])
+              for r in load_sleeper_trades(league_id, limit=100_000)]
+    moves = [json.loads(r["raw"]) for r in load_sleeper_waiver_moves(league_id)]
+    ids: set[str] = set()
+    for t in trades + moves:
+        for k in ("adds", "drops"):
+            if isinstance(t.get(k), dict):
+                ids.update(str(p) for p in t[k])
+    if players_fn is None:
+        from .database import load_players_by_ids as players_fn
+    players = players_fn(sorted(ids)) if ids else {}
+    rows = build_league_profiles(
+        league_id, trades=trades, moves=moves, rosters=rosters,
+        players=players, league_meta=league_meta, now=now)
+    return replace_manager_profiles(league_id, rows, live_user=live_user)
