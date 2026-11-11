@@ -9,6 +9,7 @@
 ## Table of Contents
 
 - [Current State 2026-11-09](#current-state-2026-11-09)
+- [Unmerged 2026-11-10: page-first trade search](#unmerged-2026-11-10-page-first-trade-search)
 
 ---
 
@@ -27,3 +28,14 @@
 
 **Don't repeat**
 - No simulator or Maestro (D-056). Production runs a single worker: a Calibration rebuild takes about 4–5 min per pair and starves admin reads, so run them off-peak.
+
+## Unmerged 2026-11-10: page-first trade search
+
+- **Where:** branch `feat/offer-learnings`, PR #641 (contains PR #638). Worktree `.claude/worktrees/offer-learnings`. Every new flag is off in it.
+- **What:** the fast deck (ADR-028, D-215, D-216) and the offer-learnings programme (ADR-029, D-217 to D-226; specs in `docs/plans/offer-learnings/plan.md`).
+- **The operator's instruction (2026-11-10, then away):** finish the code, merge, ship a TestFlight build and turn it on. Plan: merge dark, confirm the deploy, turn features on in a second change, build 1.23.0, pre-generate the revision-4 Calibration round.
+- **Stays off until the operator acts:** `trade.sleeper_offer_import` (the Terms and Privacy wording is drafted, not published; revised-offer cards have nothing to show until it is on); revision 4's selector and `trade.partner_activity` (graded first).
+- **Owed:** models-eng review of the pipeline bump (15 → 21); the TestFlight checklists in each scope block.
+- **Local only, never commit:** `data/sleeper-export/` and `data/prod-requests/` in the main checkout.
+- **Builder worktrees** (`.claude/worktrees/agent-*`) and their branches are to be swept through `docs/recovery/` once their content is verified on `main`.
+

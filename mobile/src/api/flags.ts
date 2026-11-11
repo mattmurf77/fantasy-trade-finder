@@ -43,6 +43,13 @@ export function fetchedAppMinVersion(): number { return _appMinVersion; }
 let _appStoreLive = -1;
 export function fetchedAppStoreLive(): number { return _appStoreLive; }
 
+/** WS3 pass-reason cadence — the raw top-level `pass_reason_cadence`
+ *  ({ask_after, quiet_for}, present only while `trade.pass_reason_cadence` is
+ *  on) from the last SUCCESSFUL fetch. Normalized by the reader
+ *  (utils/passReasonCadence.normalizeCadence). Never persisted. */
+let _passReasonCadence: unknown = undefined;
+export function fetchedPassReasonCadence(): unknown { return _passReasonCadence; }
+
 export async function loadFeatureFlags(
   opts: { throwOnError?: boolean } = {},
 ): Promise<FlagMap> {
@@ -59,6 +66,7 @@ export async function loadFeatureFlags(
       configs?: Record<string, { flags?: FlagMap } & Record<string, unknown>>;
       app_min_version?: unknown;
       app_store_live?: unknown;
+      pass_reason_cadence?: unknown;
     }>('/api/feature-flags', headers ? { headers } : undefined);
     const base = res?.flags || {};
     // Experiment overlays (FR-35): a running experiment variant may carry
@@ -89,6 +97,7 @@ export async function loadFeatureFlags(
     _provenance = provenance;
     _appMinVersion = minVersionOrOff(res?.app_min_version);
     _appStoreLive = appStoreLiveOrUnset(res?.app_store_live);
+    _passReasonCadence = res?.pass_reason_cadence;
     return merged;
   } catch (err) {
     if (opts.throwOnError) throw err;

@@ -204,6 +204,9 @@ class _Search:
         # A dark selector must not alter historic constructor report bytes.
         if not self.config.get("owner_outlook_evidence_enabled"):
             self.config.pop("owner_outlook_evidence_enabled", None)
+        # Only exactly 1 selects revision 4 (bakeoff_runner); any other value is today.
+        if self.config.get("owner_bilateral_revision_4_enabled") != 1.0:
+            self.config.pop("owner_bilateral_revision_4_enabled", None)
         self.pool_size = self._limit("owner_pool_size", 4, 32)
         self.pair_budget = self._limit("owner_pair_budget", 1, 16384)
         self.total_budget = self._limit("owner_total_budget", 1, 120000)

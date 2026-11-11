@@ -155,6 +155,20 @@ export interface StarterImpactSlot {
   delta: number;
 }
 
+// WS4b fit block (flag trade.fit_first_copy). docs/api-reference.md and
+// docs/cross-client-invariants.md § Fit block ranks and outlook tags.
+export type FitRankPos = 'QB' | 'RB' | 'WR' | 'TE';
+export interface FitBlockTeam {
+  side: 'them' | 'you';
+  tag?: { code: string; source: 'declared' | 'roster'; text: string };
+  lead: { code: string; text: string };
+  ranks: { pos: FitRankPos; before: number; after: number }[];
+}
+export interface FitBlock {
+  v: 'fit-2';
+  teams: FitBlockTeam[];
+}
+
 export interface TradeCard {
   trade_id: string;
   league_id: string;
@@ -248,6 +262,19 @@ export interface TradeCard {
   // row; the UI reads `sentence` only and must never switch on `code`
   // (docs/plans/counterparty-breaker/LLD.md §1.5, §1.8).
   breaker?: { code: string; severity: number; sentence: string };
+  // WS4b fit block, version 3 (flag trade.fit_first_copy, template fit-2).
+  // Server-composed (backend/trade_narrative.py fit_block): per team, the
+  // other team's first, an optional outlook tag, one lead phrase and the
+  // team's league rank moves at the positions the trade touches. Serialized
+  // only when a team has something to show; absent otherwise. The card
+  // renders `text` and the rank numbers only and never switches on `code`.
+  fit_block?: FitBlock;
+  // WS8 revised-offer card (flag trade.next_move): the server led the deck
+  // with this card because Sleeper showed the user's own offer declined
+  // (`revision`) or the user declined the other manager's counter
+  // (`middle_ground`). `line` is the server's sentence (trade_narrative
+  // revised_offer_line); the card renders it verbatim. Absent otherwise.
+  revised_offer?: { kind: 'revision' | 'middle_ground'; line: string };
   // Structured "why this match" context stamped on every v2 card
   // (server.py trade_card_to_dict → match_context). Only the fields the
   // client reads are typed; extend as needed.

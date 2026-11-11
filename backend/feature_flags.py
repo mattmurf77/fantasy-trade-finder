@@ -1002,6 +1002,17 @@ FLAG_KEYS: tuple[str, ...] = (
     # (pass_reason_elo_suppression), not this flag, so ranking math can be
     # reverted without taking the capture down with it.
     "feedback.decline_reasons",
+    # ── Pass-reason cadence (offer-learnings WS3, R9), default OFF ────────
+    # docs/plans/offer-learnings/scope-pass-reason-cadence.md. ON = the deck
+    # keeps the plain one-tap ✕ and asks for a reason only after
+    # `pass_reason_ask_after` consecutive passes, then stays quiet for
+    # `pass_reason_quiet_for` passes (model_config knobs, served on
+    # GET /api/feature-flags as `pass_reason_cadence`). Opens
+    # POST /api/trades/pass-reason independently of feedback.decline_reasons
+    # and admits the two cadence-only codes (other_picks_keep,
+    # other_waiting). OFF = the payload key is absent, the two codes 400,
+    # and every surface behaves byte-identically to before this flag.
+    "trade.pass_reason_cadence",
     # ── Three-model bake-off — docs/plans/three-model-bakeoff/PLAN.md ─────
     # Scope block: docs/plans/three-model-bakeoff/scope-phase3.md. ON = one
     # organic trade job fans out into THREE generations run sequentially on
@@ -1037,6 +1048,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
     "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
     "trade.packed_evidence",     # ADR-025 stage 2: packed deck evidence (S8); turned on BEFORE the store (R2.4 §3)
+    # ADR-028 (docs/plans/realtime-trade-engine/). Interactive owner-serve jobs only;
+    # prepared inventories, replenishment and Calibration keep the full solve.
+    "trade.fast_deck",           # serve the page-first search's proven first 150 cards; OFF = full inventory
+    "trade.fast_deck_shadow",    # run the same page beside the full solve and log agreement; serves nothing
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it
@@ -1234,6 +1249,11 @@ FLAG_KEYS: tuple[str, ...] = (
     # Whole-team meaningful benefit for both managers; implies final market
     # and roster gates. Remains dark until point coverage and intent qualify.
     "trade.mutual_benefit_v1",
+    # docs/plans/offer-learnings/scope-trade-outcomes.md (WS2 Part A) — ON ⇒ a
+    # confirmed Sleeper send writes a trade_offer_outcomes row and
+    # backend/trade_outcomes.py moves it to its observed outcome (session init
+    # + daily-tick step `trade_outcomes`). OFF (default) ⇒ none of it runs.
+    "trade.outcome_tracking",
     "trade.value_core",
     # ── Roster-first setup for Find a Trade — 2026-11-10, ships DARK ──────
     # docs/plans/roster-first-trade-setup/ (D-212, D-213). ON ⇒ the mobile
@@ -1253,6 +1273,34 @@ FLAG_KEYS: tuple[str, ...] = (
     "grading.blind",
     "grading.outlook_round",
     "grading.outlook_prepare",
+    # docs/plans/offer-learnings/scope-next-move.md (WS5, R2) — at most one
+    # pre-built revision of a sent offer (backend/trade_next_move.py). Ships
+    # false; no caller yet. OFF => propose_revision returns None, no work.
+    "trade.next_move",
+    # docs/plans/offer-learnings/scope-fit-first-copy.md (WS4). ON ⇒
+    # `trade_card_to_dict` adds `fit_lines` to bilateral cards whose frozen
+    # proof supports a specific fit reason (trade_narrative.fit_lines), and the
+    # mobile card leads with them. OFF (default) ⇒ no key, byte-identical.
+    "trade.fit_first_copy",
+    # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
+    "grading.revision4_arm",
+    # docs/plans/offer-learnings/scope-partner-activity.md (WS7, R8). ON and
+    # revision 4 selected ⇒ the owner context carries each manager's completed
+    # trades this league year (stored public profiles) and revision 4 demotes
+    # offers to a manager trading clearly less than their league. OFF ⇒ no key.
+    "trade.partner_activity",
+    # docs/plans/offer-learnings/ WS1b: a Calibration round of its own for revision 4
+    # (outlook_calibration.R4_ROUND_ID), offered after the current round. Supersedes
+    # grading.revision4_arm, which is inert while this is on. OFF => today's behaviour.
+    "grading.revision4_round",
+    # docs/plans/offer-learnings/scope-sleeper-offer-read.md (WS2b). ON ⇒ one
+    # private read of the user's own Sleeper trade offers (the Send-in-Sleeper
+    # credential) when Find a Trade is opened and on the daily tick, at most
+    # once per (user, league) per 30 min: app-sent offers gain declined /
+    # withdrawn / lapsed / countered; with the user's consent their other
+    # Sleeper offers are imported. OFF (default) ⇒ no call, no row, GET/POST
+    # /api/sleeper/offer-import 404 (DELETE still withdraws).
+    "trade.sleeper_offer_import",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

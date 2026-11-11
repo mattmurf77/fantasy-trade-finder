@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, TickLabel } from '../../components/chalkline';
 import FeedbackFAB from '../../components/FeedbackFAB';
+import SleeperOfferImportRow from '../../components/SleeperOfferImportRow';
 import Toast from '../../components/Toast';
 import {
   invalidateCapabilities,
@@ -88,6 +89,8 @@ export default function SettingsLeaguesScreen({ navigation }: any) {
         {movePlatforms.map((p) => (
           <RosterMovesRow key={p} platform={p} />
         ))}
+        {/* WS2b — self-gating (flag + server + Send-in-Sleeper link). */}
+        {!isDemo && !accountOnly ? <SleeperOfferImportRow /> : null}
       </ScrollView>
       <Toast
         visible={!!toast}

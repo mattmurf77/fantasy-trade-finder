@@ -58,6 +58,8 @@ import { TickLabel, Button, Meter, Icon, Card } from '../components/chalkline';
 import TradeCardComp, { type DispositionReasons } from '../components/TradeCard';
 import { valueBarIsEven } from '../components/TradeValueBar';
 import DeclineReasonPanel from '../components/DeclineReasonPanel';
+import { usePassReasonCadence } from '../hooks/usePassReasonCadence';
+import { cadenceCardReasons } from '../utils/passReasonCadence';
 import SendInSleeperButton from '../components/SendInSleeperButton';
 import Toast from '../components/Toast';
 import PlayerContextMenu, { type PlayerMenuAction } from '../components/PlayerContextMenu';
@@ -940,6 +942,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // advance deferred until layer 2 answers. Off ⇒ nothing below this flag
   // runs and the ✓/✕ row renders byte-identically.
   const declineReasonsOn = useFlag('feedback.decline_reasons');
+  // WS3 (flag `trade.pass_reason_cadence`): ask why only every few passes.
+  const passCadence = usePassReasonCadence();
   // The raw deck id whose pass is banked but whose deck advance is still
   // waiting on layer 2. Blocks a second disposition on the same card (the ✓,
   // the swipe gesture, the a11y actions) and is cleared on every advance.
@@ -5748,12 +5752,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // any banked pass left over from a deck reset / job swap. Flag off ⇒ the
   // effect returns on its first line and nothing here ever runs.
   useEffect(() => {
-    if (!declineReasonsOn) return;
+    if (!declineReasonsOn && !passCadence.on) return;
     cardRenderedAtRef.current = Date.now();
     reasonBankedIdRef.current = null;
     setReasonBankedId(null);
     reasonPassAttemptRef.current = null;
-  }, [declineReasonsOn, topTradeId]);
+  }, [declineReasonsOn, passCadence.on, topTradeId]);
 
   // ── Onboarding guided layer (onboarding.guided_layer AND .trades_first,
   // v2.1): coach marks 1–2. Each shows once ever (persisted at show time),
@@ -7070,6 +7074,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // blocks preceded it is over. Keeps `blocked_n` a count of CONSECUTIVE
     // blocks on one predicament rather than a session tally.
     guardBlockRef.current.key = null;
+    passCadence.record(decision);
     // C — the acted-on card leaves the device page, whichever deck this is
     // (its `trade_hash` is the same trade in every deck).
     const actedKey = deckCardKey(rawTopCard ?? topCard);
@@ -7200,7 +7205,10 @@ export default function TradesScreen({ navigation, route }: any) {
     // live layer-2 panel would offer to rewind a deck that has not moved yet.
     const passAttempt = decision === 'pass'
       ? opts?.passAttempt ?? makePassAttempt(topCard, dispatchRawId) : undefined;
-    const heldPass = swipeUndoOn && decision === 'pass' && !declineReasonsOn && !!passAttempt;
+    // A cadence chip pass arrives with its own passAttempt (the reason write
+    // already commits the pass), so it never enters the undo hold.
+    const heldPass = swipeUndoOn && decision === 'pass' && !declineReasonsOn
+      && !opts?.passAttempt && !!passAttempt;
     if (heldPass && passAttempt) {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
@@ -7382,7 +7390,9 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckIdx((i) => i + 1);
   }
 
-  function handleReasonLayer1(reason: Layer1Code, switchedFrom: Layer1Code | 'none') {
+  // `detail` is a cadence chip (WS3): the whole answer in one tap and one POST,
+  // so the deck advances at once — no layer 2, no undo hold (see advance()).
+  function handleReasonLayer1(reason: Layer1Code, switchedFrom: Layer1Code | 'none', detail?: Layer2Code) {
     if (!topCard) return;
     const rawId = rawTopCard?.trade_id ?? topCard.trade_id;
     const firstForThisCard = reasonBankedIdRef.current !== rawId;
@@ -7395,6 +7405,7 @@ export default function TradesScreen({ navigation, route }: any) {
       { reason, switched_from: switchedFrom, ...reasonEventProps() },
       'Trades',
     );
+    if (detail) track('trade_pass_layer2', { reason, detail, has_free_text: false, ...reasonEventProps() }, 'Trades');
     // The FIRST tile tap carries the pass disposition, and this POST lands
     // before the swipe POST — the backend keeps only the first `pass` outcome
     // row per impression, so this row must carry the same dwell/engagement
@@ -7406,6 +7417,7 @@ export default function TradesScreen({ navigation, route }: any) {
       ...reasonWriteTarget(),
       layer: 1,
       reason,
+      ...(detail ? { detail } : {}),
       switchedFrom,
       ...(signal
         ? {
@@ -7418,6 +7430,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // A tile switch refines the existing answer; only the FIRST tile tap on a
     // card carries the disposition.
     if (!firstForThisCard) return;
+    if (detail) return advance('pass', { passAttempt: attempt });
     reasonBankedIdRef.current = rawId;
     setReasonBankedId(rawId);
     advance('pass', { deferDeckAdvance: true, passAttempt: attempt });
@@ -7510,8 +7523,9 @@ export default function TradesScreen({ navigation, route }: any) {
     if (banked) rosterSetupOnPass();
   }
 
-  const declineReasonProps: DispositionReasons | undefined = declineReasonsOn
+  const declineReasonProps: DispositionReasons | undefined = declineReasonsOn || passCadence.on
     ? {
+        ...passCadence.cardProps,
         onLayer1: handleReasonLayer1,
         onLayer2Select: handleReasonLayer2Select,
         onLayer2Bank: handleReasonLayer2Bank,
@@ -11395,9 +11409,9 @@ function SwipableTopCard({
             onPass,
             onLike,
             disabled: dispositionDisabled,
-            reasons: declineReasons,
+            reasons: cadenceCardReasons(declineReasons),
           }}
-          reasonsAsOverlay={reasonsAsOverlay}
+          reasonsAsOverlay={reasonsAsOverlay && !declineReasons?.cadence}
           untouchableIds={untouchableIds}
           onToggleUntouchable={onToggleUntouchable}
           onSwapPlayer={onSwapPlayer}

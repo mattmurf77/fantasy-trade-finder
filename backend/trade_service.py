@@ -1185,6 +1185,7 @@ _DEFAULT_CFG: dict[str, float] = {
     "owner_bilateral_enabled":    0.0,
     "owner_bilateral_revision_enabled": 0.0,
     "owner_outlook_evidence_enabled": 0.0,
+    "owner_bilateral_revision_4_enabled": 0.0,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,

@@ -190,6 +190,9 @@ counterparty board disclosure or client analytics event is added.
 - [`deck_replenish_log`](#deck_replenish_log)
 - [`bad_trade_flags`](#bad_trade_flags)
 - [`trade_proposals`](#trade_proposals)
+- [`trade_offer_outcomes`](#trade_offer_outcomes)
+- [`offer_import_consents`](#offer_import_consents)
+- [`revised_offer_cards`](#revised_offer_cards)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -490,7 +493,7 @@ Constraint: `uq_sleeper_waiver_move_txid` on `transaction_id`. Read via `load_sl
 
 ## `manager_profiles`
 
-Manager profiles (flag `market.manager_profiles`, on in `config/features.json`) — **one row per owned roster per league**, a derived view rebuilt from `sleeper_trades` + `sleeper_waiver_moves` after each profiling sweep (`sleeper_trades_service.capture_manager_profiles` → `manager_profiles.build_league_profiles` → `database.replace_manager_profiles`, delete + insert per league in one transaction, under the session-init caller's users-row lock when called from the daemon; an empty build never wipes the previous rows). Keyed on the roster's Sleeper `owner_id`, the manager's **league identity** (`backend/CLAUDE.md` § Identity): a co-owner's moves land on the owner's row and never get a row of their own; an ownerless roster gets no row; a manager with no history gets a row of zeros. Rows are written only after a season sweep whose every leg was fetched, so their presence is the profile-backfill marker (`has_manager_profile_capture`). **No consumer:** nothing in trade generation, ordering or any response reads this table.
+Manager profiles (flag `market.manager_profiles`, on in `config/features.json`) — **one row per owned roster per league**, a derived view rebuilt from `sleeper_trades` + `sleeper_waiver_moves` after each profiling sweep (`sleeper_trades_service.capture_manager_profiles` → `manager_profiles.build_league_profiles` → `database.replace_manager_profiles`, delete + insert per league in one transaction, under the session-init caller's users-row lock when called from the daemon; an empty build never wipes the previous rows). Keyed on the roster's Sleeper `owner_id`, the manager's **league identity** (`backend/CLAUDE.md` § Identity): a co-owner's moves land on the owner's row and never get a row of their own; an ownerless roster gets no row; a manager with no history gets a row of zeros. Rows are written only after a season sweep whose every leg was fetched, so their presence is the profile-backfill marker (`has_manager_profile_capture`). **One consumer, dark:** with flag `trade.partner_activity` on and engine revision 4 selected, `database.load_manager_trade_counts` reads `owner_id` + `n_trades` once per trade job for revision 4's partner-activity rule (order only; [scope](plans/offer-learnings/scope-partner-activity.md)). Nothing else in trade generation, ordering or any response reads this table, and no client payload carries it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -887,7 +890,7 @@ The three tiles (Value · Fit · Neither) replace the card's ✕, so **tapping a
 | `trade_id` | str | the card's per-deck uuid4 prefix |
 | `key_source` | str | `impression` \| `local` — whether the PK is a real `deck_impressions` id or the degraded surrogate. Stored explicitly rather than inferred from the key's prefix, which is the kind of implicit encoding that rots. Never rewritten by a later tap: the key a row was minted under is a fact about the row |
 | `reason` | str | layer-1 code: `value` \| `fit` \| `other`. A layer-2-first write derives it from the detail's parent |
-| `detail` | str | layer-2 code: `value_giving` \| `value_getting` \| `value_other` \| `fit_outlook` \| `fit_new_weakness` \| `fit_duplicate` \| `fit_other` \| `other_player_keep` \| `other_player_avoid` \| `other_text`. **NULL is a first-class answer** — the user stopped at layer 1, which is the signal that that tile's options are wrong or missing |
+| `detail` | str | layer-2 code: `value_giving` \| `value_getting` \| `value_other` \| `fit_outlook` \| `fit_new_weakness` \| `fit_duplicate` \| `fit_other` \| `other_player_keep` \| `other_player_avoid` \| `other_picks_keep` \| `other_waiting` \| `other_text`. `other_picks_keep` ("Keeping my picks") and `other_waiting` ("Waiting on something") are written only by the pass-reason cadence chips and accepted only while `trade.pass_reason_cadence` is on ([scope](plans/offer-learnings/scope-pass-reason-cadence.md)); neither writes Elo. **NULL is a first-class answer** — the user stopped at layer 1, which is the signal that that tile's options are wrong or missing |
 | `free_text` | text | the user's own words, ≤500 chars, trimmed. **Stored here and nowhere else** — never an analytics property (SPEC §3.4); `trade_pass_layer2` carries only the boolean `has_free_text` |
 | `switched_from` | str | the prior layer-1 reason when the user moved to another tile, else NULL. Derived server-side from the stored row, never taken from the client. A stored `detail` is deliberately **kept** across a switch (a refinement, not a reset) |
 | `elo_signal_at` | str | ISO UTC of the Elo write this pass produced, or NULL when the reason suppressed it (SPEC §4). Doubles as the once-only guard: the write is claimed with `UPDATE … WHERE elo_signal_at IS NULL`, so no retry or re-tap double-counts a pass into ranking math |
@@ -933,6 +936,79 @@ The durable record of a **confirmed provider send**. Scope block: `docs/plans/pe
 Only a confirmed success writes here — an attempted or failed send is not a proposal. A successful send whose *snapshot* failed still writes the row (with NULL `valuation_json`) and increments `trade_policy.HEALTH["snapshot_failures"]`; losing the row would understate the one metric that matters most.
 
 Indexes: `ix_trade_proposals_user_league` on `(user_id, league_id)`; `ix_trade_proposals_impression` on `impression_id`.
+
+---
+
+## `trade_offer_outcomes`
+
+What happened at the provider to a trade the user **sent through the app** and, with the user's consent, to the other trade offers in their own Sleeper account. Scope blocks: `docs/plans/offer-learnings/scope-trade-outcomes.md` (WS2) and `docs/plans/offer-learnings/scope-sleeper-offer-read.md` (WS2b, flag `trade.sleeper_offer_import`: the private read writes `declined` / `withdrawn` / `lapsed` / `countered` and the counter columns, and imports rows with `source = 'sleeper_import'`). Flag `trade.outcome_tracking` (off ⇒ never written or read). One row per confirmed Sleeper send that returned a transaction id, written by `trade_outcomes.record_sent` from `server._sleeper_propose_core` (so the deck, match, calculator, shop and overhaul sends all land here), then moved by `trade_outcomes.reconcile_league` against [`sleeper_trades`](#sleeper_trades) at session init and in the daily-tick step `trade_outcomes`. Separate from [`trade_proposals`](#trade_proposals), which is written only under `trade.valuation_telemetry` and holds no roster ids.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | |
+| `user_id` | str | ACCOUNT id of the sender (`sess["user_id"]`). Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`). |
+| `league_id` | str | |
+| `provider` | str | `sleeper` (ESPN and MFL sends are not tracked yet) |
+| `provider_transaction_id` | str | Sleeper's transaction id. UNIQUE with `user_id` and `provider`: a repeated send of the same id is a no-op and never resets an observed status; two consenting managers of one league each hold their own row for the same offer. |
+| `proposal_event_id` | str, nullable | Joins `trade_proposals` when that row exists. |
+| `impression_id` | str, nullable | The originating card, validated by `server._owned_impression_id` (NULL unless `trade.valuation_telemetry` or the owner arm is on). |
+| `my_roster_id`, `their_roster_id` | int | League-scoped roster ids of sender and counterparty. The counterparty is never stored as a person id. |
+| `give_asset_ids`, `receive_asset_ids` | JSON text | The package as sent (players and FTF pick ids). |
+| `sent_at` | str | server UTC |
+| `status` | str | `sent` (still pending) · `accepted` (the transaction completed) · `completed_different_terms` (public reconcile only: the offer did not complete, but the same two rosters completed a different two-team trade after `sent_at` — an observed later trade, not a confirmed counter; not terminal) · with flag `trade.sleeper_offer_import` and the private read (`backend/sleeper_offer_read.py`): `declined` (Sleeper `rejected`, by the other side), `withdrawn` (`rejected`/`cancelled` with the rejecter on the creator's side), `lapsed` (`cancelled`, no rejecter), `countered` (declined or lapsed and the other side's `is_counter` offer is linked; see the counter columns). `accepted`, `declined`, `withdrawn` and `lapsed` are final; silence is never read as any of them. On imported rows the words describe the offer from its creator's side, and `direction` says who that was. |
+| `status_at` | str, nullable | Sleeper's completion time (`sleeper_trades.traded_at`) of the trade behind `status`. |
+| `resolved_transaction_id` | str, nullable | That trade's id (= `provider_transaction_id` when `accepted`). |
+| `observed_terms_json` | text, nullable | `completed_different_terms` only: that trade from the sender's side — `{give_player_ids, receive_player_ids, give_picks, receive_picks, give_faab, receive_faab}`, picks as `{season, round, original_roster_id}`. |
+| `checked_at` | str, nullable | Last reconcile or private read that saw the row. Without the private read, "not accepted by `checked_at`" is the only negative this table supports. |
+| `source` | str, nullable | `app` (a send through the app; NULL on rows written before WS2b) · `sleeper_import` (WS2b, written only while the user's latest `offer_import_consents` row is a grant at the current terms version; deleted in the same transaction as a withdrawal). |
+| `direction` | str, nullable | `sent` · `received`, from the user's side (`app` rows are `sent`). |
+| `counter_transaction_id` | str, nullable | The other manager's `is_counter` transaction linked to this offer: same two rosters, created by the other side, `created` within [−60 s, +10 min] of this offer's `status_updated`; one counter answers one offer. |
+| `counter_status` | str, nullable | That counter's state from the user's side: `pending` · `accepted` · `declined` (the user declined it) · `withdrawn` · `lapsed` · `countered` (the user countered back). |
+| `counter_status_at` | str, nullable | Sleeper's `status_updated` of the counter. |
+| `counter_terms_json` | text, nullable | The counter from the user's side: `{give_asset_ids, receive_asset_ids}` (players and this league's pick ids) plus `give_faab` / `receive_faab` / `unparsed_picks` when present. |
+| `extras_json` | text, nullable | Imported rows: `{give_faab, receive_faab, unparsed_picks, unparsed_faab}` when any (FAAB is never an asset id; a pick in an unknown shape is counted, not guessed). |
+
+Indexes: `uq_trade_offer_outcome_user_provider_tx` UNIQUE `(user_id, provider, provider_transaction_id)` (WS2's `(provider, provider_transaction_id)` constraint never shipped to production); `ix_trade_offer_outcomes_league_status` on `(league_id, status)`; `ix_trade_offer_outcomes_user` on `user_id`. A new table, so `metadata.create_all` creates it with its constraint on both dialects; the seven WS2b columns are also in `migration_cols` for a DB that created the table before them. Never stored from the private read: the token, `metadata`, `settings`, `player_map` (not requested) or any Sleeper user id.
+
+---
+
+## `offer_import_consents`
+
+The user's permission to import their own Sleeper trade offers (WS2b, flag `trade.sleeper_offer_import`; scope block `docs/plans/offer-learnings/scope-sleeper-offer-read.md`). **Append-only**: one row per grant or withdrawal, never updated. The latest row decides: a `grant` at `sleeper_offer_read.TERMS_VERSION` is consent; a grant at an older version is not. Written only by `POST` / `DELETE /api/sleeper/offer-import` (verified sessions). A withdrawal and the deletion of every `trade_offer_outcomes` row of the user with `source = 'sleeper_import'` commit in one transaction (`database.withdraw_offer_import_consent`). Holds no token. Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | append order |
+| `user_id` | str | ACCOUNT id |
+| `kind` | str | `grant` · `withdrawal` |
+| `terms_version` | str | the Terms line the switch showed (`offer-import-draft-1` today) |
+| `recorded_at` | str | server UTC |
+| `via` | str, nullable | `settings` |
+
+Index: `ix_offer_import_consents_user` on `(user_id, id)`. A new table; no `migration_cols` row.
+
+---
+
+## `revised_offer_cards`
+
+The one card built for the user's own declined offer (offer-learnings WS8, flag `trade.next_move`; scope block `docs/plans/offer-learnings/scope-revised-offer-cards.md`). Written by `trade_revised_offers.build` from the deck worker the first time a deck looks at a source offer: a `trade_offer_outcomes` row of the user with `direction = 'sent'` and `status = 'declined'` (a revision) or `status = 'countered'` with `counter_status = 'declined'` (a middle ground). **Once only:** never rebuilt, so the offered price never climbs; a source whose terms equal any built card's terms is never revised again. Deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`); a card whose source is an imported offer is deleted with it when the import consent is withdrawn.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | the card's `trade_id` is `revised_<id>` |
+| `user_id` | str | ACCOUNT id of the sender |
+| `league_id` | str | |
+| `outcome_id` | int | `trade_offer_outcomes.id` of the source offer. UNIQUE with `user_id` |
+| `kind` | str | `revision` · `middle_ground` |
+| `status` | str | `active` (served until acted on) · `none` (the evaluator proved no card; never retried) · `retired` |
+| `give_asset_ids`, `receive_asset_ids` | JSON text, nullable | the card's package from the user's side (NULL for `none`); re-proven by the evaluator on every deck build |
+| `change_json` | text, nullable | `trade_next_move`'s change: `{kind: swap_in_give, asset_id, replaces}` or `{kind: middle_ground, gap_share, added_give, removed_give, added_receive, removed_receive}` |
+| `step_fraction` | float, nullable | the other manager's net market gain over the original, as a share of the trade's market value |
+| `version` | str | `trade_revised_offers.VERSION` (`revised-offer-1`) |
+| `created_at` | str | server UTC |
+| `retired_at`, `retired_reason` | str, nullable | `acted` (the user passed or liked it: the evaluator answered `previous_disposition`) · `unavailable` (it no longer passes, or the partner no longer holds the ask) |
+
+Indexes: `uq_revised_offer_card_user_outcome` UNIQUE `(user_id, outcome_id)`; `ix_revised_offer_cards_user_league` on `(user_id, league_id)`. A new table; no `migration_cols` row.
 
 ---
 
@@ -993,7 +1069,7 @@ Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
 | `request_scope` | str, not null | `organic:f=<fairness, 2 decimals>`, e.g. `organic:f=0.50`. Only the organic default search is stored |
 | `roster_fp` | str, not null | `rfp1:` roster fingerprint stamped at the job's kickoff (S0, `roster_snapshot`) |
 | `values_snapshot_id` | str, not null | `vsn1:` values snapshot id stamped at kickoff (S0) |
-| `engine_version` | str, not null | `<engine>+policy:<12 hex>+code:<12 hex>+pipeline:<N>`: `v1`/`v2`/`v3` (as `trades_generated` names it) or `value_core:<value_core.types.ENGINE_VERSION>`; sha256[:12] of the job's safety-policy signature and presentation mode (what `_trade_job_is_fresh` also requires); `server._trade_engine_code_hash()`, sha256[:12] over the bytes of the modules that decide a deck's cards or their order (`server._ENGINE_CODE_MODULES`: `trade_service`, `trade_optimizer`, `trade_gen_*`, `value_core/*`, `power_rankings`, `outlook/league_state` (value core's standings), `ranking_service`, `pick_values`, `pick_slots`, `tier_config.json` (ruling 25), `trade_policy`, `trade_significance`, `trade_mutual_benefit`, `trade_roster`, `trade_roster_adapter`, `trade_outlook_utility`, `negmem`, `trade_breaker`, `deck_quality`, `bakeoff_runner`, `bakeoff_profiles`, `taste_service`, `value_model`, `suggestion_telemetry`, `trade_bilateral_presentment`, `trade_input_evidence`, `small_trade_presentment`, `trade_narrative`; computed once per process; `server.py` is deliberately excluded, and so are the rest of `outlook/` (the Outlook feature, not on the standings path)); and `server.DECK_PIPELINE_VERSION` (MOD-M1's re-run trigger). `server.py`'s own deck layers (`_run_trade_job`, `_run_value_core_job` and the layer helpers in `server.DECK_PIPELINE_FUNCTIONS`) are not hashed, so a change to them needs a manual `DECK_PIPELINE_VERSION` bump; `test_deck_pipeline_digest` pins their digest, with the constants they read (`server.DECK_PIPELINE_CONSTANTS`), as `server.DECK_PIPELINE_PINS[DECK_PIPELINE_VERSION]` (append-only, version → digest: the test holds a frozen copy of every row, so a version can't be re-pinned in place), and its closure test makes every helper they reference classified (listed, or in `DECK_PIPELINE_IGNORED`), so CI enforces it. A different value at serve time means today's path, so an engine code change or a pipeline bump never serves an older page across a deploy |
+| `engine_version` | str, not null | `<engine>+policy:<12 hex>+code:<12 hex>+pipeline:<N>`: `v1`/`v2`/`v3` (as `trades_generated` names it) or `value_core:<value_core.types.ENGINE_VERSION>`; sha256[:12] of the job's safety-policy signature and presentation mode (what `_trade_job_is_fresh` also requires); `server._trade_engine_code_hash()`, sha256[:12] over the bytes of the modules that decide a deck's cards or their order (`server._ENGINE_CODE_MODULES`: `trade_service`, `trade_optimizer`, `trade_gen_*`, `value_core/*`, `trade_first_page` and `trade_fast_deck` (ADR-028's fast deck), `power_rankings`, `outlook/league_state` (value core's standings), `ranking_service`, `pick_values`, `pick_slots`, `tier_config.json` (ruling 25), `trade_policy`, `trade_significance`, `trade_mutual_benefit`, `trade_roster`, `trade_roster_adapter`, `trade_outlook_utility`, `negmem`, `trade_breaker`, `deck_quality`, `bakeoff_runner`, `bakeoff_profiles`, `taste_service`, `value_model`, `suggestion_telemetry`, `trade_bilateral_presentment`, `trade_input_evidence`, `small_trade_presentment`, `trade_narrative`; computed once per process; `server.py` is deliberately excluded, and so are the rest of `outlook/` (the Outlook feature, not on the standings path)); and `server.DECK_PIPELINE_VERSION` (MOD-M1's re-run trigger). `server.py`'s own deck layers (`_run_trade_job`, `_run_value_core_job` and the layer helpers in `server.DECK_PIPELINE_FUNCTIONS`) are not hashed, so a change to them needs a manual `DECK_PIPELINE_VERSION` bump; `test_deck_pipeline_digest` pins their digest, with the constants they read (`server.DECK_PIPELINE_CONSTANTS`), as `server.DECK_PIPELINE_PINS[DECK_PIPELINE_VERSION]` (append-only, version → digest: the test holds a frozen copy of every row, so a version can't be re-pinned in place), and its closure test makes every helper they reference classified (listed, or in `DECK_PIPELINE_IGNORED`), so CI enforces it. A different value at serve time means today's path, so an engine code change or a pipeline bump never serves an older page across a deploy |
 | `config_signature` | str, not null | the job's `request_signature` (preferences + `model_config` + flags) |
 | `experiment_digest` | str, not null | sha256[:16] over the user's assignment in each deck-affecting experiment (`server._DECK_EXPERIMENT_LAYERS`, today `trade.aggression`): its layer, version, variant and `model_overlay`, as `experiments.variant_overlay` reports it, or `"fallback"` when the user isn't enrolled (trade_service's deterministic MD5 bucket). Read once at job start, on the job's worker thread before the engine runs, and stamped on the job; the store writes the job's value (a job whose read failed stores no page), so a variant that moves mid-build never lands on the page; at serve a different digest falls through to the job path, logged `blocked (experiment variant moved)`. Memoized in process per user on the experiments cache generation (refreshed at most every 60 s) and the `experiments.engine` flag, capped at 10,000 users, so a serve inside a generation does no DB work |
 | `deck_job_id` | str, not null | the building job; served as `job_id`, and the key `/api/trades/status?cursor=` pages by |
@@ -2246,7 +2322,9 @@ Run ledger — the observability surface for a job with no UI. **TWO rows per in
 
 ## Blind grading tables
 
-Additive new-round columns: `grading_sessions.round_id` (nullable version namespace), `active_round_key` (nullable unique account/league/round hash retained through completion, released on failure), `first_exposed_at` (nullable first public card time). Old rows remain null. `grading_build_leases` contains `lease_key` PK, random `token`, ISO `expires_at`; no personal identifiers. New source_json stores frozen account/seat context, source/code identities, gate settings and selected full proofs; arms_json stores only alias/version/rank/proof hash. Counts include complete inventory, duplicate/shared/unique/selected denominators and private gate diagnostics. Account exports withhold new-round source/diagnostics/answer keys; retention uses existing session/card policies. Participant deletion invalidates private replay rather than retaining another manager's board. [Schema/use contract](plans/outlook-calibration-round/architecture.md).
+Additive new-round columns: `grading_sessions.round_id` (nullable version namespace), `active_round_key` (nullable unique account/league/round hash retained through completion, released on failure), `first_exposed_at` (nullable first public card time). Old rows remain null. `grading_build_leases` contains `lease_key` PK, random `token`, ISO `expires_at`; no personal identifiers. New source_json stores frozen account/seat context, source/code identities, gate settings and selected full proofs; arms_json stores only alias/version/rank/proof hash. Counts include complete inventory, duplicate/shared/unique/selected denominators and private gate diagnostics. Account exports withhold new-round source/diagnostics/answer keys; retention uses existing session/card policies. Participant deletion invalidates private replay rather than retaining another manager's board. [Schema/use contract](plans/outlook-calibration-round/architecture.md). With `grading.revision4_arm` on, a new build's source_json adds `extra_arms: {"revision_4": "owner-v2-bilateral-4"}` and `revision_4` in `execution_order`; counts_json adds `arms["owner-v2-bilateral-4"]` (`role: "additive"`, `selected`, `shared_with_pair`, `inserted` or an error status); arms_json may carry a `revision_4` key with the same alias/version/rank/proof-hash shape. No column changes ([scope](plans/offer-learnings/scope-revision-4.md)).
+
+`round_id` values: `NULL` (legacy mixed-engine exercise), `"outlook-v2-v3-1"` (owner-v2-bilateral-2 vs -3) and, with `grading.revision4_round`, `"outlook-v2-v4-1"` (owner-v2-bilateral-2 vs -4; source_json `version` and `model_versions` say so, arms_json keeps the `current`/`value_core` aliases). Each account/league holds at most one building/open/completed session per round (`active_round_key` hashes the round id), so both rounds can be open for one pair. `grading_build_leases` holds at most one row per round, `lease_key` = the round id (the finish/fail fences already match `lease_key` to `round_id`). Participant deletion discards the replay snapshot for both round versions. No column changes ([scope](plans/offer-learnings/scope-revision-4-round.md)).
 
 **Calibration** — in-app blind grading, value-core Gate 2 ([plans/blind-grading/](plans/blind-grading/), [lld.md §3](plans/blind-grading/lld.md#3-schema)). Written **only** by `backend/blind_grading.py` through the `database.py` grading helpers (`insert_grading_session`, `answer_grading_card`); read by that module's `results` / `report` and by nothing else. Sessions are created one at a time by `POST /api/grading/sessions` or in bulk by `POST /api/admin/grading/pregenerate`, whose candidate query (`list_grading_candidates`) reads `deck_impressions`, `league_members` and `leagues` — not these tables — for every user with a qualifying current-engine deck served within `blind_grading.MAX_DECK_AGE_DAYS` (14 days) in a league they belong to. A deck job with any `evidence_tier = 'partial_run'` row never qualifies there or in `load_grading_legacy_deck`, the current arm's deck (ADR-025 ruling 25). No engine module imports them, and nothing in generation, ordering, impressions or swipes reads a `grading_*` table — grading leaves `deck_impressions`, `trade_impressions`, `trade_decisions`, `swipe_decisions` and `trade_service._trade_cards` untouched. Both tables are new, so `metadata.create_all` in `init_db()` creates them on SQLite and Postgres; there is no `migration_cols` entry because no existing table gains a column. No FKs, per house style — joins carry an explicit onclause.
 

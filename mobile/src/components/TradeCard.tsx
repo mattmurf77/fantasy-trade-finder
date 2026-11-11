@@ -21,11 +21,13 @@ import SendInSleeperButton from './SendInSleeperButton';
 import DeclineReasonPanel, {
   type DeclineReasonPanelProps,
 } from './DeclineReasonPanel';
+import PassReasonChips from './PassReasonChips';
+import type { PassReasonCadenceCard } from '../utils/passReasonCadence';
 import { LockGlyph } from './PlayerContextMenu';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
-import type { Player, TradeCard as TradeCardData } from '../shared/types';
+import type { Player, TradeCard as TradeCardData, FitBlockTeam } from '../shared/types';
 
 // #362 — chip copy helpers. Both derive entirely from the server-stamped
 // `standing_offer_mine` payload; neither invents a season the offer does
@@ -46,6 +48,20 @@ function seasonSpan(seasons: number[]): string {
     : sorted.map(short).join(' ');
 }
 
+// WS4b fit block — a league rank as an ordinal ("1st", "12th", "21st"); the
+// format is a cross-client rule (docs/cross-client-invariants.md § Fit block).
+export function fitRankOrdinal(n: number): string {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th'}`;
+}
+/** [{pos:'WR', before:9, after:7}, …] → "WR 9th → 7th · RB 2nd → 4th". */
+export function fitRanksText(ranks: FitBlockTeam['ranks']): string {
+  return ranks
+    .map((r) => `${r.pos} ${fitRankOrdinal(r.before)} → ${fitRankOrdinal(r.after)}`)
+    .join(' · ');
+}
+
 // #384 — the overlay presentation needs two host hooks the inline form has no
 // use for. Kept OUT of `DeclineReasonPanelProps` on purpose: the panel itself
 // knows nothing about being hosted in a sheet, and every existing caller of it
@@ -57,6 +73,10 @@ export interface DispositionReasons extends DeclineReasonPanelProps {
    *  when a layer-1 tile had already committed the pass — the host must then
    *  commit the deferred deck advance, or the card is stranded (review #1). */
   onOverlayDismissed?: (banked: boolean) => void;
+  /** Flag `trade.pass_reason_cadence` (WS3). The host strips a 'quiet' card's
+   *  reasons entirely, so present here means the cadence is asking: the
+   *  one-tap PassReasonChips row replaces the ✕ and the tile panel. */
+  cadence?: PassReasonCadenceCard;
 }
 
 interface Props {
@@ -257,6 +277,21 @@ function TradeCardComp({
   // omits `reasons` when the flag is off, double-gating client-side keeps
   // the rendering predictable if flags drift (e.g. cached job snapshot).
   const reasonsEnabled = useFlag('trade_math.human_explanations');
+  // WS4b fit block — the server sends `fit_block` only when a team has a
+  // reason or a rank move; the client double-gates on the flag (as reasons
+  // do) so a flip back hides blocks already stored on a page. An edited
+  // card's block describes the original package, so it hides like Match
+  // strength does.
+  const fitFirstEnabled = useFlag('trade.fit_first_copy');
+  const fitBlockShown = fitFirstEnabled && !data.edited ? data.fit_block : undefined;
+  const fitThem = fitBlockShown?.teams.find((t) => t.side === 'them');
+  const fitYou = fitBlockShown?.teams.find((t) => t.side === 'you');
+  // WS8 revised-offer card — the server's one sentence saying the user's
+  // earlier offer was declined and what changed. Double-gated on the flag
+  // like the fit block; an edited card hides it (it describes the package
+  // the server built, not the edit).
+  const revisedOfferEnabled = useFlag('trade.next_move');
+  const revisedLine = revisedOfferEnabled && !data.edited ? data.revised_offer?.line : undefined;
   // #384 ruling 1 — in the merged calculator experience the ✕ stays ONE
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
@@ -617,6 +652,64 @@ function TradeCardComp({
         )}
       </View>
 
+      {/* WS8 revised-offer card (flag trade.next_move) — first under the
+          header: what Sleeper showed and what changed, verbatim from the
+          server (backend/trade_narrative.py revised_offer_line). The fit
+          block below then says why the new trade suits both teams. */}
+      {revisedLine ? (
+        <View style={styles.revisedOffer} testID="trade-card.revised-offer">
+          <ChalklineText style={[type.bodySm, styles.fitLineText]} testID="trade-card.revised-offer.line">
+            {revisedLine}
+          </ChalklineText>
+        </View>
+      ) : null}
+
+      {/* WS4b fit block, version 3 (flag trade.fit_first_copy) — the card
+          leads with each team's fit, the other team first: an outlook tag,
+          one lead phrase, then the league rank at each position the trade
+          moves. Server text rendered verbatim (backend/trade_narrative.py
+          fit_block); ranks in the mono face with the arrow and numbers
+          carrying direction (no colour). Two lines per team at most: the
+          lead and the ranks each truncate rather than wrap. An absent block
+          renders nothing, so flag-off and no-block cards are unchanged. */}
+      {fitThem || fitYou ? (
+        <View style={styles.fitBlock} testID="trade-card.fit-block">
+          <ChalklineText style={type.label} numberOfLines={1}>League rank · position value</ChalklineText>
+          {fitThem ? (
+            <View style={styles.fitTeam} testID="trade-card.fit-team.them">
+              <View style={styles.fitWho}>
+                <ChalklineText style={type.label} numberOfLines={1}>Them</ChalklineText>
+                {fitThem.tag ? (
+                  <ChalklineText style={styles.fitTag} numberOfLines={1} testID="trade-card.fit-tag.them">{fitThem.tag.text}</ChalklineText>
+                ) : null}
+              </View>
+              <View style={styles.fitBody}>
+                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitThem.lead.text}</ChalklineText>
+                {fitThem.ranks.length ? (
+                  <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitThem.ranks)}</ChalklineText>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+          {fitYou ? (
+            <View style={styles.fitTeam} testID="trade-card.fit-team.you">
+              <View style={styles.fitWho}>
+                <ChalklineText style={type.label} numberOfLines={1}>You</ChalklineText>
+                {fitYou.tag ? (
+                  <ChalklineText style={styles.fitTag} numberOfLines={1} testID="trade-card.fit-tag.you">{fitYou.tag.text}</ChalklineText>
+                ) : null}
+              </View>
+              <View style={styles.fitBody}>
+                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitYou.lead.text}</ChalklineText>
+                {fitYou.ranks.length ? (
+                  <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitYou.ranks)}</ChalklineText>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* #362 — "Why you're seeing this", when the card came from a
           league-mate's standing offer rather than an exact mirror. The
           string is composed SERVER-SIDE and rendered verbatim: it names the
@@ -854,7 +947,17 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons && !reasonsAsOverlay ? (
+          {disposition.reasons?.cadence ? (
+            <PassReasonChips
+              onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
+              onSkip={() => {
+                disposition.reasons!.cadence!.onDismissed(data.trade_id);
+                disposition.onPass();
+              }}
+              onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
+              disabled={disposition.disabled}
+            />
+          ) : disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
           ) : null}
           {disposition.reasons && reasonsAsOverlay ? (
@@ -1129,6 +1232,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: chalk.dim,
   },
+  // WS4b fit block: a hairline-ruled band under the header (the mockup's
+  // version 3). Per team a fixed label column (THEM / YOU over the outlook
+  // tag) and a body of at most two single-line rows: the lead, then ranks in
+  // the mono face. Neutral colours only: direction is the arrow and numbers.
+  fitBlock: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: ink.line,
+    paddingVertical: space.sm,
+    gap: space.xs,
+  },
+  fitTeam: { flexDirection: 'row', gap: space.sm },
+  fitWho: { width: 88 },
+  fitTag: {
+    fontFamily: fonts.ui,
+    fontSize: 11,
+    lineHeight: 18,
+    color: chalk.dim,
+  },
+  fitBody: { flex: 1, minWidth: 0 },
+  fitLead: { ...type.bodySm, color: chalk.base },
+  fitRanks: { ...type.data, color: chalk.base },
+  // WS8 revised-offer line: a flare left rule (informational highlight,
+  // ADR-005) on the sentence; no fill, no radius. The text wraps in the row.
+  fitLineText: { flexShrink: 1 },
+  revisedOffer: { borderLeftWidth: 2, borderLeftColor: flare.base, paddingLeft: space.sm },
   // Counterparty-breaker hesitation line: same hint-tier row construction as
   // fitRow, with the 6px square marker filled in flare — informational
   // highlight only (ADR-005); ice stays reserved for actions. Colors by token

@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fit copy — three versions (WS4 / R11)</title>
+<style>
+  :root {
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25; --ink3:#232833;
+    --line:#262C35; --line-strong:#59647A;
+    --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --ice-on:#071013; --flare:#F0508C;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --display:'Barlow Condensed','Avenir Next Condensed','Arial Narrow',sans-serif;
+    --body:'Archivo','Avenir Next','Helvetica Neue',Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { background:var(--ink0); color:var(--chalk); font-family:var(--body); font-size:15px; line-height:1.55; margin:0; }
+  a { color:var(--ice); text-decoration:none; }
+  code { font-family:var(--mono); font-size:.9em; background:var(--ink2); border-radius:2px; padding:1px 5px; }
+
+  .topbar { position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; padding:12px 24px; background:var(--ink0); border-bottom:1px solid var(--line); }
+  .topbar h1 { font-family:var(--display); text-transform:uppercase; letter-spacing:.04em; font-size:22px; margin:0; flex:1 1 auto; white-space:nowrap; }
+  .tick { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .tick::before { content:""; display:inline-block; width:8px; height:2px; background:var(--ice); margin-right:6px; vertical-align:middle; }
+  .btn { font-family:var(--body); font-weight:600; font-size:13px; background:var(--ice); color:var(--ice-on); border:0; border-radius:4px; padding:8px 14px; cursor:pointer; }
+  .btn.ghost { background:transparent; color:var(--dim); border:1px solid var(--line-strong); }
+  .btn:focus-visible, textarea:focus-visible { outline:2px solid var(--ice); outline-offset:2px; }
+
+  main { max-width:1260px; margin:0 auto; padding:24px; }
+  .lede { max-width:80ch; color:var(--dim); }
+  .lede strong { color:var(--chalk); }
+  section.feature { background:var(--ink1); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin:22px 0; }
+  .fhead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:14px; }
+  .fnum { font-family:var(--mono); font-size:12px; color:var(--dim); }
+  .fhead h2 { font-family:var(--display); text-transform:uppercase; letter-spacing:.03em; font-size:24px; margin:0; }
+  .chip { font-family:var(--mono); font-size:11px; border-radius:2px; padding:2px 7px; letter-spacing:.03em; border:1px solid var(--line-strong); color:var(--dim); }
+  .chip.rec { color:var(--flare); border-color:var(--flare); }
+  ol.q li, ul.plain li { margin:6px 0; max-width:84ch; }
+  .note { max-width:84ch; }
+  .note p { margin:.5em 0; }
+  .label { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .muted { color:var(--dim); }
+  table.mini { border-collapse:collapse; font-size:13px; margin:10px 0; }
+  table.mini th, table.mini td { border:1px solid var(--line); padding:5px 10px; text-align:left; vertical-align:top; }
+  table.mini th { font-weight:600; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+
+  .row { display:flex; gap:20px; overflow-x:auto; padding:8px 2px 14px; align-items:flex-start; }
+  .frame { flex:0 0 auto; width:375px; }
+  .frame .cap { font-family:var(--mono); font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; margin:0 0 8px; }
+  .frame .cap.recon { color:var(--warn); }
+  .frame img { width:375px; display:block; border:1px solid var(--line-strong); border-radius:8px; }
+  .frame .sub { font-size:12.5px; color:var(--dim); margin-top:8px; }
+
+  /* Hand-drawn phone frames (reconstructions, labelled as such). 375 px = iPhone SE / mini width. */
+  .phone { width:375px; background:var(--ink0); border:1px solid var(--line-strong); border-radius:8px; padding:12px; font-size:13px; line-height:1.4; }
+  .card { background:var(--ink1); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .k { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .who { font-size:16px; font-weight:600; margin:2px 0 8px; }
+  .cols { display:grid; grid-template-columns:1fr 1px 1fr; gap:8px; margin-top:10px; }
+  .cols .rule { background:var(--line); }
+  .colh { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); border-left:2px solid var(--ice); padding-left:6px; margin-bottom:6px; }
+  .asset { border:1px solid var(--line); border-radius:4px; padding:6px 7px 6px 9px; margin-bottom:6px; position:relative; }
+  .asset::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:4px 0 0 4px; background:var(--rail, var(--faint)); }
+  .asset .pc { display:inline-block; font-size:11px; font-weight:600; letter-spacing:.06em; border:1px solid var(--rail, var(--line-strong)); border-radius:2px; padding:0 4px; color:var(--chalk); }
+  .asset .an { font-weight:600; font-size:13px; margin-top:3px; }
+  .asset .am { color:var(--dim); font-size:11px; }
+  .wr { --rail:var(--wr); } .te { --rail:var(--te); } .rb { --rail:var(--rb); } .qb { --rail:var(--qb); }
+  .pick { --rail:var(--faint); }
+  .meter { height:6px; background:var(--ink3); border-radius:2px; position:relative; margin:10px 0 4px; }
+  .meter i { position:absolute; top:-3px; width:4px; height:12px; background:var(--ice); border-radius:2px; }
+  .mrow { display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .num { font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:500; color:var(--chalk); }
+
+  /* Fit blocks */
+  .fit { border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:8px 0; margin:2px 0 0; }
+  .fit .lbl { font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:4px; }
+  .fit.v1 .fl { margin:0; font-size:13px; line-height:18px; color:var(--chalk); }
+  .fit.v1 .fl + .fl { margin-top:6px; }
+  .fit.v2 .rk { display:grid; grid-template-columns:112px 1fr; gap:8px; align-items:baseline; padding:2px 0; }
+  .fit.v2 .team { font-size:13px; font-weight:600; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fit.v2 .mvs { display:flex; flex-direction:column; gap:1px; }
+  .fit .m { font-family:var(--mono); font-size:13px; line-height:18px; white-space:nowrap; }
+  .fit .m .p { color:var(--dim); font-weight:600; }
+  .fit .m .ar { color:var(--dim); }
+  .fit .m .same { font-family:var(--body); color:var(--dim); font-size:12px; }
+  .fit.v3 .blk + .blk { margin-top:6px; }
+  .fit.v3 .lead { font-size:13px; line-height:18px; font-weight:600; color:var(--chalk); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fit.v3 .lead.plain { font-weight:400; color:var(--dim); }
+  .fit.v3 .tag { display:inline-block; width:40px; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .fit.v3 .mvrow { padding-left:40px; }
+  .fit.v3 .dot { color:var(--faint); margin:0 4px; }
+
+  /* The 375 x 667 fit check */
+  .screen { position:relative; width:375px; height:760px; background:var(--ink0); border:1px solid var(--line-strong); border-radius:8px; padding:0 12px; overflow:hidden; font-size:13px; line-height:1.4; }
+  .sbar { height:20px; display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--dim); padding-top:3px; }
+  .s-h1 { font-family:var(--display); font-weight:700; font-size:32px; line-height:34px; text-transform:uppercase; letter-spacing:.02em; margin:8px 0 4px; }
+  .status { display:flex; justify-content:space-between; color:var(--dim); font-size:12px; margin:0 2px 8px; }
+  .acts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+  .p-btn { display:block; text-align:center; font-weight:600; font-size:13px; border-radius:4px; padding:12px 0; }
+  .p-btn.primary { background:var(--ice); color:var(--ice-on); }
+  .p-btn.secondary { border:1px solid var(--line-strong); color:var(--chalk); }
+  .tabbar { position:absolute; left:0; right:0; top:617px; height:50px; display:flex; justify-content:space-around; align-items:center; background:var(--ink1); border-top:1px solid var(--line); font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--dim); }
+  .tabbar .on { color:var(--ice); }
+  .fold { position:absolute; left:0; right:0; top:667px; border-top:1px dashed var(--warn); }
+  .fold span { position:absolute; right:6px; top:2px; font-family:var(--mono); font-size:11px; color:var(--warn); }
+
+  .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:18px; }
+  .cost { border-left:2px solid var(--line-strong); padding-left:12px; }
+  .cmt { border-top:1px dashed var(--line); padding-top:12px; margin-top:14px; }
+  .cmt label { display:block; font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin-bottom:6px; }
+  .cmt textarea { width:100%; min-height:72px; background:var(--ink2); border:1px solid var(--line-strong); border-radius:4px; color:var(--chalk); font-family:var(--body); font-size:14px; padding:10px; resize:vertical; }
+  .cmt .saved { font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:4px; min-height:14px; }
+  .foot { color:var(--dim); font-size:12.5px; margin:32px 0 20px; max-width:84ch; }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>Fit copy — three versions</h1>
+  <span class="tick">WS4 / R11 · 2026-11-10 · flag trade.fit_first_copy (off)</span>
+  <button class="btn ghost" id="clearBtn" type="button">Clear comments</button>
+  <button class="btn" id="exportBtn" type="button">Export comments</button>
+</div>
+
+<main>
+  <p class="lede"><strong>What this is.</strong> The first build of fit-first copy (<code>feat/fit-first-copy</code>, dark) puts at most one sentence per side under the card header, for example "Upgrades their WR group with Eli Brandt.", and shows nothing when the engine's proof has no specific reason. You asked for a line for both teams, with each team's league rank at the position, or simply ranks before and after. This page draws three versions on the same four made-up trades, row by row: <strong>1</strong> sentence plus league rank, <strong>2</strong> ranks only, <strong>3</strong> a combined version.</p>
+  <p class="lede"><strong>What "rank" means on every frame.</strong> A team's league rank at a position by the summed consensus value of its players there. That is the number League rankings, Home's position tiles and Team Review already show, so two screens never disagree (section 05 gives the reasons). It is a dynasty-value rank, not a this-week lineup rank, and trade 1 shows what that costs.</p>
+
+  <section class="feature" id="s0">
+    <div class="fhead"><span class="fnum">00</span><h2>Recommendation and open questions</h2><span class="chip rec">Recommend Version 3</span></div>
+    <div class="note">
+      <p><strong>Recommendation: Version 3.</strong> It is the only version that is honest about losses and still gives a reason. Version 1 reads well but tells only the flattering half: in trades 2, 3 and 4 it leaves out the position a team pays from. Version 2 is honest, but in trades 1 and 3 it shows you only losses, because the reason you would make the trade (a win-now veteran, a 1st) does not appear in a position rank. Version 3 puts one reason over the full rank movement. In trade 4 its block for the other team has no praise, so you can see before sending that they will probably say no.</p>
+      <p class="label">Open questions for you</p>
+      <ol class="q">
+        <li><strong>Which version?</strong> 1, 2, 3, or keep the first build's single optional line.</li>
+        <li><strong>Rank by total position value, the number League rankings, Home and Team Review show?</strong> The cost is that a win-now trade, youth for production, can lower your rank (trade 1). The alternative is starters-only value, which League rankings shows only behind its Starters filter.</li>
+        <li><strong>Treat a rank change as noise when the team's value at that position moves by less than 5% of the league median there?</strong> The 5% is a starting value to grade, not a measured one.</li>
+        <li><strong>Ordinals ("9th → 7th") or League rankings' own "9/12" form?</strong> The frames use ordinals because a "/12" twice per move gets long at 375 px.</li>
+        <li><strong>Ties: should tied teams share a rank, as League rankings' rank chip does?</strong> Home and Team Review break ties by list order today, so the three surfaces can differ by one place on an exact tie.</li>
+        <li><strong>Should the engine still serve a card like trade 4, where the honest copy shows the other team only losing?</strong> The engine may have found the trade because of the other manager's own rankings, which the card must never reveal.</li>
+        <li><strong>The other team's block stays first in every version, as in the first build. Keep that?</strong></li>
+      </ol>
+    </div>
+    <div class="cmt"><label for="c-s0">Comments — recommendation and open questions</label><textarea id="c-s0" data-k="s0" placeholder="Answer any of the seven questions by number…"></textarea><div class="saved" data-for="s0"></div></div>
+  </section>
+
+  <section class="feature" id="before">
+    <div class="fhead"><span class="fnum">01</span><h2>Before — today's suggestion card</h2><span class="chip">real capture, 2026-08-10 build</span></div>
+    <div class="note">
+      <p>This is the real capture <code>screens/mobile/trades/populated.png</code> (captured 2026-08-10, listed in <code>screens/manifest.json</code>). The screen library has been frozen since 2026-08-11 (D-056). Since then <code>TradesScreen.tsx</code> has had 57 commits and <code>TradeCard.tsx</code> 16, so the capture shows that build, not today's app. Every proposed frame below is a hand-drawn <strong>reconstruction</strong> in Chalkline tokens, labelled as one. The fit block sits where the first build put its lines: under "Trade with", above the player sides and the value bar.</p>
+    </div>
+    <div class="row">
+      <div class="frame"><p class="cap">Capture · suggestion card</p><img src="../../screens/mobile/trades/populated.png" alt="Real capture: today's trade suggestion card"><p class="sub">No fit copy. The value bar is the card's verdict.</p></div>
+    </div>
+  </section>
+
+  <p class="lede"><strong>Rows 1–4.</strong> Each row is one trade, with the three versions side by side. "Them" is the other manager, whose block comes first; "You" is the sender.</p>
+  
+  <section class="feature tradeRow" id="t1">
+    <div class="fhead"><span class="fnum">T1</span><h2>Clear two-way fit</h2><span class="chip">made-up teams and players</span></div>
+    <p class="note">You are contending (declared). You send a young WR to Harbor Hounds, whose roster reads as rebuilding, for an older, productive WR.</p>
+    <div class="row"><div class="frame"><p class="cap recon">Reconstruction · Version 1 · sentence + league rank</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Harbor Hounds</div><div class="fit v1"><p class="fl">Fits their rebuild-leaning roster: they add Eli Brandt, a 23-year-old WR. They rank <span class="num">9th</span> of 12 at WR.</p><p class="fl">Fits your win-now plan: you add Marcus Hale, a 29-year-old WR. You rank <span class="num">3rd</span> of 12 at WR.</p></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Eli Brandt</div><div class="am">SEA · 23 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset wr"><span class="pc">WR</span><div class="an">Marcus Hale</div><div class="am">DAL · 29 yo</div></div></div></div><div class="meter"><i style="left:46%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 2 · ranks only</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Harbor Hounds</div><div class="fit v2"><div class="lbl">League rank · position value</div><div class="rk"><span class="team">Harbor Hounds</span><span class="mvs"><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">9th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></span></span></div><div class="rk"><span class="team">You</span><span class="mvs"><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">3rd</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></span></span></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Eli Brandt</div><div class="am">SEA · 23 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset wr"><span class="pc">WR</span><div class="an">Marcus Hale</div><div class="am">DAL · 29 yo</div></div></div></div><div class="meter"><i style="left:46%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 3 · combined</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Harbor Hounds</div><div class="fit v3"><div class="lbl">League rank · position value</div><div class="blk"><div class="lead"><span class="tag">Them</span>Rebuild-leaning: adds Eli Brandt, 23</div><div class="mvrow"><span class="m"><span class="p">WR</span> <span class="num">9th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></div></div><div class="blk"><div class="lead"><span class="tag">You</span>Win-now: adds Marcus Hale, 29</div><div class="mvrow"><span class="m"><span class="p">WR</span> <span class="num">3rd</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></div></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Eli Brandt</div><div class="am">SEA · 23 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset wr"><span class="pc">WR</span><div class="an">Marcus Hale</div><div class="am">DAL · 29 yo</div></div></div></div><div class="meter"><i style="left:46%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div></div>
+    <p class="note muted">Both sides have a plan reason. Position value is a dynasty measure, and Brandt is worth more on the market than Hale, so your WR rank drops a place even though your lineup gets older and better now. Version 1 hides that drop. Version 2 shows only the drop, with no reason. Version 3 shows the reason and the drop together.</p>
+  </section>
+  <section class="feature tradeRow" id="t2">
+    <div class="fhead"><span class="fnum">T2</span><h2>Positional swap</h2><span class="chip">made-up teams and players</span></div>
+    <p class="note">You send a WR to Northside Nine (no outlook known) and get an RB plus their 2026 2nd.</p>
+    <div class="row"><div class="frame"><p class="cap recon">Reconstruction · Version 1 · sentence + league rank</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Northside Nine</div><div class="fit v1"><p class="fl">Upgrades their WR group with Dante Okafor. They rank <span class="num">10th</span> of 12 at WR.</p><p class="fl">Upgrades your RB group with Jaylen Pruitt. You rank <span class="num">8th</span> of 12 at RB.</p></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Dante Okafor</div><div class="am">KC · 26 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Jaylen Pruitt</div><div class="am">HOU · 24 yo</div></div><div class="asset pick"><span class="pc">PICK</span><div class="an">2026 2nd</div><div class="am">Northside Nine</div></div></div></div><div class="meter"><i style="left:51%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 2 · ranks only</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Northside Nine</div><div class="fit v2"><div class="lbl">League rank · position value</div><div class="rk"><span class="team">Northside Nine</span><span class="mvs"><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">10th</span> <span class="ar">&rarr;</span> <span class="num">6th</span></span></span><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">2nd</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></span></span></div><div class="rk"><span class="team">You</span><span class="mvs"><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">8th</span> <span class="ar">&rarr;</span> <span class="num">5th</span></span></span><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></span></span></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Dante Okafor</div><div class="am">KC · 26 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Jaylen Pruitt</div><div class="am">HOU · 24 yo</div></div><div class="asset pick"><span class="pc">PICK</span><div class="an">2026 2nd</div><div class="am">Northside Nine</div></div></div></div><div class="meter"><i style="left:51%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 3 · combined</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Northside Nine</div><div class="fit v3"><div class="lbl">League rank · position value</div><div class="blk"><div class="lead"><span class="tag">Them</span>Upgrades WR: adds Dante Okafor</div><div class="mvrow"><span class="m"><span class="p">WR</span> <span class="num">10th</span> <span class="ar">&rarr;</span> <span class="num">6th</span></span> <span class="dot">·</span> <span class="m"><span class="p">RB</span> <span class="num">2nd</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></div></div><div class="blk"><div class="lead"><span class="tag">You</span>Upgrades RB: adds Jaylen Pruitt + a 2nd</div><div class="mvrow"><span class="m"><span class="p">RB</span> <span class="num">8th</span> <span class="ar">&rarr;</span> <span class="num">5th</span></span> <span class="dot">·</span> <span class="m"><span class="p">WR</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></div></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Dante Okafor</div><div class="am">KC · 26 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Jaylen Pruitt</div><div class="am">HOU · 24 yo</div></div><div class="asset pick"><span class="pc">PICK</span><div class="an">2026 2nd</div><div class="am">Northside Nine</div></div></div></div><div class="meter"><i style="left:51%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div></div>
+    <p class="note muted">Each team improves where it is short and pays from where it is deep. Version 1 tells only the good half. Versions 2 and 3 show the cost on both sides. This is the busiest case (two positions per team), so it is the one used for the 375 × 667 fit check in Version 3.</p>
+  </section>
+  <section class="feature tradeRow" id="t3">
+    <div class="fhead"><span class="fnum">T3</span><h2>Players for a pick</h2><span class="chip">made-up teams and players</span></div>
+    <p class="note">You are rebuilding (declared). You send two veterans to Ridge Runners, whose roster reads as contending, for their 2027 1st.</p>
+    <div class="row"><div class="frame"><p class="cap recon">Reconstruction · Version 1 · sentence + league rank</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Ridge Runners</div><div class="fit v1"><p class="fl">Upgrades their TE group with Royce Ambler. They rank <span class="num">9th</span> of 12 at TE.</p><p class="fl">Fits your rebuild: you add draft pick 2027 1st. You rank <span class="num">5th</span> of 12 overall.</p></div><div class="cols"><div><div class="colh">You send</div><div class="asset rb"><span class="pc">RB</span><div class="an">Curtis Vane</div><div class="am">MIA · 30 yo</div></div><div class="asset te"><span class="pc">TE</span><div class="an">Royce Ambler</div><div class="am">CHI · 31 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset pick"><span class="pc">PICK</span><div class="an">2027 1st</div><div class="am">Ridge Runners</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 2 · ranks only</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Ridge Runners</div><div class="fit v2"><div class="lbl">League rank · position value</div><div class="rk"><span class="team">Ridge Runners</span><span class="mvs"><span class="mline"><span class="m"><span class="p">TE</span> <span class="num">9th</span> <span class="ar">&rarr;</span> <span class="num">3rd</span></span></span><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">7th</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></span></span></div><div class="rk"><span class="team">You</span><span class="mvs"><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">6th</span> <span class="ar">&rarr;</span> <span class="num">9th</span></span></span><span class="mline"><span class="m"><span class="p">TE</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">10th</span></span></span></span></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset rb"><span class="pc">RB</span><div class="an">Curtis Vane</div><div class="am">MIA · 30 yo</div></div><div class="asset te"><span class="pc">TE</span><div class="an">Royce Ambler</div><div class="am">CHI · 31 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset pick"><span class="pc">PICK</span><div class="an">2027 1st</div><div class="am">Ridge Runners</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 3 · combined</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Ridge Runners</div><div class="fit v3"><div class="lbl">League rank · position value</div><div class="blk"><div class="lead"><span class="tag">Them</span>Upgrades TE: adds Royce Ambler</div><div class="mvrow"><span class="m"><span class="p">TE</span> <span class="num">9th</span> <span class="ar">&rarr;</span> <span class="num">3rd</span></span> <span class="dot">·</span> <span class="m"><span class="p">RB</span> <span class="num">7th</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></div></div><div class="blk"><div class="lead"><span class="tag">You</span>Rebuilding: adds their 2027 1st</div><div class="mvrow"><span class="m"><span class="p">RB</span> <span class="num">6th</span> <span class="ar">&rarr;</span> <span class="num">9th</span></span> <span class="dot">·</span> <span class="m"><span class="p">TE</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">10th</span></span></div></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset rb"><span class="pc">RB</span><div class="an">Curtis Vane</div><div class="am">MIA · 30 yo</div></div><div class="asset te"><span class="pc">TE</span><div class="an">Royce Ambler</div><div class="am">CHI · 31 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset pick"><span class="pc">PICK</span><div class="an">2027 1st</div><div class="am">Ridge Runners</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div></div>
+    <p class="note muted">A pick has no position, so it has no position rank. Version 1 has to fall back to your overall rank, which is a different number from every other line on the page. Version 2 shows you only losses, because the thing you get does not appear. Version 3 names the pick in the lead and shows what it costs you.</p>
+  </section>
+  <section class="feature tradeRow" id="t4">
+    <div class="fhead"><span class="fnum">T4</span><h2>Weak case</h2><span class="chip">made-up teams and players</span></div>
+    <p class="note">You send a WR to Bayside Bucks (no outlook known) for an RB. Their WR rank moves only on a sliver of value, and they get worse at RB, the position they give from.</p>
+    <div class="row"><div class="frame"><p class="cap recon">Reconstruction · Version 1 · sentence + league rank</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Bayside Bucks</div><div class="fit v1"><p class="fl">Their WR group barely changes with Tomas Reyes. They rank <span class="num">6th</span> of 12 at WR.</p><p class="fl">Upgrades your RB group with Kenji Oduya. You rank <span class="num">10th</span> of 12 at RB.</p></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tomas Reyes</div><div class="am">ATL · 27 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Kenji Oduya</div><div class="am">LAC · 26 yo</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 2 · ranks only</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Bayside Bucks</div><div class="fit v2"><div class="lbl">League rank · position value</div><div class="rk"><span class="team">Bayside Bucks</span><span class="mvs"><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">6th</span> <span class="same">no real change</span></span></span><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></span></span></div><div class="rk"><span class="team">You</span><span class="mvs"><span class="mline"><span class="m"><span class="p">RB</span> <span class="num">10th</span> <span class="ar">&rarr;</span> <span class="num">8th</span></span></span><span class="mline"><span class="m"><span class="p">WR</span> <span class="num">5th</span> <span class="ar">&rarr;</span> <span class="num">6th</span></span></span></span></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tomas Reyes</div><div class="am">ATL · 27 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Kenji Oduya</div><div class="am">LAC · 26 yo</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div><div class="frame"><p class="cap recon">Reconstruction · Version 3 · combined</p><div class="phone"><div class="card"><div class="k">Trade with</div><div class="who">Bayside Bucks</div><div class="fit v3"><div class="lbl">League rank · position value</div><div class="blk"><div class="lead plain"><span class="tag">Them</span>Gets Tomas Reyes, gives Kenji Oduya</div><div class="mvrow"><span class="m"><span class="p">RB</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></div></div><div class="blk"><div class="lead"><span class="tag">You</span>Upgrades RB: adds Kenji Oduya</div><div class="mvrow"><span class="m"><span class="p">RB</span> <span class="num">10th</span> <span class="ar">&rarr;</span> <span class="num">8th</span></span> <span class="dot">·</span> <span class="m"><span class="p">WR</span> <span class="num">5th</span> <span class="ar">&rarr;</span> <span class="num">6th</span></span></div></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Tomas Reyes</div><div class="am">ATL · 27 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Kenji Oduya</div><div class="am">LAC · 26 yo</div></div></div></div><div class="meter"><i style="left:50%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div></div></div>
+    <p class="note muted">Their WR rank technically goes 6th → 5th, but their WR value rises by 2% of the league's median WR value, under the proposed 5% bar, so every version treats it as unchanged. Version 1's "always both" rule forces a sentence where the engine has no reason, and that sentence hides their RB loss. Version 2 says "no real change" and shows the loss. Version 3 gives them no praise: it says what moves and shows the loss, which tells you before you send that they will probably say no.</p>
+  </section>
+
+  <section class="feature" id="v1">
+    <div class="fhead"><span class="fnum">02</span><h2>Version 1 — sentence plus league rank</h2></div>
+    <div class="two">
+      <div class="note"><p class="label">What it communicates well</p><p>The reason, in words a casual player reads fastest, anchored in one fact: where that team stands today. It reuses the first build's templates (plan, need, surplus) and adds a rank clause.</p>
+        <p class="label">Thin context</p><p>With no outlook known for the other team there is no plan sentence, so the need sentence carries it. When the engine has no reason at all (trade 4) the "always both" rule needs a new fallback sentence, which is the generic copy your condition rules out. With fewer than three valued teams the rank clause has to drop.</p></div>
+      <div class="note cost"><p class="label">What it risks</p><p><strong>Boilerplate.</strong> "Upgrades their X group with Y" would sit on most cards and soon go unread. <strong>A one-sided picture.</strong> It names a gain and never the cost: the WR you give up in trade 2, the RB they give up in trade 4. <strong>A rank that is not a change.</strong> "They rank 9th" says where they stand, not that the trade moves them, so readers will assume a gain. <strong>Picks.</strong> A pick has no position, so trade 3 falls back to overall rank, a different number again. It is also the longest: up to four lines at 375 px.</p></div>
+    </div>
+    <div class="cmt"><label for="c-v1">Comments — Version 1</label><textarea id="c-v1" data-k="v1" placeholder="Wording, the always-both rule, the rank clause…"></textarea><div class="saved" data-for="v1"></div></div>
+  </section>
+
+  <section class="feature" id="v2">
+    <div class="fhead"><span class="fnum">03</span><h2>Version 2 — ranks only</h2></div>
+    <div class="two">
+      <div class="note"><p class="label">Layout chosen: two labelled rows</p><p>One row per team, theirs first, with the team name on the left and its moves stacked on the right in mono. Chips were rejected because bordered chips look tappable, and ice is reserved for actions. A two-column grid was rejected because the teams often touch different numbers of positions, which leaves empty cells. Rows read like the card's own You send / You get sides.</p>
+        <p class="label">What it communicates well</p><p>Losses as plainly as gains, with no claim to argue with. The numbers are the ones League rankings shows. It has nothing to go stale and no template to bump.</p>
+        <p class="label">Thin context</p><p>It degrades least: ranks need only rosters and consensus values, which every linked league has. Players outside the value pool count as zero, as on League rankings. Hide the block with fewer than three valued teams, which is Home's existing rule.</p></div>
+      <div class="note cost"><p class="label">What it risks</p><p><strong>Unreadable to a casual player.</strong> "RB 2nd → 4th" with no reason looks like a bad trade for them. <strong>The reason is missing.</strong> In trade 1 the contender sees only a WR drop, and in trade 3 the rebuilder sees only losses, because a win-now veteran or a pick is not a position gain. <strong>Small moves look big.</strong> A one-place change looks as meaningful as a five-place one, so the noise rule (question 3) is not optional here.</p></div>
+    </div>
+    <div class="cmt"><label for="c-v2">Comments — Version 2</label><textarea id="c-v2" data-k="v2" placeholder="Layout, ordinals vs 9/12, the noise rule…"></textarea><div class="saved" data-for="v2"></div></div>
+  </section>
+
+  <section class="feature" id="v3">
+    <div class="fhead"><span class="fnum">04</span><h2>Version 3 — combined</h2><span class="chip rec">Recommended</span></div>
+    <div class="row">
+<div class="frame"><p class="cap recon">Reconstruction · Version 3 at 375 × 667 (iPhone SE height)</p>
+  <div class="screen" id="fitScreen">
+    <div class="sbar"><span>9:41</span><span></span></div>
+    <div class="s-h1">Trades</div>
+    <div class="status"><span>Top suggestion</span><span>1 of 8</span></div>
+    <div class="inner"><div class="card"><div class="k">Trade with</div><div class="who">Northside Nine</div><div class="fit v3"><div class="lbl">League rank · position value</div><div class="blk"><div class="lead"><span class="tag">Them</span>Upgrades WR: adds Dante Okafor</div><div class="mvrow"><span class="m"><span class="p">WR</span> <span class="num">10th</span> <span class="ar">&rarr;</span> <span class="num">6th</span></span> <span class="dot">·</span> <span class="m"><span class="p">RB</span> <span class="num">2nd</span> <span class="ar">&rarr;</span> <span class="num">4th</span></span></div></div><div class="blk"><div class="lead"><span class="tag">You</span>Upgrades RB: adds Jaylen Pruitt + a 2nd</div><div class="mvrow"><span class="m"><span class="p">RB</span> <span class="num">8th</span> <span class="ar">&rarr;</span> <span class="num">5th</span></span> <span class="dot">·</span> <span class="m"><span class="p">WR</span> <span class="num">4th</span> <span class="ar">&rarr;</span> <span class="num">7th</span></span></div></div></div><div class="cols"><div><div class="colh">You send</div><div class="asset wr"><span class="pc">WR</span><div class="an">Dante Okafor</div><div class="am">KC · 26 yo</div></div></div><div class="rule"></div><div><div class="colh">You get</div><div class="asset rb"><span class="pc">RB</span><div class="an">Jaylen Pruitt</div><div class="am">HOU · 24 yo</div></div><div class="asset pick"><span class="pc">PICK</span><div class="an">2026 2nd</div><div class="am">Northside Nine</div></div></div></div><div class="meter"><i style="left:51%"></i></div><div class="mrow"><span>-1st</span><span>Even</span><span>+1st</span></div></div></div>
+    <div class="acts"><span class="p-btn secondary">Pass</span><span class="p-btn primary">Like</span></div>
+    <div class="tabbar"><span>Home</span><span class="on">Trades</span><span>Rank</span><span>League</span></div>
+    <div class="fold" id="foldLine"><span>667 px fold</span></div>
+  </div>
+  <p class="sub" id="fitReadout">Value bar bottom: measuring…</p>
+</div>
+      <div class="note" style="flex:1 1 360px; min-width:320px">
+        <p class="label">The rule</p>
+        <ul class="plain">
+          <li><strong>Lead phrase:</strong> the single strongest reason, chosen in the first build's order (plan, then position need), in a short form: "Rebuilding: adds their 2027 1st", "Upgrades RB: adds Jaylen Pruitt". "Rebuilding" and "Win-now" are used only for an outlook the manager declared; an outlook the engine read from the roster says "Rebuild-leaning". Never "good fit".</li>
+          <li><strong>No gain, no praise:</strong> a side with no reason gets "Gets X, gives Y" in dim text (trade 4).</li>
+          <li><strong>Ranks:</strong> every position the trade touches for that team, gains and losses, "WR 9th → 7th". Unchanged and noise-level moves are omitted.</li>
+          <li><strong>Theirs first,</strong> two lines per side at most, ranks in Plex Mono, direction by arrow and numbers only, no colour.</li>
+        </ul>
+        <p class="label">Fit at 375 × 667</p>
+        <p>The left frame draws trade 2, the busiest case, on a 375 × 667 screen with the Trades header, card, Pass / Like and tab bar. The block adds a label and four lines: 118 px in this drawing. The readout under the frame is measured live in this drawing. It is a reconstruction, so treat the margin as an estimate, not a measurement of the app.</p>
+        <p class="label">Where this departs from the direction, and why</p>
+        <ol class="q">
+          <li><strong>One shared label row</strong>, "League rank · position value", above both blocks. Without it, trade 1's "WR 3rd → 4th" under "Win-now: adds Marcus Hale" reads as a contradiction. It is one line per card, not per side.</li>
+          <li><strong>Noise counts as unchanged.</strong> A one-place move on a sliver of value is omitted like a non-move, which extends "omit unchanged" to cover the risk you named.</li>
+          <li><strong>Picks get no rank.</strong> A pick has no position, so it appears only in the lead ("adds their 2027 1st"). A side whose only move is a pick has a one-line block.</li>
+          <li><strong>Lead phrases are truncated, not wrapped,</strong> to hold the two-line limit. The longest here (trade 2, yours) fits at 375 px. A longer name would end in an ellipsis rather than add a third line.</li>
+        </ol>
+        <p class="label">Thin context</p>
+        <p>The lead falls back from plan, to position gain, to "Gets X, gives Y". Ranks still show. With fewer than three valued teams the rank rows hide, and with no lead either the block disappears and the card is today's card.</p>
+        <p class="label">What it risks</p>
+        <p>Two things to read instead of one. The lead is still a template family and needs its own <code>FIT_TMPL_VERSION</code> bump. An inferred "Rebuild-leaning" can be wrong about a manager. And "WR 3rd → 4th" under a win-now reason still needs the label to make sense.</p>
+      </div>
+    </div>
+    <div class="cmt"><label for="c-v3">Comments — Version 3</label><textarea id="c-v3" data-k="v3" placeholder="Lead wording, the label row, the departures…"></textarea><div class="saved" data-for="v3"></div></div>
+  </section>
+
+  <section class="feature" id="build">
+    <div class="fhead"><span class="fnum">05</span><h2>What it would take</h2><span class="chip">read from origin/main + feat/fit-first-copy</span></div>
+    <div class="note">
+      <p class="label">What exists today</p>
+      <table class="mini">
+        <tr><th>Source</th><th>What it has</th><th>Position rank across the league?</th></tr>
+        <tr><td><code>backend/power_rankings.py</code> <code>compute_power_rankings</code></td><td>Every team in the league, with <code>positions[QB|RB|WR|TE].value</code> (summed consensus value of every rostered player there), picks separately, and a derived <code>starters</code> list.</td><td>The inputs, yes; the rank itself is computed by each client.</td></tr>
+        <tr><td><code>mobile/src/screens/LeagueSummaryScreen.tsx</code> (League rankings), <code>teamPosRank</code></td><td>The "9/12" rank chip on each drill-in position header: 1 + the number of teams with strictly more value, so ties share a rank. Coloured by league third. Consensus basis by default; All, Starters and Bench filters.</td><td>Yes, shown to users.</td></tr>
+        <tr><td><code>mobile/src/utils/positionSplit.ts</code> (Home's position tiles)</td><td>"2nd at RB · Seller" from the same values. Ties broken by user id. Consensus basis.</td><td>Yes, shown to users.</td></tr>
+        <tr><td><code>backend/team_review.py</code> <code>_pos_share</code></td><td>Your rank at each position from the same per-team sums. Ties broken by sort order.</td><td>Yes, yours only.</td></tr>
+        <tr><td>Bilateral proof, <code>trade_gen_owner.py</code> <code>_lineup</code></td><td><code>usable_depth_before</code> / <code>_delta</code> per position, for the two teams in the trade only: market value scaled for age now, of the players the lineup slots would hold, plus 15% of the best backup. Injured players are excluded. Shown nowhere.</td><td>No: two teams, not twelve.</td></tr>
+        <tr><td>First build, <code>trade_narrative.fit_lines</code></td><td>The plan, need and surplus sentences, gated on the proof.</td><td>No ranks at all.</td></tr>
+      </table>
+
+      <p class="label">Where before and after ranks would come from</p>
+      <p>From the consensus-basis power rankings. Take every team's <code>positions[P].value</code>, move the traded players' consensus values between the two teams, and rank again. The other ten teams do not change, so it is a small, pure computation (a new function beside <code>fit_lines</code>). The one missing piece is data at serialization time: <code>trade_card_to_dict</code> has the two-team proof but no league-wide values. The ranks should be frozen with the card when it is generated, the way the proof is, so a card does not change under the user as rosters move. Picks have no position and are left out of position ranks.</p>
+
+      <p class="label">Which "rank": total position value</p>
+      <p><strong>Total position value on the consensus basis</strong>, the All view of League rankings. It is the only measure the app already shows on three screens (League rankings, Home, Team Review), so a card that says "WR 9th" will match what the user sees one tap away. Usable depth is the engine's better measure of lineup impact, but users see it nowhere: ranking by it would put "WR 4th" on a card while League rankings says 6th. Starters-only value exists, but only behind a filter. The cost is that this rank measures dynasty value, so a win-now trade (youth for production) can lower your rank, as in trade 1. The lead phrase in Version 3 carries that reason, and the label row says what the rank measures. Never use the personal basis here: it disagrees with the default screens.</p>
+
+      <p class="label">Ties and small differences</p>
+      <ul class="plain">
+        <li><strong>Ties share a rank</strong> (1 + teams strictly above), the rule League rankings' chip already uses. Home and Team Review break exact ties by list order, so they can differ from the chip by one place today. Exact float ties are rare, but question 5 asks whether to align them.</li>
+        <li><strong>The noise rule:</strong> show a rank change only when the team's value at that position moves by at least 5% of the league median there. The server already computes those medians for League rankings (<code>server.py</code> <code>_position_medians</code>). Below the bar, the position counts as unchanged: Version 1 says nothing, Version 2 says "no real change" and Version 3 leaves it out.</li>
+        <li><strong>Fewer than three valued teams:</strong> hide all ranks. This is Home's <code>MIN_SPLIT_TEAMS</code> rule.</li>
+      </ul>
+
+      <p class="label">Does a league-mate's position rank reveal anything new?</p>
+      <p>No, on the consensus basis. League rankings already lists every team with its consensus position values and roster, and its drill-in shows each team's rank at each position. <code>/api/league/rank-chip</code> is deliberately open for the same reason: it is built from league-shared consensus values and exposes nothing from anyone's rankings. The before rank is on screen today, and the after rank is arithmetic on public data. It would leak if computed from the other manager's own board (the counterparty's personal values), or from their <code>benefits</code>, <code>intent</code> or preferences, which the first build already refuses to read. The plan lead may name only an outlook the engine inferred from their roster, never one they declared, as in the first build.</p>
+
+      <p class="label">What each version needs beyond the first build</p>
+      <table class="mini">
+        <tr><th>Version</th><th>Backend</th><th>App</th></tr>
+        <tr><td>1</td><td>Today's rank per side (the before half of the above); a fallback sentence for sides where no template fires, plus overall rank for pick-only sides; template version bump.</td><td>The first build's block, always two lines.</td></tr>
+        <tr><td>2</td><td>Before and after ranks for every touched position, both teams, with the noise rule. No sentences.</td><td>A new rank block in place of the first build's lines; wire type and normalizer for a new key.</td></tr>
+        <tr><td>3</td><td>Both: ranks as in 2, plus a short lead-phrase table derived from the first build's plan and need triggers, a "moves only" fallback, and a template version bump.</td><td>The first build's block slot, with a label row and two lines per side.</td></tr>
+      </table>
+    </div>
+    <div class="cmt"><label for="c-build">Comments — what it would take</label><textarea id="c-build" data-k="build" placeholder="Rank definition, noise bar, freezing ranks with the card…"></textarea><div class="saved" data-for="build"></div></div>
+  </section>
+
+  <p class="foot">Comments live only in this browser's localStorage until you export. Export produces a Markdown file (and copies it to the clipboard). Every team, player, rank and value on this page is made up for illustration, not computed by the engine. Proposed frames are reconstructions, not captures.</p>
+</main>
+
+<script>
+(function () {
+  var KEY = 'ftf-fit-copy-review-v1:';
+  var areas = document.querySelectorAll('textarea[data-k]');
+  areas.forEach(function (ta) {
+    var k = ta.getAttribute('data-k');
+    var savedEl = document.querySelector('.saved[data-for="' + k + '"]');
+    try { var v = localStorage.getItem(KEY + k); if (v) { ta.value = v; savedEl.textContent = 'saved'; } } catch (e) {}
+    var t;
+    ta.addEventListener('input', function () {
+      clearTimeout(t);
+      savedEl.textContent = '…';
+      t = setTimeout(function () {
+        try { localStorage.setItem(KEY + k, ta.value); savedEl.textContent = ta.value ? 'saved' : ''; } catch (e) { savedEl.textContent = 'could not save'; }
+      }, 400);
+    });
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var lines = ['# Fit copy (WS4 / R11) — review comments', '', '_Exported ' + new Date().toISOString() + '_', ''];
+    document.querySelectorAll('section.feature').forEach(function (sec) {
+      var ta = sec.querySelector('textarea[data-k]');
+      if (!ta) return;
+      var title = sec.querySelector('h2').textContent;
+      var num = sec.querySelector('.fnum').textContent;
+      var val = (ta.value || '').trim();
+      lines.push('## ' + num + ' — ' + title);
+      lines.push(val ? val : '_(no comment)_');
+      lines.push('');
+    });
+    var md = lines.join('\n');
+    try { navigator.clipboard && navigator.clipboard.writeText(md); } catch (e) {}
+    var blob = new Blob([md], { type: 'text/markdown' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'fit-copy-review-comments.md';
+    document.body.appendChild(a); a.click(); a.remove();
+    var btn = document.getElementById('exportBtn');
+    var old = btn.textContent; btn.textContent = 'Exported';
+    setTimeout(function () { btn.textContent = old; }, 2000);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!confirm('Clear all saved comments on this page?')) return;
+    areas.forEach(function (ta) {
+      try { localStorage.removeItem(KEY + ta.getAttribute('data-k')); } catch (e) {}
+      ta.value = '';
+      var savedEl = document.querySelector('.saved[data-for="' + ta.getAttribute('data-k') + '"]');
+      if (savedEl) savedEl.textContent = '';
+    });
+  });
+
+  // Fit check: where does the value bar end relative to the tab bar on a 667 px screen?
+  function measure() {
+    var screen = document.getElementById('fitScreen');
+    var out = document.getElementById('fitReadout');
+    if (!screen || !out) return;
+    var top = screen.getBoundingClientRect().top;
+    var bar = screen.querySelector('.mrow').getBoundingClientRect().bottom - top;
+    var acts = screen.querySelector('.acts').getBoundingClientRect().bottom - top;
+    var tabTop = 617;
+    out.textContent = 'Measured in this drawing: value bar ends at ' + Math.round(bar) + ' px, Pass / Like at ' +
+      Math.round(acts) + ' px; the tab bar starts at ' + tabTop + ' px. ' +
+      (acts <= tabTop ? 'Both clear the tab bar by ' + Math.round(tabTop - acts) + ' px.' :
+       (bar <= tabTop ? 'The value bar clears; Pass / Like would need a scroll.' : 'The value bar does not fit.'));
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure); else window.addEventListener('load', measure);
+})();
+</script>
+</body>
+</html>

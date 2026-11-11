@@ -63,8 +63,9 @@ every shape here was captured from live browser traffic (see
 | 15 | `propose_trade` | **Write**: submit a real trade proposal into the user's Sleeper league. Since #413 emits a non-empty `draft_picks` list on pick trades, produced server-side by `server._sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick` (never client-supplied) | JWT (raw, no `Bearer` prefix) | `backend/sleeper_write.py:203-273,331-337` (`build_propose_trade_body` / `propose_trade`) |
 | 16 | `reject_trade` | **Write**: reject a pending proposal | JWT | `backend/sleeper_write.py:340-351` |
 | 17 | `ftf_token_probe` | No-op (`{ __typename }`) — proves a captured JWT is real by exercising Sleeper's own auth middleware | JWT | `backend/sleeper_write.py:168-193` (`verify_token_live`) |
+| 18 | `league_transactions_filtered` | **Private read** (WS2b, flag `trade.sleeper_offer_import`): the signed-in user's own trade transactions in one league, every status (`proposed` / `complete` / `rejected` / `cancelled`). Variables `league_id`, `type_filters: ["trade"]`, `limit: 200`; no `status_filters`, no `roster_id_filters` / `leg_filters` (never exercised). Selection: `transaction_id type status created status_updated creator roster_ids consenter_ids adds drops draft_picks waiver_budget metadata settings`; only `metadata.rejecter_id`, `settings.is_counter` / `expires_at` are read from the two JSON scalars and neither is stored. Shape: `docs/plans/offer-learnings/sleeper-offers-read.md`. When: Find a Trade opened, daily tick; once per (user, league) per 30 min; back-off 24 h (auth) / 6 h (other) | JWT | `backend/sleeper_write.py` (`league_trade_offers`), called only from `server._sleeper_offers_sync` |
 
-**17 distinct Sleeper endpoints/operations total** (13 REST v1 + 4 GraphQL).
+**18 distinct Sleeper endpoints/operations total** (13 REST v1 + 5 GraphQL).
 
 ### 1.3 Client-side, non-API (mobile)
 
@@ -308,6 +309,7 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
 | Live oracle rejects the token (forged/dead) | `backend/server.py:11982-11985` | `403 token_rejected` |
 | Oracle unreachable (network/config) — inconclusive | `backend/server.py:11986-11988` | Link stores but `verified` stays `false`; not treated as rejection |
 | Sleeper rejects `propose_trade` at send time | `backend/server.py:12116-12128` | `409 sleeper_rejected` + truncated detail; credential deleted (recapturing would just replay the same rejected token, so the client is told NOT to reopen the login WebView) |
+| The private offers read fails (401/403, auth-worded GraphQL error, any other error, an answer that is not a list) | `backend/server.py` `_sleeper_offers_sync` | Nothing changes: the credential is NOT deleted (unlike a send), no row is written, one WARNING `sleeper offers read failed (auth|error)` (Sleeper's detail truncated to 200, never the token), then a back-off (24 h for every league of the user after auth, 6 h for that league otherwise) during which no call and no log happen |
 | GraphQL error surfaced as HTTP 200 with an `errors` array | `backend/sleeper_write.py:318-325` | Classified by keyword sniffing (`auth`/`unauth`/`token`/`forbidden`/`login` → `SleeperAuthError`; everything else → generic `SleeperWriteError`) |
 | Cloudflare 1010 ban (bot-signature detection) | Mitigated proactively, not caught reactively — `sleeper_write.py:43-59`, `trade_block_service.py:51-62`, `sleeper_trades_service.py:42-50` all send a real Chrome UA + `origin`/`referer` headers on every write/GraphQL call. Plain `urllib` UAs (`Python-urllib/x.y`) trip this instantly | N/A (prevention, not error handling) |
 | No `cryptography` package / no `SLEEPER_TOKEN_KEY` set | `backend/sleeper_write.py:93-104` | `503 sleeper_unconfigured` — feature goes dark rather than storing plaintext |
@@ -398,7 +400,14 @@ else is a fresh live fetch with no shared cache. The outcome is recorded in
 | Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
 | Manager profiles | `market.manager_profiles` (needs `market.trade_capture` + the shared rosters) | **0 in steady state** — keeps the waiver / free-agent rows of the trade capture's own `transactions/{week}` payloads; rosters + meta shared. **One** extra `1..18` backfill per league, once, when the flag first meets an already-swept league (marker: `manager_profiles` rows, written only after a backfill with no failed leg). No roster map ⇒ skipped, backfill included | `sync_league_trades(profiles=True)` / `capture_manager_profiles`, `backend/sleeper_trades_service.py` |
 | Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
+| Sent-offer outcome reconcile | `trade.outcome_tracking` | 0 — reads `sleeper_trades` just captured (DB-only) | `reconcile_league`, `backend/trade_outcomes.py` |
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |
+
+**Outside session init (flag `trade.outcome_tracking`):** the daily-tick step `trade_outcomes`
+re-runs the same `sync_league_trades` capture (≤2 `transactions/{week}` reads per league in
+steady state, behind the shared 429 circuit) for at most 50 leagues a day that hold an offer
+sent through the app in the last 30 days, and only while `market.trade_capture` is on. Public
+reads only; no GraphQL. See `backend/trade_outcomes.py`.
 
 **Per-init upstream budget for a Sleeper league** (steady state, all flags ON,
 draft-status TTL warm): **≤ 8 calls in season, ≤ 7 in the offseason**. On the request

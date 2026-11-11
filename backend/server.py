@@ -108,7 +108,7 @@ from .database import (
     upsert_trade_pass_reason, claim_trade_pass_elo,
     ensure_reasoned_trade_pass, mark_reasoned_trade_pass_elo,
     PASS_REASON_LAYER1, PASS_REASON_LAYER2, PASS_REASON_PARENT,
-    PASS_REASON_TEXT_MAX,
+    PASS_REASON_TEXT_MAX, PASS_REASON_CADENCE_ONLY,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
     save_deck_candidate_set, suggestion_ratio_by_league, suggestion_link_day_span,
@@ -146,7 +146,7 @@ from .database import (
     record_match_disposition,
     dismiss_match,
     upsert_league_preference, load_league_preference,
-    load_league_preferences_bulk,
+    load_league_preferences_bulk, load_manager_trade_counts,
     load_asset_preferences, set_asset_preference, ASSET_PREF_LISTS,
     sync_players, needs_player_sync,
     load_players, load_player, load_players_by_ids,
@@ -245,6 +245,9 @@ from .database import (
     save_bad_trade_flag, list_bad_trade_flags,
     # "Send in Sleeper" — encrypted Sleeper write-token storage (flagged beta)
     upsert_sleeper_credential, get_sleeper_credential, delete_sleeper_credential,
+    # offer-learnings WS2b — the private offers read and its consent
+    record_offer_import_grant, withdraw_offer_import_consent,
+    load_offer_read_targets, load_offer_import_consented_users, load_member_sleeper_leagues,
     # Team overhaul all-platform sends (2026-09-07): link-state reads for
     # overhaul_api.auth_state, mirroring GET /api/mfl/auth-link and /api/espn/link
     get_mfl_credential, get_espn_credential,
@@ -2212,7 +2215,7 @@ def _refresh_players_cache_async(force: bool = False) -> bool:
 
 
 def _daily_tick_players_guard(now: datetime):
-    """daily-tick step 5 — the M0 player-cache fallback guard, run INLINE on
+    """daily-tick step 6 — the M0 player-cache fallback guard, run INLINE on
     the daily-tick runner thread (never a request thread). The tick's own
     gate (deployed env, cache past TTL), then the guards and in-flight
     protocol of `_refresh_players_cache_async(force=False)` copied as they
@@ -4578,7 +4581,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 15
+DECK_PIPELINE_VERSION = 21
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4598,6 +4601,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_run_trade_job", "_run_value_core_job",
     # the candidate pool and injected cards
     "_inject_owned_picks", "_inject_likes_you_cards", "_inject_likes_you_cards_impl",
+    "_inject_revised_offer_cards",   # WS8: revised-offer cards lead the deck
     "_likes_you_cfg", "_likes_you_gate_level", "_likes_you_min_user_delta",
     "_likes_you_min_user_gain", "_likes_you_user_delta", "_likes_you_seed_value",
     "_likes_you_package_delta", "_likes_you_presentment_ok",
@@ -4636,6 +4640,8 @@ DECK_PIPELINE_FUNCTIONS = (
     # the stored card's content
     "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
     "_owner_public_selection", "player_to_dict",
+    # WS4b fit block: the league-wide ranks and roster reads stored with each card
+    "_fit_league_context", "_power_value_inputs", "_position_medians",
 )
 DECK_PIPELINE_CONSTANTS = (
     "_DECK_MIN_CARDS", "_EXPLORATION_BASE_PER_OPP", "_EXPLORATION_SLOT_MIN",
@@ -4695,6 +4701,8 @@ DECK_PIPELINE_IGNORED = {
     "_owned_pick_label": "label copy only",
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
+    "_aggregate_pick_label": "label copy only (the medians' value_label; the fit block reads only value)",
+    "_get_universal_pool": "the universal pool read and cache (a data fetch)",
 }
 # DECK_PIPELINE_VERSION -> its digest. Append-only: a bump adds a row and no
 # row is ever re-pinned in place (a re-pinned version would leave the pages
@@ -4716,6 +4724,12 @@ DECK_PIPELINE_PINS = {
     13: "1939e93dc5fd7de5",  # Cooperative cancellation; current-job terms/order preserved.
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
     15: "1a34729ff2b291ac",  # D-212 trade_block: the job carries the viewer's list into viewer_preferences; owner context strips it when trades.roster_setup is off (flag-off terms/order byte-identical); assignment hash sorts it.
+    16: "e155ed45d1a02a13",  # ADR-028: fast deck and shadow hooks in the owner generator call (flags trade.fast_deck*, default off); flags off: same call, terms and order unchanged.
+    17: "a344340932da4f13",  # trade.fit_first_copy (default off): trade_card_to_dict adds fit_lines to bilateral cards whose proof supports a specific reason; flag off: no key, payload byte-identical.
+    18: "560661f3c6d76b8d",  # Bilateral revision 4 (selector owner_bilateral_revision_4_enabled, default 0): presentment takes its version; the dark key is dropped from the request hash unless exactly 1; selector off: terms and order unchanged.
+    19: "41b3e46c2f4c2e68",  # Fit block v3 (trade.fit_first_copy, default off): one league-wide rank context per job, stamped on owner cards; trade_card_to_dict adds fit_block; flag off: no context, no key, payload byte-identical.
+    20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
+    21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4725,6 +4739,7 @@ DECK_PIPELINE_PINS = {
 _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "trade_first_page.py", "trade_fast_deck.py",  # ADR-028: the fast deck (flag trade.fast_deck)
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
@@ -6998,7 +7013,8 @@ def _deck_note_moves(ev: _DeckEvidence, moves, first) -> None:
 # Served-card keys that mark deck_quality's protected cards (PROTECTED_ATTRS as
 # trade_card_to_dict names them; fatigue_retest serializes as "retest").
 _SERVED_PROTECTED_KEYS = ("likes_you", "source_like_impression_id", "standing_offer_reason",
-                          "injected", "wildcard", "retest", "owner_published")
+                          "injected", "wildcard", "retest", "owner_published",
+                          "revised_offer")   # WS8: a revised-offer card holds its place
 
 
 def _display_key(index: int, moves: Mapping) -> tuple:
@@ -8286,7 +8302,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3"):
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -8826,6 +8842,40 @@ def _inject_likes_you_cards(cards: list, trade_service, user_id: str,
     with _trade_service_mod.stud_tax_override(_mode):
         return _inject_likes_you_cards_impl(cards, trade_service, user_id,
                                             *args, **kwargs)
+
+
+def _inject_revised_offer_cards(cards: list, *, owner_context: dict, owner_request_evidence,
+                                user_id: str, league_id: str, players_dict: dict,
+                                trade_service) -> list:
+    """WS8 — put the revised-offer cards for the user's own declined offers
+    first (`trade_revised_offers.build`: at most three, newest decline first,
+    each bound to the evaluator's proof). They carry the request's owner
+    evidence like any owner card, are registered for the swipe route, and an
+    organic card with the same package and partner is dropped so the deck
+    never holds it twice. Flag off ⇒ `build` returns [] before any read."""
+    from . import trade_revised_offers as _revised
+    labels: dict = {}
+
+    def name(pid):
+        player = players_dict.get(pid)
+        if player is not None and getattr(player, "position", None) != "PICK":
+            return getattr(player, "name", None) or str(pid)
+        if pid not in labels:
+            labels.update(_pick_labels_by_id([pid]))
+        return labels.get(pid) or getattr(player, "name", None) or str(pid)
+
+    revised = _revised.build(user_id=user_id, league_id=league_id, context=owner_context, name=name)
+    if not revised:
+        return cards
+    keys = set()
+    for card in revised:
+        card.owner_request_evidence = owner_request_evidence
+        trade_service._trade_cards[card.trade_id] = card
+        keys.add((frozenset(card.give_player_ids), frozenset(card.receive_player_ids),
+                  card.target_user_id))
+    rest = [c for c in cards if (frozenset(c.give_player_ids), frozenset(c.receive_player_ids),
+                                 c.target_user_id) not in keys]
+    return revised + rest
 
 
 def _mirror_skip_rows(trade_service, job_id: str, ctx) -> list:
@@ -10339,6 +10389,14 @@ def _log_deck_signal_impressions(
         # by test_bakeoff_serving's flag-off golden).
         if getattr(card, "standing_offer_reason", None):
             features["standing_offer"] = True
+        # WS8 — a revised-offer card is attributable in its frozen features:
+        # its kind, the outcome row it answers, its own row, the step and the
+        # builder version. Never the copy. Key only when set (flag off ⇒
+        # features_json unchanged).
+        _revised = getattr(card, "revised_offer", None)
+        if isinstance(_revised, dict):
+            features["revised_offer"] = {k: _revised.get(k) for k in (
+                "kind", "outcome_id", "card_id", "source", "step_fraction", "version")}
         # trade.negmem — the §3.4 stamp trichotomy. ON-condition is
         # `nm_map is not None` (flag ON *and* the league allowlisted), and it
         # is checked here, not per card, so the key exists on EVERY row this
@@ -13298,17 +13356,60 @@ def _run_trade_job(
                     assignment_probability=1.0 if owner_exclusive else None)
             except Exception:
                 log.exception("owner context capture unavailable")
+        # ADR-028 (flags trade.fast_deck / trade.fast_deck_shadow), read once
+        # per job. Interactive jobs only: a prepared inventory, the weekly
+        # replenishment and Calibration's refresh keep the full inventory.
+        # Both off (the default) ⇒ trade_fast_deck is never imported and the
+        # generator call below is the one it always was.
+        with _trade_jobs_lock:
+            _fast_deck_scope = (not preparation
+                                and not (_trade_jobs.get(job_id) or {}).get("source"))
+        fast_deck_serve = _fast_deck_scope and is_enabled("trade.fast_deck")
+        fast_deck_shadow = (_fast_deck_scope and not fast_deck_serve
+                            and is_enabled("trade.fast_deck_shadow"))
+        fit_context = _fit_league_context(owner_context, service)   # WS4b: once per job
         def _gen_owner(**_overrides):
             if owner_context is None:
                 raise ValueError("owner_context_unavailable")
             check_current()
-            cards, report = _bakeoff.owner_generator(owner_context["config"])(
-                **owner_context, _check_current=check_current)
+            _generate = _bakeoff.owner_generator(owner_context["config"])
+            _fast = None
+            if fast_deck_serve:
+                # Any failure, an unsupported request or an unproven page runs
+                # the full solve: never a partial or unattributed deck.
+                try:
+                    from . import trade_fast_deck
+                    _fast = trade_fast_deck.serve(_generate, owner_context, check=check_current)
+                except TradeWorkCancelled:
+                    raise
+                except Exception:
+                    log.exception("trade-job %s: fast deck unavailable (full solve)", job_id)
+                log.info("trade-job %s fast deck: %s", job_id,
+                         "served cards=%d" % len(_fast[0]) if _fast else "full_solve")
+            if _fast is not None:
+                cards, report = _fast
+            else:
+                _full_started = time.monotonic()
+                cards, report = _generate(**owner_context, _check_current=check_current)
+                if fast_deck_shadow:
+                    _full_ms = int((time.monotonic() - _full_started) * 1000)
+                    try:
+                        from . import trade_fast_deck
+                        log.info("trade-job %s fast-deck shadow: full_ms=%d %s", job_id, _full_ms,
+                                 json.dumps(trade_fast_deck.shadow(
+                                     cards, _generate, owner_context, check=check_current),
+                                     sort_keys=True))
+                    except TradeWorkCancelled:
+                        raise
+                    except Exception:
+                        log.exception("trade-job %s: fast-deck shadow failed (ignored)", job_id)
             check_current()
             diagnostics = report.diagnostics()
             for card in cards:
                 card.owner_request_evidence = owner_request_evidence
                 card.owner_generation_diagnostics = diagnostics
+                if fit_context is not None:
+                    card.fit_context = fit_context
                 trade_service._trade_cards[card.trade_id] = card
             return cards, report
         if bakeoff_on:
@@ -13728,6 +13829,34 @@ def _run_trade_job(
         # or re-sorted under the superseded personal/needs policy. Revalidate
         # the exact package after all earlier mutation layers; legacy cards
         # continue through their unchanged gates below.
+        # offer-learnings WS8 (flag trade.next_move) — revised-offer cards for
+        # the user's own declined offers lead the deck. Inserted here, before
+        # the owner revalidation, so they pass the same final gates as every
+        # owner card (re-proof, roster, significance, dispositions) and keep
+        # their slot: `injected` protects them from the bilateral presentment
+        # and the quality filter, as it does other injected cards. Organic
+        # owner-served decks only; never a prepared inventory or a background
+        # (replenish / calibration) build.
+        if (owner_context is not None and owner_serve and not preparation
+                and league_id != "league_demo" and not pinned_give and not pinned_receive
+                and not opponent_user_id and not trade_intent):
+            with _trade_jobs_lock:
+                _ro_background = bool((_trade_jobs.get(job_id) or {}).get("source"))
+            if not _ro_background:
+                try:
+                    final_cards = _inject_revised_offer_cards(
+                        final_cards, owner_context=owner_context,
+                        owner_request_evidence=owner_request_evidence,
+                        user_id=g_user_id, league_id=league_id,
+                        players_dict=players_dict, trade_service=trade_service)
+                    # A revised-offer card carries the fit block like any owner
+                    # card: it gets the job's one league context (WS4b).
+                    if fit_context is not None:
+                        for _ro_card in final_cards:
+                            if getattr(_ro_card, "revised_offer", None) is not None:
+                                _ro_card.fit_context = fit_context
+                except Exception as ro_err:
+                    log.warning("revised-offer cards failed (non-fatal): %s", ro_err)
         pre_owner_policy = list(final_cards)
         owner_cards = [c for c in final_cards if getattr(c, "owner_evaluation", None) is not None]
         if owner_cards:
@@ -14058,7 +14187,7 @@ def _run_trade_job(
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
                 selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
-                generator_version=(owner_model_version if owner_model_version == "owner-v2-bilateral-3"
+                generator_version=(owner_model_version if owner_model_version in ("owner-v2-bilateral-3", "owner-v2-bilateral-4")
                                    else trade_bilateral_presentment.GENERATOR_VERSION))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
@@ -20951,6 +21080,62 @@ def _invalidate_trade_block_cache(league_id: str) -> None:
         _trade_block_cache.pop(league_id, None)
 
 
+def _fit_league_context(owner_context, service):
+    """WS4b (flag trade.fit_first_copy): the league-wide inputs of the card's
+    fit block, computed ONCE per trade job and shared by every card it builds
+    (trade_card_to_dict reads them from `card.fit_context`). None when the
+    flag is off or there is no owner context, and on any failure: the cards
+    then simply carry no block.
+
+    Position values: compute_power_rankings on the consensus basis over the
+    job's own rosters (the ones its cards were built from; picks are not
+    roster players there, as in league_members), with League rankings' seed
+    and metadata (_power_value_inputs). Roster reads: the engine's own read of
+    each window, exactly as trade_gen_owner._team resolves an undeclared team
+    (a stored inferred outlook, else infer_team_outlook over the roster under
+    the job's config). A DECLARED outlook is never read here.
+    """
+    if owner_context is None or not is_enabled("trade.fit_first_copy"):
+        return None
+    try:
+        from .power_rankings import compute_power_rankings
+        from .trade_narrative import FitLeagueContext
+        ts = _trade_service_mod
+        viewer = owner_context["user_id"]
+        players = owner_context["players"]
+        league = owner_context["league"]
+        rosters = {viewer: list(owner_context["user_roster"])}
+        for member in league.members:
+            if member.user_id != viewer:
+                rosters[member.user_id] = list(member.roster)
+        seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
+                                         players.values())
+        player_ids = {uid: [pid for pid in roster
+                            if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
+                      for uid, roster in rosters.items()}
+        teams = compute_power_rankings(
+            [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
+            seed, meta)
+        prefs = owner_context.get("manager_preferences") or {}
+        inferred = owner_context.get("inferred_outlooks") or {}
+        reads = {}
+        with ts._cfg_override(owner_context["config"]):
+            for uid, roster in rosters.items():
+                read = inferred.get(uid)
+                if read is None:
+                    read = (prefs.get(uid) or {}).get("inferred_outlook")
+                if read is None:
+                    read = ts.infer_team_outlook(list(roster), players,
+                                                 num_teams=len(rosters))[0]
+                reads[uid] = read
+        return FitLeagueContext(viewer_id=viewer, teams=teams,
+                                medians=_position_medians(teams),
+                                rosters=player_ids, reads=reads)
+    except Exception:
+        log.exception("fit block: league context unavailable (cards carry no block)")
+        return None
+
+
 def trade_card_to_dict(card, players: dict) -> dict:
     def p(pid):
         pl = players.get(pid)
@@ -20987,6 +21172,18 @@ def trade_card_to_dict(card, players: dict) -> dict:
         out["model_arm"] = identity["generator"]
         out["generator_version"] = identity["generator_version"]
         out.update(_owner_public_selection(evidence))
+        # WS4b fit block (flag trade.fit_first_copy): per team a tag, a lead
+        # and league rank moves, from the frozen bilateral proof and the job's
+        # league-wide context (_fit_league_context). Serialized only when a
+        # team has something to show, so flag-off, no-context and empty
+        # payloads stay byte-identical.
+        if (is_enabled("trade.fit_first_copy")
+                and getattr(card, "fit_context", None) is not None
+                and callable(getattr(evidence, "matches", None)) and evidence.matches(card)):
+            from .trade_narrative import fit_block as _fit_block
+            fit = _fit_block(identity, card, players, card.fit_context)
+            if fit:
+                out["fit_block"] = fit
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
@@ -21005,6 +21202,12 @@ def trade_card_to_dict(card, players: dict) -> dict:
     # cards stay byte-identical to the pre-likes-you shape.
     if getattr(card, "likes_you", False):
         out["likes_you"] = True
+    # WS8 (flag trade.next_move) — a revised-offer card: its kind and the one
+    # deterministic line (trade_narrative.revised_offer_line). Only set on
+    # cards trade_revised_offers built, so flag-off payloads are unchanged.
+    _revised = getattr(card, "revised_offer", None)
+    if isinstance(_revised, dict) and _revised.get("line"):
+        out["revised_offer"] = {"kind": _revised["kind"], "line": _revised["line"]}
     # #362 — standing-offer provenance. Recipient-facing; composed
     # server-side and carries NO team ids and NO counts (R-19). Serialized
     # only when set, so flag-off payloads stay byte-identical.
@@ -21340,6 +21543,11 @@ def generate_trades():
 
     sess_token = request.headers.get("X-Session-Token", "")
     key        = _trade_job_key(g_user_id, league_id, fmt)
+
+    # offer-learnings WS2b — Find a Trade opened: at most one background read
+    # of the user's own Sleeper offers for this league (throttled in
+    # sleeper_offer_read.due). Flag off ⇒ returns before spawning anything.
+    _sleeper_offers_kick(g_user_id, league_id)
 
     # Opponent count for early progress reporting (best-effort).
     opponents_total = 0
@@ -21875,6 +22083,11 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         exclusion_keys=(_load_presentment_exclusions(user_id, league.league_id)
                         if FLAGS.trade_presentment_rules else set()),
         config=config, **selection)
+    if FLAGS.trade_partner_activity and _bakeoff.owner_revision_4_enabled(config):
+        # WS7: one read per job of the public completed-trade counts revision 4
+        # compares within the league. Only revision 4 accepts the key, and
+        # flag-off contexts, evidence and request hashes never carry it.
+        context["partner_activity"] = load_manager_trade_counts(league.league_id)
     if _bakeoff.owner_revision_enabled(config):
         from .trade_input_evidence import detached_context, PoolInputEvidence
         pool = (g_universal_by_format.get(scoring_format)
@@ -21999,6 +22212,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_enabled", None)
     if not canonical["config"].get("owner_outlook_evidence_enabled"):
         canonical["config"].pop("owner_outlook_evidence_enabled", None)
+    if canonical["config"].get("owner_bilateral_revision_4_enabled") != 1.0:
+        canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
@@ -23482,7 +23697,48 @@ def _decline_reasons_enabled() -> bool:
     is the whole rollback lever, and flipping it is a config edit, not a
     deploy (`POST /api/feature-flags/reload`).
     """
-    return getattr(FLAGS, "feedback_decline_reasons", False)
+    return (getattr(FLAGS, "feedback_decline_reasons", False)
+            or _pass_reason_cadence_enabled())
+
+
+def _pass_reason_cadence_enabled() -> bool:
+    """`trade.pass_reason_cadence` (offer-learnings WS3). ON opens this route
+    on its own (the deck asks once every few passes instead of on every pass)
+    and admits the cadence-only codes. OFF leaves `_decline_reasons_enabled`
+    exactly `feedback.decline_reasons`, so the route is unchanged."""
+    return getattr(FLAGS, "trade_pass_reason_cadence", False)
+
+
+def _cadence_int(cfg: dict, key: str, default: int, floor: int) -> int:
+    """A cadence knob as an int >= floor; a missing, non-integral, NaN or
+    out-of-range value serves `default` (a bad row can never make the prompt
+    fire on every card by accident unless someone sets 1 on purpose)."""
+    try:
+        raw = float(cfg.get(key, default))
+    except Exception:
+        return default
+    if not math.isfinite(raw) or raw != int(raw) or raw < floor:
+        return default
+    return int(raw)
+
+
+def _pass_reason_cadence_fields() -> dict:
+    """The additive `pass_reason_cadence` key on GET /api/feature-flags.
+
+    Flag OFF ⇒ `{}`: the key is absent and the payload is byte-identical to
+    before the flag existed. ON ⇒ `{ask_after: N, quiet_for: M}` from the
+    `pass_reason_ask_after` / `pass_reason_quiet_for` knobs (3 / 5), read per
+    request so `scripts/set_knob.py` lands on the next app foreground."""
+    if not _pass_reason_cadence_enabled():
+        return {}
+    try:
+        cfg = get_config()
+    except Exception:
+        cfg = {}
+    return {"pass_reason_cadence": {
+        "ask_after": _cadence_int(cfg, "pass_reason_ask_after", 3, 1),
+        "quiet_for": _cadence_int(cfg, "pass_reason_quiet_for", 5, 0),
+    }}
 
 
 def _pass_reason_writes_elo(code) -> bool:
@@ -23669,6 +23925,10 @@ def trade_pass_reason():
         return jsonify({"error": "invalid_reason", "field": "reason"}), 400
     if detail is not None:
         if detail not in PASS_REASON_PARENT:
+            return jsonify({"error": "invalid_detail", "field": "detail"}), 400
+        if detail in PASS_REASON_CADENCE_ONLY and not _pass_reason_cadence_enabled():
+            # Cadence-chip codes exist only behind their flag: flag off, the
+            # route accepts exactly the codes it always did.
             return jsonify({"error": "invalid_detail", "field": "detail"}), 400
         if reason is not None and PASS_REASON_PARENT[detail] != reason:
             # e.g. reason='fit' with detail='value_giving' — one of the two
@@ -26862,6 +27122,20 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         provider_transaction_id=result.get("transaction_id"),
         source=source,
     )
+    # offer-learnings WS2 — the 'sent' row whose provider outcome the
+    # reconciler fills from the public completed-trade capture. Its own row,
+    # NOT trade_proposals (that one is written only under
+    # trade.valuation_telemetry). Never raises.
+    if is_enabled("trade.outcome_tracking"):
+        from . import trade_outcomes as _trade_outcomes
+        _trade_outcomes.record_sent(
+            user_id=user_id, league_id=league_id,
+            transaction_id=result.get("transaction_id"),
+            my_roster_id=my_roster_id, their_roster_id=their_rid,
+            give_asset_ids=give, receive_asset_ids=receive,
+            proposal_event_id=_proposal_event_id,
+            impression_id=_owned_impression_id(impression_id, user_id, league_id=league_id),
+        )
     return {
         "status": result.get("status") or "proposed",
         "transaction_id": result.get("transaction_id"),
@@ -30206,6 +30480,16 @@ def session_init():
                         league_meta=_league_meta() if _mp_on else None,
                         live_user=user_id if _mp_on else None)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
+                    # offer-learnings WS2 — sent offers of this league read
+                    # against the capture just refreshed. DB-only; its own
+                    # try so it can't be mistaken for a capture failure.
+                    try:
+                        if is_enabled("trade.outcome_tracking"):
+                            from . import trade_outcomes as _trade_outcomes
+                            _trade_outcomes.reconcile_league(league_id)
+                    except Exception as oc_err:
+                        log.warning("  trade outcome reconcile failed (continuing): %s",
+                                    oc_err)
                     # suggestion.telemetry — executed-trade tagging: link
                     # every not-yet-linked captured trade to its best-
                     # matching logged suggestion (was_recommended + ghost
@@ -32093,6 +32377,8 @@ def _daily_tick_steps() -> list:
         S("roster_snapshot",   _daily_tick_roster_snapshot),
         S("usage_trends",      _daily_tick_usage_trends),
         S("receipts_grade",    _daily_tick_receipts_grade),
+        S("trade_outcomes",    _daily_tick_trade_outcomes),
+        S("sleeper_offers",    _daily_tick_sleeper_offers),
         S("rookie_monitor",    _daily_tick_rookie_monitor),
         S("players_guard",     _daily_tick_players_guard),
         S("reengagement",      _daily_tick_reengagement),
@@ -32105,6 +32391,50 @@ def _daily_tick_steps() -> list:
     ]
 
 
+def _daily_tick_trade_outcomes(now: datetime):
+    """daily-tick step 4 — offer-learnings WS2 (flag `trade.outcome_tracking`).
+    For leagues with an offer sent through the app in the watch window,
+    refresh the public completed-trade capture (only while
+    `market.trade_capture` is on: it owns `sleeper_trades`) and move each
+    offer to its observed outcome, so a league nobody opens still resolves."""
+    if not is_enabled("trade.outcome_tracking"):
+        return "skipped", "flag off"
+    from . import trade_outcomes as _trade_outcomes
+    sync = None
+    if is_enabled("market.trade_capture"):
+        from .sleeper_trades_service import sync_league_trades as sync
+    return "ok", _trade_outcomes.tick(now, sync=sync)
+
+
+def _daily_tick_sleeper_offers(now: datetime):
+    """daily-tick step `sleeper_offers`, after `trade_outcomes` — offer-learnings WS2b (flag
+    `trade.sleeper_offer_import`). One private offers read per (user,
+    league), through `_sleeper_offers_sync` and its throttle: leagues where
+    the user has an offer sent through the app in the last WATCH_DAYS that
+    Sleeper may still move, then the current leagues of users who consented to
+    import. At most TICK_BUDGET reads; one failure never stops the rest."""
+    if not is_enabled("trade.sleeper_offer_import"):
+        return "skipped", "flag off"
+    from . import sleeper_offer_read as _sor
+    since = (now - timedelta(days=_sor.WATCH_DAYS)).isoformat()
+    targets = list(load_offer_read_targets(_sor.PROVIDER, _sor.APP_READ_STATUSES, since,
+                                           _sor.TICK_BUDGET))
+    fresh = (now - timedelta(days=_sor.CONSENT_LEAGUE_FRESH_DAYS)).isoformat()
+    for user_id in load_offer_import_consented_users(_sor.TERMS_VERSION):
+        cred = get_sleeper_credential(user_id)
+        if cred and cred.get("sleeper_user_id"):
+            targets += [(user_id, lg) for lg in
+                        load_member_sleeper_leagues(cred["sleeper_user_id"], fresh)]
+    seen, stats = set(), {}
+    for pair in targets:
+        if pair in seen or len(seen) >= _sor.TICK_BUDGET:
+            continue
+        seen.add(pair)
+        outcome = _sleeper_offers_sync(pair[0], pair[1], trigger="daily_tick", now=now)
+        stats[outcome] = stats.get(outcome, 0) + 1
+    return "ok", stats
+
+
 def _daily_tick_deletion_scrub(now: datetime):
     """daily-tick step: the deletion scrub's due DB passes, the model store
     for every job whose DB pass is current, finished jobs deleted, and the
@@ -32114,7 +32444,7 @@ def _daily_tick_deletion_scrub(now: datetime):
 
 
 def _daily_tick_rookie_monitor(now: datetime):
-    """daily-tick step 4 — M0 rookie class-load monitor. The NEXT season's
+    """daily-tick step 5 — M0 rookie class-load monitor. The NEXT season's
     class does not exist in Sleeper's dump until ~late April. Its arrival is
     a one-shot, unobservable-in-advance event that the Draft Room's
     pre-class-load state depends on, so log it loudly the first time a row
@@ -32124,7 +32454,7 @@ def _daily_tick_rookie_monitor(now: datetime):
 
 
 def _daily_tick_reengagement(now: datetime):
-    """daily-tick step 6. Re-engagement pushes — winback variants,
+    """daily-tick step 7. Re-engagement pushes — winback variants,
     finish_ranking, and season_start. Frequency caps in `_NOTIF_FREQ_CAPS`
     enforce per-window limits (winback_matches: 1/7d, winback_dormant: 1/30d,
     finish_ranking: 1/30d, season_start: 1/365d). The cap check happens
@@ -32225,7 +32555,7 @@ def _daily_tick_reengagement(now: datetime):
 
 
 def _daily_tick_replenishment(now: datetime):
-    """daily-tick step 7 — F10 weekly deck pre-generation, DEFERRED: an
+    """daily-tick step 8 — F10 weekly deck pre-generation, DEFERRED: an
     unconditional hard skip (operator, 2026-10-23: ship S3 without it). It
     reads no flag and never calls `_run_weekly_replenishment`, so no deck
     builds, pushes, inbox rows or marker rows, whatever `deck.replenishment`
@@ -32246,7 +32576,7 @@ def _daily_tick_replenishment(now: datetime):
 
 
 def _daily_tick_eval_nightly(now: datetime):
-    """daily-tick step 8 — F8 offline eval nightly (operator tooling,
+    """daily-tick step 9 — F8 offline eval nightly (operator tooling,
     unflagged). Idempotent per (UTC day, scorer, window) via
     data/eval_runs/runs.jsonl, so daily-tick retries are free."""
     from .eval.nightly import run_all as _eval_run_all
@@ -32260,8 +32590,8 @@ def _daily_tick_eval_nightly(now: datetime):
 
 
 def _daily_tick_value_model_refit(now: datetime):
-    """daily-tick step 9 — F6 (flag deck.value_model — SHIPS DARK) nightly
-    refit. Runs AFTER step 8 so the eval pass grades yesterday's model
+    """daily-tick step 10 — F6 (flag deck.value_model — SHIPS DARK) nightly
+    refit. Runs AFTER step 9 so the eval pass grades yesterday's model
     before today's supersedes it. Flag read at run time (training AND
     serving are both dark until the F8 replay win); idempotent per UTC date
     via data/value_model/models.jsonl; `nightly_refit` never raises."""
@@ -35142,6 +35472,7 @@ def feature_flags_route():
         "experiments": experiments,
         "configs":     configs,
         **_update_gate_fields(),
+        **_pass_reason_cadence_fields(),
     })
 
 
@@ -36005,6 +36336,18 @@ def grading_create_session_route():
         return jsonify({"error": "league_not_active"}), 400
     user_id = str(sess["user_id"])
     try:
+        # Revision-4 round (grading.revision4_round): an explicit round_id, or the default
+        # offer order (outlook_calibration.default_round). Off ⇒ None, today's path.
+        r4_round = _outlook_calibration.default_round(
+            user_id=user_id, league_id=league_id, requested=body.get("round_id"))
+        if r4_round is not None:
+            out = _outlook_calibration.start_session(user_id=user_id, league_user_id=_league_user_id(sess),
+                                                     league_id=league_id, round_id=r4_round)
+            if out.get("needs_build"):
+                _outlook_calibration.kick_worker()
+            log.info("blind-grading: session %s league=%s round=%s resumed=%s",
+                     out["session"]["session_id"], league_id, r4_round, out["resumed"])
+            return jsonify({"session": out["session"], "resumed": out["resumed"]}), (200 if out["resumed"] else 202)
         # start_session resumes a building/open session itself (a failed one starts fresh)
         # and reports needs_build=True for a resumed 'building' row, so a build orphaned by
         # a restart or deploy is re-kicked here; a duplicate build writes nothing.
@@ -36042,6 +36385,17 @@ def grading_current_session_route():
     league_id = (request.args.get("league_id") or "").strip()
     if not league_id:
         return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    try:
+        r4_round = _outlook_calibration.default_round(
+            user_id=str(sess["user_id"]), league_id=league_id, requested=request.args.get("round_id"))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+    if r4_round is not None:
+        out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id,
+                                                   round_id=r4_round)
+        if out["session"] and out["session"]["status"] == "building":
+            _outlook_calibration.kick_worker()
+        return jsonify(out)
     if _outlook_calibration.enabled():
         out = _outlook_calibration.current_session(user_id=str(sess["user_id"]), league_id=league_id)
         if out["session"] and out["session"]["status"] == "building":
@@ -36173,6 +36527,18 @@ def admin_grading_pregenerate_route():
     with "refresh_rosters": true, each Sleeper league's rosters are re-read from Sleeper first."""
     _require_cron_auth()
     body = request.get_json(silent=True)
+    r4_round = _outlook_calibration.R4_ROUND_ID
+    # The revision-4 round is a known id only while grading.revision4_round is on.
+    if (isinstance(body, dict) and body.get("round_id") == r4_round
+            and _outlook_calibration.r4_round_enabled()):
+        try:
+            out = _outlook_calibration.pregenerate(offset=body.get("offset", 0),
+                limit=body.get("limit", _outlook_calibration.MAX_BATCH), targets=body.get("targets"),
+                round_id=r4_round)
+        except _blind_grading.GradingError as err:
+            return _grading_error(err)
+        _outlook_calibration.kick_worker()
+        return jsonify(out), 202
     if isinstance(body, dict) and body.get("round_id") not in (None, _outlook_calibration.ROUND_ID):
         return jsonify({"error": "invalid_round"}), 400
     if _outlook_calibration.build_enabled() or (isinstance(body, dict) and body.get("round_id") == _outlook_calibration.ROUND_ID):
@@ -36263,12 +36629,15 @@ def admin_grading_report_route():
     """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):
     results stay readable after calibration_rollout is stopped."""
     _require_cron_auth()
-    if request.args.get("round_id") not in {None, _outlook_calibration.ROUND_ID}:
+    # Each round's report stays readable whatever its flag, so results survive a rollback.
+    rounds = {_outlook_calibration.ROUND_ID, _outlook_calibration.R4_ROUND_ID}
+    if request.args.get("round_id") not in {None, *rounds}:
         return jsonify({"error": "invalid_round"}), 400
-    if request.args.get("round_id") == _outlook_calibration.ROUND_ID:
+    if request.args.get("round_id") in rounds:
         try:
             return jsonify(_outlook_calibration.report(since=request.args.get("since") or None,
-                include_open=request.args.get("include_open") == "1"))
+                include_open=request.args.get("include_open") == "1",
+                round_id=request.args.get("round_id")))
         except _blind_grading.GradingError as err:
             return _grading_error(err)
     try:
@@ -37973,21 +38342,29 @@ def _power_ranking_inputs(sess: dict, league_id: str):
     if not members:
         return None, {}, {}, fmt
 
+    seed, players_meta = _power_value_inputs(fmt, sess.get("service"), sess.get("players"))
+    return members, seed, players_meta, fmt
+
+
+def _power_value_inputs(fmt: str, service, session_players) -> tuple[dict, dict]:
+    """(seed, players_meta) for compute_power_rankings' consensus basis.
+    Shared by League rankings (_power_ranking_inputs) and the trade card's
+    fit block (_fit_league_context), so both rank from the same values."""
     pool_players, seed = _get_universal_pool(fmt)
     # Demo-style sessions rank a synthetic player pool whose ids never
     # appear in the universal pool; their consensus lives in the session
     # service's seed ratings. Merge those in as a FALLBACK (pool seed
     # wins) so demo consensus totals aren't all-zero. Real leagues are
     # unaffected — their session ranking pool is the universal pool.
-    svc_seed = getattr(sess.get("service"), "_seed", None) or {}
+    svc_seed = getattr(service, "_seed", None) or {}
     if svc_seed:
         seed = {**svc_seed, **seed}
     # Metadata: universal pool first, session players filling any gaps
     # (league roster players outside the pool still need name/position).
     players_meta = {p.id: p for p in pool_players}
-    for p in (sess.get("players") or []):
+    for p in (session_players or []):
         players_meta.setdefault(p.id, p)
-    return members, seed, players_meta, fmt
+    return seed, players_meta
 
 
 def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
@@ -39951,6 +40328,142 @@ def _fa_move_date_label(iso: str | None) -> str:
     except Exception:
         local = when.astimezone(timezone(timedelta(hours=-8)))
     return f"{local:%b} {local.day}"
+
+
+# ── offer-learnings WS2b — the user's own Sleeper trade offers, read with
+# the Send-in-Sleeper credential (flag `trade.sleeper_offer_import`).
+# docs/plans/offer-learnings/scope-sleeper-offer-read.md. The leaf
+# backend/sleeper_offer_read.py owns the throttle, the status words, counter
+# linking and what is written; this file owns the flag, the credential, the
+# public rosters read and the one private call.
+
+def _sleeper_offers_sync(user_id: str, league_id: str, *, trigger: str,
+                         now: datetime | None = None) -> str:
+    """At most one private offers read for (user, league). Returns what
+    happened: off | not_sleeper | no_consent | no_credential | not_due |
+    no_roster | failed | read. Never raises. A failure changes nothing (the
+    credential, the consent and the stored rows stay) and is logged once by
+    the throttle's back-off."""
+    if not is_enabled("trade.sleeper_offer_import"):
+        return "off"
+    from . import sleeper_offer_read as _sor
+    try:
+        league_id = str(league_id or "")
+        if not league_id.isdigit() or is_linked_platform_league(league_id):
+            return "not_sleeper"
+        # The operator's condition (2026-11-10): a user's own Sleeper offers are
+        # read only "with explicit user permission". The consent switch covers
+        # every private read, for offers sent through the app as much as for
+        # the import.
+        import_on = _sor.consented(user_id)
+        if not import_on:
+            return "no_consent"
+        cred = get_sleeper_credential(user_id)
+        if not cred:
+            return "no_credential"
+        clock = time.time()
+        if not _sor.due(user_id, league_id, clock):
+            return "not_due"
+        try:
+            token = _sleeper_write.decrypt_token(cred["token_encrypted"])
+        except _sleeper_write.SleeperWriteError as e:
+            _sor.note_failure(user_id, league_id, auth=False, now=clock, detail=e.kind)
+            return "failed"
+        if _sleeper_write.is_expired(token):
+            _sor.note_failure(user_id, league_id, auth=True, now=clock, detail="expired")
+            return "failed"
+        rosters = _fetch_league_rosters(league_id)
+        if rosters is None:
+            _sor.note_failure(user_id, league_id, auth=False, now=clock, detail="roster_read")
+            return "failed"
+        my_rid, me = _sor.my_user_ids(rosters, cred.get("sleeper_user_id"))
+        if my_rid is None:
+            return "no_roster"
+        try:
+            txs = _sleeper_write.league_trade_offers(token, league_id)
+        except _sleeper_write.SleeperAuthError as e:
+            _sor.note_failure(user_id, league_id, auth=True, now=clock,
+                              detail=getattr(e, "detail", "") or str(e))
+            return "failed"
+        except _sleeper_write.SleeperWriteError as e:
+            _sor.note_failure(user_id, league_id, auth=False, now=clock,
+                              detail=f"{e.kind}: {getattr(e, 'detail', '') or e}")
+            return "failed"
+        stats = _sor.apply_read(user_id=user_id, league_id=league_id, txs=txs,
+                                my_roster_id=my_rid, me=me, import_on=import_on,
+                                now=now or datetime.now(timezone.utc))
+        log.info("sleeper offers read league=%s trigger=%s %s", league_id, trigger,
+                 json.dumps(stats, sort_keys=True))
+        return "read"
+    except Exception as err:
+        log.warning("sleeper offers read failed unexpectedly (non-fatal): %s", err)
+        return "failed"
+
+
+def _sleeper_offers_spawn(fn, *args, **kwargs) -> None:
+    """Run a read off the request thread (a seam: tests run it inline)."""
+    threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True,
+                     name="sleeper-offers-read").start()
+
+
+def _sleeper_offers_kick(user_id: str, league_id: str) -> None:
+    """Find a Trade was opened: one background read when it is due. The flag
+    is read here, so with it off nothing is spawned."""
+    if not is_enabled("trade.sleeper_offer_import") or not user_id:
+        return
+    try:
+        _sleeper_offers_spawn(_sleeper_offers_sync, str(user_id), str(league_id),
+                              trigger="find_a_trade")
+    except Exception as err:
+        log.warning("sleeper offers kick failed (non-fatal): %s", err)
+
+
+def _offer_import_state(user_id: str) -> dict:
+    from . import sleeper_offer_read as _sor
+    return {"consented": _sor.consented(user_id), "linked": bool(get_sleeper_credential(user_id)),
+            "terms_version": _sor.TERMS_VERSION, "label": _sor.SWITCH_LABEL,
+            "terms_line": _sor.TERMS_LINE}
+
+
+@app.route("/api/sleeper/offer-import", methods=["GET", "POST", "DELETE"])
+def sleeper_offer_import_route():
+    """WS2b consent to import the user's own Sleeper trade offers.
+
+    GET    → {consented, linked, terms_version, label, terms_line}. 404 with
+             the flag off.
+    POST   {terms_version} → grant (append-only; a repeat at the same version
+             appends nothing). 404 flag off; 409 `sleeper_not_linked` without a
+             Send-in-Sleeper credential; 409 `terms_changed` when the version
+             the app showed is not the current one.
+    DELETE → appends a withdrawal and deletes every imported offer in the same
+             transaction: {consented: false, deleted, notice}. Works with the
+             flag off, so a user can always withdraw.
+    All three need a VERIFIED session (an unverified session can carry another
+    user's id), 403 `verification_required` otherwise."""
+    from . import sleeper_offer_read as _sor
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if not user_id:
+        raise _SessionExpired()
+    if request.method != "DELETE" and not is_enabled("trade.sleeper_offer_import"):
+        return jsonify({"error": "feature_disabled"}), 404
+    denial = (_verified_read_denial(sess) if request.method == "GET"
+              else _verified_write_denial(sess))
+    if denial is not None:
+        return denial
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if request.method == "DELETE":
+        _wrote, deleted = withdraw_offer_import_consent(user_id, _sor.TERMS_VERSION, now_iso)
+        return jsonify({"consented": False, "deleted": deleted, "notice": _sor.WITHDRAWN_NOTICE})
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        if not get_sleeper_credential(user_id):
+            return jsonify({"error": "sleeper_not_linked"}), 409
+        if body.get("terms_version") != _sor.TERMS_VERSION:
+            return jsonify({"error": "terms_changed", **_offer_import_state(user_id)}), 409
+        if not _sor.consented(user_id):
+            record_offer_import_grant(user_id, _sor.TERMS_VERSION, now_iso)
+    return jsonify(_offer_import_state(user_id))
 
 
 @app.route("/api/platform-write-consent", methods=["GET", "DELETE"])

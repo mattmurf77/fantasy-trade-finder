@@ -508,6 +508,8 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 
 **Objection (breaker)** — One scored reason a counterparty might decline, in the **shipped decline-reason vocabulary**: the `trade_pass_reasons` layer-2 codes (`fit_outlook`, `fit_new_weakness`, `fit_duplicate`, `value_giving`, `other_player_keep`) plus the one registered extension `roster_crunch`. Deliberately the *same* words the user picks from when they pass a card, so a prediction and a filed reason are comparable without a mapping. Each objection carries a `severity` in 0–1 and an `evidence` object drawn from a closed per-code key set; the highest-severity objection clearing its class floor is the card's `top`. A code also has a **producer** — the breaker may emit only its own six, and a sibling plan's code (`shape_aversion`) appearing in a breaker payload is a defect, not a variation. In v1 the codes are server-internal: no client ever switches on one.
 
+**Next move** — Offer-learnings R2 (`trade.next_move`, default OFF, `backend/trade_next_move.py`): the one pre-built revision of an offer the user has already sent. It keeps the most valuable asset on each side, makes one change (adds one of the sender's assets or drops one extra asked-for piece), must be an eligible card under the engine evaluator in force, and improves the other manager's side by 10–20% of the trade's market value. Never more than one, and none when nothing qualifies. Not a counter-offer from the other manager, and not shown anywhere in the app yet (treatments: `mockups/next-move/`).
+
 **Negative-results memory (negmem)** — The per-league memory of what the viewer has already turned down (`backend/negmem.py`, flag `trade.negmem`, 2026-08-22). It reads the shipped rejection spine — viewed passes carrying a filed reason — and hands generation a **soft prior**: candidate families the viewer has repeatedly killed rank lower. Three properties are the design, and all three are the point of [ADR-015](adr/adr-015-negmem-soft-prior-not-fourth-filter.md). It is **not a fourth filter**: the multiplier is clamped at `negmem_floor`, so a card can sink but never vanish — one swipe must not silence a trade space (D-067). It is **derived on read**, not stored: one bulk query per job builds an in-memory map, nothing is persisted, and deleting the source rows deletes the memory. And every influence is **stamped** (`deck_impressions.features_json.negmem`), so no card is ever quietly demoted. Two layers ride the one map — M1, the multiplier at the four generation seams; M2, the aggregate acceptance counts that finally feed `trade_gen_v2`'s long-unfed `acceptance_prior`. Distinct from the **breaker** above, which predicts what the *counterparty* would object to; negmem remembers what *you* actually rejected.
 
 **Reason family** — negmem's coarse key: which of the two admitted branches of the decline taxonomy a rejection came from, **`value`** or **`fit`**, collapsing the layer-2 codes beneath each. Deliberately coarse — the memory's unit of "cousin" is *same partner + same reason family*, **not** package similarity, so passing on two different value-heavy offers from the same manager compounds while a fit objection about a different manager does not. Everything outside those two branches (the `other_*` codes, free text) is inadmissible evidence: it names no engine-actionable family.
@@ -543,6 +545,16 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 
 **Trade concept id** — A canonical, **perspective-independent** hash of `(schema_version, league, both participants sorted, each sorted user's give side)`. It is what joins the two halves of a mutual match, which `trade_hash` cannot: `trade_hash` is viewer-relative, so A's card and B's mirror hash differently. Both are kept — `trade_hash` still drives viewer-relative fatigue and dedup, and the two answer different questions.
 
+**Trade outcome** — What happened at the provider to a trade the user sent through the app, as far as the app can observe it (`trade_offer_outcomes.status`, flag `trade.outcome_tracking`): `sent`, `accepted` (the sent Sleeper transaction appears completed in the league's public transactions), or `completed_different_terms` (it did not, but the same two teams completed a different trade after it was sent; an observed later trade, not a confirmed counter). Declined, withdrawn and expired offers are not observable from the public API and are never recorded; "not accepted yet" is the only negative. With flag `trade.sleeper_offer_import` the app also reads the user's own offers privately from Sleeper, which adds `declined`, `withdrawn`, `lapsed` and `countered`.
+
+**Imported offer** — A trade offer from the user's own Sleeper account that was not sent through the app (sent or received), stored with `trade_offer_outcomes.source = 'sleeper_import'` only while the user's "Use my Sleeper trade offers" switch is on; switching it off deletes them (WS2b).
+
+**Linked counter** — The other manager's counter-offer (`settings.is_counter`) tied to the offer it answers by the same two rosters, the other side as creator and its creation within 10 minutes of the original closing (`sleeper_offer_read.link_counters`). Sleeper itself does not record the link.
+
+**Revised-offer card** — A card that leads the deck because Sleeper showed one of the user's own sent offers declined: the same trade with one offered piece swapped for a slightly more valuable one (5–15% of the trade), proven by the engine's evaluator, shown once per declined offer and retired when passed (WS8, flag `trade.next_move`). Its line says the offer was declined and what changed, never why.
+
+**Middle ground** — The revised-offer card for a counter the user declined: it keeps what the user's offer and the counter share and moves the other manager's side about half of the market-value gap toward the counter.
+
 **Policy variant** — `legacy`, `personal_market_v1` or `value_core`: which eligibility/ranking/deck policy governed a deck job. **Orthogonal to `model_arm`** (which generator produced the card), and recorded separately so a result can be read overall *and* per generator. A deck never mixes variants — composition is part of the treatment and has to be evaluated as a coherent experience.
 
 **Value core** — The deck engine in `backend/value_core/` (flag `trade.value_core`, default off; testers first via `vc_testers_only`). It splits trade suggestion into two jobs: a core that finds every trade fair on consensus market value (the **fair pool**), and a ranking layer that orders that pool by three scores (**value**, **outlook**, **rank**), dropping nothing except lower-priority versions of the same **trade idea**. When it serves a job, none of the legacy gate or ordering stack runs. See [architecture](architecture.md#value-core-trade-engine) and [ADR-024](adr/adr-024-value-core-engine.md).
@@ -564,6 +576,12 @@ The lane-2a import path (D-058): the user opens DLF/Dynasty Nerds in an in-app b
 **Redundancy rule (value core)** — Hard rule `redundant` (`value-core-3`, 2026-10-10). No team takes a TE or a QB while it keeps as many players at that position as it starts, each worth at least 70% of the incoming one. QB counts the superflex slot (`value-core-4`, 2026-10-14): a superflex team with two comparable QBs is not offered a third. Sending one back is fine. It applies to both sides and to the fit engines, which run the same rules.
 
 **Fit engine / team value** — `backend/fit_engine.py` (2026-10-09, under test in Calibration). A **team value** is what one asset is worth to one team: Approach A multiplies consensus market by window (starter vs depth, age, picks), positional-need and that team's board factors; Approach B blends the asset's **redraft** and **dynasty** values by the team's **priority** (contender 70/30, middle 50/50, rebuilder 20/80) with a ±10% need adjustment. A fit trade gives each side something worth more to them than what they give up.
+
+**Fit block (fit-first copy, version 3)** — The server-composed band under a bilateral trade card's header (flag `trade.fit_first_copy`, `trade_narrative.fit_block`, template `fit-2`, 2026-11-10; it replaced WS4's one-sentence **fit line**). One row per team, the other team first, each with three parts: an **outlook tag**, a **lead phrase** and **rank moves**. The lead names the single strongest proof-backed reason (a plan match, then a filled positional need, e.g. "Rebuild-leaning: adds Eli Brandt, 23", "Upgrades RB: adds Jaylen Pruitt"), or, when a team has none, only what moves ("Gets X, gives Y") with no praise. Rank moves are the team's **league position rank** before and after the trade ("WR 9th → 7th"), gains and losses alike. The block is absent when neither team has a reason or a rank move. Template table: [scope-fit-block-v3.md](plans/offer-learnings/scope-fit-block-v3.md).
+
+**League position rank** — A team's rank at QB/RB/WR/TE among its league by summed consensus value of its players there (`compute_power_rankings`' `positions[P].value`), ties sharing a rank (1 + teams strictly above). The number League rankings' drill-in chip shows; the fit block shows it before and after a trade, only when the position's value moves by at least 5% of the league median there and with at least three valued teams. Picks have none. Rule: [cross-client-invariants § Fit block](cross-client-invariants.md#fit-block-ranks-and-outlook-tags-ws4b-flag-tradefit_first_copy).
+
+**Outlook tag** — The small word beside a team in the fit block. The viewer's: the outlook they declared ("All-in", "Contending", "Rebuilding", "Tanking"), else the engine's read of their roster ("Looks contending" / "Looks rebuilding"). The other team's: always the roster read, never a league-mate's declared setting. No tag for "not sure" or no read.
 
 **Fit profile (Approach B)** — A player's label from the gap between his redraft and dynasty percentile grades: **Win-now** (redraft well above dynasty), **Future** (picks, and players 25 or younger whose dynasty runs well above redraft), else **Balanced**. A team **sells** what clashes with its priority (Win-now on a rebuilder, Future on a contender) or sits at a surplus position, and **buys** the opposite.
 
@@ -626,6 +644,19 @@ A unique allocation of currently available players meeting the existing dynasty 
 
 The random `redacted:<32 hex>` that stands in for a deleted user's partner id in OTHER users' deck records after an account deletion (legal R28.20 (ii)). There is one per deletion, the same in every store, and no mapping to the id is kept once the scrub's job row is gone. A card whose partner is a redaction token is a **redacted card**: it also loses every field taken from the deleted user's account, and its blended scores are null. Readers treat its partner as unknown, never as a person to identify (legal (viii)). The prefix is `eval.contract.REDACTED_PARTNER_PREFIX`. Code: `backend/deletion_scrub.py`.
 
+## Page-first search and admissible bound
+
+**Page-first search** (`backend/trade_first_page.py`) returns the first k trade cards without
+building the rest of the inventory: candidates are ordered by an **admissible bound**, a cheap
+score proven never to be lower than a candidate's true `weaker_support`, verified best-first by
+the unchanged evaluator, and the search stops once no remaining bound can reach the page.
+[ADR-028](adr/adr-028-page-first-trade-search.md).
+
+**Fast deck** (`backend/trade_fast_deck.py`, flag `trade.fast_deck`, ships off) is a deck
+built from the page-first search's proven first 150 cards instead of the full inventory. The
+cards, order and proofs are the full engine's; the deck is shorter. **Fast-deck shadow**
+(`trade.fast_deck_shadow`) serves the full deck and logs how far the fast one agrees.
+
 ## Window evidence and dynasty roster proxy
 
 **Window evidence** records the selected/inferred outlook, provisional horizon and
@@ -634,6 +665,16 @@ outlook candidate, player production/job security stays Unknown; preference or
 price cannot prove longevity. **Dynasty roster proxy** is a legal-slot assignment
 of existing market prices, not projected points or championship probability.
 [Candidate contract](plans/outlook-evidence-rules/architecture.md).
+
+**Owned-pick premium** — revision 4 (`owner-v2-bilateral-4`) values the picks another manager would give up above market in that manager's support score: 20% for a rebuilding or tanking team, 10% for "not sure", none for a contender or championship team. Changes order only, never the market floor or the fairness gate.
+
+**Best-asset rule** — revision 4 demotes (never deletes) an uneven offer in which the other manager gives up the trade's most valuable asset for several lesser ones, unless those are all picks going to a rebuilding or tanking team.
+
+**Partner activity rule** (flag `trade.partner_activity`) — revision 4's fourth rule: offers to a manager whose completed trades this league year (public, from their manager profile) are at or below a third of their league's median are demoted, never deleted. Nobody is flagged when the league median is below 2, fewer than half the managers have a profile, or every manager is above the threshold; a manager with no profile is never flagged. A **reluctant trader** is a manager the rule flags. Never shown to users.
+
+**Additive Calibration arm** — an engine folded into a Calibration round's new decks after the paired selection (today `revision_4`), credited on shared cards and never reordering or reselecting the paired cards. Superseded for revision 4 by the **Revision-4 round**; inert while that round is on.
+
+**Revision-4 round** — the Calibration round `outlook-v2-v4-1` (flag `grading.revision4_round`): owner-v2-bilateral-2 (live) next to owner-v2-bilateral-4 on one frozen capture per deck, blind, with its own decks, answers and report beside `outlook-v2-v3-1`. Offered to every account/league: after a current deck already part-way through, before an unstarted one, which is offered again once the revision-4 deck is done.
 
 **Calibration round** — a namespaced, frozen comparison exercise whose exact model versions, input snapshot, selected cards and first feedback remain attributable independently of earlier exercises. The outlook round collects descriptive opinions and does not validate future-production forecasts.
 

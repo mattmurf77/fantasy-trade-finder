@@ -310,6 +310,10 @@ ROUTES = {
     ("DELETE", "/api/sleeper/link"): FREE,
     ("GET", "/api/sleeper/link"): FREE,
     ("POST", "/api/sleeper/link"): FREE,
+    # WS2b: the offer-import consent switch (a withdrawal is never gated).
+    ("DELETE", "/api/sleeper/offer-import"): FREE,
+    ("GET", "/api/sleeper/offer-import"): FREE,
+    ("POST", "/api/sleeper/offer-import"): FREE,
     ("GET", "/api/sleeper/players"): FREE,
     ("GET", "/api/sleeper/players/warm"): FREE,
     ("GET", "/api/sleeper/rosters/<league_id>"): FREE,

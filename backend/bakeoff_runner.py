@@ -297,14 +297,28 @@ def owner_revision_enabled(config=None) -> bool:
     return owner_arm(config) == ARM_OWNER_BILATERAL and value == 1.0
 
 
+def owner_revision_4_enabled(config=None) -> bool:
+    """V4 (built on v2, not v3) is opt-in within revision serving.
+
+    Exactly 1 selects it and it wins over the v3 selector; any other value
+    leaves the v2/v3 selection exactly as it was.
+    """
+    value = (_cfg("owner_bilateral_revision_4_enabled", 0.0) if config is None
+             else config.get("owner_bilateral_revision_4_enabled", 0.0))
+    return owner_revision_enabled(config) and value == 1.0
+
+
 def owner_outlook_evidence_enabled(config=None) -> bool:
     """V3 is opt-in within revision serving; zero rolls back to immutable v2."""
     value = (_cfg("owner_outlook_evidence_enabled", 0.0) if config is None
              else config.get("owner_outlook_evidence_enabled", 0.0))
-    return owner_revision_enabled(config) and value == 1.0
+    return owner_revision_enabled(config) and value == 1.0 and not owner_revision_4_enabled(config)
 
 
 def owner_generator(config=None):
+    if owner_revision_4_enabled(config):
+        from .trade_gen_bilateral_r4 import generate_bilateral_trades
+        return generate_bilateral_trades
     if owner_outlook_evidence_enabled(config):
         from .trade_gen_outlook_evidence import generate_bilateral_trades
         return generate_bilateral_trades
@@ -319,6 +333,9 @@ def owner_generator(config=None):
 
 
 def owner_version(config=None) -> str:
+    if owner_revision_4_enabled(config):
+        from .trade_gen_bilateral_r4 import VERSION
+        return VERSION
     if owner_outlook_evidence_enabled(config):
         from .trade_gen_outlook_evidence import VERSION
         return VERSION
@@ -333,6 +350,9 @@ def owner_version(config=None) -> str:
 
 
 def owner_evaluator(config=None):
+    if owner_revision_4_enabled(config):
+        from .trade_gen_bilateral_r4 import evaluate_bilateral_trades
+        return evaluate_bilateral_trades
     if owner_outlook_evidence_enabled(config):
         from .trade_gen_outlook_evidence import evaluate_bilateral_trades
         return evaluate_bilateral_trades

@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sleeper offer history — findings and recommendations</title>
+<style>
+  :root {
+    --ink0:#0C0E11; --ink1:#13161B; --ink2:#1A1E25;
+    --line:#262C35; --line-strong:#3D4654;
+    --chalk:#ECEFF4; --dim:#97A1AE; --faint:#626C79;
+    --ice:#56D9EC; --ice-on:#071013; --flare:#F0508C;
+    --pos:#22C55E; --warn:#F59E0B;
+    --ground:var(--ink0); --panel:var(--ink1); --well:var(--ink2);
+    --text:var(--chalk); --text-dim:var(--dim);
+    --display:'Barlow Condensed','Avenir Next Condensed','Arial Narrow',sans-serif;
+    --body:'Archivo','Avenir Next','Helvetica Neue',Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ground:#F2F4F7; --panel:#FFFFFF; --well:#E9EDF2; --line:#D5DBE3; --line-strong:#AEB8C6; --text:#141920; --text-dim:#5A6472; --faint:#8b94a1; --ice:#0B7F92; --ice-on:#FFFFFF; --flare:#C2185B; --pos:#15803D; --warn:#B45309; }
+  }
+  * { box-sizing:border-box; }
+  body { background:var(--ground); color:var(--text); font-family:var(--body); font-size:15px; line-height:1.55; margin:0; }
+  a { color:var(--ice); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  .topbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:16px; padding:12px 24px; background:var(--ground); border-bottom:1px solid var(--line); }
+  .topbar h1 { font-family:var(--display); text-transform:uppercase; letter-spacing:.04em; font-size:22px; margin:0; flex:1; }
+  .btn { font-family:var(--body); font-weight:600; font-size:13px; background:var(--ice); color:var(--ice-on); border:0; border-radius:4px; padding:8px 14px; cursor:pointer; }
+  .btn.ghost { background:transparent; color:var(--text-dim); border:1px solid var(--line-strong); }
+  .btn:focus-visible, textarea:focus-visible { outline:2px solid var(--ice); outline-offset:2px; }
+
+  main { max-width:1060px; margin:0 auto; padding:24px; }
+  .lede { max-width:70ch; color:var(--text-dim); }
+  .lede strong { color:var(--text); }
+  .tick { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin:0 0 6px; }
+  .tick::before { content:""; display:inline-block; width:8px; height:2px; background:var(--ice); margin-right:6px; vertical-align:middle; }
+
+  nav.toc { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 6px; }
+  nav.toc a { font-family:var(--mono); font-size:12px; color:var(--text-dim); border:1px solid var(--line); border-radius:4px; padding:4px 8px; }
+  nav.toc a:hover { color:var(--ice); border-color:var(--line-strong); text-decoration:none; }
+
+  section.card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:22px 24px; margin:22px 0; }
+  .chead { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:14px; }
+  .cnum { font-family:var(--mono); font-size:12px; color:var(--faint); }
+  .chead h2 { font-family:var(--display); text-transform:uppercase; letter-spacing:.03em; font-size:24px; margin:0; text-wrap:balance; flex:1; min-width:260px; }
+  .chip { font-family:var(--mono); font-size:11px; border-radius:2px; padding:2px 7px; letter-spacing:.03em; white-space:nowrap; }
+  .chip.first { color:var(--pos); border:1px solid var(--pos); }
+  .chip.next { color:var(--warn); border:1px solid var(--warn); }
+  .chip.later { color:var(--text-dim); border:1px solid var(--line-strong); }
+  .chip.note { color:var(--flare); border:1px solid var(--flare); }
+
+  .part { margin:14px 0 0; max-width:74ch; }
+  .part p { margin:.45em 0; }
+  .part ul { margin:.4em 0; padding-left:20px; }
+  .part li { margin:.3em 0; }
+  .headline { font-family:var(--display); font-size:30px; line-height:1.1; letter-spacing:.01em; margin:2px 0 8px; }
+  .headline small { font-family:var(--body); font-size:14px; color:var(--text-dim); letter-spacing:0; display:block; margin-top:4px; }
+
+  .tablewrap { overflow-x:auto; margin:10px 0 4px; }
+  table { border-collapse:collapse; font-size:14px; min-width:420px; }
+  th, td { text-align:left; padding:7px 14px 7px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; font-size:11px; letter-spacing:.07em; text-transform:uppercase; color:var(--text-dim); }
+  td.n, th.n { text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; padding-right:20px; }
+  tr.hi td { color:var(--flare); font-weight:600; }
+  table.order td { padding-right:18px; }
+  table.order { min-width:720px; }
+
+  .rec { background:var(--well); border:1px solid var(--line); border-radius:6px; padding:12px 16px; margin:10px 0; max-width:74ch; }
+  .part.wide { max-width:none; }
+  .recrow { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(200px,1fr); gap:12px; margin:10px 0; align-items:stretch; }
+  .recrow .rec { margin:0; max-width:none; }
+  .reccmt { display:flex; flex-direction:column; }
+  .reccmt label { font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px; }
+  .reccmt textarea { flex:1; width:100%; min-height:84px; background:var(--well); border:1px solid var(--line-strong); border-radius:4px; color:var(--text); font-family:var(--body); font-size:14px; padding:10px; resize:vertical; }
+  @media (max-width:600px) { .recrow { grid-template-columns:minmax(0,1fr); } }
+  .rec h3 { font-family:var(--body); font-size:15px; margin:0 0 4px; }
+  .rec .rid { font-family:var(--mono); font-size:12px; color:var(--ice); margin-right:8px; }
+  .rec p { margin:.35em 0; }
+  .rec .start { color:var(--text-dim); font-size:14px; }
+  .rec .start strong { color:var(--text); }
+
+  .cmt { margin-top:18px; max-width:74ch; }
+  .cmt label { display:block; font-weight:600; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin-bottom:6px; }
+  .cmt textarea { width:100%; min-height:64px; background:var(--well); border:1px solid var(--line-strong); border-radius:4px; color:var(--text); font-family:var(--body); font-size:14px; padding:10px; resize:vertical; }
+  .saved { font-family:var(--mono); font-size:11px; color:var(--faint); min-height:16px; margin-top:4px; }
+  .foot { color:var(--text-dim); font-size:13px; max-width:74ch; margin:26px 0 60px; }
+  @media (max-width:640px) { .topbar { flex-wrap:wrap; padding:10px 16px; } main { padding:16px; } section.card { padding:18px 16px; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Sleeper offer history</h1>
+  <button class="btn ghost" id="clearBtn" type="button">Clear comments</button>
+  <button class="btn" id="exportBtn" type="button">Export comments</button>
+</header>
+
+<main>
+  <p class="tick">Review · 10 November 2026</p>
+  <p class="lede"><strong>What 612 real trade offers say about how managers decide, and what the app should build because of it.</strong>
+  The offers come from one Sleeper inbox across three dynasty leagues, June 2022 to November 2026: 64 were accepted, about 10%.
+  Each card below gives one finding, the numbers behind it and what to do about it. Every recommendation has its own comment box beside it, and each card has one for the finding itself.
+  Only pooled figures appear here; messages and per-manager numbers stay on the local machine.</p>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#order">Build order</a><a href="#limits">Limits</a>
+    <a href="#f1">1 Market value</a><a href="#f2">2 Negotiation</a><a href="#f3">3 Counters</a>
+    <a href="#f4">4 Picks</a><a href="#f5">5 Best asset</a><a href="#f6">6 Size</a>
+    <a href="#f7">7 Managers</a><a href="#f8">8 Decline reasons</a><a href="#log">9 Logging</a>
+  </nav>
+
+  <section class="card" id="order">
+    <div class="chead"><span class="cnum">00</span><h2>Build order</h2></div>
+    <div class="part">
+      <p>Eleven recommendations, in the order I would build them. None is built yet. The starting values are for testing, not settled numbers.</p>
+    </div>
+    <div class="tablewrap"><table class="order">
+      <thead><tr><th>#</th><th>Recommendation</th><th>Evidence</th><th>Starting value</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td>R1</td><td>Rank "you pay picks" above "you ask for their picks"</td><td>18% accepted against 7%</td><td>Tie-breaker when the two are otherwise close</td><td><span class="chip first">first</span></td></tr>
+        <tr><td>R2</td><td>Show the next move with every suggestion</td><td>Three-offer threads closed 39%, single offers 8%</td><td>One pre-built follow-up worth 10–20% more</td><td><span class="chip first">first</span></td></tr>
+        <tr><td>R3</td><td>Record what happens to every trade sent from the app</td><td>The app has fewer than 5 recorded responses</td><td>Accepted, declined, countered, expired</td><td><span class="chip first">first</span></td></tr>
+        <tr><td>R4</td><td>Value the other manager's own picks above market</td><td>Median counter asked for 20 points more</td><td>About 20% above market</td><td><span class="chip next">next</span></td></tr>
+        <tr><td>R5</td><td>Demote offers asking for their best asset in exchange for pieces</td><td>7% accepted against 12%</td><td>Unless their rankings say they undervalue it</td><td><span class="chip next">next</span></td></tr>
+        <tr><td>R6</td><td>Keep first-page suggestions small</td><td>Five or more assets: 6% against 10–13%</td><td>Four assets or fewer</td><td><span class="chip next">next</span></td></tr>
+        <tr><td>R7</td><td>Aim the opening offer at the other manager winning</td><td>Only 10% of accepted trades were near even</td><td>They win by 10–20% at market</td><td><span class="chip next">next</span></td></tr>
+        <tr><td>R8</td><td>Score how willing each manager is to trade</td><td>Acceptance ranged 0% to 36% by manager</td><td>Completed trades per season, public history</td><td><span class="chip next">next</span></td></tr>
+        <tr><td>R9</td><td>Capture the decline reason in one tap</td><td>About 60 replies gave a reason; six kinds</td><td>Six chips, listed in card 8</td><td><span class="chip later">later</span></td></tr>
+        <tr><td>R10</td><td>Nudge after silence and re-surface on events</td><td>44% of unaccepted offers drew no follow-up</td><td>Prompt at 48 hours with a ready revision</td><td><span class="chip later">later</span></td></tr>
+        <tr><td>R11</td><td>Lead card copy with fit, not value</td><td>"Value too low" was the least common reason</td><td>Fit line first, value line second</td><td><span class="chip later">later</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="cmt"><label for="c-order">Comments — build order</label><textarea id="c-order" data-k="order" placeholder="Wrong order? Anything missing or not worth building?"></textarea><div class="saved" data-for="order"></div></div>
+  </section>
+
+  <section class="card" id="limits">
+    <div class="chead"><span class="cnum">—</span><h2>Read this first: what the sample can and cannot say</h2><span class="chip note">limits</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>One account's trade history, read from the Sleeper website with league-mates' consent. It is the first sizeable record of how real offers were answered, and it has five limits that apply to every card below.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <ul>
+        <li><strong>One proposer.</strong> 70% of the offers were sent by the same manager. The data shows how about 30 league-mates respond to him and how he responds to them. It cannot separate "what gets accepted" from "how he proposes".</li>
+        <li><strong>Partial history.</strong> Sleeper shows only the latest 50 messages per conversation, so 19 of 38 conversations are cut off.</li>
+        <li><strong>Outcomes are inferred.</strong> An offer counts as accepted when a completed league trade between the same managers, with the same assets, appeared within three minutes. That matched 59 of 66 completed trades (89%), so acceptance is slightly under-counted.</li>
+        <li><strong>Market value is a different source from the app's.</strong> Offers were priced with DynastyProcess monthly values as raw sums, with no package adjustment. 599 of 612 could be priced.</li>
+        <li><strong>Rapid revisions inflate offer counts.</strong> 103 offers were replaced by the same proposer within 15 minutes. The fairer unit is the negotiation thread: 280 of them.</li>
+      </ul>
+    </div>
+    <div class="part">
+      <p class="tick">Recommendations</p>
+      <p>Use these findings to choose which effects to build and measure. Do not copy the percentages into the engine as parameters, and do not fit an acceptance model to this sample.</p>
+    </div>
+    <div class="cmt"><label for="c-limits">Comments — limits</label><textarea id="c-limits" data-k="limits" placeholder="Should the 20 conversations outside your three leagues be added?"></textarea><div class="saved" data-for="limits"></div></div>
+  </section>
+
+  <section class="card" id="f1">
+    <div class="chead"><span class="cnum">01</span><h2>Market value barely predicts a yes</h2><span class="chip first">supports the premise</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>Whether an offer is good for the recipient at consensus market value says very little about whether they accept it.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <p class="headline">0.58<small>Ranking offers by the recipient's market gain is only slightly better than a coin flip (0.50 is chance, 1.00 is perfect). It is 0.60 for offers sent to league-mates.</small></p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Recipient's result at market</th><th class="n">Offers</th><th class="n">Accepted</th></tr></thead>
+        <tbody>
+          <tr><td>Loses more than 30%</td><td class="n">223</td><td class="n">7%</td></tr>
+          <tr><td>Loses 10–30%</td><td class="n">77</td><td class="n">12%</td></tr>
+          <tr><td>Within 10% of even</td><td class="n">84</td><td class="n">7%</td></tr>
+          <tr><td>Wins 10–30%</td><td class="n">82</td><td class="n">11%</td></tr>
+          <tr class="hi"><td>Wins more than 30%</td><td class="n">133</td><td class="n">17%</td></tr>
+        </tbody>
+      </table></div>
+      <ul>
+        <li>Only 10% of accepted trades were within 10% of even at market.</li>
+        <li>In 40% of accepted trades, the manager who said yes lost more than 10% at market.</li>
+        <li>The typical offer asked the recipient to lose 10%.</li>
+        <li>Offers to league-mates reached 21% acceptance only when the recipient won by more than 30%. Buying a yes with value alone is expensive.</li>
+      </ul>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R7</span>Aim the opening offer at the other manager winning</h3>
+        <p>Stop treating "fair at market" as the target for a suggestion. A near-even offer was accepted no more often than a lopsided one.</p>
+        <p class="start"><strong>Starting value:</strong> the other manager wins by 10–20% at market, then let fit and their own rankings do the rest.</p></div>
+        <div class="reccmt"><label for="c-f1-r7">Comment — R7</label><textarea id="c-f1-r7" data-k="f1-r7" data-label="R7" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f1-r7"></div></div></div>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R11</span>Lead card copy with fit, not value</h3>
+        <p>Open each card with why the trade suits the other team, and put the value line second. See card 8 for the reasons people gave.</p></div>
+        <div class="reccmt"><label for="c-f1-r11">Comment — R11</label><textarea id="c-f1-r11" data-k="f1-r11" data-label="R11" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f1-r11"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f1">Comments on the finding — market value</label><textarea id="c-f1" data-k="f1" placeholder="Is 10–20% the right opening target?"></textarea><div class="saved" data-for="f1"></div></div>
+  </section>
+
+  <section class="card" id="f2">
+    <div class="chead"><span class="cnum">02</span><h2>Deals are negotiated, not accepted</h2><span class="chip first">first</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>A single offer rarely closes. Trades happen at the end of a back-and-forth, and the longer the thread, the more often it ends in a deal.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <p class="headline">8% → 57%<small>A first offer was accepted 8% of the time. Threads with five or more offers ended in a trade 57% of the time.</small></p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Offers in the thread</th><th class="n">Threads</th><th class="n">Ended in a trade</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td class="n">144</td><td class="n">8%</td></tr>
+          <tr><td>2</td><td class="n">58</td><td class="n">21%</td></tr>
+          <tr><td>3</td><td class="n">41</td><td class="n">39%</td></tr>
+          <tr><td>4</td><td class="n">16</td><td class="n">31%</td></tr>
+          <tr class="hi"><td>5 or more</td><td class="n">21</td><td class="n">57%</td></tr>
+        </tbody>
+      </table></div>
+      <ul>
+        <li>Across all 280 threads, 20% ended in a trade.</li>
+        <li>Of 57 completed threads, 35 closed on a later offer, and 15 of those closed on the other manager's counter.</li>
+        <li>After an offer that was not accepted: 44% drew no further offer within a week, 34% were revised by the proposer, and 22% were countered (median 3 hours later).</li>
+        <li>84% of counters reused at least one asset from the offer they answered.</li>
+      </ul>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R2</span>Show the next move with every suggestion</h3>
+        <p>Each card carries a pre-built "if they say no" version that keeps the core assets and adds a sweetener. Counters almost always keep an asset from the offer they answer, so the follow-up can be prepared in advance.</p>
+        <p class="start"><strong>Starting value:</strong> one follow-up worth 10–20% more to the other manager, one tap to send.</p></div>
+        <div class="reccmt"><label for="c-f2-r2">Comment — R2</label><textarea id="c-f2-r2" data-k="f2-r2" data-label="R2" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f2-r2"></div></div></div>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R10</span>Nudge after silence</h3>
+        <p>Nearly half of unaccepted offers were simply dropped. Prompt the sender with the ready revision instead of leaving the thread to die.</p>
+        <p class="start"><strong>Starting value:</strong> 48 hours with no reply.</p></div>
+        <div class="reccmt"><label for="c-f2-r10">Comment — R10</label><textarea id="c-f2-r10" data-k="f2-r10" data-label="R10" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f2-r10"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f2">Comments on the finding — negotiation</label><textarea id="c-f2" data-k="f2" placeholder="One follow-up or two? Should the app send it or only draft it?"></textarea><div class="saved" data-for="f2"></div></div>
+  </section>
+
+  <section class="card" id="f3">
+    <div class="chead"><span class="cnum">03</span><h2>A counter asks for more, by a lot</h2><span class="chip next">next</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>When a manager counters, they are not fine-tuning. They move the deal a long way toward themselves.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <p class="headline">+20 points<small>The median counter moved the trade by 20 points of its value toward the manager countering. 70% of counters improved the counterer's side.</small></p>
+      <p>That gap is the best available estimate of how far a typical first offer sits from what the other side wants.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Recommendations</p>
+      <p>This sets the size for two other recommendations: the opening target in <strong>R7</strong> (they win by 10–20%) and the sweetener in <strong>R2</strong> (10–20% more). Nothing separate to build.</p>
+    </div>
+    <div class="cmt"><label for="c-f3">Comments on the finding — counters</label><textarea id="c-f3" data-k="f3" placeholder="…"></textarea><div class="saved" data-for="f3"></div></div>
+  </section>
+
+  <section class="card" id="f4">
+    <div class="chead"><span class="cnum">04</span><h2>Managers hold their picks</h2><span class="chip first">first</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>A draft pick is worth more to the manager who owns it than the market says. Offers that ask someone to give up picks do far worse than offers that hand picks to them.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Shape of the offer</th><th class="n">Accepted</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>Proposer pays picks for players</td><td class="n">18%</td></tr>
+          <tr><td>Pick for pick</td><td class="n">8%</td></tr>
+          <tr><td>Proposer asks for picks in return for players</td><td class="n">7%</td></tr>
+        </tbody>
+      </table></div>
+      <ul>
+        <li>In the text replies, "not giving up my first" and "holding my draft capital" were among the most common reasons for declining.</li>
+        <li>Player-only offers were accepted 16% of the time, against 9% for any offer involving a pick.</li>
+      </ul>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R1</span>Rank "you pay picks" above "you ask for their picks"</h3>
+        <p>When two suggestions are otherwise close, lead with the one where the user's picks go out and a player comes back.</p>
+        <p class="start"><strong>Starting value:</strong> a tie-breaker only, so it never promotes a clearly worse trade.</p></div>
+        <div class="reccmt"><label for="c-f4-r1">Comment — R1</label><textarea id="c-f4-r1" data-k="f4-r1" data-label="R1" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f4-r1"></div></div></div>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R4</span>Value the other manager's own picks above market</h3>
+        <p>When judging whether the other side would accept, treat picks they own as worth more to them than the consensus price. The app's pick valuation is its strongest advantage, and this is where it should show.</p>
+        <p class="start"><strong>Starting value:</strong> about 20% above market for their own picks, smaller for managers who trade often.</p></div>
+        <div class="reccmt"><label for="c-f4-r4">Comment — R4</label><textarea id="c-f4-r4" data-k="f4-r4" data-label="R4" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f4-r4"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f4">Comments on the finding — picks</label><textarea id="c-f4" data-k="f4" placeholder="Should the premium differ by round?"></textarea><div class="saved" data-for="f4"></div></div>
+  </section>
+
+  <section class="card" id="f5">
+    <div class="chead"><span class="cnum">05</span><h2>Asking for the best player in exchange for pieces works half as often</h2><span class="chip next">next</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>In uneven offers, such as two-for-one, it matters who ends up with the most valuable asset in the deal.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>In uneven offers</th><th class="n">Accepted</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>Recipient receives the trade's most valuable asset</td><td class="n">12%</td></tr>
+          <tr><td>Recipient is asked to give it up</td><td class="n">7%</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R5</span>Demote offers asking for their best asset in exchange for pieces</h3>
+        <p>Push "several of mine for your best one" suggestions down the deck, and lift suggestions where the other manager comes away with the best asset.</p>
+        <p class="start"><strong>Exception:</strong> keep it high when the other manager's own rankings say they rate that player below market.</p></div>
+        <div class="reccmt"><label for="c-f5-r5">Comment — R5</label><textarea id="c-f5-r5" data-k="f5-r5" data-label="R5" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f5-r5"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f5">Comments on the finding — best asset</label><textarea id="c-f5" data-k="f5" placeholder="…"></textarea><div class="saved" data-for="f5"></div></div>
+  </section>
+
+  <section class="card" id="f6">
+    <div class="chead"><span class="cnum">06</span><h2>Small beats large</h2><span class="chip next">next</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>The more assets in an offer, the less often it was accepted.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Assets in the offer</th><th class="n">Accepted</th></tr></thead>
+        <tbody>
+          <tr class="hi"><td>Two to four</td><td class="n">10–13%</td></tr>
+          <tr><td>Five or more</td><td class="n">6%</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R6</span>Keep first-page suggestions small</h3>
+        <p>The engine already builds mostly one-for-one and two-for-one offers. Keep larger packages off the first page unless the user asked for them.</p>
+        <p class="start"><strong>Starting value:</strong> four assets or fewer.</p></div>
+        <div class="reccmt"><label for="c-f6-r6">Comment — R6</label><textarea id="c-f6-r6" data-k="f6-r6" data-label="R6" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f6-r6"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f6">Comments on the finding — size</label><textarea id="c-f6" data-k="f6" placeholder="…"></textarea><div class="saved" data-for="f6"></div></div>
+  </section>
+
+  <section class="card" id="f7">
+    <div class="chead"><span class="cnum">07</span><h2>Managers differ more than offers do</h2><span class="chip next">next</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>Who receives an offer matters more than anything about the offer itself.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <p class="headline">0% to 36%<small>Acceptance across the 27 league-mates who each received at least eight offers. The median was 9%.</small></p>
+      <p>That spread is wider than any offer-level effect on this page.</p>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R8</span>Score how willing each manager is to trade</h3>
+        <p>Use each league-mate's public completed trades per season as a first measure of willingness, and send first-page suggestions toward the managers who trade.</p>
+        <p class="start"><strong>Status:</strong> capturing public league history is in a separate pull request (flag off, not yet reviewed). Using it to rank is not built.</p></div>
+        <div class="reccmt"><label for="c-f7-r8">Comment — R8</label><textarea id="c-f7-r8" data-k="f7-r8" data-label="R8" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f7-r8"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f7">Comments on the finding — managers</label><textarea id="c-f7" data-k="f7" placeholder="Should users see a 'trades often' label on a manager?"></textarea><div class="saved" data-for="f7"></div></div>
+  </section>
+
+  <section class="card" id="f8">
+    <div class="chead"><span class="cnum">08</span><h2>What people say when they decline</h2><span class="chip later">later</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>17% of unaccepted offers drew a written reply within three days. About 60 of those gave a reason.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <p>The reasons, in rough order from most to least common:</p>
+      <ul>
+        <li>Naming a different player or pick they would move instead (a counter in words).</li>
+        <li>Waiting on an event: a draft slot, an injury report, "after pick 1.03".</li>
+        <li>Attachment to a specific player of their own.</li>
+        <li>Holding their picks.</li>
+        <li>The trade not fitting their team's direction: too old, too long a rebuild, wrong position.</li>
+        <li>Not rating the player being offered.</li>
+        <li>The value being too low. This was the least common stated reason, and two replies said the value was fair and declined anyway.</li>
+      </ul>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R9</span>Capture the decline reason in one tap</h3>
+        <p>Offer chips that match what people actually say: "not moving that player", "keeping my picks", "wrong direction for my team", "don't rate what I'd get", "waiting on something", "value too low". Each answer changes what the engine offers that manager next.</p></div>
+        <div class="reccmt"><label for="c-f8-r9">Comment — R9</label><textarea id="c-f8-r9" data-k="f8-r9" data-label="R9" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f8-r9"></div></div></div>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R10</span>Re-surface on events</h3>
+        <p>Let a user park an offer until a named event: a pick is made, the draft order is set, or a player's injury status changes.</p></div>
+        <div class="reccmt"><label for="c-f8-r10">Comment — R10</label><textarea id="c-f8-r10" data-k="f8-r10" data-label="R10" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f8-r10"></div></div></div>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R11</span>Lead card copy with fit, not value</h3>
+        <p>Value was the reason least often given. The card's first line should be about the other team's need or direction.</p></div>
+        <div class="reccmt"><label for="c-f8-r11">Comment — R11</label><textarea id="c-f8-r11" data-k="f8-r11" data-label="R11" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="f8-r11"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-f8">Comments on the finding — decline reasons</label><textarea id="c-f8" data-k="f8" placeholder="Other reasons you hear that aren't here?"></textarea><div class="saved" data-for="f8"></div></div>
+  </section>
+
+  <section class="card" id="log">
+    <div class="chead"><span class="cnum">09</span><h2>The app records none of this today</h2><span class="chip first">first</span></div>
+    <div class="part">
+      <p class="tick">Description</p>
+      <p>Every finding above came from outcomes and counters that live in Sleeper, not in the app.</p>
+    </div>
+    <div class="part">
+      <p class="tick">Observations</p>
+      <ul>
+        <li>The app's own data holds fewer than 5 responses from the manager on the other side of a trade, all time.</li>
+        <li>The table meant to hold sent proposals has no rows in production.</li>
+        <li>Without outcomes, none of the starting values on this page can be tuned on more than one person's history.</li>
+      </ul>
+    </div>
+    <div class="part wide">
+      <p class="tick">Recommendations</p>
+      <div class="recrow"><div class="rec"><h3><span class="rid">R3</span>Record what happens to every trade sent from the app</h3>
+        <p>For each trade a user sends: whether it was accepted, declined, countered or left to expire, and what the counter was. This is the measurement every other recommendation depends on.</p>
+        <p class="start"><strong>Re-check:</strong> re-run the acceptance evaluation once ten or more managers have responded.</p></div>
+        <div class="reccmt"><label for="c-log-r3">Comment — R3</label><textarea id="c-log-r3" data-k="log-r3" data-label="R3" placeholder="Build it? Change the starting value? Skip?"></textarea><div class="saved" data-for="log-r3"></div></div></div>
+    </div>
+    <div class="cmt"><label for="c-log">Comments on the finding — logging</label><textarea id="c-log" data-k="log" placeholder="…"></textarea><div class="saved" data-for="log"></div></div>
+  </section>
+
+  <p class="foot">Source and method: <a href="offer-history.md">offer-history.md</a>. Engine context: <a href="recommendation.md">recommendation.md</a>.
+  Comments stay in this browser until you export. Export downloads a Markdown file and copies it to the clipboard; send it back and each note will be worked through.</p>
+</main>
+
+<script>
+(function () {
+  var KEY = 'ftf-sleeper-review:';
+  var areas = document.querySelectorAll('textarea[data-k]');
+  areas.forEach(function (ta) {
+    var k = ta.getAttribute('data-k');
+    var savedEl = document.querySelector('.saved[data-for="' + k + '"]');
+    try { var v = localStorage.getItem(KEY + k); if (v) { ta.value = v; savedEl.textContent = 'saved'; } } catch (e) {}
+    var t;
+    ta.addEventListener('input', function () {
+      clearTimeout(t);
+      savedEl.textContent = '…';
+      t = setTimeout(function () {
+        try { localStorage.setItem(KEY + k, ta.value); savedEl.textContent = ta.value ? 'saved' : ''; }
+        catch (e) { savedEl.textContent = 'could not save'; }
+      }, 400);
+    });
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var lines = ['# Sleeper offer history — review comments', '', '_Exported ' + new Date().toISOString() + '_', ''];
+    document.querySelectorAll('section.card').forEach(function (sec) {
+      lines.push('## ' + sec.querySelector('.cnum').textContent + ' — ' + sec.querySelector('h2').textContent);
+      sec.querySelectorAll('textarea[data-k]').forEach(function (ta) {
+        var val = (ta.value || '').trim();
+        var label = ta.getAttribute('data-label');
+        lines.push((label ? '**' + label + ':** ' : '**Finding:** ') + (val ? val : '_(no comment)_'));
+      });
+      lines.push('');
+    });
+    var md = lines.join('\n');
+    try { navigator.clipboard && navigator.clipboard.writeText(md); } catch (e) {}
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+    a.download = 'sleeper-review-comments.md';
+    document.body.appendChild(a); a.click(); a.remove();
+    var btn = document.getElementById('exportBtn'), old = btn.textContent;
+    btn.textContent = 'Exported';
+    setTimeout(function () { btn.textContent = old; }, 2000);
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (!confirm('Clear all saved comments on this page?')) return;
+    areas.forEach(function (ta) {
+      var k = ta.getAttribute('data-k');
+      try { localStorage.removeItem(KEY + k); } catch (e) {}
+      ta.value = '';
+      var savedEl = document.querySelector('.saved[data-for="' + k + '"]');
+      if (savedEl) savedEl.textContent = '';
+    });
+  });
+})();
+</script>
+</body>
+</html>

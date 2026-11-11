@@ -7,6 +7,7 @@ Used by trade_service.generate_trades() to populate TradeCard.narrative.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 from typing import Optional
 
 
@@ -351,3 +352,420 @@ def hesitation_line(objection: dict, players: dict) -> Optional[str]:
         return HESITATION_TEMPLATES[key].format(**values)
     except Exception:
         return None
+
+
+# ─────────────── fit block, version 3 (flag trade.fit_first_copy) ───────────────
+# docs/plans/offer-learnings/scope-fit-block-v3.md (WS4b). Replaces WS4's one
+# optional line per side (`fit_lines`, scope-fit-first-copy.md). Per team, the
+# other team first: an outlook tag, one short lead phrase naming the strongest
+# reason (or only what moves), and the team's league rank at every position the
+# trade moves, before and after. Read from the bilateral generator's frozen
+# proof (`card.owner_evaluation.as_dict()`) plus `FitLeagueContext`, the
+# league-wide consensus position values captured once per trade job. No new
+# proof field. `build_narrative` and the hesitation surface above are
+# untouched; nothing here reads a flag or a knob (the flag lives at the server
+# seam).
+#
+# Privacy: the other team's block uses only what the app already shows a viewer
+# about a league-mate: rosters, consensus values, ages, consensus position
+# ranks (League rankings) and the engine's roster read of their window (Team
+# Review's partners beat). It reads exactly two things from the counterparty
+# side of the proof, `usable_depth_before` and `usable_depth_delta` (a
+# market-value proxy), and never their personal board, benefits, intent,
+# preferences or their outlook as the proof records it (which is their
+# DECLARED setting when they have one).
+
+#: Bump on ANY wording change (whitespace and punctuation included).
+FIT_TMPL_VERSION = "fit-2"
+
+#: Need: the receiving side's usable-depth proxy at the named position rises
+#: by at least this share of its value before the trade.
+FIT_NEED_MIN_LIFT = 0.10
+#: Need: the gain must also exceed the backup credit the proxy gives the named
+#: player (trade_gen_owner._lineup counts one backup per position at 15%), so a
+#: phrase is only written when he moves into the counted starters.
+_FIT_BACKUP_SHARE = 0.15
+#: Win-now asset: `trade_service._now_lean(pos, age)` at least this.
+FIT_WIN_NOW_MIN_LEAN = 0.05
+#: Other team's plan: their market-weighted now-lean shift must reach this in
+#: the plan's direction (the same ±0.05 band as `_opponent_frame`).
+FIT_THEIR_PLAN_MIN_SHIFT = 0.05
+#: Rank noise bar: a position's consensus value must change by at least this
+#: share of the league median at that position (server._position_medians) for
+#: its rank move to show. A starting value to grade, not a measured one.
+FIT_RANK_MIN_MOVE = 0.05
+#: Fewer valued teams than this: no ranks at all (Home's MIN_SPLIT_TEAMS).
+FIT_RANK_MIN_TEAMS = 3
+
+_FIT_REBUILD = ("rebuilder", "jets")
+_FIT_WIN_NOW = ("contender", "championship")
+_FIT_DEPTH_POSITIONS = ("QB", "RB", "WR", "TE")
+#: The viewer's plan benefit as each bilateral revision names it.
+_FIT_PLAN_BENEFITS = ("outlook", "future_pick_capital")
+_FIT_ARM = "owner_v2_bilateral"
+
+FIT_TEMPLATES: dict[str, str] = {
+    # `.you` = the viewer DECLARED this window; `.you_roster` / `.them` = the
+    # engine's roster read, so the phrase says "-leaning" instead of a plan.
+    "plan_rebuild.you":        "Rebuilding: adds {asset}",
+    "plan_rebuild.you_roster": "Rebuild-leaning: adds {asset}",
+    "plan_rebuild.them":       "Rebuild-leaning: adds {asset}",
+    "plan_win_now.you":        "Win-now: adds {asset}",
+    "plan_win_now.you_roster": "Win-now-leaning: adds {asset}",
+    "plan_win_now.them":       "Win-now-leaning: adds {asset}",
+    "need.you":                "Upgrades {pos}: adds {name}",
+    "need.them":               "Upgrades {pos}: adds {name}",
+    # No supported gain: only what moves, no praise.
+    "moves.you":               "Gets {gets}, gives {gives}",
+    "moves.them":              "Gets {gets}, gives {gives}",
+}
+
+#: Outlook tag words. `declared`: the app's display name for a declared
+#: outlook (mobile OutlookBiasReceipt.tsx OUTLOOK_DISPLAY_NAME). `roster`:
+#: Team Review's words for a league-mate's inferred window (partners beat,
+#: "Rebuilding teams" / "Contending teams"), marked "Looks", the deck receipt's
+#: wording for an inferred outlook ("you look" rather than "you're"). The
+#: roster read never infers the extremes, and `not_sure` gets no tag (Team
+#: Review drops a read that declined to commit).
+FIT_TAGS: dict[str, dict[str, str]] = {
+    "declared": {"championship": "All-in", "contender": "Contending",
+                 "rebuilder": "Rebuilding", "jets": "Tanking"},
+    "roster":   {"contender": "Looks contending", "rebuilder": "Looks rebuilding"},
+}
+
+
+class FitLeagueContext:
+    """League-wide inputs for the fit block, captured once per trade job and
+    shared (by reference) by every card the job builds.
+
+    `teams` is `power_rankings.compute_power_rankings` on the consensus basis
+    (the numbers League rankings, Home and Team Review show); `medians` is
+    `server._position_medians(teams)`; `rosters` maps each team id to its
+    non-pick player ids (to check a card's assets sit where the card says);
+    `reads` maps each team id to the engine's roster read of its window.
+    Immutable once built: copies return the same object.
+    """
+    __slots__ = ("viewer_id", "values", "medians", "player_value", "owner",
+                 "valued", "reads", "ranked")
+
+    def __init__(self, *, viewer_id: str, teams: list, medians: dict,
+                 rosters: dict, reads: dict):
+        self.viewer_id = viewer_id
+        self.values = {t["user_id"]: {p: float(t["positions"][p]["value"])
+                                      for p in _FIT_DEPTH_POSITIONS} for t in teams}
+        # Every team's value per position, ascending: a card's rank is then a
+        # binary search, not a walk over the league.
+        self.ranked = {p: sorted(v[p] for v in self.values.values())
+                       for p in _FIT_DEPTH_POSITIONS}
+        self.medians = {p: float((medians.get(p) or {}).get("value") or 0.0)
+                        for p in _FIT_DEPTH_POSITIONS}
+        self.player_value = {r["player_id"]: (r["position"], float(r["value"]))
+                             for t in teams for r in t["roster"]}
+        self.owner = {pid: uid for uid, ids in rosters.items() for pid in ids}
+        self.valued = sum(1 for t in teams if t["positions_value"] > 0)
+        self.reads = dict(reads)
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+
+def _fit_finite(value) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and value == value and value not in (float("inf"), float("-inf")))
+
+
+def _fit_text(value) -> Optional[str]:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _fit_asset(pid, players: dict) -> Optional[dict]:
+    """Public facts about one asset, or None when it cannot be described."""
+    from .trade_service import is_pick_asset   # lazy: avoids circular import
+    player = players.get(pid)
+    name = _fit_text(getattr(player, "name", None))
+    if player is None or name is None:
+        return None
+    if is_pick_asset(player):
+        return {"id": pid, "name": name, "pos": "PICK", "age": None}
+    pos, age = getattr(player, "position", None), getattr(player, "age", None)
+    return {"id": pid, "name": name, "pos": pos if isinstance(pos, str) else None,
+            "age": int(age) if _fit_finite(age) and age > 0 else None}
+
+
+def _fit_describe(asset: dict) -> Optional[str]:
+    if asset["pos"] == "PICK":
+        return f"the {asset['name']}"
+    if asset["age"] is None or not asset["pos"]:
+        return None
+    return f"{asset['name']}, {asset['age']}"
+
+
+def _fit_lean(asset: dict) -> Optional[float]:
+    from .trade_service import _now_lean   # lazy: avoids circular import
+    if asset["pos"] == "PICK":
+        return _now_lean("PICK", None)
+    if asset["age"] is None:
+        return None
+    return _now_lean(asset["pos"], asset["age"])
+
+
+def _fit_plan(side: str, team: dict, incoming: list, outgoing: list,
+              market: dict) -> Optional[tuple[str, dict]]:
+    outlook = team.get("outlook")
+    if outlook not in _FIT_REBUILD + _FIT_WIN_NOW:
+        return None
+    if side == "you":
+        benefits = team.get("benefits")
+        if not isinstance(benefits, list) or not set(benefits) & set(_FIT_PLAN_BENEFITS):
+            return None
+    else:
+        # `team` is the public view (the roster read). The plan must also show
+        # in the public shape of the trade, as in WS4.
+        shift = gross = 0.0
+        for sign, assets in ((1, incoming), (-1, outgoing)):
+            for asset in assets:
+                lean = _fit_lean(asset)
+                if lean is None:
+                    return None
+                shift += sign * market[asset["id"]] * lean
+                gross += market[asset["id"]]
+        shift /= gross
+        if (shift > -FIT_THEIR_PLAN_MIN_SHIFT if outlook in _FIT_REBUILD
+                else shift < FIT_THEIR_PLAN_MIN_SHIFT):
+            return None
+    from .trade_gen_bilateral import _YOUNG   # the generator's own youth bands
+    if outlook in _FIT_REBUILD:
+        # Picks, or young non-RB players: the assets the bilateral plan scores
+        # as clearly positive for a rebuild (a young RB scores near zero).
+        fits = [a for a in incoming if a["pos"] == "PICK" or (
+            a["pos"] in ("QB", "WR", "TE") and a["age"] is not None
+            and a["age"] <= _YOUNG[a["pos"]])]
+        key = "plan_rebuild"
+    else:
+        fits = [a for a in incoming if a["pos"] in _FIT_DEPTH_POSITIONS
+                and (_fit_lean(a) or 0.0) >= FIT_WIN_NOW_MIN_LEAN]
+        key = "plan_win_now"
+    variant = side
+    if side == "you" and team.get("outlook_source") != "declared":
+        variant = "you_roster"
+    for asset in sorted(fits, key=lambda a: (-market[a["id"]], a["id"])):
+        described = _fit_describe(asset)
+        if described:
+            return f"{key}.{variant}", {"asset": described}
+    return None
+
+
+def _fit_depth(team: dict) -> Optional[tuple[dict, dict]]:
+    before, delta = team.get("usable_depth_before"), team.get("usable_depth_delta")
+    if not isinstance(before, dict) or not isinstance(delta, dict):
+        return None
+    if not all(_fit_finite(before.get(p)) and _fit_finite(delta.get(p))
+               for p in _FIT_DEPTH_POSITIONS):
+        return None
+    return before, delta
+
+
+def _fit_need(side: str, team: dict, incoming: list,
+              market: dict) -> Optional[tuple[str, dict]]:
+    # A rebuilding or tanking team's lineup is not its goal (the generator
+    # weights roster need at 0.05 and 0 for them), so no need phrase for one.
+    depth = _fit_depth(team)
+    if depth is None or team.get("outlook") in _FIT_REBUILD:
+        return None
+    from .trade_service import age_now_mult   # lazy: avoids circular import
+    before, delta = depth
+    best = None
+    for pos in sorted({a["pos"] for a in incoming if a["pos"] in _FIT_DEPTH_POSITIONS}):
+        top = max((a for a in incoming if a["pos"] == pos),
+                  key=lambda a: (market[a["id"]], a["id"]))
+        if top["age"] is None:
+            continue
+        gain = delta[pos]
+        # More than a bench body: the proxy credits one backup at 15% of its
+        # lineup value, so a gain at or under that is a backup, not an upgrade.
+        backup = _FIT_BACKUP_SHARE * market[top["id"]] * age_now_mult(pos, top["age"])
+        if gain <= backup or (before[pos] > 0 and gain < FIT_NEED_MIN_LIFT * before[pos]):
+            continue
+        lift = gain / before[pos] if before[pos] > 0 else float("inf")
+        if best is None or lift > best[0]:
+            best = (lift, pos, top["name"])
+    if best is None:
+        return None
+    return f"need.{side}", {"pos": best[1], "name": best[2]}
+
+
+def _fit_tag(source: str, outlook) -> Optional[dict]:
+    text = FIT_TAGS[source].get(outlook)
+    return {"code": outlook, "source": source, "text": text} if text else None
+
+
+def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: list,
+                   assets: dict) -> Optional[dict]:
+    """{"them": [...], "you": [...]}: league rank moves per team, or None when
+    no rank can be shown (too few valued teams, or a team or an asset the
+    context does not place where the card does)."""
+    you, them = context.viewer_id, other_id
+    if (context.valued < FIT_RANK_MIN_TEAMS or you not in context.values
+            or them not in context.values or you == them):
+        return None
+    after = {you: dict(context.values[you]), them: dict(context.values[them])}
+    touched = {you: set(), them: set()}
+    for ids, src, dst in ((give, you, them), (receive, them, you)):
+        for pid in ids:
+            if assets[pid]["pos"] == "PICK":
+                continue                        # a pick has no position rank
+            if context.owner.get(pid) != src:
+                return None                     # the context disagrees with the card
+            pos, value = context.player_value.get(pid, (None, 0.0))
+            if pos not in _FIT_DEPTH_POSITIONS:
+                continue
+            after[src][pos] -= value
+            after[dst][pos] += value
+            touched[src].add(pos)
+            touched[dst].add(pos)
+    for uid in after:
+        # A team's position value is a sum of 0.1-rounded player values,
+        # rounded to 0.1 (compute_power_rankings); stay on the same grid.
+        after[uid] = {p: round(v, 1) for p, v in after[uid].items()}
+    def above(pos, value):
+        """Teams strictly above `value` at `pos` before the trade."""
+        ranked = context.ranked[pos]
+        return len(ranked) - bisect_right(ranked, value)
+
+    rows = {}
+    for side, uid in (("them", them), ("you", you)):
+        moves = []
+        for pos in _FIT_DEPTH_POSITIONS:
+            if pos not in touched[uid]:
+                continue
+            was, now = context.values[uid][pos], after[uid][pos]
+            if now == was or abs(now - was) < FIT_RANK_MIN_MOVE * context.medians[pos]:
+                continue
+            # Ties share a rank: 1 + the teams strictly above (League rankings).
+            # After the trade only the two teams' values differ, so swap their
+            # before values for their after values in the count.
+            before = 1 + above(pos, was)
+            later = 1 + above(pos, now) + sum(
+                (after[t][pos] > now) - (context.values[t][pos] > now) for t in after)
+            if before != later:
+                moves.append({"pos": pos, "before": before, "after": later})
+        # Gains first, larger moves first, then position order.
+        moves.sort(key=lambda m: (m["after"] > m["before"], -abs(m["after"] - m["before"]),
+                                  _FIT_DEPTH_POSITIONS.index(m["pos"])))
+        rows[side] = moves
+    return rows
+
+
+def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
+    """The version-3 fit block for one bilateral card, or None (today's card:
+    the caller adds nothing).
+
+    `proof` is `card.owner_evaluation.as_dict()`, already matched to `card`;
+    `context` is the job's `FitLeagueContext`. Returned only when at least
+    one team has a supported lead (plan, then need) or a rank move; a team
+    without a supported lead gets the moves-only phrase. Pure; raises nothing
+    (any malformed input yields None).
+    """
+    try:
+        if (not isinstance(proof, dict) or proof.get("generator") != _FIT_ARM
+                or proof.get("eligible") is not True
+                or not isinstance(context, FitLeagueContext)):
+            return None
+        give, receive = list(card.give_player_ids), list(card.receive_player_ids)
+        market = {}
+        for row in proof.get("assets") or ():
+            if isinstance(row, dict) and _fit_finite(row.get("market")) and row["market"] > 0:
+                market[row.get("id")] = row["market"]
+        if not give or not receive or set(market) != set(give + receive):
+            return None
+        assets = {pid: _fit_asset(pid, players if isinstance(players, dict) else {})
+                  for pid in give + receive}
+        if any(a is None for a in assets.values()):
+            return None
+        other = card.target_user_id
+        ranks = _fit_rank_rows(context, other, give, receive, assets) or {"them": [], "you": []}
+        teams, shown = [], False
+        for side, incoming, outgoing in (("them", give, receive), ("you", receive, give)):
+            inc = [assets[p] for p in incoming]
+            out = [assets[p] for p in outgoing]
+            if side == "them":
+                counterparty = proof.get("counterparty")
+                counterparty = counterparty if isinstance(counterparty, dict) else {}
+                read = context.reads.get(other)
+                # The public view: the roster read in place of whatever outlook
+                # the proof holds, and nothing else of theirs but the depth proxy.
+                view = {"outlook": read, "outlook_source": "inferred",
+                        "usable_depth_before": counterparty.get("usable_depth_before"),
+                        "usable_depth_delta": counterparty.get("usable_depth_delta")}
+                tag = _fit_tag("roster", read)
+            else:
+                view = proof.get("viewer")
+                view = view if isinstance(view, dict) else {}
+                tag = _fit_tag("declared" if view.get("outlook_source") == "declared"
+                               else "roster", view.get("outlook"))
+            chosen = (_fit_plan(side, view, inc, out, market)
+                      or _fit_need(side, view, inc, market))
+            if chosen:
+                shown = True
+                code, values = chosen
+            else:
+                code = f"moves.{side}"
+                values = {"gets": " + ".join(a["name"] for a in inc),
+                          "gives": " + ".join(a["name"] for a in out)}
+            entry = {"side": side, "lead": {"code": code,
+                                            "text": FIT_TEMPLATES[code].format(**values)},
+                     "ranks": ranks[side]}
+            if tag:
+                entry["tag"] = tag
+            shown = shown or bool(ranks[side])
+            teams.append(entry)
+        return {"v": FIT_TMPL_VERSION, "teams": teams} if shown else None
+    except Exception:
+        return None
+
+
+# ── WS8 revised-offer cards (flag trade.next_move) ──────────────────────────
+# One sentence on a card built because Sleeper showed the user's own offer
+# declined (a revision) or showed the user declining the other manager's
+# counter (a middle ground). It states what the platform showed and what
+# changed, never a reason for the decline. Assets are named by the caller's
+# `name(asset_id)` (player names, pick labels); the sentence sits above the
+# fit lines and reads on its own beside them.
+
+def _revised_names(ids, name) -> str:
+    labels = [str(name(i) or "an asset") for i in ids]
+    if len(labels) <= 1:
+        return labels[0] if labels else "that trade"
+    return ", ".join(labels[:-1]) + " and " + labels[-1]
+
+
+def revised_offer_line(kind: str, *, original_give, original_receive, give, receive,
+                       name) -> str:
+    """The card's first line, from the original offer and the card's terms.
+
+    revision      "Your offer for {asked} was declined. Another idea: {new}
+                   in place of {old}."
+    middle_ground "You turned down their counter to your offer for {asked}.
+                   A middle ground: {changes}."  changes, relative to the
+                   user's original offer: "add X", "keep X" (no longer
+                   offered), "also ask for X", "no longer ask for X".
+    """
+    asked = _revised_names(list(original_receive), name)
+    if kind == "revision":
+        old = [p for p in original_give if p not in give]
+        new = [p for p in give if p not in original_give]
+        return (f"Your offer for {asked} was declined. Another idea: "
+                f"{_revised_names(new, name)} in place of {_revised_names(old, name)}.")
+    parts = []
+    for verb, ids in (("add", [p for p in give if p not in original_give]),
+                      ("keep", [p for p in original_give if p not in give]),
+                      ("also ask for", [p for p in receive if p not in original_receive]),
+                      ("no longer ask for", [p for p in original_receive if p not in receive])):
+        if ids:
+            parts.append(f"{verb} {_revised_names(ids, name)}")
+    changes = (", ".join(parts[:-1]) + " and " + parts[-1]) if len(parts) > 1 else parts[0]
+    return (f"You turned down their counter to your offer for {asked}. "
+            f"A middle ground: {changes}.")
