@@ -1,3 +1,12 @@
+## 2026-11-11 — Sleeper read without the switch (D-227) and the fit block's rank-fact fallback (D-228)
+
+- **D-227, `test_sleeper_offer_read.py` (68 pass):** `test_no_reason_to_read_makes_no_call` and `test_without_the_switch_an_app_sent_offer_is_read_and_nothing_is_imported`. Sabotages: `never-read-without-the-switch` (the gate ignores open app-sent offers) turns the second red; `always-read` (the gate removed) turns both red.
+- **D-228, `test_fit_block_v3.py` (66 pass):** the fallback's four codes, the holds-plus-moves split, shift wording, ordinals equal to the app's, the random-league rank test extended to held ranks, and a sweep asserting no fallback lead names an asset. Sabotage `fallback-names-the-players` turns four red. The pinned template table no longer holds `{gets}` / `{gives}`.
+- **Related suites on the combined head:** fit block, deck pipeline digest (unchanged, still 21), revised-offer cards, narrative, fast deck: 176 pass. Sleeper read, revised-offer cards, trade outcomes: 138 pass.
+- **Full backend suite:** CI's `backend-tests` on the pushed head is the gate for this change; a local full run was in progress when this entry was written.
+- **Not verified:** the new wording on a device. Check on TestFlight 184 after deploy: a card where a team has no reason shows a rank fact ("Still RB 2nd", "Up at RB, down at WR") and never "Gets …, gives …"; a card with a plan or need lead is unchanged.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-10 — Offer-learnings turn-on (#643) and release, iOS 1.22.0 (184)
 
 - **CI:** all four checks green on `2fa889ff` (#641; backend tests 40 min) and on `6df59c3f` (#643). Both merges pinned to the tested head.
