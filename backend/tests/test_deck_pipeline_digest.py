@@ -52,6 +52,7 @@ FROZEN_PINS = {
     14: "c35ce67a4434a981",  # Owner searches enforce every explicit give-all pin.
     15: "1a34729ff2b291ac",  # D-212 trade_block: viewer list carried by the job; owner-context flag gate.
     16: "e155ed45d1a02a13",  # ADR-028: fast deck and shadow hooks in the owner generator call (flags trade.fast_deck*, default off); flags off: same call, terms and order unchanged.
+    17: "a344340932da4f13",  # trade.fit_first_copy (default off): trade_card_to_dict adds fit_lines to bilateral cards whose proof supports a specific reason; flag off: no key, payload byte-identical.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
