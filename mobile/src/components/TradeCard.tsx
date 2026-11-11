@@ -61,6 +61,44 @@ export function fitRanksText(ranks: FitBlockTeam['ranks']): string {
     .map((r) => `${r.pos} ${fitRankOrdinal(r.before)} → ${fitRankOrdinal(r.after)}`)
     .join(' · ');
 }
+/** The lead above a team's before/after table. A rank-fact lead (`holds.*`
+ *  "RB stays 5th", `shifts.*` "Up at RB, down at WR") restates the table, so
+ *  it hides; a reason (`plan_*`, `need.*`) stays. With no table (`positions`
+ *  absent or empty: an older server, or `flat.*` / `none.*`) the lead always
+ *  shows, as before. The card's one read of a fit `code`. */
+export function fitLeadShown(team: FitBlockTeam): boolean {
+  if (!team.positions?.length) return true;
+  return !/^(holds|shifts)\./.test(team.lead.code);
+}
+
+// WS4b fit block — one team's before/after table rows: position, rank
+// before, rank after, in the mono face with fixed cells so the columns line
+// up across both teams under the block's one Before / After header. Each row
+// is one VoiceOver element ("Them, RB, 5th before, 5th after"). No colour:
+// the numbers carry direction.
+function FitRankRows({ side, who, positions }: {
+  side: FitBlockTeam['side'];
+  who: string;
+  positions: NonNullable<FitBlockTeam['positions']>;
+}) {
+  return (
+    <>
+      {positions.map((p) => (
+        <View
+          key={p.pos}
+          style={styles.fitRankRow}
+          testID={`trade-card.fit-rank.${side}.${p.pos}`}
+          accessible
+          accessibilityLabel={`${who}, ${p.pos}, ${fitRankOrdinal(p.before)} before, ${fitRankOrdinal(p.after)} after`}
+        >
+          <ChalklineText style={[styles.fitRankNum, styles.fitRankPos]} numberOfLines={1}>{p.pos}</ChalklineText>
+          <ChalklineText style={[styles.fitRankNum, styles.fitRankCol]} numberOfLines={1}>{fitRankOrdinal(p.before)}</ChalklineText>
+          <ChalklineText style={[styles.fitRankNum, styles.fitRankCol]} numberOfLines={1}>{fitRankOrdinal(p.after)}</ChalklineText>
+        </View>
+      ))}
+    </>
+  );
+}
 
 // #384 — the overlay presentation needs two host hooks the inline form has no
 // use for. Kept OUT of `DeclineReasonPanelProps` on purpose: the panel itself
@@ -286,6 +324,8 @@ function TradeCardComp({
   const fitBlockShown = fitFirstEnabled && !data.edited ? data.fit_block : undefined;
   const fitThem = fitBlockShown?.teams.find((t) => t.side === 'them');
   const fitYou = fitBlockShown?.teams.find((t) => t.side === 'you');
+  // The Before / After header shows once, when either team has a table.
+  const fitTable = !!(fitThem?.positions?.length || fitYou?.positions?.length);
   // WS8 revised-offer card — the server's one sentence saying the user's
   // earlier offer was declined and what changed. Double-gated on the flag
   // like the fit block; an edited card hides it (it describes the package
@@ -671,10 +711,29 @@ function TradeCardComp({
           fit_block); ranks in the mono face with the arrow and numbers
           carrying direction (no colour). Two lines per team at most: the
           lead and the ranks each truncate rather than wrap. An absent block
-          renders nothing, so flag-off and no-block cards are unchanged. */}
+          renders nothing, so flag-off and no-block cards are unchanged.
+          With `positions` (2026-11-11) a team shows a before/after table
+          (FitRankRows, up to 4 rows) in place of the rank text, under one
+          Before / After header; a rank-fact lead the table restates hides
+          (fitLeadShown). Without it the team renders exactly as before. */}
       {fitThem || fitYou ? (
         <View style={styles.fitBlock} testID="trade-card.fit-block">
           <ChalklineText style={type.label} numberOfLines={1}>League rank · position value</ChalklineText>
+          {fitTable ? (
+            <View
+              style={styles.fitTeam}
+              testID="trade-card.fit-rank-head"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+            >
+              <View style={styles.fitWho} />
+              <View style={[styles.fitBody, styles.fitRankRow]}>
+                <View style={styles.fitRankPos} />
+                <ChalklineText style={[type.label, styles.fitRankCol]} numberOfLines={1}>Before</ChalklineText>
+                <ChalklineText style={[type.label, styles.fitRankCol]} numberOfLines={1}>After</ChalklineText>
+              </View>
+            </View>
+          ) : null}
           {fitThem ? (
             <View style={styles.fitTeam} testID="trade-card.fit-team.them">
               <View style={styles.fitWho}>
@@ -684,8 +743,12 @@ function TradeCardComp({
                 ) : null}
               </View>
               <View style={styles.fitBody}>
-                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitThem.lead.text}</ChalklineText>
-                {fitThem.ranks.length ? (
+                {fitLeadShown(fitThem) ? (
+                  <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitThem.lead.text}</ChalklineText>
+                ) : null}
+                {fitThem.positions?.length ? (
+                  <FitRankRows side="them" who="Them" positions={fitThem.positions} />
+                ) : fitThem.ranks.length ? (
                   <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitThem.ranks)}</ChalklineText>
                 ) : null}
               </View>
@@ -700,8 +763,12 @@ function TradeCardComp({
                 ) : null}
               </View>
               <View style={styles.fitBody}>
-                <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitYou.lead.text}</ChalklineText>
-                {fitYou.ranks.length ? (
+                {fitLeadShown(fitYou) ? (
+                  <ChalklineText style={styles.fitLead} numberOfLines={1}>{fitYou.lead.text}</ChalklineText>
+                ) : null}
+                {fitYou.positions?.length ? (
+                  <FitRankRows side="you" who="You" positions={fitYou.positions} />
+                ) : fitYou.ranks.length ? (
                   <ChalklineText style={styles.fitRanks} numberOfLines={1}>{fitRanksText(fitYou.ranks)}</ChalklineText>
                 ) : null}
               </View>
@@ -1254,6 +1321,16 @@ const styles = StyleSheet.create({
   fitBody: { flex: 1, minWidth: 0 },
   fitLead: { ...type.bodySm, color: chalk.base },
   fitRanks: { ...type.data, color: chalk.base },
+  // The before/after table: fixed cells, left-aligned, so the columns line
+  // up across both teams and under the header. A rank cell fits its widest
+  // occupant: the BEFORE header (Archivo 11pt caps + tracking, ~46pt; ~62pt
+  // at the 1.35 dense cap), wider than "12th" (4 Plex Mono cells, 31pt; 42pt
+  // capped). Position cell: "QB" (2 cells, 16pt; 21pt capped). Left column
+  // 88 + 3 gaps of 8 + 28 + 64 + 64 = 268pt, inside a 375pt phone's card.
+  fitRankRow: { flexDirection: 'row', gap: space.sm },
+  fitRankPos: { width: 28 },
+  fitRankCol: { width: 64 },
+  fitRankNum: { ...type.data, color: chalk.base },
   // WS8 revised-offer line: a flare left rule (informational highlight,
   // ADR-005) on the sentence; no fill, no radius. The text wraps in the row.
   fitLineText: { flexShrink: 1 },

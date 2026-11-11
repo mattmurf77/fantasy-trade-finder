@@ -1983,9 +1983,11 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 | Reason | Meaning | Action |
 |---|---|---|
 | `player_team_changed` | Strict scoring only since D-231. In production (best-available scoring) a team-changed player is left unprojected instead. | None in production. If it appears, the scoring contract in `config/league_projections.json` has changed. |
-| `missing_weekly_projections` | A team has no projected player at all in an upcoming week. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
+| `missing_weekly_projections` | The weekly projection feed has no usable projection for anyone in an upcoming week (empty or not yet published). Since model v6 a team with no projected rostered player in an otherwise populated week is filled from free agents instead. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
 | `season_state_mismatch`, `unsupported_divisions_median_bestball_or_manual_seeding` | The league is outside what the model supports (another season; divisions, median games, best ball or manual seeding). | None. |
 | `league_membership_changed` | The account no longer owns a team in that league. | None. |
+
+**Incomplete estimates (model v6, 2026-11-11).** An open starting slot takes the best projected free agent, or scores zero, so it no longer marks a forecast `incomplete`. The one remaining cause is a starter who has already played without a recorded score; it clears once Sleeper records the score and the league is re-run. `coverage.fa_filled_slots` / `zero_filled_slots` count the fills. Before v6, four of six production forecasts were incomplete for a single RB slot whose only rostered RB had an empty feed row.
 
 **What happened on 2026-11-11:** five rostered players changed NFL teams the day model v5 shipped. Sleeper's projection rows for weeks 11 to 14 still carried the old teams, and a guard from 2026-11-07 stopped every affected league's run. All six targets that had a forecast the day before produced none. Fixed by D-231.
 

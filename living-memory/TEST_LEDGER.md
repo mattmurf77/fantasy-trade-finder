@@ -1,3 +1,21 @@
+## 2026-11-11 — Forecast model v6: free-agent fill (D-234), branch `feat/projection-fa-fill`
+
+- **`-k league_projection`: 566 passed** (main session re-run; 553 before). Full suite by the subagent: **14,506 passed, 42 skipped, 0 failed** (940 s).
+- **New tests (13):** an empty RB slot takes the best projected free-agent RB and the suggestion is available; none projected scores 0 and stays complete; a free agent never displaces a starter; two open slots take the best assignment of two different free agents; no rostered, taxi or reserve player of any team is offered (feed and capture layers); bye and not-pregame free agents are out; Max PF fills the same way; a played starter with no score is not filled and stays incomplete; IDP free agent first, then the replacement mean, then 0; ties break by player id; a saved v5 result is old-model and made due once. Eight existing tests whose cases are now filled were renamed to say what is true; no unrelated assertion changed.
+- **Sabotages (19, Opus subagent):** 17 red then restored. Two stayed green and are explained: locks ignored only at the fill (re-applied by `idp_bye_fill`; red when ignored at both points) and the tie post-pass removed (the optimizer's own id order already gives it; reversing it is red).
+- **Dry run against Sleeper's live feeds (local, nothing written):** all six real forecasts complete on v6. In the IDP league, 12 slots are filled from free agents and 1 scores 0 over the remaining weeks; the other two leagues need none.
+- **Capture time, synthetic 12-team league:** +0.6 s with full rosters, +1.2 s with 672 forced fills.
+- **Not verified:** anything on a device (D-056); the client wording (below) until its checks run.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — Fit block before/after rank table, branch `feat/fit-block-rank-table`
+
+- **`test_fit_block_v3.py`: 73 pass.** `positions` is held ranks plus moves in QB/RB/WR/TE order; a noise-level move is in neither list nor `positions`; `v`, `lead`, `ranks` and `tag` are byte-identical to before for pinned cases; a team with no rank rows has `[]`. Fit, narrative, deck-digest, fast-deck and revised-offer subset: **512 passed** (main session). Full suite by the subagent: 14,481 passed, 42 skipped.
+- **Mobile (main session re-run):** `tsc --noEmit` clean; **173 of 173** check suites; testID lint OK. `check-fit-first-copy.js` checks 11–14: the table renders from `positions` under one Before / After header; held and moved rows as ordinals; `holds.*` / `shifts.*` leads hide with a table and `plan_*` / `need.*` leads stay; absent or empty `positions` renders as before; no style depends on direction.
+- **Sabotages, red then restored (18, Opus subagent):** held ranks dropped; no position sort; noise move counted as held; `ranks` replaced; `positions` omitted; `v` changed; rank text shown in place of the table; header always shown; empty table renders nothing; held rows filtered; colour by direction; VoiceOver label removed; narrow rank cell; lead kept or hidden wrongly (3); normalizer cap and check removed (2).
+- **Not verified:** anything on a device (D-056). Checklist: a card with one held and one moved rank shows one Before / After header and aligned rows for Them and You; "RB stays 5th" and "Up at RB, down at WR" leads are gone while "Win-now: adds …" stays above the rows; a team with "No league rank change" shows only that line; VoiceOver reads each row as one item; at the largest text size "BEFORE", "AFTER" and "12th" are not cut off; builds 184 and 185 against the new server look as before. Widths were estimated from font metrics.
+- No scope block: operator feedback from TestFlight ("a simple before/after table is a better fit for the positions involved"). Additive payload field; `fit-2` unchanged. FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Roster setup tier page (D-233), branch `feat/roster-setup-tier-rank`
 
 - **Backend, `test_roster_tier_save.py` (15):** only posted ids change (whole-board diff); a lone up-move lands on the band floor and a lone down-move on the ceiling, also in a band empty at that position; several movers keep posted order with pinned values; incumbents keep byte-identical overrides; the scope is read with both flags off; `tiers_saved` is untouched; `tier_save` carries `via: roster_setup`; posted ids become `explicit`; a fair-at-market card giving player X is `eligible` before and `viewer_no_benefit` after X is lifted two tiers, and stays eligible when the same move goes through `/api/rankings/reorder`; ids not at the position are ignored; the rookie path's lone-player value is unchanged. `test_analytics_taxonomy_roster_setup.py` extended.
@@ -70,7 +88,7 @@
 
 ## 2026-11-10 — Roster-first setup flag flip (`trades.roster_setup` → true)
 
-- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run (no build includes `9c252819` yet).
+- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run; 1.22.0 (184) is the first build that includes `9c252819`.
 - Local: the flag mirror tests plus the trade-block, deck-digest, blind-grading and rankings-import suites pass (204 passed). CI on the PR covers the rest. `FTF_SKIP_SIM_GATE=1` (D-056).
 
 ## 2026-11-10 — Offer-learnings integration (branch `feat/offer-learnings`, PR #641, every new flag off)
