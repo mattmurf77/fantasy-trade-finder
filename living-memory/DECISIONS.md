@@ -1,5 +1,12 @@
 # Decisions — Fantasy Trade Finder
 
+## D-NEXT — Engine revision 4 reorders only, through support scores; Calibration gets it as an additive arm
+
+**Date:** 2026-11-10 · **Who:** WS1 builder, from the operator's offer-learnings comments (R1, R4, R5, R6).
+**Decision:** `owner-v2-bilateral-4` builds on revision 2 and wins over the v3 selector. Its owned-pick premium (by the other team's outlook: 20% rebuilder/tanking, 10% not sure, 0 contender), pay-picks tie-breaker and best-asset demotion act on support scores only, so eligibility and terms equal revision 2's. Calibration folds it into new `outlook-v2-v3-1` builds behind `grading.revision4_arm` without touching the paired v2/v3 cards.
+**Why:** grade before turning anything on, without disturbing the running v2/v3 comparison; a demotion presentment cannot undo.
+**Consequences:** exposed or completed Calibration decks get no revision-4 cards (open operator choice). [ADR-028](../docs/adr/adr-028-bilateral-revision-4.md), [scope](../docs/plans/offer-learnings/scope-revision-4.md).
+
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

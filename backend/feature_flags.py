@@ -1230,6 +1230,8 @@ FLAG_KEYS: tuple[str, ...] = (
     "grading.blind",
     "grading.outlook_round",
     "grading.outlook_prepare",
+    # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
+    "grading.revision4_arm",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

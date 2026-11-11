@@ -143,6 +143,21 @@ version fenced through evaluator, admission, publication and prepared payload
 compatibility. Old -1/-2 proofs are never rewritten; the new selector defaults0.
 See [policy, source gaps and code walk](plans/outlook-evidence-rules/architecture.md).
 
+## Bilateral revision 4 (offer learnings)
+
+`trade_gen_bilateral_r4.py` adds default-dark `owner-v2-bilateral-4`, a subclass of revision
+2's search (not revision 3's), selected by `owner_bilateral_revision_4_enabled=1` inside
+revision serving; it wins over the v3 selector. Three rules change order only, through the
+support scores the ranker and `trade_bilateral_presentment` already read: an owned-pick
+premium on the other manager's market acceptability set by their outlook, a pay-picks key
+inside bilateral-1's existing comparable set, and a demotion of uneven offers that take the
+other manager's most valuable asset (except picks to a rebuilding or tanking team).
+Eligibility, terms, floor and overpay gates are revision 2's. Proofs carry a `revision_4`
+block; version fencing covers evaluation, page safety signature, presentment and prepared
+payloads. The module name keeps the fast deck on the full solve. Calibration can add it as an
+additive arm (`grading.revision4_arm`) to the frozen v2/v3 round. See
+[scope](plans/offer-learnings/scope-revision-4.md).
+
 ## Independent model evaluation (offline foundation, 2026-09-22)
 
 `backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently

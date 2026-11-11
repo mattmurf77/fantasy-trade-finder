@@ -13,6 +13,7 @@ Calibration coverage (2026-11-06): metadata-backed unranked holdings are safety 
 Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses stored consent/credentials and the full paired pipeline. Native mapping/settings and pick ownership must be represented exactly; unsupported inputs remain failures. Provider account/season/auth/format/credential revision joins semantic currentness. [Contract](../docs/plans/calibration-provider-capture/architecture.md).
 
 ## Table of Contents
+- [2026-11-10 — Engine revision 4 and an additive Calibration arm](#2026-11-10--engine-revision-4-and-an-additive-calibration-arm)
 - [2026-11-06 — Evidence-bound outlook candidate](#2026-11-06--evidence-bound-outlook-candidate)
 - [What This Is](#what-this-is)
 - [Scope](#scope)
@@ -28,6 +29,10 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 - [Win Now season pipeline](#win-now-season-pipeline)
 
 ---
+
+## 2026-11-10 — Engine revision 4 and an additive Calibration arm
+
+A dark fourth bilateral revision (built on revision 2) reorders offers using the other team's outlook: their own picks priced above market for them, paying picks preferred over asking for them when quality ties, and "several for their best asset" demoted. Calibration can add it as a third, additive arm to new frozen round builds. No serving change. See [architecture](../docs/architecture.md#bilateral-revision-4-offer-learnings).
 
 ## 2026-11-06 — Evidence-bound outlook candidate
 

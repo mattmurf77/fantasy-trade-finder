@@ -15,6 +15,7 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense matching is private evidence of unchanged holdings, not full-roster fit or priced value. All holdings still count toward active capacity. Only offensive/pick legs proceed through the unchanged shared gates; fixed legs/cut plans fail. Unsupported constraints and account failures retain specific errors and failed GET polling does not requeue. [Contract](../docs/plans/calibration-coverage-repair/validation.md).
 
 ## Table of Contents
+- [2026-11-10 — Revision-4 proof and additive-arm conventions](#2026-11-10--revision-4-proof-and-additive-arm-conventions)
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
 - [Authoritative References](#authoritative-references)
@@ -68,6 +69,10 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 - [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
+
+## 2026-11-10 — Revision-4 proof and additive-arm conventions
+
+A ranking-only rule writes to support scores (keeping `support.revision_2_score` and `revision_4_adjustments`) and never to `utility`, market gain or the package, so eligibility is unchanged and presentment sees the same order signal. A dark numeric selector is popped from constructor reports and the selected-request hash unless it is exactly 1. A Calibration arm outside a round's equal-quota pair is an *additive arm*: folded after the paired order is fixed, credited on shared cards, inserted without reordering, failure isolated, and reported under `additive_arms`. [Scope](../docs/plans/offer-learnings/scope-revision-4.md).
 
 ## 2026-11-06 — Versioned outlook evidence contract
 

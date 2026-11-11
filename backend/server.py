@@ -8285,7 +8285,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3"):
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -14052,7 +14052,7 @@ def _run_trade_job(
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
                 selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
-                generator_version=(owner_model_version if owner_model_version == "owner-v2-bilateral-3"
+                generator_version=(owner_model_version if owner_model_version in ("owner-v2-bilateral-3", "owner-v2-bilateral-4")
                                    else trade_bilateral_presentment.GENERATOR_VERSION))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
@@ -21986,6 +21986,8 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_enabled", None)
     if not canonical["config"].get("owner_outlook_evidence_enabled"):
         canonical["config"].pop("owner_outlook_evidence_enabled", None)
+    if canonical["config"].get("owner_bilateral_revision_4_enabled") != 1.0:
+        canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",

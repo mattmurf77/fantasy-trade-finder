@@ -14,6 +14,9 @@ from pathlib import Path
 from .blind_grading import Catalog, GradingError
 
 VERSIONS = ("owner-v2-bilateral-2", "owner-v2-bilateral-3")
+# Additive arm (grading.revision4_arm): never part of the paired v2/v3 selection.
+REVISION_4 = "owner-v2-bilateral-4"
+_REVISION_4_KEY = "owner_bilateral_revision_4_enabled"
 @lru_cache(maxsize=1)
 def code_revision():
     root = Path(__file__).parent
@@ -153,7 +156,7 @@ class CapturedComparison:
     def run_arm(self, version, *, check_current=None):
         from . import server as s, trade_service as ts, bakeoff_runner as bakeoff
         from . import trade_bilateral_presentment, deck_quality
-        if version not in VERSIONS:
+        if version not in VERSIONS + (REVISION_4,):
             raise ValueError("unsupported calibration version")
         def checkpoint():
             if check_current is not None:
@@ -162,7 +165,10 @@ class CapturedComparison:
         checkpoint()
         context = copy.deepcopy(self.owner_context)
         context["config"]["owner_outlook_evidence_enabled"] = float(version == VERSIONS[1])
-        if version == VERSIONS[0]:
+        # Pin the v4 selector per arm: a serving value of 1 must not turn the
+        # v2/v3 arms into v4. Non-1 values are popped before any report/hash.
+        context["config"][_REVISION_4_KEY] = float(version == REVISION_4)
+        if version != VERSIONS[1]:
             context.pop("input_evidence", None)
         with ts._cfg_override(context["config"]):
             control = {"_check_current": check_current} if check_current is not None else {}
@@ -332,6 +338,7 @@ def capture(*, user_id, league_user_id, league_id):
     cfg, flags = dict(ts._cfg), _flags(s)
     cfg.update(owner_bilateral_enabled=1., owner_bilateral_revision_enabled=1.,
                owner_outlook_evidence_enabled=1.)
+    cfg[_REVISION_4_KEY] = 0.  # The capture is v3-shaped; run_arm pins each arm.
     # Read inside the checked window. A concurrent sync must not attach a
     # new revision to the earlier refresh return value.
     pick_source = "platform" if linked and linked.platform == "mfl" else s._pick_read_source()
