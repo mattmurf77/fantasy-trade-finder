@@ -935,7 +935,7 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                      "text": "Rebuild-leaning: adds Eli Brandt, 23" },
                                                // codes: plan_rebuild.*, plan_win_now.*, need.*,
                                                // and, with no supported gain, a league-rank
-                                               // fact: holds.* ("Still RB 2nd"), shifts.* ("Up
+                                               // fact: holds.* ("RB stays 2nd"), shifts.* ("Up
                                                // at RB, down at WR"), flat.*, none.* (2026-11-11;
                                                // never the card's own player list)
                            "ranks": [ { "pos": "QB"|"RB"|"WR"|"TE",
