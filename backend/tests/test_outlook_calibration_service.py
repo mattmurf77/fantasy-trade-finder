@@ -288,10 +288,11 @@ def test_worker_continues_after_bounded_batch_but_never_spins_on_foreign_lease(m
     monkeypatch.setattr(oc, 'enabled', lambda: True)
     monkeypatch.setattr(oc, '_pending_work', lambda: True)
     monkeypatch.setattr(oc, '_launch_worker_locked', lambda: launched.append(True))
-    monkeypatch.setattr(oc, 'drain_queue', lambda: {'processed': 100})
+    # **kw: the worker names the round for every round but the current one.
+    monkeypatch.setattr(oc, 'drain_queue', lambda **kw: {'processed': 100})
     oc._worker_main()
     assert launched == [True]
-    monkeypatch.setattr(oc, 'drain_queue', lambda: {'busy': True})
+    monkeypatch.setattr(oc, 'drain_queue', lambda **kw: {'busy': True})
     oc._worker_main()
     assert launched == [True]
 

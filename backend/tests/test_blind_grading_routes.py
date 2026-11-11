@@ -32,6 +32,7 @@ import pytest
 
 import backend.blind_grading as bg
 import backend.experiments as experiments
+import backend.outlook_calibration as oc
 import backend.server as server
 from backend.feature_flags import DEFAULT_FLAGS, FLAG_KEYS
 
@@ -109,6 +110,14 @@ def _hit_all(c, headers: dict) -> list:
 def client():
     server.app.config["TESTING"] = True
     return server.app.test_client()
+
+
+@pytest.fixture(autouse=True)
+def _revision_4_round_off(monkeypatch):
+    """This file pins the single-round path. The revision-4 round ships on
+    (config/features.json) and would send a new session to its own deck; that
+    path is covered by test_calibration_revision_4_round.py."""
+    monkeypatch.setattr(oc, "r4_round_enabled", lambda: False)
 
 
 def _set_global_flag(monkeypatch, value: bool) -> None:

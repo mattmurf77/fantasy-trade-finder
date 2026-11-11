@@ -121,7 +121,9 @@ def test_route_serves_a_raised_value_as_an_int(client, mem_engine):
 
 def test_rest_of_the_response_is_unchanged(client, mem_engine):
     body = _flags(client).get_json()
-    assert set(body) == {"flags", "experiments", "configs", KEY, LIVE}
+    # pass_reason_cadence: additive key present while trade.pass_reason_cadence
+    # is on, as it is in the shipped config (2026-11-10).
+    assert set(body) == {"flags", "experiments", "configs", KEY, LIVE, "pass_reason_cadence"}
     assert body["flags"] == flags_dict()
     assert isinstance(body["experiments"], dict)
     assert isinstance(body["configs"], dict)

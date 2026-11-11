@@ -34,6 +34,7 @@ from sqlalchemy import create_engine, func, insert, select
 import backend.blind_grading as bg
 import backend.database as db
 import backend.experiments as experiments
+import backend.outlook_calibration as oc
 import backend.server as server
 import backend.value_core.pipeline as vc_pipeline
 
@@ -147,6 +148,14 @@ def _seed(eng) -> None:
 # ---------------------------------------------------------------------------
 # harness
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _revision_4_round_off(monkeypatch):
+    """This file pins the single-round path. The revision-4 round ships on
+    (config/features.json) and would send a new session to its own deck; that
+    path is covered by test_calibration_revision_4_round.py."""
+    monkeypatch.setattr(oc, "r4_round_enabled", lambda: False)
+
 
 @pytest.fixture
 def world(monkeypatch):
