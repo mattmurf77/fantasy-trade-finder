@@ -17,6 +17,7 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 ## Table of Contents
 - [2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four](#2026-11-10--asset-pref-vocabulary-is-four-types-single-membership-spans-all-four)
 
+- [2026-11-10 — Calibration rounds side by side](#2026-11-10--calibration-rounds-side-by-side)
 - [2026-11-10 — Revision-4 proof and additive-arm conventions](#2026-11-10--revision-4-proof-and-additive-arm-conventions)
 - [2026-11-06 — Versioned outlook evidence contract](#2026-11-06--versioned-outlook-evidence-contract)
 - [2026-11-04 — Export boundary and board-history owner fencing](#2026-11-04--export-boundary-and-board-history-owner-fencing)
@@ -75,6 +76,10 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 ## 2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four
 
 `asset_preferences.list_type` (`ASSET_PREF_LISTS`) is now `untouchable` \| `target` \| `not_interested` \| `trade_block` (D-212, roster-first setup). Both loaders return all four plural/snake keys (`untouchables`, `targets`, `not_interested`, `trade_block`) for every user they return, in every flag state. Single membership is per (user, league, player) across **all four** — `set_asset_preference` deletes before it inserts — so a client toggling Move ↔ Keep ↔ none never reconciles locally. The convention for a new list type that the engine reads: **persistence ungated, engine read gated at the one context loader** (`server._owner_generation_context` pops the key when the flag is off), and any evidence/hash that names the key includes it only when present, so flag-off bytes are unchanged. `trade_block` is read by the owner-v1 and bilateral constructors only (give-side mirror of `targets`); legacy v2/v3 and likes-you do not read it. Strings: [cross-client invariants § Asset preference list types](../docs/cross-client-invariants.md#asset-preference-list-types).
+
+## 2026-11-10 — Calibration rounds side by side
+
+A Calibration round is a row in `outlook_calibration.ROUNDS`: round id, its own flag, and a two-version pair under the fixed wire aliases `current`/`value_core` (so installed clients and `blind_grading.arm_summaries` read any round unchanged). Every session, lease and report is keyed by its round id: one building/open/completed session per account/league/round (`active_round_key`), one build lease per round (`lease_key` = round id, which the finish/fail fences already require), one serial worker thread draining enabled rounds in order. `next`/`cards`/`results` dispatch on the session row's own round. Start/current take an optional `round_id`; with none, `default_round` decides: a current-round deck part-way through (`first_exposed_at` or an answer, the round's own frozen test) wins, then the new round until completed, then the current round again, so a new round needs no app change and never interrupts or retires a deck. The current round keeps its zero-argument calls (`enabled()`, `build_enabled()`, `drain_queue()`, `_pending_work()`); a later round goes through `round_enabled(rid)` / `round_build_enabled(rid)`. A new round never touches another round's rows; an additive arm is not used once a round of its own exists. [Scope](../docs/plans/offer-learnings/scope-revision-4-round.md).
 
 ## 2026-11-10 — Revision-4 proof and additive-arm conventions
 

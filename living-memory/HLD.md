@@ -32,7 +32,7 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 
 ## 2026-11-10 — Engine revision 4 and an additive Calibration arm
 
-A dark fourth bilateral revision (built on revision 2) reorders offers using the other team's outlook: their own picks priced above market for them, paying picks preferred over asking for them when quality ties, and "several for their best asset" demoted. Calibration can add it as a third, additive arm to new frozen round builds. No serving change. See [architecture](../docs/architecture.md#bilateral-revision-4-offer-learnings).
+A dark fourth bilateral revision (built on revision 2) reorders offers using the other team's outlook: their own picks priced above market for them, paying picks preferred over asking for them when quality ties, and "several for their best asset" demoted. Calibration can add it as a third, additive arm to new frozen round builds. No serving change. Superseded the same day by a Calibration round of its own (`outlook-v2-v4-1`, revision 2 vs 4), so pairs that opened or finished the v2/v3 round also grade revision 4; two rounds can be open per pair. See [architecture](../docs/architecture.md#bilateral-revision-4-offer-learnings).
 
 ## 2026-11-06 — Evidence-bound outlook candidate
 

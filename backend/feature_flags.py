@@ -1289,6 +1289,10 @@ FLAG_KEYS: tuple[str, ...] = (
     # trades this league year (stored public profiles) and revision 4 demotes
     # offers to a manager trading clearly less than their league. OFF ⇒ no key.
     "trade.partner_activity",
+    # docs/plans/offer-learnings/ WS1b: a Calibration round of its own for revision 4
+    # (outlook_calibration.R4_ROUND_ID), offered after the current round. Supersedes
+    # grading.revision4_arm, which is inert while this is on. OFF => today's behaviour.
+    "grading.revision4_round",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

@@ -46,6 +46,10 @@ pair under one round id.
   extra arm in the admin report, not as part of the two-arm comparison.
 - Pairs whose deck is already exposed get no revision-4 cards in this round; extending them
   needs an operator decision (scope §6).
+- 2026-11-10 follow-up: the operator chose a separate round. `outlook-v2-v4-1`
+  (`grading.revision4_round`) grades revision 4 against revision 2 for every pair, and the
+  additive arm of point 5 is inert while it is on
+  ([scope](../plans/offer-learnings/scope-revision-4-round.md)).
 - Starting values (20/10/0 premium, .10 demotion) are effects to grade, not fitted parameters.
 - Partner activity (decision 6): Calibration captures are built with the revision-4 selector
   at 0, so the Calibration revision-4 arm carries no `partner_activity` and grades WS1's

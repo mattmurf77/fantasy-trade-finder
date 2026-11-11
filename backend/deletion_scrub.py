@@ -1173,7 +1173,8 @@ def _redact_grading_source(conn, session: dict, ctx: _GradingContext) -> None:
     source = _loads(session["source_json"])
     if isinstance(source, (dict, list)):
         new = _replace_ids(source, ctx.ids, ctx.token)
-        if (isinstance(source, dict) and source.get("version") == "outlook-v2-v3-1"
+        from .outlook_calibration import ROUNDS
+        if (isinstance(source, dict) and source.get("version") in ROUNDS
                 and new != source):
             # Full paired snapshots contain other managers' private boards.
             # Deletion overrides replay immutability: discard the snapshot and
