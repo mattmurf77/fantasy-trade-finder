@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-212 — Manager profiles: keyed on roster `owner_id`, current season only, one backfill is the only extra Sleeper cost, rookie drafts deferred
+## D-214 — Manager profiles: keyed on roster `owner_id`, current season only, one backfill is the only extra Sleeper cost, rookie drafts deferred
 
 **Date:** 2026-11-10 · **Who:** side session from the trade-quality evaluation (built dark; operator decides the open questions in the design).
 **Context:** ~80% of suggestions go to league-mates who never ranked, and testers like those far less. Public Sleeper league history (trades, FAAB waiver bids including lost ones) says what those managers actually do, but FAAB rows were discarded by the trade sweep and no per-manager profile existed. [Design](../docs/plans/manager-profiles/design.md).
@@ -10,6 +10,20 @@
 - Trade signals are thin in one season (prod: median 2 trades per manager per season, 19% zero); prior seasons need one `/rosters` read per prior league to attribute (design open question 2).
 - `accounts.delete_user_data` deletes a deleted account's profile rows and export includes them, but a league-mate's next sweep can rebuild one from public data (design open question 1).
 - 2026-11-10: the operator turned the flag on in `config/features.json` ("flip it on") before answering open question 1; it takes effect when PR #635 merges. Production's `FTF_FLAGS` does not pin this key (G-076), so the file value applies. Turning it on exposed one bug, fixed in the same change: the caller's own profile was rebuilt when their account was deleted mid-daemon. `replace_manager_profiles` now takes the caller's users-row lock (`live_user`), like the roster-history writes; a league-mate's later sync can still rebuild a deleted account's profile (open question 1).
+
+## D-213 — Roster setup's "Keep" is the existing `untouchable` tag, with a guard past 40% of the roster
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q2](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** The roster-first setup step gives every asset Move / — / Keep. Keep could reuse `untouchable` or become a softer new list.
+**Decision:** Keep writes `asset_preferences.list_type = 'untouchable'` through the existing `POST /api/league/asset-prefs`. The step shows a guard note once more than ~40% of the roster is marked Keep.
+**Consequences:** No new engine reads for Keep. Every arm already honours it, but differently: legacy and likes-you paths hard-exclude untouchables, and owner-v1 lets one go only at a market gain with a same-position player coming back. That is why the guard exists: heavy Keep use can empty a legacy deck. Users get one word for one thing.
+
+## D-212 — Roster setup's "Move" is a new `asset_preferences` list type, `trade_block`
+
+**Date:** 2026-11-10 · **Who:** operator, accepting the roster-first setup design ([prd.md §0 Q1](../docs/plans/roster-first-trade-setup/prd.md)).
+**Context:** Nothing stores "I would move this player". `trade_away_positions` is per position, so mapping one player onto it makes the whole position shoppable. `targets` is per player but is read only on the receive side.
+**Decision:** Add `trade_block` as a fourth `list_type` value in `asset_preferences` (the give-side twin of `target`). `list_type` is a plain string, so there is no migration. Persistence is ungated; the engine reads it only behind `trades.roster_setup`.
+**Consequences:** Single membership still holds (one tag per player per league). The value becomes part of the asset-prefs API contract, the mobile `AssetPrefs` type and `docs/cross-client-invariants.md` when built. The owner and bilateral constructors need new give-side reads (prd §4.3).
 ## D-211 — Docs-only pushes skip Render through a build filter, not a `[skip render]` marker
 
 **Date:** 2026-11-10 · **Who:** operator (asked to replace the marker with a build filter).

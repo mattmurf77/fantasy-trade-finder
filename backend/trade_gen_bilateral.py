@@ -156,6 +156,9 @@ class _Search(owner._Search):
             if direction > 0:
                 declared += .3 * ((pid in pref.get("targets", ()))
                                  - (pid in pref.get("not_interested", ())))
+            elif direction < 0:
+                # Give-side twin of `targets` (D-212): willing to move him.
+                declared += .3 * (pid in pref.get("trade_block", ()))
             # Marginal usable roster evidence, never an instruction for a
             # tanking team to fill its immediate lineup holes.
             after = self._lineup(team["roster"] | {pid} if direction > 0 else team["roster"] - {pid}, team)
@@ -181,6 +184,7 @@ class _Search(owner._Search):
         focal = max(buy or 0, -(sell or 0), 0)
         pref = team["preferences"]
         declared = (focal_in in pref.get("targets", ())
+                    or focal_out in pref.get("trade_block", ())
                     or self._position(focal_in) in pref.get("acquire_positions", ())
                     or self._position(focal_out) in pref.get("trade_away_positions", ()))
         explicit = team["uid"] == self.user_id and (bool(set(give) & set(self.give_pins))

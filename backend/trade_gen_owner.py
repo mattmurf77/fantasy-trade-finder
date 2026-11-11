@@ -394,7 +394,10 @@ class _Search:
             "usable_depth_before": team["lineup_before"], "usable_depth_after": after,
             "roster_ids": sorted(team["roster"]), "inactive_ids": sorted(team["inactive"]),
             "preferences": {key: list(team["preferences"].get(key) or ()) for key in
-                ("acquire_positions", "trade_away_positions", "untouchables", "targets", "not_interested")},
+                ("acquire_positions", "trade_away_positions", "untouchables", "targets", "not_interested",
+                 # D-212: present only when trades.roster_setup kept the key, so
+                 # flag-off evidence bytes are unchanged.
+                 *(("trade_block",) if "trade_block" in team["preferences"] else ()))},
             "starter_requirements": team["starts"], "lineup_proxy": "market_usable_depth_v1",
             "starter_slots": team["slots"], "lineup_source": team["lineup_source"],
             **({"native_lineup": {"policy":"native_position_range_family_v1",
@@ -548,6 +551,7 @@ class _Search:
             priority -= sum(self._position(p) in pref.get("trade_away_positions", ()) for p in incoming)
             priority += sum(p in pref.get("targets", ()) for p in incoming)
             priority -= sum(p in pref.get("not_interested", ()) for p in incoming)
+            priority += sum(p in pref.get("trade_block", ()) for p in outgoing)
         data["preference_priority"] = priority
         data["construction"] = {"shape": f"{len(give)}x{len(receive)}",
             "small": (len(give), len(receive)) in ((1, 1), (1, 2), (2, 1)),
@@ -585,6 +589,9 @@ class _Search:
                                      - (pos in pref.get("trade_away_positions", ())))
         if direction > 0:
             priority += .1 * ((pid in pref.get("targets", ())) - (pid in pref.get("not_interested", ())))
+        elif direction < 0:
+            # Give-side twin of `targets` (D-212): willing to move this player.
+            priority += .1 * (pid in pref.get("trade_block", ()))
         team["asset_interest"][key] = personal + outlook + need + priority
         return team["asset_interest"][key]
 
