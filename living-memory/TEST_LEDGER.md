@@ -88,7 +88,7 @@
 
 ## 2026-11-10 — Roster-first setup flag flip (`trades.roster_setup` → true)
 
-- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run (no build includes `9c252819` yet).
+- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run; 1.22.0 (184) is the first build that includes `9c252819`.
 - Local: the flag mirror tests plus the trade-block, deck-digest, blind-grading and rankings-import suites pass (204 passed). CI on the PR covers the rest. `FTF_SKIP_SIM_GATE=1` (D-056).
 
 ## 2026-11-10 — Offer-learnings integration (branch `feat/offer-learnings`, PR #641, every new flag off)
