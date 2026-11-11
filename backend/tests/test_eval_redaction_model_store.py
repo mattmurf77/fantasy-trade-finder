@@ -6,6 +6,7 @@ unparseable lines that can't hold a deleted id. The rewrite is atomic and
 idempotent, keeps the store's mode, and the serve-time cache reloads it."""
 
 import json
+import gc
 import os
 import stat
 
@@ -184,6 +185,9 @@ def test_a_failure_leaves_the_store_untouched_and_no_temp_file(store, monkeypatc
     """...and no file descriptor open (QA P3-5: fchmod failing leaked one)."""
     os.chmod(store, 0o644)
     raw, st = open(store, "rb").read(), os.stat(store)
+    # Collect first: garbage left by earlier tests can hold descriptors that
+    # close mid-test and make the count fall (CI, 2026-11-11: 26 before, 24 after).
+    gc.collect()
     fds = len(os.listdir("/dev/fd"))
 
     def boom(*_a, **_k):
