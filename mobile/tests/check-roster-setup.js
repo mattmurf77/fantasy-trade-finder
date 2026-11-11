@@ -12,7 +12,10 @@
 // a failing screen. This guard pins the six structural checks scope.md §3
 // names, plus the scope's testIDs, and it transpiles and EXECUTES
 // `src/utils/rosterSetup.ts` (the prefill, Keep guard, pick cap, rank walk,
-// new-asset diff, auto-push condition and snooze ladder) under plain node.
+// new-asset diff, first-pass trigger condition and snooze ladder) under
+// plain node. §10 pins the automatic entry the operator amended on
+// 2026-11-10: the setup is pushed on the FIRST DECLINED suggestion (a
+// committed pass), never on a TradesHome focus.
 //
 // HONEST LABEL (G-035): checks 1-6 prove the PRESENCE of exact wirings in
 // source, not runtime behaviour. The executed section proves the pure
@@ -52,6 +55,7 @@ const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\
 
 const SCREEN = code(read('src/screens/RosterSetupScreen.tsx'));
 const CARD = code(read('src/components/RosterSetupEntryCard.tsx'));
+const TRIGGER = code(read('src/hooks/useRosterSetupPassTrigger.ts'));
 const QUICK_RANK = code(read('src/screens/QuickRankScreen.tsx'));
 const GRID = code(read('src/components/RankChipGrid.tsx'));
 const TRADES = code(read('src/screens/TradesScreen.tsx'));
@@ -115,7 +119,7 @@ assert(
 assert(
   /\{rosterSetupOn && leagueId && !isDemo && route\?\.name === 'TradesHome' \? \(\s*<RosterSetupEntryCard/.test(TRADES)
     && (TRADES.match(/<RosterSetupEntryCard/g) || []).length === 1,
-  '4c. the auto-push + return card mount exists once, behind the flag, landing-only, never demo',
+  '4c. the return card mount exists once, behind the flag, landing-only, never demo',
 );
 assert(
   /rosterSetup: rosterSetupOn && leagueId && !isDemo\s*\?/.test(TRADES),
@@ -127,15 +131,17 @@ assert(
 );
 const pushSites = [
   ['RosterSetupEntryCard', CARD],
+  ['useRosterSetupPassTrigger', TRIGGER],
   ['TradesScreen', TRADES],
   ['TradeDnaSheet', DNA],
   ['QuickRankScreen', QUICK_RANK],
 ].flatMap(([n, s]) => (s.match(/navigate\(\s*'RosterSetup'/g) || []).map(() => n));
 assert(
   pushSites.filter((n) => n === 'TradesScreen').length === 1
-    && pushSites.filter((n) => n === 'RosterSetupEntryCard').length === 2
+    && pushSites.filter((n) => n === 'RosterSetupEntryCard').length === 1
+    && pushSites.filter((n) => n === 'useRosterSetupPassTrigger').length === 1
     && !pushSites.includes('TradeDnaSheet'),
-  '4f. RosterSetup is pushed only from the flag-gated card (auto-push + open) and the flag-gated DNA onEdit',
+  '4f. RosterSetup is pushed only from the card tap, the first-pass trigger and the flag-gated DNA onEdit',
   pushSites.join(', '),
 );
 
@@ -268,12 +274,13 @@ const base = {
   flagOn: true, leagueId: 'L1', isDemo: false, hydrated: true, hasRecord: false,
   assetCount: 5, alreadyPushedThisSession: false,
 };
-assert(u.shouldAutoPush(base), '9j. auto-push when every prd §3.1 condition holds');
+assert(u.shouldPushSetupOnPass(base), '9j. first-pass push when every prd §3.1 condition holds');
+assert(u.shouldAutoPush === undefined, '9j2. the focus-era shouldAutoPush helper is gone');
 for (const [k, v] of [
   ['flagOn', false], ['leagueId', 'league_demo'], ['isDemo', true], ['hydrated', false],
   ['hasRecord', true], ['assetCount', 0], ['assetCount', null], ['alreadyPushedThisSession', true],
 ]) {
-  assert(!u.shouldAutoPush({ ...base, [k]: v }), `9k. no auto-push when ${k}=${JSON.stringify(v)}`);
+  assert(!u.shouldPushSetupOnPass({ ...base, [k]: v }), `9k. no first-pass push when ${k}=${JSON.stringify(v)}`);
 }
 // Snooze ladder: full → Not now → collapsed this session → one re-offer
 // in a later session → Not now → retired (collapsed for good).
@@ -287,6 +294,57 @@ assert(L.reofferSession === 4 && u.cardView(L, 'entry', 5) === 'collapsed', '9o.
 L = u.ladderOnSnooze(L, 'entry', 4);
 assert(L.retired && u.cardView(L, 'entry', 9) === 'collapsed', '9p. Not now on the re-offer retires it');
 assert(u.cardView(L, 'roster_changed', 9) === 'full', '9q. a ladder for another card kind does not apply');
+
+// ── 10. The automatic entry is the first COMMITTED PASS (2026-11-10) ────
+assert(
+  !/useIsFocused|useFocusEffect/.test(CARD) && !/entry: 'first_pass'/.test(CARD),
+  '10a. the TradesHome card has no focus-based push (return card only)',
+);
+assert(
+  /navigate\('RosterSetup', \{ entry: 'first_pass' \}\)/.test(TRIGGER)
+    && /shouldPushSetupOnPass\(\{/.test(TRIGGER)
+    && /hasRecord: !!useRosterSetup\.getState\(\)\.byLeague\[l\.leagueId\]/.test(TRIGGER)
+    && /pushedThisSession\.add\(l\.leagueId\)/.test(TRIGGER),
+  '10b. the trigger pushes {entry:first_pass} only through shouldPushSetupOnPass (record read at call time, once per league per session)',
+);
+assert(
+  /const rosterSetupOnPass = useRosterSetupPassTrigger\(\{\s*enabled: rosterSetupOn && !isDemo,/.test(TRADES),
+  '10c. TradesScreen arms the trigger only with the flag on and outside demo',
+);
+const triggerCalls = (TRADES.match(/rosterSetupOnPass\(\);/g) || []).length;
+assert(triggerCalls === 5, '10d. exactly five committed-pass call sites in TradesScreen', `found ${triggerCalls}`);
+const advanceBody = (TRADES.match(/  function advance\([\s\S]*?\n  \}\n/) || [''])[0];
+const iMutate = advanceBody.indexOf('swipeMutation.mutate({ card: topCard, decision');
+const iAdvance = advanceBody.indexOf('if (!opts?.deferDeckAdvance) setDeckIdx((i) => i + 1);');
+const iPlain = advanceBody.search(/if \(decision === 'pass' && !heldPass && reasonBankedIdRef\.current !== dispatchRawId\) \{\s*rosterSetupOnPass\(\);/);
+assert(
+  iMutate > 0 && iAdvance > iMutate && iPlain > iAdvance,
+  '10e. plain pass: the trigger runs AFTER the unchanged swipe write and the deck advance; never for a held or reason-deferred pass',
+);
+assert(
+  /timer: setTimeout\(\(\) => \{\s*flushPendingPassRef\.current\(\);\s*rosterSetupOnPass\(\);\s*\}, UNDO_HOLD_MS\)/.test(advanceBody),
+  '10f. undo-held pass: the trigger runs only when the undo window expires, after the held write flushes (Undo cancels it)',
+);
+const fnBody = (name) => (TRADES.match(new RegExp(`  function ${name}\\([\\s\\S]*?\\n  \\}\\n`)) || [''])[0];
+assert(
+  /commitReasonAdvance\(\);\s*rosterSetupOnPass\(\);/.test(fnBody('handleReasonLayer2Select'))
+    && /commitReasonAdvance\(\);\s*rosterSetupOnPass\(\);/.test(fnBody('handleReasonLayer2Send'))
+    && /if \(banked\) commitReasonAdvance\(\);\s*if \(banked\) rosterSetupOnPass\(\);/.test(fnBody('handleReasonOverlayDismissed')),
+  '10g. reasoned pass: the trigger runs right after commitReasonAdvance at its three callers — layer 2 answered, sent, or a banked overlay closed (deck and browse)',
+);
+assert(
+  ['handleReasonLayer1', 'handleReasonLayer2Bank', 'flushPendingPass', 'undoPass', 'commitReasonAdvance']
+    .every((n) => fnBody(n) && !/rosterSetupOnPass/.test(fnBody(n))),
+  '10h. never at layer 1 or the "Other" bank (capture still open), in flushPendingPass (resets/unmount flush it), on Undo, or inside commitReasonAdvance (its shape is pinned elsewhere)',
+);
+const ENTRY_SRC = [SCREEN, CARD, TRIGGER, UTIL_SRC, readRoot('backend/analytics_taxonomy.py'),
+  readRoot('docs/business/analytics/2026-11-10-roster-setup-events.md')].join('\n');
+assert(
+  !/first_use/.test(ENTRY_SRC)
+    && /type Entry = 'first_pass' \| 'roster_changed' \| 'manual_dna' \| 'entry_card';/.test(SCREEN)
+    && /entry\s+∈ first_pass \| roster_changed \| manual_dna \| entry_card/.test(readRoot('backend/analytics_taxonomy.py')),
+  "10i. the entry enum is first_pass (never first_use) in the screen, trigger, taxonomy and addendum",
+);
 
 console.log(`\n${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);

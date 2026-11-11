@@ -213,6 +213,7 @@ import {
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
 import RosterSetupEntryCard from '../components/RosterSetupEntryCard';
+import { useRosterSetupPassTrigger } from '../hooks/useRosterSetupPassTrigger';
 import OverhaulEntryCard from '../components/OverhaulEntryCard';
 import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
@@ -1014,9 +1015,21 @@ export default function TradesScreen({ navigation, route }: any) {
   // #357/#358/#359 — Team Review entry (dark until the operator flips it).
   const teamReviewOn = useFlag('trades.team_review');
   // Roster-first setup (docs/plans/roster-first-trade-setup/prd.md; dark by
-  // default). Off ⇒ no auto-push, no TradesHome card, no DNA "Your roster"
-  // row: every surface below is mounted only behind this read (AC-0).
+  // default). Off ⇒ no first-pass push, no TradesHome card, no DNA "Your
+  // roster" row: every surface below is mounted only behind this read (AC-0).
   const rosterSetupOn = useFlag('trades.roster_setup');
+  // The setup's only automatic entry: the FIRST committed pass in a league
+  // (operator amendment 2026-11-10). Called at the committed-pass points
+  // below — plain pass in advance(), the undo-held pass's timer, and after
+  // each commitReasonAdvance() caller (layer 2 answered / sent, banked
+  // overlay closed). A no-op unless the flag is on and not demo.
+  const rosterSetupOnPass = useRosterSetupPassTrigger({
+    enabled: rosterSetupOn && !isDemo,
+    leagueId,
+    userId,
+    isDemo,
+    navigation,
+  });
   // Team overhaul entry (BUILD-CONTRACT §9 / D9). The active-overhaul probe
   // runs only while the flag is on: flag off ⇒ no request and no card.
   const overhaulOn = useFlag('overhaul.enabled');
@@ -7187,14 +7200,20 @@ export default function TradesScreen({ navigation, route }: any) {
     // live layer-2 panel would offer to rewind a deck that has not moved yet.
     const passAttempt = decision === 'pass'
       ? opts?.passAttempt ?? makePassAttempt(topCard, dispatchRawId) : undefined;
-    if (swipeUndoOn && decision === 'pass' && !declineReasonsOn && passAttempt) {
+    const heldPass = swipeUndoOn && decision === 'pass' && !declineReasonsOn && !!passAttempt;
+    if (heldPass && passAttempt) {
       // Hold the POST for the undo window (design note at pendingPassRef).
       const card = topCard;
       passAttempt.state = settlePassWrite(passAttempt.state, { type: 'swipe', status: 'held' });
       pendingPassRef.current = {
         card,
         rawId: dispatchRawId,
-        timer: setTimeout(() => flushPendingPassRef.current(), UNDO_HOLD_MS),
+        // Roster-first setup: the window expiring IS this pass committing,
+        // so the first-pass trigger runs after the held write is flushed.
+        timer: setTimeout(() => {
+          flushPendingPassRef.current();
+          rosterSetupOnPass();
+        }, UNDO_HOLD_MS),
         signal: dispatchSignal,
         attempt: passAttempt,
       };
@@ -7214,6 +7233,13 @@ export default function TradesScreen({ navigation, route }: any) {
     // own tiles. `commitReasonAdvance()` does this line (and only this line)
     // once layer 2 answers — the next trade IS the confirmation (SPEC §1).
     if (!opts?.deferDeckAdvance) setDeckIdx((i) => i + 1);
+    // Roster-first setup — a plain pass has committed (write dispatched, deck
+    // advanced). Held passes trigger on their timer; a reasoned pass (its id
+    // banked by layer 1 before it called here) triggers once layer 2 answers
+    // or its overlay closes — never here, mid-capture.
+    if (decision === 'pass' && !heldPass && reasonBankedIdRef.current !== dispatchRawId) {
+      rosterSetupOnPass();
+    }
     if (decision === 'like') {
       haptics.success();
       // Item 8: remember the liked card for the share affordance, fire the
@@ -7407,6 +7433,9 @@ export default function TradesScreen({ navigation, route }: any) {
     );
     observeReasonRequest(attempt, postDeclineReason({ ...reasonWriteTarget(), layer: 2, reason, detail }));
     commitReasonAdvance();
+    // Roster-first setup — the reasoned pass is complete (layer 2 answered),
+    // so the first-pass push can no longer cut the reason capture off.
+    rosterSetupOnPass();
   }
 
   // "Other" tapped: bank the code so a tester who opens the box and bails
@@ -7447,6 +7476,7 @@ export default function TradesScreen({ navigation, route }: any) {
     }));
     Keyboard.dismiss();
     commitReasonAdvance();
+    rosterSetupOnPass(); // roster-first setup: the reasoned pass is complete
   }
 
   // The composer's send button opens BELOW the text box, so focusing the
@@ -7476,6 +7506,8 @@ export default function TradesScreen({ navigation, route }: any) {
   function handleReasonOverlayDismissed(banked: boolean) {
     track('trade_pass_overlay_dismissed', { banked }, 'Trades');
     if (banked) commitReasonAdvance();
+    // Roster-first setup — a banked pass whose overlay closed is complete.
+    if (banked) rosterSetupOnPass();
   }
 
   const declineReasonProps: DispositionReasons | undefined = declineReasonsOn
@@ -8522,10 +8554,11 @@ export default function TradesScreen({ navigation, route }: any) {
           />
         ) : null}
 
-        {/* Roster-first setup (prd §3) — the first-use auto-push and the
-            post-skip / roster-changed return card. Landing only (never a
-            pushed TradeDeck), never demo, and mounted only with the flag
-            on: off ⇒ this component and its reads do not exist. */}
+        {/* Roster-first setup (prd §3) — the post-skip / roster-changed
+            return card. Landing only (never a pushed TradeDeck), never demo,
+            and mounted only with the flag on: off ⇒ this component and its
+            reads do not exist. The automatic entry is the first-pass trigger
+            (useRosterSetupPassTrigger), not this card. */}
         {rosterSetupOn && leagueId && !isDemo && route?.name === 'TradesHome' ? (
           <RosterSetupEntryCard leagueId={leagueId} userId={userId} isDemo={isDemo} />
         ) : null}

@@ -8,7 +8,8 @@ an unregistered prop is stripped while the response still reports
 dropped == 0. Same shape as test_analytics_taxonomy_home_hub.py.
 
 Two of the six are NON_INTENT on purpose (INTENT is derived by subtraction):
-  * roster_setup_shown   — an impression the user did not ask for on first use;
+  * roster_setup_shown   — an impression the user did not ask for on the
+                           first-pass entry;
   * roster_setup_skipped — a dismissal/terminator (quickset_abandoned class).
 """
 

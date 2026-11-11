@@ -76,7 +76,7 @@ import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/type
 // The deck under this push keeps loading the whole time: nothing here
 // blocks, cancels or waits on it, so Skip costs no time (prd §7).
 
-type Entry = 'first_use' | 'roster_changed' | 'manual_dna' | 'entry_card';
+type Entry = 'first_pass' | 'roster_changed' | 'manual_dna' | 'entry_card';
 type Step = 'toggles' | 'rank' | 'done';
 
 interface SetupAsset {

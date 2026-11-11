@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 
 import ChalkText from './chalkline/Text';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
@@ -13,26 +13,19 @@ import {
   ladderOnShow,
   ladderOnSnooze,
   newAssetIds,
-  shouldAutoPush,
   type PromptKind,
 } from '../utils/rosterSetup';
 
-// Roster-first setup's TradesHome presence (flag `trades.roster_setup`;
-// prd §3). TradesScreen mounts this ONLY with the flag on, on the
-// `TradesHome` route, outside demo — so with the flag off nothing here
-// exists: no query, no push, no card (AC-0).
+// Roster-first setup's TradesHome RETURN CARD (flag `trades.roster_setup`;
+// prd §3.2/§3.3, TeamReviewEntryCard pattern). TradesScreen mounts this ONLY
+// with the flag on, on the `TradesHome` route, outside demo — so with the
+// flag off nothing here exists: no query, no card (AC-0).
 //
-// Two jobs, one owner (both read the same device record and roster):
+// This card never pushes the setup on its own. The automatic entry is the
+// user's first declined suggestion in a league (operator amendment
+// 2026-11-10), owned by `hooks/useRosterSetupPassTrigger` and called from
+// TradesScreen's committed-pass points.
 //
-// 1. AUTO-PUSH (prd §3.1, the only automatic entry). The first time the
-//    landing is focused for a league with no device record and a non-empty
-//    roster, push `RosterSetup {entry:'first_use'}`. TradesHome stays
-//    MOUNTED beneath the push, so the deck request it already issued keeps
-//    running — the setup never delays the deck (AC-1, AC-9). Once per league
-//    per app session at most (module set), so a failed store write can never
-//    loop the push.
-//
-// 2. RETURN CARD (prd §3.2/§3.3, TeamReviewEntryCard pattern):
 //    - `skipped` record → "Set up your roster" (opens the full step);
 //    - `done` record whose roster gained assets → "N new on your roster"
 //      (opens Step 1 filtered to them). Losing assets never prompts.
@@ -43,7 +36,6 @@ import {
 //    snapshot instead. Impressions ride the existing `prompt_shown` event
 //    (surface `roster_setup_card`).
 
-const pushedThisSession = new Set<string>();
 const impressionsThisSession = new Set<string>();
 
 export default function RosterSetupEntryCard({
@@ -56,7 +48,6 @@ export default function RosterSetupEntryCard({
   isDemo: boolean;
 }) {
   const navigation = useNavigation<any>();
-  const focused = useIsFocused();
   const hydrated = useRosterSetup((s) => s.hydrated);
   const record = useRosterSetup((s) => s.byLeague[leagueId]);
   const write = useRosterSetup((s) => s.write);
@@ -66,30 +57,6 @@ export default function RosterSetupEntryCard({
   useEffect(() => {
     void useRosterSetup.getState().hydrate();
   }, []);
-
-  // Players alone decide "has a roster" as soon as rosters answer; with no
-  // players, wait for the picks read to settle before deciding.
-  const assetCount = !roster.rostersReady
-    ? null
-    : roster.playerIds.length > 0
-      ? roster.playerIds.length
-      : roster.picksSettled ? roster.assetIds.length : null;
-
-  useEffect(() => {
-    if (!focused) return;
-    const go = shouldAutoPush({
-      flagOn: true, // the mount is the flag gate
-      leagueId,
-      isDemo,
-      hydrated,
-      hasRecord: !!record,
-      assetCount,
-      alreadyPushedThisSession: pushedThisSession.has(leagueId),
-    });
-    if (!go) return;
-    pushedThisSession.add(leagueId);
-    navigation.navigate('RosterSetup', { entry: 'first_use' });
-  }, [focused, leagueId, isDemo, hydrated, record, assetCount, navigation]);
 
   // ── Card ──────────────────────────────────────────────────────────────
   const ready = hydrated && !!record && roster.rostersReady && roster.picksSettled;

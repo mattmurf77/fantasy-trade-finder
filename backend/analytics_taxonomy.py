@@ -443,7 +443,7 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # docs/business/analytics/2026-11-10-roster-setup-events.md. Registered
     # in the SAME commit as the mobile emitters (the NULL-`platform` lesson).
     # Mobile-only. `roster_setup_shown` (an impression the user did not ask
-    # for on first use) and `roster_setup_skipped` (the terminator for a
+    # for on the first-pass entry) and `roster_setup_skipped` (the terminator for a
     # non-completing entry) are classified in
     # analytics_queries.NON_INTENT_EVENTS; the other four are intent. No
     # per-tap client event: per-asset writes are already logged server-side
@@ -1746,7 +1746,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "team_review_exited":      frozenset({"league_id", "beat", "index", "outcome"}),
     "team_review_action_taken": frozenset({"league_id", "beat", "action"}),
     # Roster-first setup (analytics.md §2): ids, counts and closed enums only.
-    #   entry   ∈ first_use | roster_changed | manual_dna | entry_card
+    #   entry   ∈ first_pass | roster_changed | manual_dna | entry_card
+    #             (first_pass = the automatic entry, pushed on the user's
+    #             first declined Find a Trade suggestion in a league)
     #   stage   ∈ toggles | rank
     #   surface ∈ entry_card | roster_changed_card | dna_row
     # `position` on roster_setup_rank_saved is a CORE POSITION

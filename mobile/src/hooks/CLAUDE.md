@@ -14,4 +14,6 @@ Custom React hooks. Currently:
 
 - `useMyRosterAssets.ts` — the caller's roster as roster-first setup counts it: player ids via `findMyRoster` (owner or co-owner) on `['league-rosters', id]` plus owned pick ids on `['league-picks', id]` (both shared cache keys). A picks failure degrades to no picks, never to no roster.
 
+- `useRosterSetupPassTrigger.ts` — roster-first setup's ONLY automatic entry (flag `trades.roster_setup`; operator amendment 2026-11-10): returns a stable function TradesScreen calls at the committed-pass points (plain pass in `advance()`, the undo-held pass's timer, and after each `commitReasonAdvance()` caller once the reason capture closes); it pushes `RosterSetup {entry:'first_pass'}` when `utils/rosterSetup.shouldPushSetupOnPass` holds (flag, non-demo, store hydrated, no device record, non-empty roster, once per league per app session). Never touches the pass itself.
+
 - `useTradePagePrewarm.ts` — mounted once in TabNav: hydrates/refreshes the organic first page before Acquire focus, using persisted fairness and the exact active user/league/format. Joins foreground session revalidation and cancels after identity, token, flag, foreground or format changes. Passive requests use the server prewarm header guard; free previews require a user tap.

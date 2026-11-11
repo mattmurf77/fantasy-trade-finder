@@ -519,8 +519,9 @@ function TradesStackNav() {
       {/* Roster-first setup for Find a Trade (flag `trades.roster_setup`,
           docs/plans/roster-first-trade-setup/prd.md). Registered
           UNCONDITIONALLY like every flag-gated route — the screen carries the
-          flag — and pushed from TradesHome (first use per league, the return
-          card) or the Trade DNA sheet's "Your roster" row. Shared always-on
+          flag — and pushed from the deck (the first declined suggestion per
+          league), the TradesHome return card, or the Trade DNA sheet's "Your
+          roster" row. Shared always-on
           back control (native back is dead on iOS 26, RNS#3294); Back = Skip
           at the current step (prd §7). Tab-stack screen: NO local
           FeedbackFAB (#188 / #196 / #197). */}

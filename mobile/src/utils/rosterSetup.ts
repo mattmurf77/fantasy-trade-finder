@@ -3,7 +3,8 @@
 //
 // Zero runtime imports on purpose: `mobile/tests/check-roster-setup.js`
 // transpiles and EXECUTES this file, so every decision the screen, the
-// TradesHome card and the auto-push share lives here as a plain function.
+// TradesHome card and the first-pass trigger share lives here as a plain
+// function.
 // The store (`state/rosterSetup.ts`) only remembers; the screen only renders.
 
 import type { Position } from '../shared/types';
@@ -166,7 +167,7 @@ export function newAssetIds(
 
 // ── Entry decisions ─────────────────────────────────────────────────────
 
-export interface AutoPushInput {
+export interface PassTriggerInput {
   flagOn: boolean;
   leagueId: string | null;
   isDemo: boolean;
@@ -177,8 +178,11 @@ export interface AutoPushInput {
   alreadyPushedThisSession: boolean;
 }
 
-/** prd §3.1 — the only automatic entry. All must hold. */
-export function shouldAutoPush(i: AutoPushInput): boolean {
+/** The only automatic entry (prd §3.1 as amended by the operator,
+ *  2026-11-10): asked when a pass on a Find a Trade card has COMMITTED —
+ *  never on a landing focus. All must hold; with no device record for the
+ *  league, the first committed pass is the first declined suggestion. */
+export function shouldPushSetupOnPass(i: PassTriggerInput): boolean {
   return (
     i.flagOn
     && !!i.leagueId

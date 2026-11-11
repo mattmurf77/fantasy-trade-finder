@@ -9,7 +9,7 @@ import type { PromptLadder } from '../utils/rosterSetup';
 //
 // Modelled on `teamReviewCompletion.ts`, for the same reason: the writer
 // (RosterSetupScreen, pushed in the Trades stack) and the readers (the
-// TradesHome auto-push + RosterSetupEntryCard) sit in ONE stack with
+// first-pass trigger + RosterSetupEntryCard) sit in ONE stack with
 // TradesHome MOUNTED beneath the push. A once-per-mount AsyncStorage read
 // could not see a record written while it sat underneath, and a focus re-read
 // would race the fire-and-forget write. So: memory updates SYNCHRONOUSLY,

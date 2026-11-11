@@ -23,7 +23,7 @@ All fire through `track(name, props, screen)` in `mobile/src/api/events.ts`. Scr
 | `roster_setup_prompt_tapped` | intent | a return entry point is tapped | `league_id`, `surface`, `new_asset_count` |
 
 **Closed enums.**
-`entry`: `first_use` · `roster_changed` · `manual_dna` · `entry_card`.
+`entry`: `first_pass` · `roster_changed` · `manual_dna` · `entry_card`. `first_pass` is the automatic entry: the setup is pushed when the user's first declined (passed) Find a Trade suggestion in a league has committed (operator amendment, 2026-11-10; it replaced a push on TradesHome focus before anything shipped).
 `stage`: `toggles` · `rank`.
 `surface` (on `roster_setup_prompt_tapped`): `entry_card` · `roster_changed_card` · `dna_row`.
 `position`: `QB` · `RB` · `WR` · `TE` — a core position, never a device platform.
@@ -40,7 +40,7 @@ No player id, name, free text or device platform rides in any prop.
 
 ## Why two are non-intent
 
-`INTENT_EVENTS` is derived by subtraction. `roster_setup_shown` fires on first use whether or not the user asked for anything, so counted as intent it would mint a user-day for every new Find a Trade user and step-change DAU on the ship date (the `team_review_beat_viewed` class). `roster_setup_skipped` is a dismissal that terminates an entry (the `quickset_abandoned` / `team_review_exited` class).
+`INTENT_EVENTS` is derived by subtraction. `roster_setup_shown` fires on the `first_pass` entry whether or not the user asked for the setup, so counted as intent it would mint a user-day for every new Find a Trade user and step-change DAU on the ship date (the `team_review_beat_viewed` class). `roster_setup_skipped` is a dismissal that terminates an entry (the `quickset_abandoned` / `team_review_exited` class).
 
 ## Not changed
 

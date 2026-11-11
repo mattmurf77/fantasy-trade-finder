@@ -11,7 +11,7 @@ import { getLeaguePicks, type OwnedPick } from '../api/league';
 //
 // Both reads share the cache keys every other consumer uses —
 // `['league-rosters', id]` is seeded by session init, `['league-picks', id]`
-// is TradesScreen's — so the TradesHome card and the auto-push cost nothing
+// is TradesScreen's — so the TradesHome card and the first-pass trigger cost nothing
 // on a warm session. A picks failure (ESPN has no ownership, a 409 during
 // session init) degrades to "no picks", never to "no roster".
 

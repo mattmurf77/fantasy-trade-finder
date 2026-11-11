@@ -107,10 +107,10 @@ NON_INTENT_EVENTS = frozenset({
     # Roster-first setup (flag `trades.roster_setup`), added in the SAME
     # commit that registered them (docs/plans/roster-first-trade-setup/
     # analytics.md §3), for the reason at the top of this block.
-    #   roster_setup_shown — an IMPRESSION the user did not ask for on
-    #     first use (the team_review_beat_viewed class). Admitting it would
-    #     mint a user-day for every new Find a Trade user and step-change DAU
-    #     on the ship date.
+    #   roster_setup_shown — an IMPRESSION the user did not ask for on the
+    #     first-pass entry (the team_review_beat_viewed class). Admitting it
+    #     would mint a user-day for every new Find a Trade user and
+    #     step-change DAU on the ship date.
     #   roster_setup_skipped — a dismissal/TERMINATOR, the quickset_abandoned
     #     / team_review_exited class.
     # The other four roster_setup_* events are intent and deliberately ABSENT.
