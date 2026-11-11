@@ -73,6 +73,10 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 
 ---
 
+## 2026-11-11 — A scoped tier save writes only the ids it is given
+
+`/api/tiers/save` has three shapes: the plain save (re-spreads the whole tier, marks the position saved), `scope: 'rookie'` (the rookie set is the scope, behind `ranks.rookie_subset`) and `scope: 'roster'` (the posted ids are the scope, read without a flag, D-233). Both scoped shapes go through `apply_tiers_subset`, leave `tiers_saved` and the ranking method alone, and never move a player outside the scope. A client that places a few players into tiers must use a scoped shape; the plain save would price a lone moved player at the top of his tier. The roster scope also passes `empty_band_edge`, so a lone mover into a band empty at his position lands at the edge he moved toward. The app's page mirrors that placement locally (`applyTierMove`); change one, change both.
+
 ## 2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four
 
 `asset_preferences.list_type` (`ASSET_PREF_LISTS`) is now `untouchable` \| `target` \| `not_interested` \| `trade_block` (D-212, roster-first setup). Both loaders return all four plural/snake keys (`untouchables`, `targets`, `not_interested`, `trade_block`) for every user they return, in every flag state. Single membership is per (user, league, player) across **all four** — `set_asset_preference` deletes before it inserts — so a client toggling Move ↔ Keep ↔ none never reconciles locally. The convention for a new list type that the engine reads: **persistence ungated, engine read gated at the one context loader** (`server._owner_generation_context` pops the key when the flag is off), and any evidence/hash that names the key includes it only when present, so flag-off bytes are unchanged. `trade_block` is read by the owner-v1 and bilateral constructors only (give-side mirror of `targets`); legacy v2/v3 and likes-you do not read it. Strings: [cross-client invariants § Asset preference list types](../docs/cross-client-invariants.md#asset-preference-list-types).

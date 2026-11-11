@@ -96,6 +96,12 @@ Not in the seven active items. Live since 2026-11-11T05:28Z (`13865d73`, #641 + 
 
 Detail: [recommendation](../docs/plans/realtime-trade-engine/recommendation.md) · [offer-learnings plan](../docs/plans/offer-learnings/plan.md).
 
+## 2026-11-11 — Roster setup tier page (D-233): TestFlight checklist, then read the first saves
+
+1. Run the 15-step checklist in [`../docs/plans/roster-first-trade-setup/scope-tier-rank.md`](../docs/plans/roster-first-trade-setup/scope-tier-rank.md) (build notes) on the first build that carries it.
+2. Read `roster_setup_tiers_saved` against "giving too much value" passes once a few users have re-tiered (tracking addendum 2026-11-11).
+3. Operator calls left open: placeable picks (needs engine work, PRD Q5); whether two players moved up together should both sit at the very bottom of an occupied tier.
+
 ## 2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call
 
 1. **MOD-M1:** pipeline 15 deployed after the Nov 10 freeze, so decide whether a re-run is owed or the frozen candidate `b1440b7b` stands (models-eng). The flag is now on, so pipeline 15 changes trades for any user who tags a player Move.

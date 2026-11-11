@@ -315,3 +315,39 @@ The operator was asked which screen "the draft pick tier ranker" meant (the Tier
 - **How dragging actually feels on a 30-row mixed list.** That is runtime-only, and it is why option (a) is ranked on risk rather than measured.
 - **Whether the old rank step has any production completions.** No production read was made. That figure would show how much the fallback flag protects.
 - **Whether the pick-value calibration will keep the bands identical across positions.** The `tier_config.json` note says they are identical by design. If they ever diverge, one heading set still works (headings are labels), but pre-fill and the edge placement become per-position, which they already are in the code path above.
+
+## 9. Build notes (2026-11-11)
+
+Built on `feat/roster-setup-tier-rank`; evidence in `living-memory/TEST_LEDGER.md` (2026-11-11), decision D-233.
+
+**Differences from the text above**
+- No picks on the page (operator decision 3). The `roster-setup.tiers.picks` id does not exist; a check asserts it is absent.
+- `apply_tiers_subset` gained `empty_band_edge` (roster scope only): a lone mover into a band empty at his position lands at the edge he moved toward. Without it he took the band ceiling, which broke decision 6.
+- Direction, the "back to his slot" rule and the "was <tier>" marker are judged against the save baseline (the tier the server holds), not the first layout. After a partial save the two differ.
+- A back gesture during an in-flight save is held with no prompt; Save and Retry are ref-guarded.
+- Added on the page: an "N selected · Clear" row; a `roster-setup.tiers.skip` id; an optional `testIDPrefix` on `TierTargetChips`.
+- `_note_ranking_method` is skipped for the roster scope whatever `via` says.
+- `mobile/tests/check-quickset-via.js` accepts the widened `via` whitelist and guard.
+
+**Known limits**
+- Two or more players moved up into one occupied tier in a single save are spread through its lower part; they do not all sit at the very bottom.
+- Test 8 (the lifted player's card becomes `viewer_no_benefit`) covers owner-v1 only.
+- Text contrast of the 11pt tier-colored micro-labels was not measured.
+- Nothing was run on a device.
+
+**Manual TestFlight checklist (replaces §6's list)**
+1. Before starting, open Rank → Tiers and screenshot one position's board.
+2. Pass a Find a Trade card. Step 1 is unchanged; tap Continue. One page, "Place your players", shows every QB/RB/WR/TE under eight headings, empty tiers included. No picks appear anywhere on it. Spot-check three players at different positions against Tiers.
+3. Tap **Done** with nothing moved and no Step 1 changes. The done screen says nothing changed and the deck does not regenerate.
+4. Move one RB up a tier. On the page he sits at the bottom of the new tier with "was <old tier>". Save. On Rank → Tiers → RB he is in the new tier at or near its bottom, and every other RB matches the screenshot.
+5. Move one WR down a tier. He lands at the top of the lower tier on the page, and the same on Tiers after saving.
+6. Select three players at different positions, tap one tier. All three move. Save. All three show that tier on Tiers. The done summary reads "3 re-tiered".
+7. Move a player and then move him back to his starting tier. He returns to his original slot, the button reads Done, and Tiers is unchanged.
+8. Note a card that gives away player X for a fair-looking return. Move X up two tiers and save. After the one regeneration, X no longer appears on the give side of an at-market card.
+9. In airplane mode, move two players at different positions and Save. An error shows, the moves stay, and the button reads Retry. Reconnect and Retry: both save with no duplicate.
+10. Move a player, then swipe back. "Discard your tier changes?" appears. Keep editing stays on the page; Discard leaves Tiers unchanged. Skip with unsaved moves asks the same question.
+11. Tap Save and swipe back at once: the page stays until the save finishes, with no prompt.
+12. VoiceOver on a chip: the "Move to 1 1st" action moves it.
+13. Find a player whose market tier differs from his page tier: he shows "mkt: <tier>". Move him into his market tier: the label disappears.
+14. A 30+ player roster scrolls to the FA section. The footer never covers a chip, including while the two-row "Move to" bar is showing. The feedback button sits above the footer.
+15. With `trades.roster_tier_rank` off, Step 2 is the old per-position rank step again.
