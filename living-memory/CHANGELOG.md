@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Usage Trends: Last week | Last 3 weeks (D-250)
+
+- **What it is:** a second pill under "Biggest jumps | Weekly share". Last 3 weeks orders and words the list by each player's three-week average, and a jump is that average against his three weeks before.
+- **Default:** Last week, exactly as before.
+- **Rules:** a player needs two games in the three weeks to count as a jump; cards say which weeks they cover and how many games.
+- **Needs the next app build.** Not verified on a device or against live mid-season weeks.
+
 ## 2026-11-12 — Free Agents: ranks count every player at the position; the league selector is the header (D-249)
 
 - **Ranks:** a free agent now shows his overall rank at the position on your board (TE23), not his rank among free agents (TE1). Server-side, so build 187 gets it on deploy.

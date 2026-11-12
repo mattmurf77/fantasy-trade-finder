@@ -39,6 +39,35 @@ export interface UsageMetricBlock {
   signal: UsageSignal | null;
   /** Server display order for this metric; 1 shows first. */
   rank: number;
+  /** Only with `period=3` (the Simple view's "Last 3 weeks"). */
+  period?: UsagePeriodBlock;
+}
+
+/** One metric over the period (the newest three selected weeks) against the
+ *  baseline (up to three completed weeks before it). Averages cover played
+ *  weeks only. `kind`: "jump" (up by the spike margin, 2+ games, real
+ *  volume), "new" (no baseline game, 2+ games, real volume) or null. The
+ *  three ranks are the server's orders: Biggest jumps, and Weekly share by
+ *  % of team or by count; fewer than two games rank last. */
+export interface UsagePeriodBlock {
+  games: number;
+  avg: number | null;
+  avg_share: number | null;
+  base_games: number;
+  base_avg: number | null;
+  base_avg_share: number | null;
+  kind: 'jump' | 'new' | null;
+  delta: number | null;
+  delta_share: number | null;
+  rank_jump: number;
+  rank_share: number;
+  rank_count: number;
+}
+
+/** The weeks a `period=3` response covers. */
+export interface UsagePeriodWeeks {
+  weeks: number[];
+  base_weeks: number[];
 }
 
 export interface UsagePlayer {
@@ -74,18 +103,23 @@ export interface UsageTrendsResponse {
   players: UsagePlayer[];
   /** [0] is the focused league, then the requested others in order. */
   leagues: UsageLeague[];
+  /** Only with `period=3`. */
+  period?: UsagePeriodWeeks;
 }
 
-/** `weeks` null/absent = the server's default (the last four completed). */
+/** `weeks` null/absent = the server's default (the last four completed).
+ *  `period` 3 adds the "Last 3 weeks" reading; absent = today's request. */
 export async function getUsageTrends(
   leagueId: string,
   otherLeagueIds: string[],
   weeks?: number[] | null,
+  period?: 3 | null,
 ) {
   const others = otherLeagueIds.filter((id) => id && id !== leagueId);
   const qs =
     `league_id=${encodeURIComponent(leagueId)}` +
     (others.length ? `&league_ids=${others.map(encodeURIComponent).join(',')}` : '') +
-    (weeks && weeks.length ? `&weeks=${weeks.join(',')}` : '');
+    (weeks && weeks.length ? `&weeks=${weeks.join(',')}` : '') +
+    (period ? `&period=${period}` : '');
   return api.get<UsageTrendsResponse>(`/api/usage-trends?${qs}`);
 }
