@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-11 — Win-now season signal built and merged dark (D-238)
+
+- **What is in:** generator revision 5 (season points from the saved forecast, player labels, plan conflict, the shed curve for Rebuilding and Tanking), its join with rules-first construction, the server wiring and `season_block` payload, an admin label-review route, and the app's season line, label tags and conflict sentence.
+- **Off:** flag `trade.season_signal` false and knob `owner_bilateral_revision_5_enabled` 0, so decks and cards are unchanged.
+- **Build time, revision 5 on the page path:** 0.36 to 0.92 s on 12 to 16 team test leagues (single runs), against 3.1 to 7.4 s for the full solve.
+- **Next:** stage A (flag on, evidence recorded, revision 2 still serving), then the label review, then revision 5. The app part needs the next TestFlight build.
+- Not verified in production or on a device.
+
 ## 2026-11-11 — "Why pass?" opens from the ✕ as a frame over the card
 
 - **Why:** TestFlight 186 report, "a card with no pass button". The asking card removed the ✕ and put the reason chips under the card, below the fold on a tall card.
