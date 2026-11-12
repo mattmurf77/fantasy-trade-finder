@@ -99,7 +99,7 @@ About 44 requests per league-season: league, rosters, users (owner ids only), 18
 
 | Scope | League-seasons | Requests | Time at 4 requests a second |
 |---|---|---|---|
-| Pilot | 150 | about 6,600 | under 30 minutes |
+| Pilot (operator, 2026-11-12: about 150 leagues, seasons 2024 to 2026) | about 450 | about 20,000 | about 80 minutes |
 | Full (recommended cap) | up to 9,000 (3,000 leagues, seasons 2024 to 2026) | about 400,000 | about 28 hours |
 
 - **Throttle:** one process, 4 requests a second (a quarter of Sleeper's stated ceiling), back-off on 429 and 5xx, and a hard stop after repeated 429s.
@@ -117,6 +117,7 @@ To study whether the *same manager* behaves the same way across leagues, an owne
 ### 5.4 Where it lives
 
 - A local research store in `data/sleeper-universe/`: compressed raw responses per league-season, and one SQLite file of normalised tables. `/data/` is already git-ignored; nothing in it is ever committed or uploaded.
+- **Everything runs locally**, on the operator's machine, never through Render.
 - **Not the production database.** This is research data. If a finding becomes a product feature that needs some of it in production, that is a separate change with its own schema and gates.
 
 Tables: `leagues`, `rosters`, `roster_weeks` (players, starters, points), `transactions` (raw), `trades` and `trade_assets` (one row per player, pick or FAAB amount moved, with from and to roster), `drafts`, `draft_picks`, `standings_weeks` (derived), `outcomes`.
@@ -128,6 +129,8 @@ The operator's main question needs each team's roster and standing *when the tra
 - **In season:** the matchups call gives every team's players for each week. Start from that week's snapshot and replay the week's transactions up to the trade's timestamp.
 - **Offseason:** start from the last snapshot of the season before (same lineage) and replay transactions forward, including the rookie draft.
 - **Check:** replaying a full week must land on the next week's snapshot. Target: at least 98% of roster-weeks match exactly in the pilot. League-seasons that fail are flagged and excluded from outlook work, with the count reported.
+
+To make the rebuild complete the pull keeps every roster-changing event (trades, waiver and free-agent moves, commissioner moves, rookie and startup draft picks), the standings as of each week, and the schedule and scores (operator, 2026-11-12), so outlook can be rebuilt from both the roster and the standings.
 
 From that roster we derive, per team, at the trade's date: record and points so far, roster strength (best lineup by market value), age profile, pick capital, and the app's own outlook label computed offline with the existing classifier, so findings map straight onto All-in, Contending, Rebuilding and Tanking.
 
@@ -142,6 +145,8 @@ To say who "paid" what, we need the market's value for each player and pick on t
 | DynastyProcess history | Years, weekly | Public; the app already uses its current values |
 
 Trades before a value source's first date can still be used for structure, timing and outlook direction, but not for pricing.
+
+Operator, 2026-11-12: read KeepTradeCut's history from its site, as the app already does for current values (daily values back to 2020 are on each player page). Both sources are stored in full, since each arrives whole; priced analysis starts with 2026 trades, and earlier seasons are priced only if wanted later.
 
 ### 5.7 Picks
 
@@ -231,7 +236,7 @@ A caution that belongs in every result: a trade that happened is not a trade tha
 |---|---|---|
 | 0 | Decisions in §11 | Done 2026-11-12 |
 | 1 | Build the crawler and schema | Tests on fixtures only (no live calls in tests); an independent review confirms no name field can reach disk; the throttle is tested |
-| 2 | Pilot: 150 league-seasons | Pilot report (§8.2) |
+| 2 | Pilot: about 150 leagues, seasons 2024 to 2026 | Pilot report (§8.2) |
 | 3 | Full pull | Completes inside the request budget with no 429 stop; resumes cleanly from a forced interruption |
 | 4 | Data quality and bias report | §8.3; dataset frozen as v1 with checksums |
 | 5 | Analysis, in parallel by question | §8.4 rules; every hypothesis reported, including the ones that fail |
