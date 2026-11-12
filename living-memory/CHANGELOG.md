@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Win-now engine: Tanking and Rebuilding teams are steered to move older producers (D-243, D-244)
+
+- **Label fit:** for a Tanking or Rebuilding manager's own side the engine reads the player labels, and for win-now pieces and older cornerstones uses whichever of the label and the age rule is the stronger sell.
+- **Sell bonus:** cards that send win-now pieces or older cornerstones get a small boost, and cards that take them on a small reduction (0.05 Tanking, 0.03 Rebuilding). Same cards, new order.
+- **Measured on the real ranker:** Tanking's first 30 go from 15 to 19 cards sending a win-now piece on the fixture league, keeping 17 of 30; Rebuilding 13 to 19, keeping 22.
+- **State:** both are settings and only matter once the win-now engine (revision 5) serves, which it does not yet.
+
 ## 2026-11-12 — Founders' review: Trade rules page, the rule catalog and the decline waterfall (D-245)
 
 - **What:** a second page in Founders' review listing every yes/no rule with a plain name and description, how many candidate trades each removed for the selected league ("Started with N → M served"), and a note field per rule with history.
