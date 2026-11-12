@@ -787,6 +787,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # offer-learnings WS8: the revised-offer card built for the user's own
     # declined offer.
     "revised_offer_cards",
+    # Founders' review (rule waterfall): a founder's notes on the engine's rules,
+    # written under their own account.
+    "founder_rule_notes",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each
