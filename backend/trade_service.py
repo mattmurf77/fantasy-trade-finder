@@ -1186,6 +1186,9 @@ _DEFAULT_CFG: dict[str, float] = {
     "owner_bilateral_revision_enabled": 0.0,
     "owner_outlook_evidence_enabled": 0.0,
     "owner_bilateral_revision_4_enabled": 0.0,
+    # Keep / untouchable: 1 (default) = hard rule on every owner-family card
+    # (pinned own give excepted); 0 = the premium-return rule. Owner arms only.
+    "owner_untouchable_hard":   1.0,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,

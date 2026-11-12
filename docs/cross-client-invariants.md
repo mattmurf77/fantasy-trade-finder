@@ -1066,7 +1066,7 @@ Sign-in requests may carry `device_id` (body) or `X-Device-Id` (header) on `/api
 
 `asset_preferences.list_type` vocabulary, defined in `backend/database.py:ASSET_PREF_LISTS` and sent verbatim by clients in the POST `/api/league/asset-prefs` body (`list` field — `mobile/src/api/league.ts:setAssetPref`):
 
-- `untouchable` — never offer this player FROM the owner's roster in generated trades (feedback #95)
+- `untouchable` — never offer this player FROM the owner's roster in generated trades (feedback #95; roster setup's Keep). On the owner-family engines this binds every manager's marks, not only the viewer's: with `owner_untouchable_hard` 1 (default) no generated card sends the viewer's untouchable or asks for a league-mate's, except the viewer's own explicit give pin; at 0 those engines use the premium-return rule. Hand-queued likes (`calcq_`, D-170) are exempt. A league-mate's mark never reaches any payload
 - `target` — bias suggestions toward acquiring this player
 - `not_interested` — never offer this player TO the owner in generated trades (#163 — receive-side hard filter, all gen paths incl. v3 sweeteners and likes-you injections; the give side is untouched, so the owner can still trade the player away)
 - `trade_block` — the owner is willing to MOVE this player (D-212, roster-first setup's "Move" state; the give-side twin of `target`). A **soft** bonus, never an "only offer these" filter, read by the owner-v1 and bilateral constructors only, and only when `trades.roster_setup` is on; legacy v2/v3 and likes-you ignore it. Players and owned pick ids both carry it. The roster-setup screen writes only `trade_block` \| `untouchable` \| `none` (Move / Keep / no opinion)

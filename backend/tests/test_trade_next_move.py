@@ -143,9 +143,13 @@ def test_the_viewers_untouchables_are_never_added():
                   viewer={"give": 800., "target": 1680., "mid": 250.},
                   partner={"give": 1350., "target": 1120., "mid": 380.},
                   manager_preferences={"viewer": {"untouchables": ["mid"]}})
-    # The evaluator alone would accept it (same position, the viewer still
-    # receives more), and its step is inside this band.
-    assert evaluate(ctx, ["give", "mid"], ["target"]).eligible
+    # Under the premium-return rule (owner_untouchable_hard 0) the evaluator
+    # alone would accept it (same position, the viewer still receives more),
+    # and its step is inside this band; the hard rule (default) rejects it.
+    assert evaluate(ctx, ["give", "mid"], ["target"]).reason == "untouchable"
+    premium = {**ctx, "config": {**ctx["config"], "owner_untouchable_hard": 0.}}
+    assert evaluate(premium, ["give", "mid"], ["target"]).eligible
+    assert nm.propose_revision(offer(), premium, step_min=.05) is None
     assert nm.propose_revision(offer(), ctx, step_min=.05) is None
     ctx["manager_preferences"] = {}
     assert nm.propose_revision(offer(), ctx, step_min=.05).change["asset_id"] == "mid"

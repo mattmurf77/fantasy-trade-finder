@@ -196,9 +196,11 @@ def test_explicit_selection_untouchables_price_and_owned_pick_protection():
     assert proof(args).reason=="tanking_own_next_draft_pick"
     args["pinned_give_players"]=["give"]
     assert proof(args).eligible
-    args=qualified(favorable(manager_preferences={"partner":{"untouchables":["target"]}},
-        positions={"give":"RB","target":"QB"},pinned_receive_players=["target"]))
-    assert proof(args).reason=="untouchable_return"
+    for hard,reason in ((1.,"untouchable"),(0.,"untouchable_return")):
+        args=qualified(favorable(manager_preferences={"partner":{"untouchables":["target"]}},
+            positions={"give":"RB","target":"QB"},pinned_receive_players=["target"]))
+        args["config"]={**args.get("config",{}),"owner_untouchable_hard":hard}
+        assert proof(args).reason==reason
     args=qualified(favorable())
     args["seed_elo"]["target"]=ts.value_to_elo(100000)
     assert proof(args).reason=="market_floor"

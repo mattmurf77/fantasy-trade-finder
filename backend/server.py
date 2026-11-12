@@ -4581,7 +4581,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 22
+DECK_PIPELINE_VERSION = 23
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4732,6 +4732,7 @@ DECK_PIPELINE_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
+    23: "08f6de7b2911cf86",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -22365,6 +22366,11 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
+    from . import trade_gen_owner as _owner_gen
+    if not _owner_gen.untouchable_hard(canonical["config"]):
+        # Knob 0 is the premium-return rule every unit before it was built
+        # under: it keeps their hashes. On (the default) it is a new unit.
+        canonical["config"].pop(_owner_gen.UNTOUCHABLE_HARD_KEY, None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:
