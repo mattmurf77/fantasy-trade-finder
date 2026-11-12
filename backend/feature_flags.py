@@ -473,6 +473,9 @@ FLAG_KEYS: tuple[str, ...] = (
                              # spawner for onboarding QA (backend/test_users.py)
     "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
                                # readout (mobile TimingReadoutRow, ruling 11)
+    "dev.test_profile",      # /api/test-profile/* — the operator's onboarding test
+                             # profile (backend/test_profile.py). Also needs the
+                             # real account in env TEST_PROFILE_ACCOUNTS.
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL

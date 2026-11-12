@@ -111,6 +111,7 @@ the operator reaches it by running the server locally.
   - [Paywall gate (402)](#paywall-gate-402)
 - [Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)](#test-support-ftf_test_mode1-only-never-mounted-in-normal-operation)
 - [Test users (QA — flag `testing.stage_users`, ships dark)](#test-users-qa-flag-testingstage_users-ships-dark)
+- [Onboarding test profile (operator — flag `dev.test_profile` + env `TEST_PROFILE_ACCOUNTS`)](#onboarding-test-profile-operator-flag-devtest_profile--env-test_profile_accounts)
 - [Calibration — blind grading (`/api/grading/*`; flag `grading.blind`, on for every app user)](#calibration--blind-grading-apigrading-flag-gradingblind-on-for-every-app-user)
 
 ---
@@ -1640,6 +1641,49 @@ Synthetic stage-user spawner for onboarding QA (`backend/test_users.py`; plan: `
 |---|---|---|
 | POST | `/api/test-users` | `{stage: "fresh"\|"activated"\|"board_owner"\|"converted"\|"power"}` → mint user `qa_<uuid8>` / username `qa_<stage>_<4hex>` with a live demo-league session (NOT `is_demo` — the client treats it as a normal signed-in session). Server-side seeding: `board_owner`+ persists a WR QuickSet board via the exact `/api/tiers/save` storage (`users.tier_overrides` + `tiers_saved` + `ranking_method='quickset'`); `converted`+ stamps `users.verified_at`/`verified_via='apple'` (verification only — **no accounts row**; deep account flows aren't simulated) and the session is marked verified; `power` seeds boards for all four positions. Returns `{session_token, user_id, username, display_name, league_id, league_name, stage, client_state, notes}` where `client_state` is the `ftf_onboarding_state` dict the client adopts verbatim for that stage |
 | DELETE | `/api/test-users/<user_id>` | Same gates. 400 unless `user_id` starts with `qa_`. Deletes the `users` row + `swipe_decisions` + `member_rankings` rows and evicts any live session. Returns `{ok, user_id, deleted: {users, swipe_decisions, member_rankings, sessions_evicted}}` |
+
+## Onboarding test profile (operator — flag `dev.test_profile` + env `TEST_PROFILE_ACCOUNTS`)
+
+The operator becomes a brand-new app user to test onboarding, then flips back (`backend/test_profile.py`; plan `docs/plans/onboarding-test-profile/`). This sits beside Test Stages and does not change it.
+
+**Gate, on every route:** the flag `dev.test_profile` must be on, **and** the authenticated session's real working key (`sess.user_id` — a Sleeper id or `acct_*`) must be in env `TEST_PROFILE_ACCOUNTS`.
+- Anything else gets **404** (no existence signal).
+- Never consulted: the tester allow-list, `X-Device-Id`, or any request field.
+
+**Identity:** the test profile of real key X is the app user `qa_tp_X`.
+- It is derived server-side; there is no route parameter for it, so no route can name another account's profile.
+- `_extension_build_session` refuses to mint a `qa_tp_` id unless the switch asks for it.
+- `_get_session` treats a `qa_tp_` session as expired once its real key leaves the gate.
+
+**Leagues:** a test profile may only ever enter leagues inside its own namespace, `qa_tp:X:<native league id>`, whose other teams are keyed `qa_tpo_<hash>`. Nobody else may enter them. The namespace is filled by the **production linking flows** (operator rulings 2026-11-11 and 2026-11-12; plan §11–§12):
+- **ESPN / MFL:** `/api/espn/link`, `/api/espn/import`, `/api/mfl/link`, `/api/mfl/import`, `/api/mfl/auth-link`, `/api/mfl/auth-import` are open to a test session and behave exactly as for a new user.
+  - Each writes through `test_profile.storage_league_id` (the identity for every real user), so stored and returned league ids are namespaced.
+  - The platform URL builders read the native id back through `native_league_id`.
+  - Credential rows are keyed by the test profile's own id.
+- **Sleeper:** `POST /api/extension/auth` with a test session token runs the normal username lookup.
+  - It then keeps the test identity: it returns `user_id = qa_tp_X`, the same token, and the user's leagues as namespaced ids.
+  - A username that is not the operator's own Sleeper user → **403** `not_your_sleeper_account`.
+  - `/api/sleeper/leagues`, `/rosters`, `/league-users` read Sleeper live with the operator's Sleeper id and the native league id, and return every other member re-keyed to `qa_tpo_*`.
+- **Outbound chokepoint:** every push, inbox row, join notification, queued notification, trade match, referral credit and platform write checks `test_profile.outbound_blocked`. Nothing reaches a real user from the test profile, and the platform propose / FA-move cores answer 403 `test_profile_blocked`.
+
+**Request fence:** `_test_profile_request_guard` (before_request) applies three rules to a test-profile session:
+- Any request that names a league other than its own `qa_tp:X:` leagues (path arg, `?league_id`, JSON `league_id`) gets **403** `test_profile_league`.
+- A non-GET call to an endpoint in `_TP_BLOCKED_ENDPOINTS` gets **403** `{error: "test_profile_blocked", message}`. The list covers:
+  - trade propose/respond, FA move and overhaul send;
+  - Sleeper JWT link, platform-write consent and offer import;
+  - Fleaflicker link/import;
+  - Apple/Google/platform-entry/demo identity minting;
+  - account delete, invite-token mint and profile visibility.
+- `POST /api/notifications/register-device` answers `{ok: true, skipped: "test_profile"}`, so the push token stays on the real account.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/test-profile` | Who may use it, and whether this session is one. Returns `{available: true, active: false}` for an allowed real session, `{available: true, active: true, user_id, display_name}` for a test session, otherwise 404 |
+| POST | `/api/test-profile/enter` | From a **verified** real session of an allowed account (unverified → 403 `verification_required`). Mints a verified, durable session for that account's own `qa_tp_X` and returns `{session_token, user_id, username, display_name}`. The real session is untouched; the app keeps its token to switch back |
+| POST | `/api/test-profile/exit` | Test session only. Ends THIS test session (memory + durable row) and returns `{ok}` |
+| POST | `/api/test-profile/reset` | Test session only. Runs `test_profile.reset_profile`: deletes every row whose user-id column equals `qa_tp_X`, or whose league-id column is inside `qa_tp:X:`, across every table in `database.py`. It refuses any non-test id. Ends all of the profile's sessions and returns a fresh one: `{session_token, user_id, username, display_name, deleted: {table: n}, sessions_evicted}` |
+
+`/api/session/init` on a namespaced ESPN/MFL league reads it from the DB like any imported league; a namespaced Sleeper league is read live with the native id and re-keyed. On a test profile's first session it credits no referral, fans out no join notification and registers no projection target.
 
 ### Full-roster evidence (2026-09-04; dark)
 

@@ -473,6 +473,10 @@ def load_decks(
             q = q.where(imp.c.served_at <= as_of)
         if user_id:
             q = q.where(imp.c.user_id == user_id)
+        else:
+            # Synthetic QA users (qa_*: Test Stages, the onboarding test
+            # profile) never feed the eval nightly or the value-model refit.
+            q = q.where(~imp.c.user_id.startswith("qa_", autoescape=True))
         if league_id:
             q = q.where(imp.c.league_id == league_id)
         rows = conn.execute(q).fetchall()
@@ -487,6 +491,8 @@ def load_decks(
                 pq = pq.where(_PACKS.c.served_at <= as_of)
             if user_id:
                 pq = pq.where(_PACKS.c.user_id == user_id)
+            else:
+                pq = pq.where(~_PACKS.c.user_id.startswith("qa_", autoescape=True))
             if league_id:
                 pq = pq.where(_PACKS.c.league_id == league_id)
             packs = conn.execute(pq).fetchall()

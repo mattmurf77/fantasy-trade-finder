@@ -262,6 +262,7 @@ from . import sleeper_write as _sleeper_write
 from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
+from . import test_profile as _tp               # onboarding test profile (dev.test_profile)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
@@ -613,6 +614,10 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     (a URLError) without touching the network; a 429 opens it. Fixture mode
     goes through the circuit too, so cassette 429s exercise the real path.
     """
+    if "qa_tp" in url:
+        # Test-profile ids (backend/test_profile.py) are never real Sleeper
+        # ids: a snapshot league or profile must not reach the network.
+        raise urllib.error.HTTPError(url, 404, "test-profile id", None, None)
     league = _api_obs.sleeper_endpoint_class(url)[1]
     with _sleeper_http.guard(league):
         return _sleeper_get_unguarded(url, timeout)
@@ -2628,6 +2633,9 @@ def _restore_persisted_session(token: str) -> dict | None:
         if sess is not None:
             return sess
         user_id = str(row["user_id"])
+        is_test = _tp.is_test_profile_id(user_id)
+        if is_test and not _tp.enabled_for(_tp.real_id_of(user_id), is_enabled):
+            return None
         try:
             if _accts.is_account_user_id(user_id):
                 _, payload = _account_build_session(
@@ -2645,6 +2653,7 @@ def _restore_persisted_session(token: str) -> dict | None:
                                   or profile.get("username") or ""),
                     avatar=profile.get("avatar"),
                     token=token,
+                    **({"test_profile": True} if is_test else {}),
                 )
                 payload.pop("extension", None)
         except Exception:
@@ -2733,11 +2742,23 @@ def _get_session(token: str) -> dict | None:
         return None
     with _sessions_lock:
         sess = _sessions.get(token)
-    if sess is not None:
-        return sess
-    if not is_enabled("auth.persistent_sessions"):
+    if sess is None:
+        if not is_enabled("auth.persistent_sessions"):
+            return None
+        sess = _restore_persisted_session(token)
+    if sess is not None and not _test_profile_session_allowed(sess):
         return None
-    return _restore_persisted_session(token)
+    return sess
+
+
+def _test_profile_session_allowed(sess: dict) -> bool:
+    """A test-profile session lives only while its real account is still
+    allowed (flag `dev.test_profile` + TEST_PROFILE_ACCOUNTS). Turning either
+    off makes every test-profile token read as expired. Real sessions: True."""
+    uid = sess.get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return True
+    return _tp.enabled_for(_tp.real_id_of(uid), is_enabled)
 
 
 class _RequestSession(collections.UserDict):
@@ -2824,6 +2845,27 @@ def _active_format(sess: dict) -> str:
     """Return the format that `_require_session` resolved for this request."""
     return (sess.get("_effective_format") if isinstance(sess, _RequestSession)
             else None) or sess.get("active_format") or "1qb_ppr"
+
+
+def _sleeper_identity(sess) -> str:
+    """THE Sleeper user id of a session, for READ-ONLY Sleeper calls (the
+    username step, league discovery, roster resolution). For every real
+    session it is the session's own user id — byte-identical to before, which
+    tests/test_test_profile_sleeper.py pins over every such site. For the
+    onboarding test profile `qa_tp_X` it is the real account's own Sleeper id
+    (X itself, or the Sleeper id bound to account X); the app identity stays
+    `qa_tp_X` and nothing keyed by this id is ever written for it."""
+    uid = str((sess or {}).get("user_id") or "")
+    if not _tp.is_test_profile_id(uid):
+        return uid
+    real = _tp.real_id_of(uid) or ""
+    if real.isdigit():
+        return real
+    from . import accounts as _accounts
+    if _accounts.is_account_user_id(real):
+        acct = _accounts.get_account(real[len(_accounts.ACCOUNT_USER_PREFIX):]) or {}
+        return str(acct.get("sleeper_user_id") or "")
+    return ""
 
 
 def _league_user_id(sess: dict) -> str:
@@ -16373,7 +16415,8 @@ def get_rankings_progress():
                 _league_obj  = sess.get("league")
                 _league_id   = getattr(_league_obj, "league_id", None)
                 _league_name = getattr(_league_obj, "name", "") or ""
-                if _league_id:
+                # A test profile's unlock is never announced to anyone.
+                if _league_id and not _tp.is_test_profile_id(g_user_id):
                     _members  = load_league_member_unlock_states(
                         _league_id, exclude_user_id=g_user_id,
                     )
@@ -26558,6 +26601,8 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
     when the fetch fails, so a verdict that just flipped to `drafted` still
     drops the stale season's rows.
     """
+    if _tp.is_test_league_id(league_id):
+        return None   # a test-profile snapshot keeps the copied verdict; no platform read
     try:
         ctx = get_league_draft_context(league_id)
         if not ctx:
@@ -27035,6 +27080,8 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     route wrapper repeats its own prefix checks first so its ordering is
     byte-identical; on that path these re-checks are no-ops.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("trade.send_in_sleeper"):
@@ -29452,11 +29499,23 @@ def sleeper_user(username):
 @app.route("/api/sleeper/leagues/<user_id>")
 def sleeper_leagues(user_id):
     """Fetch NFL leagues for a Sleeper user (2026 season) + local DB leagues."""
-    url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/2026"
+    fetch_uid = user_id
+    if _tp.is_test_profile_id(user_id):
+        # Onboarding test profile: the SAME discovery read, made with the
+        # real account's Sleeper id, ids returned in the profile's namespace.
+        # Only the profile's own session may ask.
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if not caller or caller.get("user_id") != user_id:
+            return jsonify([])
+        fetch_uid = _sleeper_identity(caller)
+    url = f"https://api.sleeper.app/v1/user/{fetch_uid}/leagues/nfl/2026"
     log.info("=== /api/sleeper/leagues  user_id=%r", user_id)
     sleeper_failed = False
     try:
         sleeper_data = _sleeper_get(url) or []
+        if fetch_uid != user_id:
+            sleeper_data = [{**lg, "league_id": _tp.storage_league_id(user_id, str(lg.get("league_id")))}
+                            for lg in sleeper_data if isinstance(lg, dict) and lg.get("league_id")]
     except Exception as e:
         log.error("  leagues error: %s", e)
         sleeper_data = []
@@ -29465,6 +29524,9 @@ def sleeper_leagues(user_id):
     # Append any locally-stored leagues where this user is a member
     try:
         local = load_local_leagues_for_user(user_id)
+        if fetch_uid != user_id:   # a namespaced Sleeper league is listed once
+            _seen = {str(lg.get("league_id")) for lg in sleeper_data}
+            local = [lg for lg in local if str(lg.get("league_id")) not in _seen]
         if local:
             log.info("  appending %d local league(s) for user %s", len(local), user_id)
         sleeper_data = list(sleeper_data) + local
@@ -29519,6 +29581,25 @@ def sleeper_leagues(user_id):
 def sleeper_rosters(league_id):
     """Fetch all rosters for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/rosters  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "rosters" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "rosters" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Platform-imported leagues (ESPN/MFL/Fleaflicker) have NUMERIC
         # platform-native ids, so the isdigit() split alone would misroute
@@ -29553,6 +29634,25 @@ def sleeper_rosters(league_id):
 def sleeper_league_users(league_id):
     """Fetch all users for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/league_users  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "users" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "users" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Same platform-imported split as /api/sleeper/rosters (#149/#150).
         if not league_id.isdigit() or is_linked_platform_league(league_id):
@@ -29823,7 +29923,11 @@ def session_init():
     from .session_input import resolve_session_input, SessionInputError
     _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
+        # The Sleeper identity differs from the session user only for the
+        # onboarding test profile; a real session's call is unchanged.
+        _tp_kw = ({"sleeper_identity": _sleeper_identity(existing_sess)}
+                  if _tp.is_test_profile_id((existing_sess or {}).get("user_id")) else {})
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw, **_tp_kw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
@@ -29843,6 +29947,10 @@ def session_init():
     avatar            = body.get("avatar", None)
     # Referrer attribution (set only on user INSERT)
     invited_by        = body.get("invited_by") or None
+    if _tp.is_test_profile_id(user_id):
+        # A test profile never credits a referral or notifies an inviter.
+        invited_by = None
+        body = {**body, "invite_id": None}
 
     # ── League identity vs account identity (co-owner support) ───────────
     # `user_id` is WHO IS LOGGED IN (rankings, swipes, entitlements,
@@ -30304,7 +30412,8 @@ def session_init():
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
                 )
-                if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
+                if (authoritative["platform"] == "sleeper" and is_enabled("league.projections")
+                        and not _tp.is_test_league_id(league_id)):
                     try:
                         from .league_projections.batch import register as _register_projection_target
                         _projection_season = (_s0_raw.get("meta") or {}).get("season")
@@ -30368,8 +30477,9 @@ def session_init():
                 # pair on the joining user's first session. Doesn't ping
                 # the joiner. Capped implicitly by the dedup_key — a
                 # returning user re-init won't re-fire because
-                # _is_new_user is False.
-                if _is_new_user:
+                # _is_new_user is False. Never for a test profile: its
+                # snapshot league has no real members, and this pins it.
+                if _is_new_user and not _tp.is_test_profile_id(user_id):
                     try:
                         _new_username = username or display_name or user_id
                         _peers = load_league_member_unlock_states(
@@ -31243,6 +31353,9 @@ def _send_typed_push(
          and exit. The 8am cron drains and bundles.
       5. Otherwise: load device tokens, send via Expo, log + record_event.
     """
+    if _tp.outbound_blocked(user_id, payload=json.dumps(data or {}, default=str), kind=f"push:{kind}"):
+        log.info("push dropped (test profile): kind=%s", kind)
+        return
     started = g.get("_user_data_started") if has_request_context() else None
     with _user_data_lifecycle.capture(user_id, started=started).active() as active:
         if not active:
@@ -31838,6 +31951,8 @@ def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
     rosters fetch, whose roster_id → owner_id map is what makes team_key
     platform-native. No map ⇒ weak keys, stamped as such — the recap
     declines to chart weak-keyed teams rather than fragmenting silently."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     owner_map: dict[str, tuple] = {}
     for r in roster_rows or []:
         oid = str(r.get("owner_id") or "")
@@ -31879,6 +31994,8 @@ def _platform_roster_history_on_sync(league_id: str, platform: str,
     Also the late-joiner re-stamp: at link time we know the joining user's
     native team, so their team's whole recorded season resolves to them in
     one idempotent UPDATE — no mapping table."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     if not is_enabled("market.roster_history"):
         return
     try:
@@ -34086,8 +34203,14 @@ def _verify_retry_response():
 def _extension_build_session(user_id: str, username: str,
                              display_name: str, avatar: str | None,
                              token: str | None = None,
-                             load_history: bool = True) -> tuple[str, dict]:
+                             load_history: bool = True,
+                             test_profile: bool = False) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
+
+    `test_profile` must be True exactly when `user_id` is an onboarding
+    test-profile id (backend/test_profile.py): only the test-profile switch
+    and its durable restore pass it, so no sign-in path that takes its id
+    from Sleeper or an account can ever mint or claim a `qa_tp_` session.
 
     `token` re-registers the session under an existing bearer token —
     used only by the persistent-session restore path (teardown 06-03),
@@ -34108,6 +34231,8 @@ def _extension_build_session(user_id: str, username: str,
 
     Returns (token, session_payload).
     """
+    if _tp.is_test_profile_id(user_id) != bool(test_profile):
+        raise ValueError("test-profile ids are minted only by the test-profile switch")
     # Durable restore already holds _session_restore_lock; never invert its
     # order with deletion's user gates. Fresh auth keeps this lease to teardown.
     if token is None:
@@ -34214,6 +34339,30 @@ def extension_auth():
         ]
     except Exception as e:
         log.info("extension_auth: leagues fetch failed (non-fatal): %s", e)
+
+    # Onboarding test profile: the username step above ran unchanged; a test
+    # session is NOT replaced by a new identity — it keeps qa_tp_X and gets
+    # the league list in its own namespace. Only the real account's own
+    # Sleeper user is accepted (a test session is already verified, so it may
+    # not borrow another person's Sleeper identity).
+    _tp_caller = _get_session(request.headers.get("X-Session-Token", ""))
+    if _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id")):
+        if str(user_id) != _sleeper_identity(_tp_caller):
+            return jsonify({"error": "not_your_sleeper_account",
+                            "message": "Use your own Sleeper username — the test "
+                                       "profile reads your linked Sleeper account."}), 403
+        _pid = _tp_caller["user_id"]
+        return jsonify({
+            "stage":         "connected",
+            "session_token": request.headers.get("X-Session-Token", ""),
+            "expires_at":    int(time.time()) + 4 * 3600,
+            "user_id":       _pid,
+            "username":      username,
+            "display_name":  display_name,
+            "avatar":        avatar,
+            "leagues":       [{**lg, "league_id": _tp.storage_league_id(_pid, lg["league_id"])}
+                              for lg in leagues_compact],
+        })
 
     # Mint session immediately. Unverified, so history waits for the verify
     # (R28.17: loading it here made the response time reveal whether this
@@ -36328,6 +36477,186 @@ def delete_test_user_route(user_id: str):
         return jsonify({"error": "internal_error"}), 500
 
 
+# ─── Onboarding test profile (docs/plans/onboarding-test-profile/) ─────────
+# The operator becomes a brand-new app user (`qa_tp_<real working key>`) to
+# test onboarding, then flips back. Logic and the identity rules live in
+# backend/test_profile.py. Gate, every route: flag `dev.test_profile` AND the
+# authenticated session's real working key listed in TEST_PROFILE_ACCOUNTS —
+# never the tester allow-list, never a device id, never a client-supplied id.
+# Anything else ⇒ 404, no existence signal. The only switch is a session's own
+# real account ↔ that account's own test profile.
+
+_TP_BLOCKED_MESSAGE = ("Not available in the test profile. Tap “Back to my "
+                       "profile” to do this with your real account.")
+
+# Non-GET calls a test-profile session may never make: platform writes
+# (trades, free-agent moves, overhaul sends), Sleeper linking (the Sleeper id
+# IS the app identity) and the dark Fleaflicker linking, identity
+# minting/binding, account deletion (Reset is the test profile's delete),
+# referral and public-profile surfaces. ESPN and MFL LINKING are NOT here: the
+# operator tests them through the real routes (ruling 2026-11-11), whose
+# storage goes through `_tp.storage_league_id` (design.md §11).
+_TP_BLOCKED_ENDPOINTS = frozenset({
+    "propose_trade_to_sleeper", "propose_trade_to_mfl", "respond_trade_in_mfl",
+    "propose_trade_to_espn", "league_free_agents_move_route", "overhaul_send_route",
+    "sleeper_link", "fleaflicker_link", "fleaflicker_import", "fleaflicker_discover",
+    "platform_write_consent_route", "sleeper_offer_import_route",
+    "link_sleeper_source", "auth_apple", "auth_google", "entry_platform",
+    "session_demo", "spawn_test_user", "delete_test_user_route",
+    "delete_account_route", "mint_invite_token", "profile_visibility",
+})
+
+
+def _tp_request_league_ids() -> list[str]:
+    """Every league id this request names: path args, ?league_id, JSON body."""
+    ids = [v for k, v in (request.view_args or {}).items() if "league" in k]
+    ids.append(request.args.get("league_id"))
+    body = request.get_json(silent=True) if request.is_json else None
+    if isinstance(body, dict):
+        ids.append(body.get("league_id"))
+    return [str(x) for x in ids if x not in (None, "")]
+
+
+@app.teardown_request
+def _test_profile_actor_reset(exc):
+    token = g.pop("_tp_actor_token", None)
+    if token is not None:
+        _tp.ACTOR.reset(token)
+
+
+@app.before_request
+def _test_profile_request_guard():
+    """Fences every request a test-profile session makes: blocked endpoints
+    refuse with a message the app shows, the push-token registration is
+    skipped (the token must stay on the real account), and any league id other
+    than the profile's own `qa_tp:` copies is refused."""
+    token = request.headers.get("X-Session-Token", "")
+    if not token:
+        return None
+    sess = _get_session(token)
+    uid = (sess or {}).get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return None
+    g._tp_actor_token = _tp.ACTOR.set(uid)   # read by the outbound chokepoint
+    endpoint = request.endpoint or ""
+    if endpoint == "register_device_for_push":
+        return jsonify({"ok": True, "skipped": "test_profile"})
+    if endpoint in _TP_BLOCKED_ENDPOINTS and request.method != "GET":
+        return jsonify({"error": "test_profile_blocked",
+                        "message": _TP_BLOCKED_MESSAGE}), 403
+    for lid in _tp_request_league_ids():
+        if lid != "no_league" and not _tp.owns_test_league(uid, lid):
+            return jsonify({"error": "test_profile_league",
+                            "message": "The test profile only uses its own "
+                                       "copies of your leagues."}), 403
+    return None
+
+
+def _tp_caller():
+    """(session, user_id) for the request's session, or (None, None)."""
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
+    return (sess, str(sess.get("user_id") or "")) if sess else (None, None)
+
+
+def _tp_not_found():
+    return jsonify({"error": "not_found"}), 404
+
+
+def _tp_mint_session(profile_uid: str) -> tuple[str, dict]:
+    """A fresh verified session for the test profile. Verified because it is
+    derived from the real account's verified session; persisted like any
+    verified session, so it survives restarts and deploys."""
+    token, payload = _extension_build_session(
+        user_id=profile_uid, username=profile_uid,
+        display_name=_tp.DISPLAY_NAME, avatar=None, test_profile=True)
+    payload.pop("extension", None)
+    payload["verified"] = True
+    payload["verified_via"] = "test_profile"
+    _persist_session_if_eligible(token, payload)
+    return token, payload
+
+
+def _tp_session_body(token: str, profile_uid: str) -> dict:
+    return {"session_token": token, "user_id": profile_uid,
+            "username": profile_uid, "display_name": _tp.DISPLAY_NAME}
+
+
+def _tp_revoke_sessions(profile_uid: str) -> int:
+    with _sessions_lock:
+        stale = [t for t, s in _sessions.items() if s.get("user_id") == profile_uid]
+        for t in stale:
+            _sessions.pop(t, None)
+    try:
+        delete_persisted_sessions_for_user(profile_uid)
+    except Exception:
+        log.warning("test-profile: durable session cleanup failed")
+    return len(stale)
+
+
+@app.route("/api/test-profile", methods=["GET"])
+def test_profile_status():
+    """GET — {available, active}: whether this account may use a test profile
+    and whether this session IS one. 404 for everyone else."""
+    sess, uid = _tp_caller()
+    if sess is None:
+        return _tp_not_found()
+    if _tp.is_test_profile_id(uid):   # _get_session already enforced the gate
+        return jsonify({"available": True, "active": True,
+                        "user_id": uid, "display_name": _tp.DISPLAY_NAME})
+    if _tp.enabled_for(uid, is_enabled):
+        return jsonify({"available": True, "active": False})
+    return _tp_not_found()
+
+
+@app.route("/api/test-profile/enter", methods=["POST"])
+def test_profile_enter():
+    """POST — from a verified real session of an allowed account, mint a
+    session for that account's own test profile. The real session is left
+    untouched; the app keeps its token to switch back."""
+    sess, uid = _tp_caller()
+    if sess is None or _tp.is_test_profile_id(uid) or not _tp.enabled_for(uid, is_enabled):
+        return _tp_not_found()
+    if not sess.get("verified"):
+        return jsonify({"error": "verification_required"}), 403
+    profile_uid = _tp.profile_id(uid)
+    token, _ = _tp_mint_session(profile_uid)
+    log.info("test-profile: entered (account %s)", uid)
+    return jsonify(_tp_session_body(token, profile_uid))
+
+
+@app.route("/api/test-profile/exit", methods=["POST"])
+def test_profile_exit():
+    """POST — end THIS test-profile session (memory + durable row). The app
+    restores the real token it kept; nothing here touches the real account."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    token = request.headers.get("X-Session-Token", "")
+    with _sessions_lock:
+        _sessions.pop(token, None)
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/test-profile/reset", methods=["POST"])
+def test_profile_reset():
+    """POST — wipe every row the test profile wrote (test_profile.reset_profile:
+    its own id and its own `qa_tp:` league copies only), end all of its
+    sessions, and hand back a fresh session so onboarding starts from zero."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    evicted = _tp_revoke_sessions(uid)
+    deleted = _tp.reset_profile(uid)
+    token, _ = _tp_mint_session(uid)
+    log.info("test-profile: reset %s — %s", uid, deleted)
+    return jsonify({**_tp_session_body(token, uid),
+                    "deleted": deleted, "sessions_evicted": evicted})
+
+
 # ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
 # Tester-only value-core Gate 2: grade value-core vs current-engine cards
 # without knowing which made them. All logic is in backend/blind_grading.py;
@@ -37685,6 +38014,8 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
         linked = load_espn_leagues_for_user(user_id)
     except Exception:
         log.exception("espn verify: linked-league lookup failed for %s", user_id)
+    for lg in linked:   # test-profile READ seam: stored qa_tp: ids → ESPN's own
+        lg["league_id"] = _tp.native_league_id(lg.get("league_id"))
 
     # 1. Strong oracle: an already-linked league ESPN only serves to a
     #    signed-in member. PUBLIC links are skipped on purpose.
@@ -38187,6 +38518,7 @@ def espn_link():
                 # public league doesn't need.
                 auth_mode = "public"
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for t in league["teams"]:
         mid = user_id if t.team_id == team_id else _espn_member_id(league_id, t)
@@ -38201,7 +38533,7 @@ def espn_link():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
+            league_id       = store_lid,
             user_id         = user_id,
             name            = league["name"] or f"ESPN league {league_id}",
             espn_season     = league["season"] or season,
@@ -38209,14 +38541,14 @@ def espn_link():
             espn_my_team_id = team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — AFTER the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{team_id}")
 
     r = mapped["report"]
@@ -38226,7 +38558,7 @@ def espn_link():
              r["match_rate"] * 100, len(r["unmatched"]))
     resp = {
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -38359,8 +38691,9 @@ def espn_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_espn_league(league_id) if league_id else None
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_espn_league(store_lid) if league_id else None
     if not row:
         return jsonify({"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}), 404
@@ -38420,7 +38753,7 @@ def espn_import():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
+            league_id       = store_lid,
             user_id         = row["user_id"],
             name            = league["name"] or row.get("name") or "",
             espn_season     = league["season"] or season,
@@ -38428,19 +38761,19 @@ def espn_import():
             espn_my_team_id = my_team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{my_team_id}")
 
     return jsonify({
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -40875,6 +41208,8 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
        `complete`, the roster save → event → response (the stamp starts off
        the request thread).
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     t0 = _fa_move_clock()
     user_id = str(sess.get("user_id") or "")
     # 3. A verified session (the hard write gate). `_verified_write_denial`
@@ -42200,6 +42535,7 @@ def mfl_link():
         return jsonify({"error": "mfl_bad_team_id",
                         "message": "That franchise isn't in this league."}), 400
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -42210,19 +42546,19 @@ def mfl_link():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=user_id,
+            league_id=store_lid, user_id=user_id,
             name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
             season=year, auth="public", my_team=franchise_id,
             total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — normalize MFL owned picks into draft_picks (same store Sleeper
@@ -42230,20 +42566,20 @@ def mfl_link():
     # persisted so franchise→user name resolution has the member snapshot.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_link: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_link: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_link")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_link")
 
     r = mapped["report"]
     log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
              "unmatched=%d picks=%d", user_id, league_id, year, len(members),
              r["match_rate"] * 100, len(r["unmatched"]), len(parsed["future_picks"]))
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": franchise_id,
@@ -42318,8 +42654,9 @@ def mfl_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_platform_league(league_id, "mfl") if league_id else None
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_platform_league(store_lid, "mfl") if league_id else None
     if not row:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
@@ -42355,35 +42692,35 @@ def mfl_import():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=row["user_id"],
+            league_id=store_lid, user_id=row["user_id"],
             name=parsed["name"] or row.get("name") or "", platform="mfl",
             season=year, auth=row.get("platform_auth") or "public",
             my_team=my_team, total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{my_team}")
 
     # #158 — re-normalize MFL owned picks on manual refresh (see mfl_link).
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_import: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_import: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — re-detect on every re-sync. This is also the manual fix-up path
     # for leagues linked before format detection existed.
-    _mfl_store_scoring_format(league_id, raw, "mfl_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_import")
 
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": row.get("platform_auth") or "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
@@ -42453,6 +42790,7 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         raise _mfl.MflError(
             "couldn't match your franchise in this league", kind="franchise")
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -42462,22 +42800,22 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "player_ids": mapped["rosters"].get(fid, []),
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     upsert_platform_league(
-        league_id=league_id, user_id=user_id,
+        league_id=store_lid, user_id=user_id,
         name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
         season=year, auth="cookie", my_team=franchise_id,
         total_rosters=parsed["total_teams"], host=host,
         future_picks=parsed["future_picks"])
-    replace_espn_league_members(league_id, members)
+    replace_espn_league_members(store_lid, members)
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — same best-effort owned-pick normalization as the public path.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_auth_import: normalized %d owned picks (league=%s)",
                      _npk, league_id)
         except Exception as _mpk_err:
@@ -42485,11 +42823,11 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "(continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_auth_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_auth_import")
 
     r = mapped["report"]
     return {
-        "league_id": league_id, "name": parsed["name"], "season": year,
+        "league_id": store_lid, "name": parsed["name"], "season": year,
         "my_team_id": franchise_id, "teams_imported": len(members),
         "total_teams": parsed["total_teams"],
         "future_picks_stored": len(parsed["future_picks"]),
@@ -43507,6 +43845,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     byte-identical; on that path these re-checks are no-ops. Extracted
     2026-09-07 exactly the way `_sleeper_propose_core` was.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
@@ -44118,6 +44458,8 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     `espn_pick_unsupported`); the overhaul refuses them earlier, at
     prepare-send, so nothing is half-sent.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599

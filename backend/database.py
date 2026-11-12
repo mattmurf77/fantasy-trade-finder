@@ -79,6 +79,8 @@ engine   = create_engine(DATABASE_URL, echo=False, future=True,
                             else _pg_engine_kwargs()))
 metadata = MetaData()
 
+from . import test_profile as _tp   # onboarding test profile: storage re-key + outbound chokepoint
+
 # Silent prepared offers are private artifacts, not shown impressions. The
 # participant index covers every consumed manager, including non-app members.
 # Store operations live in prepared_trade_store; these additive tables are
@@ -5769,10 +5771,14 @@ def load_leaderboard(
             return {"metric": metric, "window": window, "league_id": league_id,
                     "rows": [], "self_row": None}
 
+    # Synthetic QA users (qa_*: Test Stages, the onboarding test profile) are
+    # never on a board; over-fetch a little so dropping them keeps `limit`.
+    fetch = limit + 10
     if metric == "streak":
-        top = _streak_top(league_user_ids, limit)
+        top = _streak_top(league_user_ids, fetch)
     else:
-        top = _rank_count_top(_window_since(window), league_user_ids, limit)
+        top = _rank_count_top(_window_since(window), league_user_ids, fetch)
+    top = [(uid, val) for uid, val in top if not str(uid).startswith("qa_")][:limit]
 
     if not top:
         return {"metric": metric, "window": window, "league_id": league_id,
@@ -10066,6 +10072,9 @@ def load_global_like_rate(days: int = 30) -> tuple[int, int]:
         .where(and_(
             trade_decisions_table.c.decision.in_(("like", "pass")),
             trade_decisions_table.c.created_at >= cutoff,
+            # Synthetic QA users (qa_*: Test Stages, the onboarding test
+            # profile) never move a product-wide learning signal.
+            ~trade_decisions_table.c.user_id.startswith("qa_", autoescape=True),
         ))
         .group_by(trade_decisions_table.c.decision)
     )
@@ -10527,7 +10536,9 @@ def count_archetype_engagement(
             like_alias.c.action == "like",
         )).exists()
     )
-    conds = [deck_impressions_table.c.archetype == archetype, has_viewed]
+    conds = [deck_impressions_table.c.archetype == archetype, has_viewed,
+             # Synthetic QA users (qa_*) never move the global audition pool.
+             ~deck_impressions_table.c.user_id.startswith("qa_", autoescape=True)]
     if since_iso:
         conds.append(deck_impressions_table.c.served_at >= since_iso)
     q_viewed = (select(func.count())
@@ -10769,7 +10780,7 @@ def upsert_league_members(league_id: str, members: list[dict]) -> None:
     rows = [
         {
             "league_id":    league_id,
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -10977,7 +10988,8 @@ def write_session_init_members(league_id: str, members: list[dict], *, user_id: 
     writes again (the deletion matrix).
     """
     now = _now()
-    rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
+    rows = [{"league_id": str(league_id),
+             "user_id": _tp.masked_member_id(league_id, str(m["user_id"])),
              "username": m.get("username", ""),
              "display_name": m.get("display_name") or m.get("username", ""),
              "roster_data": json.dumps(m.get("player_ids", [])), "updated_at": now}
@@ -12369,6 +12381,9 @@ def create_trade_match(
     the match itself is the product event and must not fail on an audit
     field.
     """
+    for _uid in (user_a_id, user_b_id):
+        if _tp.outbound_blocked(_uid, league_id=league_id, payload=user_a_id, kind="trade_match"):
+            raise _tp.OutboundBlocked("trade match touching the onboarding test profile")
     now = _now()
     latency = None
     if first_like_at:
@@ -14898,6 +14913,8 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
+    if _tp.outbound_blocked(user_id, payload=json.dumps(metadata or {}), kind=type_):
+        return {"id": None, "user_id": user_id, "type": type_, "blocked": True}
     supplied_conn = conn
     row = {
         "user_id":       user_id,
@@ -14994,6 +15011,8 @@ def create_or_coalesce_league_join_notification(
     Returns the row dict, or None on failure (never raises — an inbox
     write must not be able to fail a session_init).
     """
+    if _tp.outbound_blocked(user_id, league_id=league_id, kind="league_member_joined"):
+        return None
     if not user_id or not league_id:
         return None
     day_start = datetime.now(timezone.utc).replace(
@@ -15594,6 +15613,9 @@ def claim_referral(referral_id: int, referred_user_id: str, method: str, *, conn
     One conditional UPDATE, so two concurrent first sessions can't both
     claim it. False when the row was already claimed (or isn't pending), or
     when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    if _tp.is_test_profile_id(referred_user_id) or _tp.is_test_profile_id(_tp.ACTOR.get()):
+        _tp.outbound_blocked("referrer", payload=referred_user_id, kind="referral_credit")
+        return False
     supplied_conn = conn
     from sqlalchemy.exc import IntegrityError
     r = referrals_table
@@ -17127,7 +17149,7 @@ def replace_espn_league_members(league_id: str, members: list[dict]) -> None:
     rows = [
         {
             "league_id":    str(league_id),
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -17520,6 +17542,8 @@ def queue_notification(
     `dedup_key` is the original key from _send_typed_push; it gets
     threaded through the bundle drain so frequency caps remain accurate.
     """
+    if _tp.outbound_blocked(user_id, payload=json.dumps(data or {}), kind=kind):
+        return
     if not user_id or not kind or not deliver_after:
         return
     try:
@@ -17649,6 +17673,9 @@ def load_all_signed_up_users() -> list[dict]:
                     users_table.c.last_rank_at,
                     users_table.c.unlocked_formats,
                 ).where(users_table.c.signup_at.is_not(None))
+                # Synthetic QA users (test_users.py qa_*, the onboarding test
+                # profile qa_tp_*) never get digests, reviews or re-engagement.
+                .where(~users_table.c.sleeper_user_id.startswith("qa_", autoescape=True))
             ).fetchall()
         for r in rows:
             d = dict(r._mapping)

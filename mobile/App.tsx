@@ -28,6 +28,9 @@ import RootNav, { navigationRef } from './src/navigation/RootNav';
 import UpdateGateScreen, { APP_VERSION_INT } from './src/screens/UpdateGateScreen';
 import { shouldBlockForUpdate } from './src/utils/appVersion';
 import { useSession } from './src/state/useSession';
+import { hydrateTestProfile, refreshTestProfileAvailability } from './src/state/testProfile';
+import TestProfileBanner from './src/components/TestProfileBanner';
+import TestProfileRelinkPrompt from './src/components/TestProfileRelinkPrompt';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import {
   useOnboardingState,
@@ -114,6 +117,9 @@ function App() {
       // reads per-position quick-tiers completion at mount and must not
       // race hydration.
       hydrateQuicksetProgress(),
+      // Onboarding test profile marker (local read): the app comes back in
+      // whichever profile it was in, with the banner up.
+      hydrateTestProfile(),
     ])
       .catch(() => { /* all legs are best-effort */ })
       .finally(() => {
@@ -131,6 +137,9 @@ function App() {
           .revalidateSession()
           .then(() => {
             void refreshQuicksetProgress();
+            // Onboarding test profile: does the server offer it to this
+            // account? (404 for everyone not allow-listed.)
+            void refreshTestProfileAvailability();
           });
         // Analytics (tracking plan v2): restore the offline event queue,
         // then record the cold open. Fired AFTER loadCachedFlags so the
@@ -296,7 +305,12 @@ function App() {
           {updateRequired && fontsSettled ? (
             <UpdateGateScreen minVersion={appMinVersion} appVersionInt={APP_VERSION_INT as number} />
           ) : (
-            <RootNav booted={booted && fontsSettled} />
+            <>
+              <TestProfileBanner>
+                <RootNav booted={booted && fontsSettled} />
+              </TestProfileBanner>
+              <TestProfileRelinkPrompt />
+            </>
           )}
           <StatusBar style="light" />
         </PersistQueryClientProvider>

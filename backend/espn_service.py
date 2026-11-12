@@ -89,6 +89,10 @@ class EspnAuthError(EspnError):
 # ---------------------------------------------------------------------------
 
 def league_url(league_id: str, season: int) -> str:
+    # Onboarding test profile: a stored `qa_tp:X:<id>` reads ESPN as <id>
+    # (identity for every real id) — the read half of the linking seam.
+    from .test_profile import native_league_id
+    league_id = native_league_id(league_id)
     return (
         f"{ESPN_READS_BASE}/seasons/{season}/segments/0/leagues/"
         f"{urllib.parse.quote(str(league_id))}?view=mTeam&view=mRoster&view=mSettings"

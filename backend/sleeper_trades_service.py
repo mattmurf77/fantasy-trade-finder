@@ -75,6 +75,8 @@ def fetch_week_transactions(
     `_opener` injects a fake urlopen in tests (same pattern as
     trade_block_service / sleeper_write / espn_service).
     """
+    if "qa_tp" in str(league_id):   # onboarding test profile: never reach Sleeper by a namespaced id
+        raise ValueError("test-profile league id")
     url = f"{SLEEPER_API_BASE}/league/{league_id}/transactions/{week}"
     request = urllib.request.Request(url)
     for k, v in _HEADERS.items():

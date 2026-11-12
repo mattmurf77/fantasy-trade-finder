@@ -288,7 +288,7 @@ const util = load(utilSrc);
   assert(count(app, 'const appMinVersion = useFeatureFlags((s) => s.appMinVersion);') === 1
       && count(app, 'const updateRequired = shouldBlockForUpdate(appMinVersion, APP_VERSION_INT);') === 1,
     '3j. App.tsx decides with shouldBlockForUpdate(store min, APP_VERSION_INT)');
-  assert(/\{updateRequired && fontsSettled \? \(\s*<UpdateGateScreen minVersion=\{appMinVersion\} appVersionInt=\{APP_VERSION_INT as number\} \/>\s*\) : \(\s*<RootNav booted=\{booted && fontsSettled\} \/>\s*\)\}/.test(app),
+  assert(/\{updateRequired && fontsSettled \? \(\s*<UpdateGateScreen minVersion=\{appMinVersion\} appVersionInt=\{APP_VERSION_INT as number\} \/>\s*\) : \(\s*(?:<>\s*<TestProfileBanner>\s*)?<RootNav booted=\{booted && fontsSettled\} \/>\s*(?:<\/TestProfileBanner>\s*<TestProfileRelinkPrompt \/>\s*<\/>\s*)?\)\}/.test(app),
     '3k. …and the gate REPLACES RootNav (nothing beneath it is mounted)');
   const mounts = allSrc.filter((f) => /<UpdateGateScreen\b/.test(f.code));
   assert(mounts.length === 1 && mounts[0].rel === 'App.tsx' && count(mounts[0].code, '<UpdateGateScreen') === 1,

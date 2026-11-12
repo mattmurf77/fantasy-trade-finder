@@ -512,6 +512,8 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
         if (e.expression.text === 'useFlag' && isStr(e.arguments[0])) return [e.arguments[0].text];
         if (e.expression.text === 'useTimingReadoutEnabled' && e.arguments.length === 0) return ['testing.timing_readout'];
+        // The onboarding test profile: offered by the SERVER (state/testProfile).
+        if (e.expression.text === 'useTestProfile') return ['test_profile'];
         if (isTesterSurfaceCall(e)) return hookReturn ? flagsOf(hookReturn, hookSf, depth + 1) : null;
         return null;
       }
@@ -523,12 +525,12 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       return null;
     };
     const read = (cond && flagsOf(cond, hub)) || [null];
-    const want = ['__DEV__', 'testing.stage_users', 'testing.timing_readout'];
+    const want = ['__DEV__', 'testing.stage_users', 'testing.timing_readout', 'test_profile'];
     const exact = read.every(Boolean) && read.length === want.length && want.every((k) => read.includes(k));
     if (rows.length === 1 && cond && info.whenTrue && exact) {
-      ok(`T2. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout`);
+      ok(`T2. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout || test profile offered`);
     } else {
-      fail("T2. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout",
+      fail("T2. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout || test profile offered",
            rows.length !== 1 ? `found ${rows.length} settings.hub.testing rows`
              : !cond ? 'the row is unconditional — every user would see Testing'
              : !info.whenTrue ? `the row is in the FALSE branch of \`${cond.getText(hub)}\` — every non-tester would see Testing`
@@ -682,6 +684,10 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       vm.runInNewContext(js, {
         module: mod, exports: mod.exports, __DEV__: dev,
         require: (name) => {
+          if (name === '../../state/testProfile') {
+            // `test_profile` in `on` = the server offers the test profile.
+            return { useTestProfile: (sel) => sel({ available: on.includes('test_profile'), active: false }) };
+          }
           if (name !== '../../state/useFeatureFlags') throw new Error(`unexpected import ${name}`);
           return { useFlag: (k) => { asked.push(k); return on.includes(k); } };
         },
@@ -695,6 +701,7 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       [false, ['testing.timing_readout'], true],
       [false, ['testing.stage_users', 'testing.timing_readout'], true],
       [false, ['ux.help_surface'], false],
+      [false, ['test_profile'], true],
     ];
     const wrong = [];
     let askedKeys = new Set();
@@ -709,9 +716,9 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       if (!askedKeys.has(k)) wrong.push(`never reads ${k}`);
     }
     if (wrong.length === 0) {
-      ok('5b. useTesterSurface() (executed) = __DEV__ || testing.stage_users || testing.timing_readout');
+      ok('5b. useTesterSurface() (executed) = __DEV__ || testing.stage_users || testing.timing_readout || test profile offered');
     } else {
-      fail('5b. useTesterSurface() = __DEV__ || testing.stage_users || testing.timing_readout', wrong.join('; '));
+      fail('5b. useTesterSurface() = __DEV__ || testing.stage_users || testing.timing_readout || test profile offered', wrong.join('; '));
     }
   }
 

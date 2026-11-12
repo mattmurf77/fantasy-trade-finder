@@ -131,6 +131,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Quick Set unlock backfill (P0-1, 2026-08-11)](#quick-set-unlock-backfill-p0-1-2026-08-11)
 - [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
+- [Onboarding test profile — become a new user, flip back (2026-11-11)](#onboarding-test-profile-become-a-new-user-flip-back-2026-11-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
@@ -1141,6 +1142,46 @@ Account-only sign-in cannot be driven by a UI test through real Sign in with App
 A `ftf-test-apple:` token hitting a production server is rejected as a malformed Apple token. Empty/whitespace subs return `None` (covered by `backend/tests/test_account_only_harness.py`). The seam substitutes for `verify_apple_token` and **nothing else** — session creation, account linking and routing all run the real code paths.
 
 **Why this is a runbook entry and not an api-reference row:** it adds no route and is unreachable in any deployed build.
+
+## Onboarding test profile — become a new user, flip back (2026-11-11)
+
+Operator tool: run onboarding as a brand-new user, then return to your real profile with no re-login.
+- Server: `backend/test_profile.py`, `/api/test-profile/*` in `docs/api-reference.md`.
+- Plan: `docs/plans/onboarding-test-profile/`.
+
+**Enable it for one account** (needs both settings, server-side):
+1. Find the account's real working key.
+   - In the app: Settings → Account, while signed in as the real profile. `GET /api/account` returns `sleeper_user_id` for a Sleeper-linked account, else the working key is `acct_<account_id>`.
+   - Without the app: run a read-only query in the production DB, `SELECT sleeper_user_id FROM users WHERE lower(username) = '<your sleeper username>'`.
+   - Never paste the id into the repo, a doc or a commit.
+2. Render → the web service → Environment: set `TEST_PROFILE_ACCOUNTS=<that key>` (comma-separate several). Save; Render redeploys.
+3. Turn the flag on: set `"dev.test_profile": true` in `config/features.json` and deploy, or set it through the `FTF_FLAGS` env override on Render.
+
+**Use it (TestFlight build that includes the client half):**
+1. Settings → Testing → **Test onboarding as a new user** → Start.
+   - The app stashes everything on the device under the real profile and swaps in a fresh test session.
+   - It restarts at the sign-in screen as a first launch.
+   - A **TEST PROFILE** bar stays at the top with **Reset** and **Back to my profile**.
+2. Onboard as a new user through the **real** flows:
+   - **Sleeper:** type your own Sleeper username. Another person's gets "Use your own Sleeper username".
+   - **ESPN / MFL:** pick the platform on the landing screen. The league picker opens that platform's link sheet, and you sign in as a new user would.
+   - **Apple / Google / demo:** "Not available in the test profile".
+   - Linked leagues are stored under `qa_tp:<id>:`. Every league-mate appears as an opaque `qa_tpo_…` team, and nothing the test profile does notifies, matches or messages anyone. See plan §11–§12.
+3. **Back to my profile** restores the real token, user, league and every device setting exactly as they were.
+   - If your real ESPN or MFL link stopped working while you tested, the normal re-link prompt appears.
+   - Signing in to ESPN/MFL again can end the platform's older session. You accepted that cost, and the prompt is the fix.
+4. **Reset** wipes only the test profile's rows, including its platform credential rows and namespaced leagues, and starts onboarding again.
+5. The app reopens in whichever profile it was closed in.
+
+**What it cannot test:**
+- Sending trades, free-agent moves, offer import and Sleeper JWT capture are refused by design. The "Verify Sleeper account" step a new user meets is therefore not exercised.
+- Anything that needs a second real person: matches, league-mate notifications and the join fan-out are suppressed.
+- Live per-league reads that reach Sleeper with a stored league id degrade for a test league rather than call Sleeper: lineup slots, roster limit, outlook, draft board, free agents, standings and roster refresh.
+
+**Turn it off:** remove the key from `TEST_PROFILE_ACCOUNTS` (or the env var), or set the flag false.
+- Every test-profile token then reads as expired.
+- A phone still in the test profile keeps its banner. Tap **Back to my profile**: the real token is held on the device and is restored without the server.
+- Leftover test rows: they are keyed `qa_tp_<id>` / `qa_tp:<id>:…` and every report and cron already ignores them. To remove them, run the delete through `backend.test_profile.reset_profile('qa_tp_<id>')` from a shell with the production `DATABASE_URL`. It refuses any id that is not a test profile.
 
 ## Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)
 

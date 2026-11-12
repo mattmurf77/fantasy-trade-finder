@@ -225,6 +225,8 @@
   "testing.stage_users": false,
   "_comment_timing_readout": "2026-10-24 head-eng ruling 11 (time to trade suggestion, #339 §9.5). testing.timing_readout gates ONE Settings > Testing row (mobile components/TimingReadoutRow, mounted by onboarding-eng) showing this device's last tap-to-first-card ms_from_tap (R2) and its cell (network_type, launch_state), held in memory only: no server, no storage. Also opens the Settings hub's Testing entry (with __DEV__ || testing.stage_users). Client-only; no route reads it. Delivered per device via the experiment overlay, like testing.stage_users. Default false.",
   "testing.timing_readout": false,
+  "_comment_test_profile": "Onboarding test profile (docs/plans/onboarding-test-profile/, backend/test_profile.py). dev.test_profile gates /api/test-profile/* and the Settings > Testing row \"Test onboarding as a new user\". It is inert unless the account is ALSO listed in the server env var TEST_PROFILE_ACCOUNTS (comma-separated real working keys); the tester allow-list and device ids are never consulted. Default false.",
+  "dev.test_profile": false,
   "_comment_tiktok_discovery": "2026-07-26 TikTok-discovery deck engine (docs/plans/tiktok-discovery/). Flags flipped ON per-wave at each TestFlight ship. deck.value_model stays dark until an F8 replay win (PRD F6 gate). F8 eval harness is unflagged operator tooling.",
   "deck.signal_v2": true,
   "deck.thompson_v2": true,
