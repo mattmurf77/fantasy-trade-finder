@@ -12,6 +12,17 @@
 - Each weekly forecast changes the request signature for that viewer, so stored first pages and prepared decks rebuild weekly.
 - Not changed: the legacy generators, mock-draft CPU drafters and the value core still use the roster read. `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
 
+## D-236 — League-median leagues are forecast with two results a week; the model version stays v6; the league's median setting is stored at link
+
+**Date:** 2026-11-11 · **Who:** the operator ("Let's make the model change to solve for median scoring leagues. Ensure we also include checking that when users link a new league and update the DB to store that setting"). The tie rule, keeping the version and the rename of the unsupported reason are this session's calls.
+**Context:** A Sleeper league with `league_average_match` gives every team a second result each week against the league's median score. `capture` refused those leagues, so one of the operator's two current-season unsupported leagues had no forecast.
+**Decision:** The median is taken over every team's score that week; above it wins, below it loses, equal ties. `capture` books the median result for completed weeks, so the current record equals Sleeper's; `simulate` books it for every simulated week from that week's scores, with no extra random draw; seeding and playoff odds use the combined record. Results and snapshots carry `league_format` (`median_game`, `games_per_week`). `core.VERSION` is not bumped, because a non-median league's result is byte-identical. `leagues.median_game` (nullable) is written at first link and refreshed on every sync from the league data already fetched; unknown never overwrites a known value. The forecast still reads the live Sleeper setting at capture. Divisions, best ball and manual seeding stay unsupported under the renamed reason `unsupported_divisions_bestball_or_manual_seeding`. Scope: `docs/plans/league-projections/median-leagues-scope.md`.
+**Consequences:**
+- The rule was checked against one real 12-team league: rebuilt records matched Sleeper's for all 12 teams over 9 weeks. A tie exactly at the median never occurred there, so that case is an assumption.
+- For a median league the record fields cover two games a week; the weekly win chance fields stay the head-to-head game and separate `median_*` fields carry the second.
+- `POST /api/cron/league-projections {"retry_unsupported": true}` re-attempts targets whose last attempt was unsupported, for use after a format becomes supported.
+- The column is not sent to clients yet.
+
 ## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
 
 **Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.
