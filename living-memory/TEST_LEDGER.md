@@ -1,3 +1,14 @@
+## 2026-11-12 — Founders' review: any label for any player (D-251), branch `fix/founder-labels-any-label`
+
+- **Full backend suite (Opus subagent, no edits in flight, before merging the Free Agents and Usage Trends branches):** 15,405 passed, 42 skipped, 0 failed. Targeted (`test_founder_review.py` 70, season value, season signal worker, bilateral season, season copy, label review, replay, digest): 297 passed.
+- **App (subagent):** `tsc --noEmit` clean; 180 of 180 `check-*.js` (`check-founder-review.js` 56 of 56); testid-lint OK.
+- **What is pinned:** any of the four labels for a starter, a bench player, a borderline player and an unprojected player is accepted, stored, read back and used as the engine's label; move-back and Reset clear; the summary maps a missing side to "none" (the old code would have raised sorting None against a string); non-founders still get 404; a whole deck on revision 5 with the label fit, the sell bonus and partner matching runs with every label set against `startable`.
+- **Sabotages, red then restored (14, subagent; checksums identical after each):** 8 on the server and engine, 6 on the client.
+- **The digest test did not fail:** no pipeline bump.
+- **Main session:** read the `season_value.py` and `founder_review.py` diffs; production holds 0 stored overrides and 0 rule notes (read-only count), so the change of meaning touches nothing stored; merged the two stacked branches in and re-ran the founder, season, usage, free-agent and digest tests.
+- **Not verified:** anything on a device; the shipped 187 client against the new server response (traced in code, not run).
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Usage Trends period toggle (D-250), branch `feat/usage-trends-period-toggle`
 
 - **Full backend suite (Opus subagent, no edits in flight, before merging the Free Agents branch):** 15,410 passed, 42 skipped, 0 failed. `test_usage_trends.py` + `test_usage_trends_refresh.py`: 61 passed (12 new). All `test_analytics_*.py` + `test_events_api.py`: 258 passed.
