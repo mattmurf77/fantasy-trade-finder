@@ -12,6 +12,15 @@
 ---
 
 
+## 2026-11-11 — "Why pass?" opens from the ✕ as a frame over the card
+
+- **Why:** TestFlight 186 report, "a card with no pass button". The asking card removed the ✕ and put the reason chips under the card, below the fold on a tall card.
+- **What changed (app, next build):** an asking card looks like any other. Its ✕ opens a frame over the card: "WHY PASS?", "Your answer helps us find better trades for you.", six reasons, Just pass and a close button. Every exit is a pass (operator ruling); a reason is the pass and the reason in one tap.
+- **Cadence:** the ask is spent only when the frame was shown. A like or a swipe on an asking card carries the ask to the next card.
+- **Toast:** "Passed" offers Undo only when there is a held pass to undo; a pass with a reason commits at once and shows plain "Passed".
+- **Events:** `pass_reason_prompt_shown` now means the frame opened, not the card fronted. Names and props unchanged.
+- Not verified on a device.
+
 ## 2026-11-11 — Rules-first deck construction is on (D-235, ADR-030); repeat cap 5 of 30
 
 - **What changed:** the deck rules now decide which trades are built, before ranking, and the whole eligible deck is built with the page-first search (about 0.35 s of CPU a search against 4.0 s on the recorded requests). No 150-card cap. `trade.fast_deck` is retired; the switch is `deck.rules_first`.
