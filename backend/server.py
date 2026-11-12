@@ -137,6 +137,8 @@ from .database import (
     upsert_league_members, upsert_member_rankings,
     # The session-init daemon's start read and its guarded members write
     league_row_and_member_ids, write_session_init_members,
+    # Per-user platform-league binding (docs/plans/platform-league-binding/)
+    get_platform_binding, platform_bound_teams,
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -21180,8 +21182,9 @@ def _sync_mfl_owned_picks(league_id: str, *, source_picks=None,
         replace_draft_picks(league_id, [])
         return 0
 
-    my_team   = str(row.get("platform_my_team") or "")
-    link_user = str(row.get("user_id") or "")
+    # Every franchise an app user is bound to → that user's id (the label the
+    # shared league_members snapshot carries); every other → synthetic.
+    bound = platform_bound_teams(league_id, "mfl")
     try:
         cur_season = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
     except (TypeError, ValueError):
@@ -21194,8 +21197,8 @@ def _sync_mfl_owned_picks(league_id: str, *, source_picks=None,
 
     def _fr_to_user(fid: str) -> str:
         fid = str(fid)
-        if fid and fid == my_team:
-            return link_user
+        if fid and fid in bound:
+            return bound[fid]
         return _mfl_member_id(league_id, fid) if fid else ""
 
     members_by_uid = {str(m.get("user_id")): m for m in load_league_members(league_id)}
@@ -24919,8 +24922,9 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         looking board.
       * franchise → user ← the SAME synthetic-id scheme every other MFL
         surface uses (`_mfl_member_id`: `mfl:<league>.f<franchise>`), with
-        the linking user's own franchise (`platform_my_team`) mapped to
-        their real user id so `my_picks` resolves.
+        every bound franchise mapped to its app user (platform_bound_teams)
+        and the viewer's own bound franchise to the viewer, so `my_picks`
+        resolves.
       * MFL player id → our id ← the EXISTING shared DP crosswalk
         (`_shared_crosswalk().by_mfl_sleeper`). This is load-bearing:
         `draft_board_service._render_mfl` SUPPRESSES the undrafted list
@@ -24971,10 +24975,13 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
             usernames[uid] = name
         if uid.startswith(prefix):
             franchise_to_user[uid[len(prefix):]] = uid
-    my_team = str(row.get("platform_my_team") or "")
-    link_user = str(row.get("user_id") or "")
-    if my_team and link_user:
-        franchise_to_user[my_team] = link_user
+    # Bound franchises carry their app user's id; the VIEWER's own bound
+    # franchise maps to the viewer (my_picks), co-owned or not.
+    franchise_to_user.update(platform_bound_teams(lid, "mfl"))
+    viewer = str(sess.get("user_id") or "")
+    mine = get_platform_binding(viewer, lid, "mfl") if viewer else None
+    if mine:
+        franchise_to_user[mine["team_id"]] = viewer
 
     try:
         xw = _shared_crosswalk()
@@ -25247,8 +25254,8 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
 
     `order` is FTF member `user_id`s in round-1 pick order, so it drops
     straight into `settings.order`. The ESPN team → member mapping is the
-    SAME one the import writes (`_espn_member_id`, with the linking user's
-    own real id for their own team), and the result must be an exact
+    SAME one the import writes (`_espn_member_id`, with each bound app
+    user's real id for their own team — platform_bound_teams), and the result must be an exact
     permutation of the league's current membership — anything else (a team
     left, a re-link changed the binding) returns None rather than a
     partially-right order.
@@ -25272,14 +25279,13 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
                 league["teams"], league.get("playoff_team_count"))
             if order_ids:
                 by_id = {t.team_id: t for t in league["teams"]}
-                my_team = row.get("espn_my_team_id")
-                importer = str(row.get("user_id") or "")
+                bound = platform_bound_teams(str(league_id), "espn")
                 n_playoff = int(league.get("playoff_team_count") or 0)
                 order, detail = [], []
                 for pick, tid in enumerate(order_ids, start=1):
                     t = by_id[tid]
-                    uid = (importer if (importer and tid == my_team)
-                           else _espn_member_id(str(league_id), t))
+                    uid = (bound.get(str(tid))
+                           or _espn_member_id(str(league_id), t))
                     order.append(uid)
                     detail.append({
                         "user_id":       uid,
@@ -32790,8 +32796,12 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             return None, "espn_auth_expired"
         except _espn.EspnError:
             return None, "espn_fetch_failed"
-        my_tid = lg.get("espn_my_team_id")
+        # The credential read above is the leagues row's user's; R9 holds it
+        # to THAT user's own binding (none → no assertion, never a wrong-
+        # account nudge computed against a league-mate's team).
         my_uid = str(lg.get("user_id") or "")
+        my_tid = (get_platform_binding(my_uid, lid, "espn") or {}).get("team_id_int")
+        bound = platform_bound_teams(lid, "espn")
         # #321 R9 — the sweep is identity-aware: a stored SWID that
         # conclusively doesn't own the bound team gets the honest
         # wrong-account nudge (same `espn_reconnect` type, deduped per
@@ -32805,8 +32815,7 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
                 _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
-            mid = my_uid if (my_uid and t.team_id == my_tid) \
-                else _espn_member_id(lid, t)
+            mid = bound.get(str(t.team_id)) or _espn_member_id(lid, t)
             teams.append({"team_key": f"espn:{lid}.t{t.team_id}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -32828,12 +32837,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
         except Exception:
             return None, "mfl_fetch_failed"
-        my_fid = lg.get("platform_my_team")
-        my_uid = str(lg.get("user_id") or "")
+        bound = platform_bound_teams(lid, "mfl")
         teams = []
         for fr in parsed["franchises"]:
             fid = fr["franchise_id"]
-            mid = my_uid if (my_uid and fid == my_fid) else _mfl_member_id(lid, fid)
+            mid = bound.get(str(fid)) or _mfl_member_id(lid, fid)
             teams.append({"team_key": f"mfl:{lid}.f{fid}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -32849,12 +32857,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             mapped = _flea.map_teams(parsed, _shared_crosswalk())
         except Exception:
             return None, "fleaflicker_fetch_failed"
-        my_tid = lg.get("platform_my_team")
-        my_uid = str(lg.get("user_id") or "")
+        bound = platform_bound_teams(lid, "fleaflicker")
         teams = []
         for t in parsed["teams"]:
             tid = t["team_id"]
-            mid = my_uid if (my_uid and tid == my_tid) else _flea_member_id(lid, tid)
+            mid = bound.get(str(tid)) or _flea_member_id(lid, tid)
             teams.append({"team_key": f"fleaflicker:{lid}.t{tid}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -38441,7 +38448,7 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
     valid ESPN session for SOME account" — the 2026-08-12 incident stored a
     different human's working session as the caller's. So after the auth
     verdict, a MEMBERSHIP assertion runs regardless of oracle strength: the
-    pair's SWID must own the caller's bound team (`espn_my_team_id`) in
+    pair's SWID must own the caller's bound team (their own binding) in
     their linked ESPN leagues. Set semantics over EVERY bound league row —
     one ESPN human owns one SWID, so a conclusive mismatch against ANY bound
     league means the wrong account (or a mis-picked binding; either way the
@@ -39162,7 +39169,11 @@ def espn_import():
     body = request.get_json(force=True) or {}
     league_id = str(body.get("league_id") or "").strip()
     row = get_espn_league(league_id) if league_id else None
-    if not row:
+    # Per-user binding: a re-sync refreshes the CALLER's own team only; a
+    # caller with no binding (never linked, or a pre-fix binding that was
+    # overwritten) is told to link — never handed the row's team.
+    binding = get_platform_binding(user_id, league_id, "espn") if row else None
+    if not row or binding is None:
         return jsonify({"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}), 404
 
@@ -39185,7 +39196,7 @@ def espn_import():
     except _espn.EspnError as e:
         return _espn_error_response(e)
 
-    my_team_id = row.get("espn_my_team_id")
+    my_team_id = binding["team_id_int"]
     if my_team_id not in {t.team_id for t in league["teams"]}:
         return jsonify({"error": "espn_team_missing",
                         "message": "Your team is no longer in this ESPN "
@@ -39198,8 +39209,11 @@ def espn_import():
     # alone cannot identify. Only asserted for the linker's own binding
     # (zero false rejects if another user ever re-syncs). "Owns" = any listed
     # owner, co-owners included (_espn_binding_mismatch); an ownerless bound
-    # team is inconclusive-accept.
-    if swid and str(row.get("user_id") or "") == str(user_id):
+    # team is inconclusive-accept. (Per-user bindings: my_team_id IS the
+    # caller's own binding now, so the assertion holds every re-syncer to
+    # their own team — the old linker-only condition existed because a
+    # non-linker re-sync used to carry the linker's team.)
+    if swid:
         bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
         if _espn_binding_mismatch(bound, swid):
             clear_espn_credential_verification(user_id)
@@ -39222,7 +39236,7 @@ def espn_import():
     try:
         upsert_espn_league(
             league_id       = league_id,
-            user_id         = row["user_id"],
+            user_id         = user_id,
             name            = league["name"] or row.get("name") or "",
             espn_season     = league["season"] or season,
             espn_auth       = row.get("espn_auth") or "public",
@@ -43143,7 +43157,9 @@ def mfl_import():
     body = request.get_json(force=True) or {}
     league_id = str(body.get("league_id") or "").strip()
     row = get_platform_league(league_id, "mfl") if league_id else None
-    if not row:
+    # Per-user binding (see espn_import): the caller's own franchise only.
+    binding = get_platform_binding(user_id, league_id, "mfl") if row else None
+    if not row or binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
 
@@ -43162,7 +43178,7 @@ def mfl_import():
 
     parsed = _mfl.parse_bundle(raw)
     mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
-    my_team = row.get("platform_my_team")
+    my_team = binding["team_id"]
     if my_team not in {fr["franchise_id"] for fr in parsed["franchises"]}:
         return jsonify({"error": "mfl_team_missing",
                         "message": "Your franchise is no longer in this league — "
@@ -43178,7 +43194,7 @@ def mfl_import():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=row["user_id"],
+            league_id=league_id, user_id=user_id,
             name=parsed["name"] or row.get("name") or "", platform="mfl",
             season=year, auth=row.get("platform_auth") or "public",
             my_team=my_team, total_rosters=parsed["total_teams"], host=host,
@@ -43812,7 +43828,12 @@ def _mfl_franchise_from_member_id(league_id: str, member_id) -> str | None:
     None when the value isn't a synthetic id for THIS league."""
     m = re.match(rf"^mfl:{re.escape(str(league_id))}\.f(\d+)$",
                  str(member_id or ""))
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # A league-mate who uses the app carries their real id on their team
+    # (the shared snapshot labels every bound team): their own binding.
+    b = get_platform_binding(member_id, league_id, "mfl")
+    return b["team_id"] if b else None
 
 
 # ── MFL pick-asset encoding (FTF pick ids → MFL `FP_…` strings) ──────────────
@@ -44058,7 +44079,7 @@ def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
     warnings: list[dict] = []
     norm = _mfl_write.normalize_franchise_id
 
-    my_fid = row.get("platform_my_team")
+    my_fid = (get_platform_binding(user_id, league_id, "mfl") or {}).get("team_id")
     their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
                  else _mfl_franchise_from_member_id(league_id, their_user_id))
     if not my_fid or not their_fid:
@@ -44207,7 +44228,7 @@ def _validate_espn_trade(sess, user_id, row, league_id, their_user_id,
     teams = _espn.parse_league(raw)["teams"]
     rostered = {t.get("id") for t in raw["teams"]
                 if isinstance(t, dict) and isinstance(t.get("roster"), dict)}
-    my_tid = row.get("espn_my_team_id")
+    my_tid = (get_platform_binding(user_id, league_id, "espn") or {}).get("team_id_int")
     if their_team_in is not None:
         try:
             their_tid = int(their_team_in)
@@ -44368,13 +44389,14 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     if not row:
         return {"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}, 404
-    if str(row.get("user_id") or "") != str(user_id):
-        # One linker per platform-league row; only the linker has a franchise
-        # binding, so nobody else can send from it.
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
+        # The SENDER's own binding is the only source of "my franchise" —
+        # never the leagues row, which every league-mate's link shares.
         return {"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}, 404
-    my_fid = str(row.get("platform_my_team") or "").strip()
+    my_fid = binding["team_id"].strip()
     if not my_fid:
         return {"error": "mfl_franchise_unknown",
                         "message": "Couldn't determine your franchise — "
@@ -44661,7 +44683,8 @@ def respond_trade_in_mfl():
     if not row:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
-    if str(row.get("user_id") or "") != str(user_id):
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}), 404
@@ -44762,7 +44785,8 @@ def mfl_pending_trades():
     if not row:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
-    if str(row.get("user_id") or "") != str(user_id):
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}), 404
@@ -44796,7 +44820,7 @@ def mfl_pending_trades():
 
     return jsonify({
         "trades": _mfl.parse_pending_trades(raw),
-        "my_franchise_id": str(row.get("platform_my_team") or "") or None,
+        "my_franchise_id": binding["team_id"] or None,
     })
 
 
@@ -44853,7 +44877,12 @@ def _espn_team_id_from_member_id(league_id: str, member_id, teams) -> int | None
         for t in teams:
             if t.owner_swid and _espn.canonical_swid(t.owner_swid).upper() == target:
                 return t.team_id
-    return None
+        return None
+    # A league-mate who uses the app: their own binding, still verified
+    # against the live team list.
+    b = get_platform_binding(s, league_id, "espn")
+    tid = b["team_id_int"] if b else None
+    return tid if tid is not None and any(t.team_id == tid for t in teams) else None
 
 
 @app.route("/api/trades/propose-espn", methods=["POST"])
@@ -44974,13 +45003,14 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     if not row:
         return {"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}, 404
-    if str(row.get("user_id") or "") != str(user_id):
-        # One linker per ESPN league row; only the linker has a team binding,
-        # so nobody else can send from it.
+    binding = get_platform_binding(user_id, league_id, "espn")
+    if binding is None:
+        # The SENDER's own binding is the only source of "my team" — never
+        # the leagues row, which every league-mate's link shares.
         return {"error": "espn_not_linked",
                         "message": "This ESPN league isn't linked to your "
                                    "account."}, 404
-    my_team_id = row.get("espn_my_team_id")
+    my_team_id = binding["team_id_int"]
     if my_team_id is None:
         return {"error": "espn_team_unknown",
                         "message": "Couldn't determine your team — re-link "
@@ -45361,7 +45391,8 @@ def fleaflicker_import():
     body = request.get_json(force=True) or {}
     league_id = str(body.get("league_id") or "").strip()
     row = get_platform_league(league_id, "fleaflicker") if league_id else None
-    if not row:
+    binding = get_platform_binding(user_id, league_id, "fleaflicker") if row else None
+    if not row or binding is None:
         return jsonify({"error": "fleaflicker_not_linked",
                         "message": "Link this Fleaflicker league first."}), 404
     try:
@@ -45371,7 +45402,7 @@ def fleaflicker_import():
 
     parsed = _flea.parse_bundle(raw)
     mapped = _flea.map_teams(parsed, _shared_crosswalk())
-    my_team = row.get("platform_my_team")
+    my_team = binding["team_id"]
     if my_team not in {t["team_id"] for t in parsed["teams"]}:
         return jsonify({"error": "fleaflicker_team_missing",
                         "message": "Your team is no longer in this league — "
@@ -45387,7 +45418,7 @@ def fleaflicker_import():
                         "team_key": f"fleaflicker:{league_id}.t{tid}"})  # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=row["user_id"],
+            league_id=league_id, user_id=user_id,
             name=parsed["name"] or row.get("name") or "", platform="fleaflicker",
             season=row.get("platform_season") or _MFL_DEFAULT_YEAR,
             auth=row.get("platform_auth") or "public", my_team=my_team,
@@ -45470,8 +45501,10 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
     (`_mfl_import_league_authed` / `_espn_import_payload`) so a fresh read and
     the session agree on player identity — an id-only read would report a
     name-matched player as "gone". Persists nothing. Member ids follow the
-    import: the linker's own team is `user_id`, every other team the synthetic
-    `mfl:{L}.f{FID}` / `espn:{SWID}` id. Credentials never leave this function.
+    session's view of the snapshot: the CALLER's bound team (their own
+    platform_league_bindings row) is `user_id`, another app user's bound team
+    carries that user's id, every other team the synthetic `mfl:{L}.f{FID}` /
+    `espn:{SWID}` id. No binding → None. Credentials never leave this function.
     """
     user_id = str(sess.get("user_id") or "")
     if not user_id or not str(league_id).isdigit():
@@ -45481,9 +45514,11 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             from . import mfl_service as _mfl
             from .database import get_platform_league
             row = get_platform_league(league_id, "mfl")
-            if not row or str(row.get("user_id") or "") != user_id:
+            binding = get_platform_binding(user_id, league_id, "mfl")
+            if not row or binding is None:
                 return None
-            my_fid = str(row.get("platform_my_team") or "").strip()
+            my_fid = binding["team_id"].strip()
+            labels = platform_bound_teams(league_id, "mfl")
             year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
             host = row.get("platform_host") or _mfl.resolve_host(league_id, year)
             raw = _mfl.fetch_league_bundle(league_id, year, host,
@@ -45492,15 +45527,18 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             rosters = _mfl.map_franchises(parsed, _shared_crosswalk())["rosters"]
             return [{"roster_id": fr["franchise_id"],
                      "owner_id": (user_id if fr["franchise_id"] == my_fid
-                                  else _mfl_member_id(league_id, fr["franchise_id"])),
+                                  else labels.get(fr["franchise_id"])
+                                  or _mfl_member_id(league_id, fr["franchise_id"])),
                      "players": list(rosters.get(fr["franchise_id"], []))}
                     for fr in parsed["franchises"]]
         if platform == "espn":
             from .database import get_espn_league, get_espn_credential
             row = get_espn_league(league_id)
-            if not row or str(row.get("user_id") or "") != user_id:
+            binding = get_platform_binding(user_id, league_id, "espn")
+            if not row or binding is None:
                 return None
-            my_team_id = row.get("espn_my_team_id")
+            my_team_id = binding["team_id_int"]
+            labels = platform_bound_teams(league_id, "espn")
             cred = get_espn_credential(user_id) or {}
             espn_s2 = swid = None
             if cred.get("swid") and cred.get("espn_s2_encrypted"):
@@ -45510,7 +45548,8 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
             return [{"roster_id": t.team_id,
                      "owner_id": (user_id if t.team_id == my_team_id
-                                  else _espn_member_id(league_id, t)),
+                                  else labels.get(str(t.team_id))
+                                  or _espn_member_id(league_id, t)),
                      "players": list(mapped["rosters"].get(t.team_id, []))}
                     for t in league["teams"]]
     except Exception as exc:

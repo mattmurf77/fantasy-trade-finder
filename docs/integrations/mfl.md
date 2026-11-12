@@ -528,15 +528,18 @@ applies to import responses. `_parse_import_response` accepts both
 `<status>OK</status>` XML and `{"status":"OK"}` JSON and **refuses to report
 success on any ambiguous body**.
 
-### v1 limitation — single-linker leagues (operator-accepted 2026-08-11)
+### Per-user franchise bindings (2026-11-11)
 
-v1 stores **one `leagues` row per MFL league**, so only the FTF user who
-linked the league has a franchise binding (`platform_my_team`) and can send
-from it. Any other FTF user in the same MFL league gets 404 `mfl_not_linked`
-("This MFL league isn't linked to your account."); the mobile client offers
-re-linking, which transfers the binding to them. Accepted for v1 — per-user
-franchise bindings are a v2 concern if MFL adoption warrants it (see the
-scope block §"v1 limitations").
+The v1 single-linker limitation is gone. One `leagues` row per MFL league
+still holds the league facts, but each FTF user's franchise is their own
+`platform_league_bindings` row (written by their own link / sign-in import).
+Every FTF user in the league can link, re-sync and send from **their own**
+franchise with **their own** cookie; a user with no binding gets 404
+`mfl_not_linked` ("This MFL league isn't linked to your account.") and re-links.
+A league-mate who uses the app appears under their real id in the member list;
+sending to them resolves their franchise from their binding.
+`leagues.platform_my_team` is legacy (last linker, read only by the backfill).
+[Design](../plans/platform-league-binding/design.md).
 
 ### Error modes
 

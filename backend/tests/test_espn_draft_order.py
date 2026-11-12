@@ -392,6 +392,9 @@ def mem_db(monkeypatch):
             conn.execute(league_members_table.insert().values(
                 league_id=ESPN_LEAGUE, user_id=uid, username=uid,
                 display_name=uid, roster_data="[]"))
+    # A pre-binding-table row set: derive IMPORTER's binding exactly as the
+    # boot migration does (docs/plans/platform-league-binding/).
+    db.backfill_platform_league_bindings()
     db.invalidate_pick_assignment_cache(ESPN_LEAGUE)
     server._SUGGESTED_ORDER_CACHE.clear()
     yield engine

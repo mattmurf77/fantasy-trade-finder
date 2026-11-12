@@ -19,6 +19,13 @@
 - **Measured on the real ranker:** Tanking's first 30 go from 15 to 19 cards sending a win-now piece on the fixture league, keeping 17 of 30; Rebuilding 13 to 19, keeping 22.
 - **State:** both are settings and only matter once the win-now engine (revision 5) serves, which it does not yet.
 
+## 2026-11-12 — Two league-mates can link the same ESPN or MFL league (D-246, G-077)
+
+- **The bug:** a second manager linking the same league overwrote the first one's team: the league vanished for them, or they saw the other roster, or were told they had used the wrong account; the second linker could not send at all. Same defect on MFL and Fleaflicker.
+- **The fix:** each user's team in a linked league is its own record, written only by that user's link. A user with no record is never shown someone else's team.
+- **Existing data:** a startup backfill rebuilds what can be trusted and never guesses. In production one MFL league's first linker has to re-link once.
+- **No app change.** Not verified against live ESPN or MFL.
+
 ## 2026-11-12 — Founders' review: Trade rules page, the rule catalog and the decline waterfall (D-245)
 
 - **What:** a second page in Founders' review listing every yes/no rule with a plain name and description, how many candidate trades each removed for the selected league ("Started with N → M served"), and a note field per rule with history.
