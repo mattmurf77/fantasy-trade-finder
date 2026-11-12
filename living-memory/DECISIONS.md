@@ -1,5 +1,39 @@
 # Decisions — Fantasy Trade Finder
 
+## D-241 — Keep / untouchable is a hard rule on generated owner cards
+
+**Date:** 2026-11-11 · **Who:** the operator reported it ("Untouchables were showing in trade cards. Is that expected?") and then "turn on all of the features we're pushing live". Evaluator-only (not pool removal) and no exception for a pinned get are the builder's and the main session's calls.
+**Context:** Owner-v1 (#285) treated an untouchable as reluctance: it could leave a roster when the return beat market and a player at the same position came back, for the viewer's marks and league-mates' alike. D-213 recorded that as a consequence; the glossary and invariants promised a hard filter. Roster setup's Keep made marks common.
+**Decision:** model_config `owner_untouchable_hard` (default 1) makes it hard in the owner evaluator shared by owner-v1 and bilateral revisions 1 to 5 on every entrance. A generated card never sends a manager's untouchable; the only exception is the viewer's own explicit give pin. D-170 stands: a hand-queued like still surfaces. 0 restores the old rule byte for byte and keeps request hashes.
+**Consequences:**
+- A deck is exactly the old deck minus its Keep cards: 6 to 10% fewer cards on Keep-heavy synthetic leagues. Removing Keep players from the search pool instead reshuffled about half the rest of the deck and was rejected.
+- A pinned request for a league-mate's Keep player now returns no cards for that player.
+- A viewer's revised offer that still sends their Keep player is no longer proposed. A league-mate's own like or standing offer of their own Keep player still mirrors.
+- Legacy engines and the value core are unchanged. Supersedes D-213's "owner-v1 lets one go only at a market gain".
+
+## D-240 — Next-draft firsts price by the original team's projected draft slot, at full strength (partial reversal of D-146)
+
+**Date:** 2026-11-11 · **Who:** the operator: "we should add value adjustments to next year firsts based on the projected draft order"; all eight design decisions approved ("I'm aligned with the 8 decisions for draft picks"); "For top end of draft picks, we should match that curve"; show the slot ("1.01 [Projected]"); and "turn on all of the features we're pushing live, including pick pricing". Plan: [`../docs/plans/pick-value-projected-slot/`](../docs/plans/pick-value-projected-slot/).
+**Context:** D-146 left future picks at one generic price. A 2027 1st from a team projected to pick in the top three priced the same as a contender's.
+**Decision:** Behind `picks.projected_slot_value` (shipped true), a next-draft round-1 pick in a Sleeper league with a usable saved forecast prices at `G × (1 + w·(ratio − 1))`: `ratio` is the original team's expected per-slot value over the curve's plain mean, so a league's total is unchanged. `w` is `pick_projection_weight` (1.0) at full strength; the weeks-played ramp stays behind `pick_projection_season_scaling` (0). An adjusted pick shows its rounded expected slot and carries `proj_slot` / `proj_name`. One pricing seam, Win Now included. Weekly baseline forecasts are kept 90 days.
+**Consequences:**
+- On the pinned prices a projected top-3 pick is about 3,349 and a likely playoff team's about 1,029, against 1,860 for both before. Slots 1 to 4 certain price 3,161 against DynastyProcess's 2027 early first at 2,983.
+- Replay of 23 recorded requests on invented forecasts: every league's total conserved; median deck loses under 3% of cards; 1 to 2 decks lose 25 to 27% (bar was 20%), smallest deck 78 cards. Shipped on by operator direction with that known.
+- Real forecasts were not priced before shipping; the operator checks in the app. Off without a deploy: `pick_projection_weight` 0.
+- Prices move with each weekly forecast, so stored pages rebuild weekly. The draft order is assumed to be worst max points first.
+- 2028 and later, rounds 2 and up, ESPN, MFL and leagues without a usable forecast are unchanged.
+
+## D-239 — The trade card stops showing league position ranks
+
+**Date:** 2026-11-11 · **Who:** the operator, on build 186: "The new position value change is disorienting when displayed above the card. Also I just don't think it's adding much. The starting lineup change feature below the value bar is better at this already. Let's remove the value change content." Tag loss accepted ("Yes").
+**Context:** The fit block showed a before/after table of league position ranks (added the same day), rank moves and rank-fact sentences above the player rows.
+**Decision:** Flag `trade.fit_position_ranks` (shipped false). Off: the block carries no `ranks`, no `positions` and no rank-fact lead; each team shows an outlook tag and a real reason, and a team with neither reason is left out. Server-side, so installed builds change without an update. The next build labels the block "Team fit".
+**Consequences:**
+- Installed builds require a lead to show a team, so about half of all outlook tags go with the rank facts, including some of D-237's corrected league-mate tags. The engine still uses the outlook. The next build can show a tag on its own.
+- Builds 184 to 186 keep the heading "League rank · position value" over the remaining content.
+- The block shows on 60 to 93% of cards on the test leagues; some cards show none.
+- The win-now season line renders inside this block, so it needs its own home before revision 5 serves.
+
 ## D-237 — A league-mate with no saved outlook is assumed from their playoff chance in the saved forecast, in two bands, before the roster read
 
 **Date:** 2026-11-11 · **Who:** the operator: "Assumed team outlooks should use our projections for non app users. For example paulsmenis is shown as 'looks contending' when he has almost no chance to make the playoffs". Two bands, the wire `source`, the cache route and the flag pairing are the main session's and the builder's calls.
@@ -18,6 +52,7 @@
 **Context:** The engine's team-plan term read age and position only, so an All-in viewer could not be told which RBs help this season, and a card could work against a saved plan without saying so.
 **Decision:** Generator revision 5 (`trade_gen_bilateral_season`) reads projected points per game for the remaining regular-season weeks from the account's saved forecast, scores All-in and Contending viewers on lineup points gained, scores Rebuilding (weight 0.5) and Tanking (weight 1.0) on lineup points shed, labels players (win-now piece, cornerstone, rebuild piece, depth) and uses the labels in the plan term, demotes and names a card that works against a saved plan, and sends a `season_block` the app prints verbatim. Flag `trade.season_signal` ships **false**; revision 5 is selected by the knob `owner_bilateral_revision_5_enabled` (0). Revision 5 runs on the rules-first page path with bounds proven never to sit below the true score; negative season values fall back to the gated full solve.
 **Consequences:**
+- **Update, same day:** the flag `trade.season_signal` shipped **true** with the combined release (operator: "turn on all of the features we're pushing live"), which is stage A; revision 5 stays off (knob 0) pending the operator's call.
 - Nothing changes for users until the flag and the knob are on. Stage A (flag on, revision 2 serving) only records evidence and one `season-signal:` log line per job.
 - With the flag on, the evidence digest joins the request hash, so stage A starts new request units.
 - The app shows the season line, label tags and conflict sentence only inside the fit block; a card with no fit block shows the label tags alone.

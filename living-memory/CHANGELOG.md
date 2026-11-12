@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-11 — Combined release: pick pricing on, rank content off the card, Keep is hard, season signal stage A (D-237 to D-241)
+
+- **One branch, one deploy:** league-mate outlooks from the forecast (D-237), win-now season signal (D-238), no position ranks on the card (D-239), next-draft firsts priced by projected slot (D-240), Keep as a hard rule (D-241). `DECK_PIPELINE_VERSION` 27.
+- **On at deploy:** `picks.projected_slot_value`, `trade.partner_outlook_projection`, `owner_untouchable_hard` 1, `trade.season_signal` (stage A only: evidence and one log line per job; revision 2 still serves). **Off:** `trade.fit_position_ranks`; revision 5 (`owner_bilateral_revision_5_enabled` 0).
+- **What users see on the current build:** a 2027 1st reads "2027 1.0x · projected" and is priced by where the team is projected to pick; no rank table or rank sentences on cards; no Keep players in generated cards; league-mates' tags follow the forecast.
+- **Needs the next app build:** the PROJECTED / PROJ tag, "Team fit" heading, season line and labels, the why-pass frame.
+- **Not verified:** real forecasts were not priced before shipping; nothing on a device.
+
 ## 2026-11-11 — League-mates' assumed outlooks come from the saved forecast (D-237)
 
 - **Why:** a league-mate with almost no playoff chance read "Looks contending", because the roster read calls nearly every team contending.
