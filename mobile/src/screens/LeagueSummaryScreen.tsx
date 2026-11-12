@@ -1,4 +1,3 @@
-import LeagueProjectionSection from '../components/LeagueProjectionSection';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -40,6 +39,9 @@ import {
   type OutlookTeam,
   type OutlookMeta,
 } from '../api/league';
+import { findMyRoster, getLeagueRosters } from '../api/sleeper';
+import type { ProjectionOutlook } from '../api/leagueProjections';
+import HomePlayoffBanner from '../components/home/HomePlayoffBanner';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
@@ -578,6 +580,34 @@ export default function LeagueSummaryScreen() {
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
+
+  // Under `league.projections` this page shows Home's playoff tile, not the
+  // full projected standings: those live on the Standings page (Projected).
+  // The tile needs the user's roster id the way Home finds it, on the shared
+  // `['league-rosters', id]` key (check-session-seed S-2's staleTime).
+  const tileUserId = useSession((s) => s.user?.user_id);
+  const tileRostersQuery = useQuery({
+    queryKey: ['league-rosters', leagueId],
+    queryFn: () => getLeagueRosters(leagueId!),
+    enabled: batchProjections && outlookSupported && !!leagueId,
+    staleTime: 5 * 60_000,
+  });
+  // Same events as Home's tile, attributed by screen: route.name is
+  // 'LeagueRankings' (tab root) or 'LeagueSummary' (legacy root push).
+  const onTileDetails = () => {
+    track('home_tile_tapped', { tile: 'standings' }, route.name);
+    navigation.navigate('Standings', { segment: 'projected' });
+  };
+  // Home's "Review outlook" destination: the Trade DNA sheet with the
+  // suggestion marked; it saves nothing. The legacy root push sits above
+  // 'Main', so it pops back to it (a bare navigate('Trades') is unhandled
+  // from the root stack in React Navigation 7).
+  const onTileReviewOutlook = (recommended: ProjectionOutlook) => {
+    track('home_tile_tapped', { tile: 'outlook' }, route.name);
+    const params = { mode: 'guided', editDna: true, suggestOutlook: recommended };
+    if (isTabRoot) navigation.navigate('Trades', { screen: 'TradesHome', params });
+    else navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome', params } });
+  };
 
   const teams = query.data?.teams ?? [];
   // 2026-07-26 — the All/Starters/Bench control renders only when the server
@@ -1725,8 +1755,16 @@ export default function LeagueSummaryScreen() {
             A non-Sleeper league gets the honest unavailable row instead of the
             section — and no request. Frame E: the layer mounts collapsed as a
             one-line strip; OutlookStripAndSection owns the strip/section
-            switch so this mount site stays one expression. */}
-        {batchProjections ? <LeagueProjectionSection /> : oddsEnabled ? (
+            switch so this mount site stays one expression.
+            Under `league.projections` the slot holds Home's playoff tile
+            (2026-11-12): its links open Standings on Projected, the one
+            place the full projected standings render. */}
+        {batchProjections ? (
+          <HomePlayoffBanner key={`${tileUserId}:${leagueId}`}
+            rosterId={findMyRoster(tileRostersQuery.data, tileUserId ?? '')?.roster_id ?? null}
+            onDetails={onTileDetails}
+            onReviewOutlook={onTileReviewOutlook} />
+        ) : oddsEnabled ? (
           outlookSupported ? (
             <OutlookStripAndSection query={outlookQuery} leagueId={leagueId} />
           ) : (

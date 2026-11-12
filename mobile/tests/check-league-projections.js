@@ -10,7 +10,8 @@ const api = read('backend/league_projections/api.py');
 assert(standings.includes("const batchProjections = useFlag('league.projections')"));
 assert(standings.includes("enabled: !batchProjections && segment === 'projected'"));
 assert(summary.includes('enabled: !batchProjections && oddsEnabled'));
-assert(summary.includes('{batchProjections ? <LeagueProjectionSection />'));
+// League Rankings shows Home's playoff tile; the full section is Standings' only.
+assert(summary.includes('{batchProjections ? (\n          <HomePlayoffBanner') && !summary.includes('LeagueProjectionSection'));
 assert(section.includes("['league-projection-batch', userId, leagueId]"));
 assert(section.includes('getLeagueProjectionBatch'));
 assert(!api.includes('service.wake('));
