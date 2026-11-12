@@ -90,7 +90,11 @@ def arguments(case):
     elif case=='pair_budget':args['config']={'owner_pair_budget':1}
     elif case=='total_budget':args['config']={'owner_total_budget':1}
     elif case=='expired':args['manager_preferences']={'viewer':{'expired_pick_ids':['give']}}
-    elif case=='untouchable':args['manager_preferences']={'partner':{'untouchables':['target']}}
+    elif case=='untouchable':
+        # Captured under the premium-return rule: knob 0 must reproduce it byte
+        # for byte (the hard rule's own contracts: test_untouchable_hard.py).
+        args['manager_preferences']={'partner':{'untouchables':['target']}}
+        args['config']={'owner_untouchable_hard':0}
     elif case=='last_wins':
         args=favorable(outlook='jets',opponent_outlooks={'partner':'jets'},
             manager_preferences={'viewer':{'expired_pick_ids':['give'],'own_next_draft_pick_ids':['give']},

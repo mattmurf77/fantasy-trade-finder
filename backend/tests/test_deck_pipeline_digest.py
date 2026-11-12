@@ -62,6 +62,7 @@ FROZEN_PINS = {
     24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): no position-value walk and no league rank in the fit block; on: byte-identical to v22.
     25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector default 0); flag off and selector 0: context, hash, terms, order and payload unchanged.
     26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
+    27: "68bb3f499c837968",  # Keep is a hard rule (owner_untouchable_hard, default 1); knob 0: request hash, terms and order unchanged.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 

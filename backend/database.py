@@ -3879,6 +3879,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("season_partner_matching", 0.0, "Revision 5 only: 1 = stage 2, the season label table also reads every league-mate's plan fit (seller-buyer matching); 0 = the viewer only"),
     ("season_shed_weight_tanking", 1.0, "Revision 5 only: a Tanking team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
     ("season_shed_weight_rebuilding", 0.5, "Revision 5 only: a Rebuilding team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
+    ("owner_untouchable_hard", 1.0, "Owner-family generators (owner-v1, bilateral 1-4): 1 = Keep/untouchable is a hard rule, a generated card never sends a manager's untouchable unless the viewer pinned it on their own give side; 0 = the premium-return rule (an untouchable leaves only for a market gain with a same-position return); any other value reads as 1"),
     ("prepared_trade_inventory_enabled", 0.0, "Silent durable prepared trade inventory: exactly 1 enables preparation/adoption with the registered capability; default 0, no model or offer-limit changes"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),

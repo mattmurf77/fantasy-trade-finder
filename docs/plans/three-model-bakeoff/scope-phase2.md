@@ -1,5 +1,10 @@
 # Feature Scope — Three-model bake-off, Phase 2: pin arm A
 
+2026-11-11 inventory amendment: `owner_untouchable_hard` is EXCLUDED from both
+legacy profiles. Only the owner-family constructors (owner-v1, bilateral 1-4)
+read it; legacy arms keep their own hard untouchable filter and never see it.
+Added to the knob inventory guard without golden recapture.
+
 2026-09-22 inventory amendment: `owner_bilateral_revision_enabled` is EXCLUDED
 from both legacy profiles. It dispatches between separately versioned owner
 constructors only when the bilateral owner arm is selected. Neither arm A nor

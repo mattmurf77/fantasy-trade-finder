@@ -19,6 +19,10 @@ Output is aggregate-only (counts, medians, percentiles): no ids, names or roster
 
     PYTHONHASHSEED=0 python -m backend.eval.served_deck_replay --dir data/prod-requests
 
+``--untouchable`` instead measures the Keep rule (``owner_untouchable_hard``): each request's
+rules-first deck built and served under knob 0 (premium-return rule) and knob 1 (hard rule),
+reporting how many cards the hard rule removes and how many knob-0 cards sent a Keep player.
+
 ``--latest`` replays only the newest request of each manager-league pair. Comparisons are
 in-process (the incumbent is not repeatable across processes, R0). Run it with nothing
 else on the machine for meaningful CPU numbers.
@@ -126,6 +130,53 @@ def compare(generate, request, *, presentment=True):
             "old_cpu": round(old_cpu, 3), "new_cpu": round(new_cpu, 3)}
 
 
+def untouchable_effect(generate, context, slots, *, presentment=True):
+    """The Keep rule on one request: its rules-first deck under knob 0 and knob 1 (aggregates).
+
+    ``*_breaks`` count cards that send the viewer's untouchable or ask for a league-mate's,
+    read from the request's own captured ``manager_preferences``."""
+    from .. import trade_fast_deck, trade_gen_owner as owner
+    prefs = context.get("manager_preferences") or {}
+    viewer = str(context["user_id"])
+
+    def keep(uid):
+        return set((prefs.get(uid) or {}).get("untouchables") or ())
+
+    def breaks(cards):
+        return sum(bool(set(c.give_player_ids) & keep(viewer))
+                   or bool(set(c.receive_player_ids) & keep(c.target_user_id)) for c in cards)
+
+    row = {"viewer_keeps": len(keep(viewer)),
+           "mate_keeps": sum(len(keep(uid)) for uid in prefs if uid != viewer)}
+    for value, label in ((0.0, "premium"), (1.0, "hard")):
+        ctx = copy.copy(context)
+        ctx["config"] = {**(context.get("config") or {}), owner.UNTOUCHABLE_HARD_KEY: value}
+        request = Request(ctx, slots)
+        built, _, _ = trade_fast_deck.serve(generate, ctx, request.rules())
+        served, _ = request.served(built, presentment=presentment)
+        row.update({f"{label}_admitted": len(built), f"{label}_served": len(served),
+                    f"{label}_breaks": breaks(served)})
+    row["removed_served"] = row["premium_served"] - row["hard_served"]
+    return row
+
+
+def summarize_untouchable(rows):
+    n = len(rows)
+    lines = [f"requests replayed: {n}"]
+    if not n:
+        return "\n".join(lines)
+    marked = [r for r in rows if r["viewer_keeps"] or r["mate_keeps"]]
+    lines.append(f"requests with any Keep mark in the league: {len(marked)} of {n}")
+    for key in ("viewer_keeps", "mate_keeps", "premium_served", "hard_served", "removed_served",
+                "premium_breaks", "hard_breaks", "premium_admitted", "hard_admitted"):
+        xs = [r[key] for r in rows]
+        lines.append(f"{key}: total {sum(xs)} min {min(xs)} median {statistics.median(xs)} "
+                     f"p90 {_pct(xs, .9)} max {max(xs)}")
+    lines.append(f"requests whose served deck lost cards: {sum(r['removed_served'] > 0 for r in rows)}")
+    lines.append(f"hard-rule served cards with a Keep player (must be 0): {sum(r['hard_breaks'] for r in rows)}")
+    return "\n".join(lines)
+
+
 def load_request(record, slots_by_league):
     """A recorded owner request as generator keyword arguments, plus its lineup slots."""
     from .. import trade_service as ts
@@ -185,6 +236,8 @@ def main(argv=None):
     parser.add_argument("--dir", required=True, help="recorded requests (index.json, model_config.json)")
     parser.add_argument("--latest", action="store_true", help="newest request per manager-league pair only")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--untouchable", action="store_true",
+                        help="measure the Keep rule (owner_untouchable_hard 0 vs 1) instead")
     args = parser.parse_args(argv)
     os.environ.setdefault("DATABASE_URL", "sqlite://")   # never the app database
     import socket
@@ -219,13 +272,18 @@ def main(argv=None):
     for rec in records:
         try:
             context, slots = load_request(rec, slots_by_league)
-            rows.append(compare(candidate.generate_bilateral_trades, Request(context, slots)))
+            if args.untouchable:
+                rows.append(untouchable_effect(candidate.generate_bilateral_trades, context, slots))
+            else:
+                rows.append(compare(candidate.generate_bilateral_trades, Request(context, slots)))
         except Exception as error:  # noqa: BLE001 - counted, never printed with data
             failed += 1
             print(f"request failed: {type(error).__name__}", file=sys.stderr)
-    print(summarize(rows))
+    print(summarize_untouchable(rows) if args.untouchable else summarize(rows))
     if failed:
         print(f"failed requests: {failed}")
+    if args.untouchable:
+        return 0 if rows and not failed and not any(r["hard_breaks"] for r in rows) else 1
     return 0 if rows and all(r["same_set"] and r["page_eq_gated"] for r in rows) and not failed else 1
 
 

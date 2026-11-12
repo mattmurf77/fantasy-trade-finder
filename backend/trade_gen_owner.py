@@ -178,6 +178,18 @@ def _dump(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+UNTOUCHABLE_HARD_KEY = "owner_untouchable_hard"
+
+
+def untouchable_hard(config):
+    """Is Keep / untouchable a hard rule (model_config ``owner_untouchable_hard``)?
+
+    Any value but exactly 0 (default 1) is the hard rule: a card never sends a
+    manager's untouchable unless the viewer pinned it on their own give side.
+    0 restores the premium-return rule (owner-v1 scope, D-213)."""
+    return (config or {}).get(UNTOUCHABLE_HARD_KEY, 1.0) != 0
+
+
 class _Search:
     def __init__(self, *, players, league, user_id, user_roster, user_elo,
                  seed_elo, scoring_format="1qb_ppr", fairness_threshold=.5,
@@ -213,6 +225,9 @@ class _Search:
                         "season_partner_matching", "season_shed_weight_tanking",
                         "season_shed_weight_rebuilding"):
                 self.config.pop(key, None)
+        # Read once; never in report or proof bytes (the request hash carries it).
+        self.untouchable_hard = untouchable_hard(self.config)
+        self.config.pop(UNTOUCHABLE_HARD_KEY, None)
         self.pool_size = self._limit("owner_pool_size", 4, 32)
         self.pair_budget = self._limit("owner_pair_budget", 1, 16384)
         self.total_budget = self._limit("owner_total_budget", 1, 120000)
@@ -553,6 +568,11 @@ class _Search:
                 # to sell their own untouchable. Only own SEND overrides it.
                 (opponent, receive, give, rv, gv, ())):
             tagged = set(team["preferences"].get("untouchables") or ()) & set(outgoing) - set(explicit)
+            if tagged and self.untouchable_hard:
+                # Hard rule. Untouchables keep their pool slots on purpose, so
+                # the deck is today's minus the cards that send one (removing
+                # them from the pool would reshuffle the rest of the deck).
+                return finish("untouchable")
             if tagged and (in_market <= out_market + _EPS or any(
                     self._position(p) != "PICK" and not any(self._position(q) == self._position(p) for q in incoming)
                     for p in tagged)):

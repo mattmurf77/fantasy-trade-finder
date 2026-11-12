@@ -1210,6 +1210,9 @@ _DEFAULT_CFG: dict[str, float] = {
     # term, read by revision 5 only (order only, never inventory or terms).
     "season_shed_weight_tanking":    1.0,
     "season_shed_weight_rebuilding": 0.5,
+    # Keep / untouchable: 1 (default) = hard rule on every owner-family card
+    # (pinned own give excepted); 0 = the premium-return rule. Owner arms only.
+    "owner_untouchable_hard":   1.0,
     # Owner arm only, computational limits (not pricing permissions).
     "owner_pool_size":           16.0,
     "owner_pair_budget":         4096.0,
