@@ -29,7 +29,8 @@ from backend.tests.test_fair_packages import OPP, OPP2, SEED
 
 FLAG = "trade.season_signal"
 KNOBS = ("owner_bilateral_revision_5_enabled", "season_conflict_demotion", "season_partner_matching",
-         "season_shed_weight_tanking", "season_shed_weight_rebuilding")
+         "season_shed_weight_tanking", "season_shed_weight_rebuilding", "season_viewer_label_fit",
+         "season_sell_bonus_tanking", "season_sell_bonus_rebuilding")
 SLOTS = ["RB", "RB", "FLEX"]
 # Projected points a week: the viewer's a1/a2 start, b1/b2 would start for the viewer.
 PPG = {"a1": 14.0, "a2": 9.0, "a3": 3.0, "b1": 16.0, "b2": 15.0, "b3": 8.0, "b4": 7.5,
@@ -255,7 +256,7 @@ def test_revisions_2_to_4_hash_as_before_with_the_season_knobs_present(world, re
     for key in KNOBS:
         context["config"].pop(key, None)
     expected = server._owner_selected_assignment(context, "organic", serve=True)["request_hash"]
-    for values in ((0., .10, 0., 1., .5), (2., 0., 1., .3, .9)):
+    for values in ((0., .10, 0., 1., .5, 0., 0., 0.), (2., 0., 1., .3, .9, 1., .05, .03)):
         context["config"].update(dict(zip(KNOBS, values)))
         assert server._owner_selected_assignment(context, "organic", serve=True)["request_hash"] == expected
     assert bo.owner_version(context["config"]) == {2: "owner-v2-bilateral-2", 3: "owner-v2-bilateral-3",
@@ -268,6 +269,41 @@ def test_revision_5_knobs_are_part_of_its_request(world):
     first = server._owner_selected_assignment(context, "organic", serve=True)["request_hash"]
     context["config"]["season_conflict_demotion"] = 0.
     assert server._owner_selected_assignment(context, "organic", serve=True)["request_hash"] != first
+
+
+def test_viewer_label_fit_off_keeps_revision_5_hashes_on_is_a_new_unit(world):
+    """`season_viewer_label_fit` (amended 2026-11-12): any value but exactly 1 hashes as a
+    revision 5 request built before the knob existed; 1 (the default) is a new unit.
+    Sabotage: drop the knob-off pop from `_owner_selected_assignment`."""
+    revision_5()
+    context = context_for(world)
+    context["config"].pop("season_viewer_label_fit", None)          # before the knob existed
+    before = server._owner_selected_assignment(context, "organic", serve=True)["request_hash"]
+    for off in (0., .5, 2.):
+        context["config"]["season_viewer_label_fit"] = off
+        assert server._owner_selected_assignment(context, "organic", serve=True)["request_hash"] == before
+    context["config"]["season_viewer_label_fit"] = 1.
+    assert server._owner_selected_assignment(context, "organic", serve=True)["request_hash"] != before
+
+
+@pytest.mark.parametrize("key", ["season_sell_bonus_tanking", "season_sell_bonus_rebuilding"])
+def test_sell_bonus_off_keeps_revision_5_hashes_on_is_a_new_unit(world, key):
+    """The sell bonus (amended 2026-11-12): any value <= 0 hashes as a revision 5 request
+    built before the knob existed; a positive value is a new unit, each value its own.
+    Sabotage: drop the bonus-off pop from `_owner_selected_assignment`."""
+    revision_5()
+    context = context_for(world)
+    for other in ("season_sell_bonus_tanking", "season_sell_bonus_rebuilding"):
+        context["config"].pop(other, None)                      # before the knobs existed
+    before = server._owner_selected_assignment(context, "organic", serve=True)["request_hash"]
+    for off in (0., -.05):
+        context["config"][key] = off
+        assert server._owner_selected_assignment(context, "organic", serve=True)["request_hash"] == before
+    hashes = set()
+    for on in (.03, .05):
+        context["config"][key] = on
+        hashes.add(server._owner_selected_assignment(context, "organic", serve=True)["request_hash"])
+    assert before not in hashes and len(hashes) == 2
 
 
 def test_the_hash_follows_the_evidence_digest_never_as_of(world):

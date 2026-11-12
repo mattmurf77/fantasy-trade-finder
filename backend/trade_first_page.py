@@ -119,9 +119,22 @@ evidence it names none, and the bounds, screen and memo are revision 2's:
   (F_R the free-agent points in R's lineup): T(R') >= its starters' points >=
   the best weight of R - G's assets (adding assets never lowers a max-weight
   independent set) >= R's starters minus G's. The support level computes the
-  re-scored team plan exactly (the generator's own ``_shed_parts``).
+  re-scored team plan exactly (the generator's own ``_shed_parts``). Its plan
+  fit is a market-weighted sum over the assets like revision 2's; when it reads
+  a per-asset fit other than ``_plan_asset`` (the viewer's label fit, hook term
+  ``shed["plan"]``), the side's plan column reads that fit, so the bound's plan
+  term is that sum exactly and the argument is unchanged. A shed side's support
+  never reads ``_plan_asset`` after eligibility, so nothing else moves.
 * The conflict demotion only lowers both supports, so every bound stays an
   upper bound (the support level is then above the exact score).
+* The sell bonus (hook term ``sell``, the viewer's): both supports move after
+  eligibility by b x share, share the card's market share of older producers sent
+  minus received, a pure function of the terms known before pricing, so ``pre``,
+  ``priced`` and the support level add it exactly (``_Bounds.sell_bonus``; each side
+  then clipped at 1, which only lowers the true score). A negative bonus is dropped
+  on a demoted card, so the bound floors it at minus the demotion knob; the level is
+  exact unless the demotion fired or b exceeds the demotion. Premise 0 <= b <= .15
+  (``_SELL_BONUS_MAX``): no side needs the clip at 0; otherwise ``Unsupported``.
 With any season term the screen bounds through ``_Member.pre`` (same entries
 as the inlined screen, which stays revisions 1 and 2's, bit-identical). A
 negative season input, or a ``_lineup`` override without the hook, is
@@ -166,6 +179,10 @@ _UNSUPPORTED = ("pinned_give_players", "pinned_receive_players", "exact_give", "
 
 _SEASON_KEY = "season_lineup_v1"  # lineup memo: tags a season-scored team's key (_LineupMemo.install)
 _SEASON_SLACK = 1e-6  # season points are rounded to 6 decimals; outward slack on season bounds
+# Revision 5's sell bonus (hook term "sell"): the bounds' premise is 0 <= b <= this, so a
+# moved support never needs the lower clip at 0 (an eligible side's support is above .35,
+# the shed re-score takes at most the team-plan weight .20, the bonus at most b).
+_SELL_BONUS_MAX = .15
 
 
 class Unsupported(ValueError):
@@ -359,6 +376,15 @@ class _Bounds:
         self.gamma, self.trade_wide = c("package_adj_gamma_market"), c("package_bench_trade_wide") > 0
         self.floor_market, self.floor_cross = c("package_floor_market"), c("package_floor_cross")
         self.season, self.shed_rate = self._season_terms(search)
+        # A shed-scored side whose re-scored team plan reads its own per-asset plan fit
+        # (revision 5's viewer label fit): the plan column reads that fit, not ``_plan_asset``.
+        self.shed_plan = {uid: terms["shed"]["plan"] for uid, terms in self.season.items()
+                          if terms["shed"] is not None and terms["shed"].get("plan") is not None}
+        # Revision 5's sell bonus on both supports (the viewer's hook term), or None.
+        self.sell = next((terms["sell"] for terms in self.season.values() if terms.get("sell")), None)
+        if self.sell is not None and not 0 <= self.sell["weight"] <= _SELL_BONUS_MAX:
+            raise Unsupported("sell_bonus_out_of_range")
+        self._older = {}
         # Any season term: the screen bounds through ``_Member.pre`` (not the inlined
         # copy, which is revisions 1 and 2's bound, kept bit-identical).
         self.generic = bool(self.season)
@@ -473,13 +499,15 @@ class _Bounds:
 
     def rows(self, viewer, other, pool, sent_by_viewer):
         s, sign = self.search, (-1 if sent_by_viewer else 1)
+        v_plan = self.shed_plan.get(viewer["uid"]) or (lambda pid: s._plan_asset(viewer, pid))
+        o_plan = self.shed_plan.get(other["uid"]) or (lambda pid: s._plan_asset(other, pid))
         out = {}
         for pid in pool:
             m = s.market[pid]
             out[pid] = (m, sign * m * (s._features[viewer["uid"], pid]["direction"] or 0),
-                        sign * m * s._plan_asset(viewer, pid),
+                        sign * m * v_plan(pid),
                         -sign * m * (s._features[other["uid"], pid]["direction"] or 0),
-                        -sign * m * s._plan_asset(other, pid))
+                        -sign * m * o_plan(pid))
         return out
 
     def _need(self, uid, usable_ratio):
@@ -516,6 +544,24 @@ class _Bounds:
         gain = (rv - gv) / max(rv, gv)
         return min(a[0] + self._market(gain), a[1] + self._market(-gain))
 
+    def sell_bonus(self, give, receive):
+        """The sell bonus both supports move by, computed as the generator computes it
+        (``_sell_share``: same sums, same order), except that a negative bonus is floored at
+        minus the demotion knob: the generator drops it on a demoted card, which no bound
+        can know, and a demoted card falls by the demotion instead. 0 without the bonus."""
+        if self.sell is None:
+            return 0.0
+        market, older = self.search.market, self._older
+        for pid in give + receive:
+            if pid not in older:
+                older[pid] = self.sell["older"](pid)
+        gross = sum(market[p] for p in give + receive)
+        share = (sum(market[p] for p in give if older[p]) - sum(market[p] for p in receive if older[p])) / gross
+        bonus = self.sell["weight"] * share
+        if bonus < 0 and self.sell["demotion"] > 0:
+            bonus = max(bonus, -self.sell["demotion"])
+        return bonus
+
     def support(self, viewer, other, give, receive, row, priced):
         """The exact two-sided support (up to float summation order)."""
         s, g = self.search, row[0]
@@ -537,6 +583,10 @@ class _Bounds:
             need = _clip(s._need_utility(team, deltas, g) * 4)
             out.append(self.w_pref * _clip(.5 + pref / g, 0, 1) + self._market(market)
                        + self.w_plan * _clip(.5 + .5 * _clip(plan / g + need), 0, 1))
+        bonus = self.sell_bonus(give, receive)
+        if bonus:
+            # Both sides move by it after eligibility (``_shift`` clips each to [0, 1]).
+            out = [_clip(side + bonus, 0, 1) for side in out]
         return min(out)
 
 
@@ -651,6 +701,12 @@ class _Member:
         r_lo, r_hi = b.side_price(rv, max(gv))
         q = (r_lo / g_hi if g_hi < math.inf else 0.0, r_hi / g_lo if g_lo > 0 else math.inf)
         bound, a = b.pre(self.uids, row, self.gains(give, receive), q)
+        if b.sell is not None:
+            # The sell bonus is known exactly before pricing: both sides (hence every
+            # term of the min) move by it; outward slack for summation order.
+            bonus = b.sell_bonus(give, receive) + _FLOOR_SLACK
+            a = (a[0] + bonus, a[1] + bonus)
+            bound += bonus
         return bound, (row, a)
 
     def screen(self, index, heap):

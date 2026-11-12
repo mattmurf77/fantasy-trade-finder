@@ -14,6 +14,29 @@
 - League-mates' names appear in the test profile's own rows, as they do in the real profile.
 - Rejected: wiping the real account; a second real account; a canned linking shortcut (built, then removed on the 2026-11-11 ruling).
 
+## D-244 — A sell bonus for Rebuilding / Tanking viewers' cards that move older producers
+
+**Date:** 2026-11-12 · **Who:** the operator: "Spin up a subagent to… write the sell bonus", after D-243 showed the label fit alone could not move the first 30. The formula, the conflict cap and the "older producer" definition are the main session's brief and the builder's measurement.
+**Context:** The team-plan term is capped at 0.20 and often saturated, and the ranker orders by the weaker side, so a better per-asset fit left a Tanking viewer's first 30 unchanged.
+**Decision:** `season_sell_bonus_tanking` 0.05 and `season_sell_bonus_rebuilding` 0.03 (model_config, revision 5 only, ≤ 0 = off). For a Rebuilding or Tanking viewer with usable season evidence, both sides' supports move after eligibility, outside the clipped team plan, by b × (market share of win-now pieces and older cornerstones sent minus received). Picks, rebuild pieces, young cornerstones, unlabelled and board-decided players count 0. A negative bonus is dropped when the conflict demotion fires on the same card. The page-first bound adds it exactly (premise b ≤ 0.15, else the gated full solve). Viewer only, in stage 2 too.
+**Consequences:**
+- Order only: the card set never changes; off is byte-identical, request hash included.
+- Real ranker, first 30, defaults: fixture Tanking sends a win-now piece 15 → 19 and an older producer 17 → 23, keeping 17 of 30; Rebuilding 13 → 19, keeping 22. A synthetic 12-team league: Tanking 13 → 23, keeping 18. Largest support move 0.029. A league with almost no older producers barely moves.
+- The earlier estimate (22 of 30 for Tanking) was high. At the defaults Tanking keeps a bare majority of its first 30 and one player can crowd the top of the generator's order (one tight end on 8 of the top 10 on the fixture, before the deck's repeat cap). The builder's "blended" setting is 0.03 to 0.04 for Tanking and 0.02 for Rebuilding; the operator decides.
+- A mirror "buy bonus" for All-in / Contending is not built; the gap there is smaller because season scoring already reaches their gates and pools.
+- Nothing serves it until revision 5 serves.
+
+## D-243 — A Rebuilding / Tanking viewer's ordering reads the season labels, never milder than the age rule
+
+**Date:** 2026-11-12 · **Who:** the operator: "even with win now enabled, it's still dynasty. So more so I just expect that it's blended into dynasty specific trade cards, but the aggressive ends (all in and tanking) should get more of those trade suggestions if they have significant gaps or older less valuable producers." and "Use a subagent to build it" on the viewer-only proposal. The never-milder rule is the main session's direction after measurement; ranking-only placement is the builder's call.
+**Context:** Revision 5 read the label table for Rebuilding / Tanking teams only in stage 2 (partner matching, off). The table alone was milder than revision 2's age rule on win-now running backs over 24 (−0.8 against −1.0) and scored older cornerstones +0.2 against −0.45.
+**Decision:** `season_viewer_label_fit` (model_config, default 1, revision 5 only, exactly 1 = on). A Rebuilding / Tanking viewer's re-scored team plan reads the label table; for a win-now piece or an older cornerstone the fit is the lower of the table's and the age rule's, at the outlook's scale. Applied after eligibility, inside the clipped team-plan term with the shed term. Gates, pools and the card set stay revision 2's. Stage 2 now means partner matching only. 0 restores the previous behaviour byte for byte.
+**Consequences:**
+- On the fixture the first 30 are identical for both outlooks; about 2% of cards move, by at most 0.013 (Tanking) and 0.025 (Rebuilding).
+- It fixes the age rule where it was soft or wrong: a young win-now piece +0.45 → −0.45, a young win-now running back −0.15 → −0.8, a young backup running back coming back −0.15 → +0.7.
+- It does not put more sell-the-older-producer cards in the first 30; D-244 does.
+- One pipeline bump (30) covers D-243 and D-244.
+
 ## D-246 — "My team" in a linked ESPN, MFL or Fleaflicker league is a per-user binding, never a league fact
 
 **Date:** 2026-11-12 · **Who:** the operator: "fix the ESPN overwrite bug". The model, the backfill rules and no feature flag are the builder's and the main session's calls. Plan: [`../docs/plans/platform-league-binding/`](../docs/plans/platform-league-binding/). (D-243 to D-245 are taken by work on other branches.)
