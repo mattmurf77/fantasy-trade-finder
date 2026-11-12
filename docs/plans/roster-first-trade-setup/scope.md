@@ -59,7 +59,7 @@ Design: [prd.md](prd.md) · Analytics: [analytics.md](analytics.md) · Reuse evi
   4. See trades. Exactly one regeneration, and at least one card gives away a Move player.
   5. Keep 15+ players. The guard note appears.
   6. Skip on a second league. The entry card shows, Not now snoozes it, and it is re-offered once in a later session.
-  7. Make a trade on the platform that brings in a player. The "1 new on your roster" card appears and lists only him.
+  7. Make a trade on the platform that brings in a player. The "1 new player on your roster" card appears and lists only him.
   8. Flag off: no screen, no card, no DNA row.
 - [ ] **WAIVED — web client:** v1 is mobile only. The web Trades page has no Trade DNA parity, so there is nowhere to host the step. **Signed off by the operator 2026-11-10.**
 - `testID`s to add (must pass `mobile/scripts/testid-lint.sh`):

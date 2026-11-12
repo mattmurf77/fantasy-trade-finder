@@ -101,12 +101,12 @@ const st = strip(read('src/screens/StandingsScreen.tsx'));
 assert(/const leagueId = useSession\(\(s\) => s\.league\?\.league_id\) \|\| null;/.test(st)
   && /queryKey: \['league-rosters', leagueId\]/.test(st)
   && /queryKey: \['league-users', leagueId\]/.test(st)
-  && /queryKey: \['league-outlook', leagueId, 'consensus'\]/.test(st),
+  && /queryKey: \['league-projection-batch', userId, leagueId\]/.test(st),
   '4a. Standings: every query is keyed by the session league');
 assert(/useSession\(\(s\) => s\.leagues\.find\(\(l\) => l\.league_id === leagueId\)\?\.platform\)/.test(st),
   "4b. Standings: the platform (and so the ESPN/MFL unavailable card) follows the switched league");
-assert(/projected = <LeagueProjectionSection key=\{leagueId \?\? ''\} \/>;/.test(st),
-  "4b2. Standings: the batch projection section remounts per league (its expanded row is a roster id, which repeats across leagues)");
+assert(/const openRosterId = open && open\.leagueId === leagueId \? open\.rosterId : null;/.test(st),
+  "4b2. Standings: the open team is remembered with its league, so a switch closes it (a roster id repeats across leagues)");
 
 const rc = strip(read('src/screens/ReceiptsScreen.tsx'));
 assert(/const leagueId = useSession\(\(s\) => s\.league\?\.league_id\);/.test(rc)

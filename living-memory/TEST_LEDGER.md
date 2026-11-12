@@ -1,3 +1,30 @@
+## 2026-11-12 — Standings single table (D-254), branch `feat/standings-single-table`
+
+- **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 184 of 184 `check-*.js`, with the new `check-standings-table.js` at 105 of 105; testid-lint OK. Backend: the digest test, every analytics-taxonomy test and the 19 tests that read `mobile/src`: 512 passed; `test_league_projection_median.py` 32 passed. Backend change is comments only in the taxonomy.
+- **What is pinned:** sorting for every column both ways with ties and with missing values last; the odds and points formats; the dash rules; which line the open team shows per view; no segments; the pill and its event; one table; the open card's border, radius and no shadow; the status line; the shared forecast key; no simulation request reachable from the page; league switch closes the open team and keeps view and sort; the layout arithmetic at 375pt; `LeagueProjectionSection` gone.
+- **Sabotages, red then restored (45, subagent; checksums unchanged).** Four assertions were weak on the first pass and were tightened.
+- **Main session:** read the screen's data flow.
+- **Not verified:** anything on a device: column widths, the two-line headings, large text sizes, the open card.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — League rankings playoff tile; roster-changed card wording and count (D-253, G-078), branch `feat/league-rankings-playoff-tile`
+
+- **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 183 of 183 `check-*.js`, including the new `check-league-rankings-playoff-tile.js` and `check-roster-setup.js` at 166 passed; testid-lint OK. Backend: the digest test, the home-hub taxonomy test and every backend test that reads `mobile/src`: 483 passed (on the tile commit; later commits change no file those read). No backend code changed.
+- **What is pinned (tile):** League rankings mounts the tile and not the section; Standings still mounts the section; the tile's links (both handlers executed for both mounts); the shared query key; Home's mount verbatim; the strip path unchanged; the event shape.
+- **What is pinned (card):** the six title wordings, executed; kickers, defenses, IDP and unvalued players raise no card after setup or on arrival; one real arrival gives "1 new player on your roster" and the list is exactly him; a pre-fix stored record gives 0 where it gave 4, and a real arrival still gives 1; every write path records the set the card diffs.
+- **Sabotages, red then restored (32, subagent; checksums unchanged):** 15 on the tile, 6 on the wording, 11 on the count fix. Two assertions did not go red at first and were tightened.
+- **Main session:** read the League rankings diff; merged the note-removal branch in (no conflicts) and re-ran the tile, roster-setup, league-projection and header suites, `tsc` and testid-lint.
+- **Not verified:** anything on a device, in particular "Review outlook" from the legacy League summary push, and the cost of the card's extra board reads on Find a Trade.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Projected standings: free-agent summary line removed, branch `fix/projection-drop-fa-fill-line`
+
+- **App and web (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 182 of 182 `check-*.js`; testid-lint OK. Backend: the digest test, every backend test that reads `mobile/src` or `web/js`, and the league-projection tests: 636 passed. Full backend suite: CI on the PR.
+- **What is pinned:** the helper and its three wordings are gone from the app section, the helper file and the web script; with free-agent counts present no line renders; the status line, the incomplete sentence and the per-row free-agent marker still render.
+- **Sabotages, red then restored (9, subagent; checksums unchanged):** 4 on the app, 5 on the web.
+- **Not verified:** anything on a device.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Release: Free Agents, Usage Trends period, founder labels, league selector pages on `main` at `8d1bcefa`; TestFlight 1.22.0 (188)
 
 - **CI on the merged heads:** #671 `8ca71525`, #672 `4f972e2e`, #673 `fbc8cdc2` and #674 `968ddb02` each green on all four checks before its merge. The four were stacked; after each merge `origin/main`'s tree was identical to the merged head's.

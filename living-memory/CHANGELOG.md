@@ -12,6 +12,26 @@
 ---
 
 
+## 2026-11-12 — Standings is one sortable table (D-254)
+
+- **What changed:** no Current / Projected tabs. One row per team with a Record | Points pill: Record shows W-L, projected W-L and playoff odds; Points shows PF, Max PF and projected Max PF. Every heading sorts.
+- **Open team:** an outlined card that stands out from the rows, holding the rest of the team's numbers and the record, weekly and draft-pick detail.
+- **No forecast:** current numbers still show; forecast columns show a dash.
+- **Needs the next app build.** Not seen on a device.
+
+## 2026-11-12 — League rankings shows the playoff tile; the roster-changed card counts correctly (D-253, G-078)
+
+- **League rankings:** the full Projected standings section is replaced by the same playoff tile Home shows, linking to the Standings page.
+- **Roster-changed card:** the title names what is new ("15 new players on your roster"; picks are named separately). A bug that counted kickers, defenses and IDP players as permanently new, and brought the card back every session, is fixed.
+- **Projected standings:** the free-agent summary line is removed (same release).
+- **Needs the next app build.** Not verified on a device.
+
+## 2026-11-12 — Projected standings: the free-agent summary line is removed
+
+- **What changed:** the sentence under the status line ("12 open lineup slots use the best available free agent; 1 has none and counts as 0", and its variants) is gone from the app and the web page. Operator: "we can remove the copy underneath".
+- **What stays:** the status line, the note shown when a forecast is incomplete, and the "(free agent)" marker beside a player in a team's lineup. The server still sends the counts.
+- **App side needs the next build;** the web page changes on deploy.
+
 ## 2026-11-12 — League selector header on Standings, Usage Trends, Track record and Win Now (D-252)
 
 - **What changed:** these four pages carry the same top bar as the tab screens, with the back button and title under it. Switching league reloads the page for that league.

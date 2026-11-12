@@ -460,7 +460,7 @@ The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-cong
 
 **Home hub** — The Home tab under `nav.home_hub` (D-202): status rows (team outlook, current standings, overall rank), the four position tiles with **Buy** | **Sell**, and five task tiles. **Buy** at a position opens League rankings at the top of that position's list (the deepest teams, the ones you'd buy from). **Sell** opens it at the end (the shortest teams, the ones you'd sell to). Flag off is the D-198 four-row Home.
 
-**Current vs projected standings** — **Current** standings are actual results: Sleeper roster `settings.wins/losses/ties/fpts`, ordered by win % (a tie counts half), then points for. Sleeper exposes no standings rank, so the place is computed and may differ from a league's own tiebreakers. **Projected** standings are the Season-outlook simulation (`/api/league/outlook`), with Likely / Toss-up / Unlikely bands and no percentages. Home shows current only. The Standings page shows both, and fetches projected only when it is selected.
+**Current vs projected standings** — **Current** standings are actual results: Sleeper roster `settings.wins/losses/ties/fpts`, ordered by win % (a tie counts half), then points for. Sleeper exposes no standings rank, so the place is computed and may differ from a league's own tiebreakers. **Projected** standings are the saved weekly league forecast (flag `league.projections`; the most likely final record, playoff odds and projected Max PF). Home shows current only. The Standings page shows both in one table (Record \| Points), reading the saved forecast and never running a simulation; the Season-outlook simulation (`/api/league/outlook`, bands, no percentages) lives on League rankings.
 
 
 ## Premium rank set

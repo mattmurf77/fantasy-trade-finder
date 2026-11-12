@@ -1,5 +1,28 @@
 # Decisions — Fantasy Trade Finder
 
+## D-254 — Standings is one sortable table with a Record | Points pill; nothing on the page starts a simulation
+
+**Date:** 2026-11-12 · **Who:** the operator: "let's go with one row. W-L, Projected W-L, Playoff Odds %. A pill in the top right of the table to toggle to Points summary. That changes the columns to 'PF', 'Max PF', 'Proj Max PF'", after asking for a version "that doesn't need the current and projected tabs" with sortable columns, and "Expanded tiles are hard to identify" for the open team. The outlined card, the projected record's form, the event reuse and the removal of the old simulation path are the builder's and the main session's calls. Plan: [`../docs/plans/home-engagement/scope-standings-table.md`](../docs/plans/home-engagement/scope-standings-table.md); mockups `mockups/projection-expanded-row/`.
+**Context:** Standings had a Current table and, under a Projected segment, the whole `LeagueProjectionSection` with its own toggles. The open team's detail looked like more team rows.
+**Decision:** One table. Record view: W-L, Proj. W-L (the forecast's most likely final record), Playoffs. Points view: PF, Max PF, Proj. Max PF. Every heading sorts; each view remembers its sort while mounted; a missing value sorts last either way. The open team is an outlined card (1pt ice border, radius 8, raised surface) holding what the view leaves out, the average final record, and Final record odds, Weekly projections and Draft pick odds. The forecast is read when the page opens, on the key Home's tile shares. `LeagueProjectionSection` is removed; its detail lives in `LeagueProjectionDetail`. The old `outlook.odds` simulation request is gone from this page.
+**Consequences:**
+- With no saved forecast the table still shows W-L, PF and Max PF (Sleeper's potential points) and dashes elsewhere, with the existing status sentence.
+- The `segment` route param is still accepted and never read; the app no longer sends it.
+- `standings_segment_changed` is reused for the pill with `segment: record | points`. Sort and open-team taps are not tracked: no existing event fits.
+- Dropped: the place number column, points per game on the detail line, and one sentence about simulated averages. The Season outlook bands remain only on League rankings' older strip path.
+- App-only; needs the next build. Column widths are computed, not seen on a device.
+
+## D-253 — League rankings shows Home's playoff tile; the full projected standings live only on the Standings page
+
+**Date:** 2026-11-12 · **Who:** the operator: "we should hide the Projected standings section in the same tile that we show on the home page. So that projected standings aren't presented directly on the league rankings page but instead via the dedicated Projected standings page". Reusing the one tile component and the navigation for the legacy push are the builder's and the main session's calls. Plan: [`../docs/plans/home-engagement/scope.md`](../docs/plans/home-engagement/scope.md) (addendum 2026-11-12).
+**Context:** League rankings rendered the whole `LeagueProjectionSection` inline, a second copy of what the Standings page shows under Projected.
+**Decision:** Under `league.projections`, League rankings mounts `HomePlayoffBanner` (the same component, query key and pure logic as Home) in that slot. Its percentage and "View" open Standings on Projected; "Review outlook" opens the Trade DNA sheet with the suggestion marked, as on Home. `LeagueProjectionSection` is mounted only by `StandingsScreen`. Taps emit Home's `home_tile_tapped` with the League rankings screen name; no new event.
+**Consequences:**
+- A non-Sleeper league, or one with no forecast, shows what the tile shows on Home for that case (nothing for non-Sleeper).
+- From the legacy root-stack push, "Review outlook" pops to the tabs first (`popTo('Main', …)`): a bare `navigate('Trades')` is not handled from the root stack. That path is checked by code walk only.
+- The older `outlook.odds` strip, shown when batch projections are off, is unchanged. The website's league page still shows projected standings inline.
+- App-only; needs the next build.
+
 ## D-252 — The league selector header goes on Standings, Usage Trends, Track record and Win Now
 
 **Date:** 2026-11-12 · **Who:** the operator: "Yes add the selector to the recommended pages", answering the list in D-249. Which state each page drops on a switch is the builder's and the main session's call. Plan: [`../docs/plans/free-agents-header-rank/scope.md`](../docs/plans/free-agents-header-rank/scope.md) (addendum 2026-11-12). Extends D-249.

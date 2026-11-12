@@ -8,11 +8,14 @@ import { track } from '../api/events';
 import { useRosterSetup } from '../state/rosterSetup';
 import { useOnboardingState } from '../state/useOnboardingState';
 import { useMyRosterAssets } from '../hooks/useMyRosterAssets';
+import { useSetupSections } from '../hooks/useSetupSections';
 import {
   cardView,
   ladderOnShow,
   ladderOnSnooze,
   newAssetIds,
+  newOnRosterTitle,
+  trackedAssetIds,
   type PromptKind,
 } from '../utils/rosterSetup';
 
@@ -27,7 +30,8 @@ import {
 // TradesScreen's committed-pass points.
 //
 //    - `skipped` record → "Set up your roster" (opens the full step);
-//    - `done` record whose roster gained assets → "N new on your roster"
+//    - `done` record whose roster gained assets → "N new players [and M
+//      new picks] on your roster" (`newOnRosterTitle`)
 //      (opens Step 1 filtered to them). Losing assets never prompts.
 //    Snooze grammar = QuickSetPromptCard's: Not now → one re-offer in a later
 //    session → retired. A retired entry card COLLAPSES to a one-line row
@@ -53,14 +57,23 @@ export default function RosterSetupEntryCard({
   const write = useRosterSetup((s) => s.write);
   const sessionCount = useOnboardingState((s) => s.ob.sessionCount);
   const roster = useMyRosterAssets(leagueId, userId, !isDemo);
+  // Only a `done` record can prompt "N new"; the section reads run for it
+  // alone, with the boards held 5 min so a TradesHome revisit is free.
+  const sections = useSetupSections(!isDemo && record?.status === 'done', 5 * 60_000);
 
   useEffect(() => {
     void useRosterSetup.getState().hydrate();
   }, []);
 
   // ── Card ──────────────────────────────────────────────────────────────
-  const ready = hydrated && !!record && roster.rostersReady && roster.picksSettled;
-  const newIds = ready ? newAssetIds(roster.assetIds, record!.seenAssetIds) : [];
+  const ready = hydrated && !!record && roster.rostersReady && roster.picksSettled
+    && (record.status !== 'done' || sections.settled);
+  // THE tracked set (players the setup screen can list, plus picks): what the
+  // snapshot records and the only thing this card counts. A kicker, defense
+  // or IDP arrival never raises it.
+  const pickIds = roster.picks.map((p) => p.pick_id);
+  const tracked = ready ? trackedAssetIds(roster.playerIds, sections.sectionOf, pickIds) : [];
+  const newIds = ready ? newAssetIds(tracked, record!.seenAssetIds) : [];
   const kind: PromptKind | null = !ready
     ? null
     : record!.status === 'skipped'
@@ -106,7 +119,7 @@ export default function RosterSetupEntryCard({
       // Retiring "N new" acknowledges them: absorb into the snapshot so the
       // NEXT roster change prompts fresh.
       write(leagueId, {
-        seenAssetIds: Array.from(new Set([...(record?.seenAssetIds ?? []), ...roster.assetIds])),
+        seenAssetIds: Array.from(new Set([...(record?.seenAssetIds ?? []), ...tracked])),
         prompt: null,
       });
     } else {
@@ -116,7 +129,7 @@ export default function RosterSetupEntryCard({
 
   const title = kind === 'entry'
     ? 'Set up your roster'
-    : `${newIds.length} new on your roster`;
+    : newOnRosterTitle(newIds, pickIds);
 
   if (view === 'collapsed') {
     return (
