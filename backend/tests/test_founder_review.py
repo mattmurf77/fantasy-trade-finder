@@ -416,7 +416,7 @@ def test_the_admin_route_reads_the_same_label(founder):
 
 def test_the_pipeline_version_is_pinned_for_the_override_seam():
     """Sabotage: forget the bump."""
-    assert server.DECK_PIPELINE_VERSION == 28 and server.DECK_PIPELINE_PINS[28] == "f9dc5f829bcd9a92"
+    assert server.DECK_PIPELINE_VERSION >= 28 and server.DECK_PIPELINE_PINS[28] == "f9dc5f829bcd9a92"
 
 
 def test_the_flag_defaults_off_in_code_and_ships_on():

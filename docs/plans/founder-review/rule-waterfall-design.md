@@ -1,7 +1,7 @@
 # Founders' review, use case 2: the decline waterfall
 
-**Date:** 2026-11-11 · **Status:** built (modules, storage, tests), **not wired** (no route, no
-page yet) · **Branch:** `feat/founder-rule-waterfall`, cut from `release/2026-11-12-train` @
+**Date:** 2026-11-11 · **Status:** built and **wired** (routes, run, app page; see
+[§11 As built](#11-as-built-the-wiring-pass) for what differs from §6-§8) · **Branch:** `feat/founder-rule-waterfall`, cut from `release/2026-11-12-train` @
 `e8fd4480` · **Scope block:** [rule-waterfall-scope.md](rule-waterfall-scope.md)
 
 The operator's ask: a table of every yes/no rule, as a decline waterfall, showing how many
@@ -24,6 +24,7 @@ production data, network or user ids.
 - [8. Cost and run model](#8-cost-and-run-model)
 - [9. Rules flagged for the founder](#9-rules-flagged-for-the-founder)
 - [10. What is not measured, and open questions](#10-what-is-not-measured-and-open-questions)
+- [11. As built: the wiring pass](#11-as-built-the-wiring-pass)
 
 ## 1. What the founder sees
 
@@ -513,3 +514,129 @@ Found while building the catalog (not rule rows, for the founder and engineering
 - **Production numbers**: every number here is the fixture or synthetic leagues. The first real
   run will show production's shape; the 247 recorded requests could be replayed offline with
   this module if the operator wants a pooled table.
+
+## 11. As built: the wiring pass
+
+Wired on the same branch (2026-11-11). What follows is what shipped; **deviations** from §6-§8
+are marked.
+
+### 11.1 Routes
+
+As §7, behind `_founder_session` (flag `founder.review` + `FOUNDER_ACCOUNTS` + a verified,
+non-demo session; anything else 404 with no state change). Full shapes in
+[api-reference](../../api-reference.md).
+
+| Route | As §7? |
+|---|---|
+| `GET /api/founder/rule-waterfall?league_id=` | yes. A failed or unsupported run keeps the last completed `waterfall` / `run_at` (a failed run never replaces a result). |
+| `POST /api/founder/rule-waterfall` `{league_id}` | 202 / 409 / 400 as §7. **Deviation:** an out-of-scope deck answers **200** `{status: "unsupported", error}` at once (the route checks owner-only serving and `deck.rules_first` before starting anything), and **400 `league_not_selected`** when the league is not the one the founder's session has selected (the run uses the session's loaded league, as a real deck request does). |
+| `PUT /api/founder/rule-notes/<rule_key>` `{body}` | yes, plus **429 `rate_limited`** at 60 saves an hour per account (in memory; §7.2 asked for this cap). |
+| `GET /api/founder/rule-notes/<rule_key>` | **Added**: the history accessor as a route, so the page can show earlier versions. |
+| `GET /api/admin/founder/rule-notes` | §7.2's "later" operator read, built now (path `/api/admin/founder/rule-notes`, not `founder-rule-notes`, to sit beside the other admin reads). Cron secret; every rule ever noted with its current note and history; author always "founder". |
+
+Every route is classified in `backend/paywall_gate.py` (the four founder routes `FREE`, the admin
+read `NEVER_GATE`). Not decorated with `@_gate_unverified_*` (§7.1 suggested it): the founder
+gate already requires a verified session, as the label routes do.
+
+### 11.2 The run, and why it cannot touch a real request
+
+`server._rule_waterfall_job` on a daemon thread (`_start_trade_job_thread`, the trade jobs'
+own launcher). It builds a **private** trade job and runs `_run_trade_job` with:
+
+- `execution_context` captured from the founder's session on the request thread
+  (`_capture_trade_execution`: a deep copy of the league, a shallow copy of the trade service),
+  with the copy's `_trade_cards` and `_significance_exemptions` replaced by fresh dicts, as the
+  prepared runtime does for its private sessions;
+- `prefs_preload` from `_trade_job_preferences` (what `/api/trades/generate` passes); fairness
+  from `sess["trade_fairness_threshold"]` (the founder's last organic deck request; 0.75, the
+  organic default, if none);
+- the job's own `significance_capture` / `presentation_capture`, taken on the request thread;
+- `prepare_sink=_NoPrepareSink()`: preparation mode (the value core is skipped, no exposure
+  events, suppression into a private sink), with a sink whose every attribute access raises, so
+  a job that ever got past the probe fails instead of doing preparation work;
+- `work_check`: raises `TradeWorkCancelled("diagnostic_timed_out")` after 60 s (the job calls
+  it from every `check_current`, including inside the search via `_check_current`);
+- `rule_waterfall_probe`: the new per-job keyword (default None).
+
+The job is registered in `_trade_jobs` (so `check_current` sees it live and the founder's own
+input changes revoke it) with `source: "founder_rule_waterfall"`, **never** in
+`_trade_jobs_by_key` / `_selected_trade_jobs`, so no request can find, reuse, poll or supersede
+it; it is popped when the run ends. Its `run_id` is not a job id.
+
+**The probe** (`_run_trade_job`, one guarded call): after the rules-first rules are built and
+before `_fit_league_context` and any generation, `rule_waterfall_probe(owner_context,
+deck_rules, check_current)`. **Deviation from §7.3.1:** §7.3 placed it inside `_gen_owner` before
+`trade_fast_deck.serve`; it sits one level up instead, after the scope decision, so it fires on
+every path the job can take (owner path or not, rules or none) and the job can never continue
+into generation for a founder run. The probe takes the generator from
+`_bakeoff.owner_generator(owner_context["config"])` (the call `_gen_owner` makes), computes
+`rule_waterfall.compute(generate, owner_context, deck_rules, after=server_stages(...),
+check=check_current)` and **always raises** `TradeWorkCancelled("diagnostic_complete")` (two
+new reasons in `trade_work_control`). Out-of-scope requests (no owner context, no rules,
+unsupported generator) record `unsupported`; a measurement error records `failed`. The job's
+`TradeWorkCancelled` handler finishes it with that reason; nothing after the probe runs: no
+generation, no card registration, no first page, no prepared inventory, no impressions, no
+dispositions, no `trades_generated` event.
+
+What runs before the probe is the real job's prelude for the same founder and league (reads:
+rankings, preferences, drafts and picks, forecasts, negative memory; owned-pick injection into
+the private copies; the job dict's own fields). `test_a_run_writes_nothing_a_real_request_reads`
+compares every database table, the job tables, the session's card store and significance
+provenance, the session, the league members and `record_event` before and after a run (equal),
+and then shows the founder's next real deck is the same deck as before the run.
+
+**Pipeline 29.** The probe is in `_run_trade_job`, a pinned function: `DECK_PIPELINE_VERSION`
+28 → 29, digest `02e724a78ba569ee`. A bump makes stored pages from 28 fall through once. A
+probe-free install was possible (the job's `work_check` is called at the start of
+`_gen_owner`, and could read `owner_context` / `deck_rules` off the caller's frame) and was
+rejected: it reads another function's locals and would break silently on a rename. With the
+probe None a real job is byte-identical: the freeze and golden suites pass unchanged, a real
+job's published deck on the production-flag harness is byte-for-byte the same under this
+`server.py` and under the branch's previous one (every card field but the minted
+`trade_id` / `impression_id` / `expires_at`), and the generate route and prepared runtime pass
+no probe (`test_a_real_job_without_the_probe_is_byte_identical`).
+
+### 11.3 Cost, and what a concurrent user's deck request sees
+
+One run at a time per process (lock, then 409); results cached per (account, league), latest
+only, lost on restart. Measured on this laptop (synthetic 12-team leagues, revision 2): a
+waterfall run alone 3.4 s, peak process memory 172 → 398 MB (+226 MB). A real deck
+construction for another league took 0.35–0.40 s alone (median 0.38 s) and **0.56–2.84 s while
+a run was in progress** (median 0.63 s; the 2.84 s was the first one, overlapping the run's
+heaviest stretch). Python shares the interpreter lock between threads every 5 ms, so a real
+request is slowed, not blocked: expect roughly 1.5–7x on its CPU-bound part for the run's
+10–20 s on Render, and nothing after the run ends. Prepared-inventory work and forecast batches
+defer while a run is live (they already defer to any interactive job). Only the founder's
+button starts a run: there is no cron, no automatic run and no other caller of
+`_rule_waterfall_job`.
+
+### 11.4 The page (Calibration › Founders' review › Trade rules)
+
+`FounderReview` shows "Player labels | Trade rules" only when `GET /api/founder/rule-waterfall`
+answers (null on 404: an older server keeps the label page alone). `RuleWaterfallReview`:
+
+- Header: league name, the line "Started with N candidate trades → M served", the server's
+  `started_definition`, "Run 3m ago · 12 teams · generator", the additions note when `added` >
+  0, and **Run for this league** (reads "Running…", disabled, with a progress line; polls GET
+  every 2 s only while `running`). A failed or unsupported run shows the server's reason.
+- **Deviation from §6.1:** while a run is in progress the table stays (with the previous counts,
+  or none) instead of being replaced by a spinner row, so notes can be written during a run.
+- Table grouped by stage (headers with the stage total), one row per rule in the server's
+  order: name, description (two lines, tap the row for the whole description and the note),
+  "off today" / "search limit" tags, Removed, Remaining, share of started with a flare bar,
+  "Removed x% of the trades that reached it". `not_measured` / `not_run` rows say so in words.
+  Zero rows are shown by default, on a quieter surface, with "Hide rules that removed nothing
+  (N)". Additions are a separate dashed "Added after the deck was built" line, never in a row.
+  Below the table, "Other rules (not in the waterfall)": the pool, liked trades, standing
+  offers, the five-card floor, the repeat cap, with notes.
+- **Deviation from §6.3 (Notes column):** on a phone the note field lives in the expanded row,
+  not a column; a saved note marks the collapsed row ("Note"), an edited one "Unsaved". Each
+  expanded row: the catalog's "Worth questioning" line when it has one, a multi-line field
+  (2,000-character cap, counter from 1,800), Save (enabled when changed; "Saved" for 2 s; the
+  server's error), "Last edited by you · 2h ago", and "N earlier versions" (the history route).
+  Drafts live in one page-level map, so text survives scrolling, collapsing and expanding;
+  leaving through Player labels, Grading or a navigator removal with unsaved notes asks first.
+- Before any run the table renders from the catalog alone with empty counts.
+- VoiceOver: each row reads "rule name, removed N, remaining M" (or "not measured", "not run
+  for this deck", "not counted yet"), plus ", has a note". Counts use thousands separators.
+

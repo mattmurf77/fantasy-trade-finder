@@ -180,7 +180,8 @@
     "test:outlook-suggestion": "node tests/check-outlook-suggestion.js",
     "test:first-page-failure": "node tests/check-first-page-failure.js",
     "test:trade-input-readiness": "node tests/check-trade-input-readiness.js",
-    "test:founder-review": "node tests/check-founder-review.js"
+    "test:founder-review": "node tests/check-founder-review.js",
+    "test:founder-rule-waterfall": "node tests/check-founder-rule-waterfall.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
