@@ -400,7 +400,7 @@ mobile agent as sole owner of `TradesScreen.tsx`. Evidence:
 [TEST_LEDGER 2026-08-26](TEST_LEDGER.md) · [D-166](DECISIONS.md). Rebuilt on current
 `origin/main` (`867c3baa`) 2026-08-26; all gates re-run green on the merged tree.
 
-1. **~~Answer Q-032 / Q-033~~ — RESOLVED 2026-08-19.** Operator ruled: **ship dark**
+1. **~~Answer Q-032 / Q-033~~ — RESOLVED 2026-08-19.** *(Q-033 reversed 2026-11-12: the one-tap confirm now saves the outlook only, [D-256](DECISIONS.md).)* Operator ruled: **ship dark**
    (`trade.avoid_positions` `false`) and **keep the inherited behavior** (the one-tap outlook
    confirm goes on clearing all three position lists). Both features now merge with **nothing
    user-visible changing** — schema, routes and client code land inert behind two dark flags.
