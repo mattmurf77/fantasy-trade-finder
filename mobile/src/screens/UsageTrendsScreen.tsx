@@ -33,7 +33,7 @@ import {
   prefetchListCapabilities,
   type FaMoveCapability,
 } from '../api/faMove';
-import { getUsageTrends, type UsageMetric, type UsagePlayer } from '../api/usageTrends';
+import { getUsageTrends, type UsageMetric, type UsagePeriodWeeks, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, dropPendingSearch, handoffDeckMode } from '../state/tradeSearchTrace';
@@ -44,6 +44,8 @@ import {
   newsSplit,
   nextSort,
   ownerName,
+  periodOrder,
+  periodSplit,
   presetWeeks,
   sortByLatestWeek,
   sortLabel,
@@ -57,6 +59,7 @@ import {
   type PositionFilter,
   type StatsSort,
   type UsageOrder,
+  type UsagePeriod,
   type UsageUnit,
   type UsageView,
 } from '../utils/usageTrends';
@@ -85,11 +88,17 @@ const ORDERS: { key: UsageOrder; label: string }[] = [
   { key: 'jumps', label: 'Biggest jumps' },
   { key: 'week', label: 'Weekly share' },
 ];
+const PERIODS: { key: UsagePeriod; label: string }[] = [
+  { key: 'week', label: 'Last week' },
+  { key: 'three_weeks', label: 'Last 3 weeks' },
+];
 
 // Remembered for the app session so the pill stays where the user left it.
 let lastView: UsageView = 'simple';
 // Version A's order toggle, remembered the same way. Biggest jumps by default.
 let lastOrder: UsageOrder = 'jumps';
+// Version A's period toggle, remembered the same way. Last week by default.
+let lastPeriod: UsagePeriod = 'week';
 
 type ListItem =
   | { kind: 'section'; key: string; title: string; sub: string }
@@ -106,6 +115,7 @@ export default function UsageTrendsScreen() {
 
   const [view, setView] = useState<UsageView>(lastView);
   const [order, setOrder] = useState<UsageOrder>(lastOrder);
+  const [period, setPeriod] = useState<UsagePeriod>(lastPeriod);
   const [metric, setMetric] = useState<UsageMetric>('snaps');
   const [ownership, setOwnership] = useState<OwnershipFilter>(route.params?.ownership ?? 'all');
   const [positionFilter, setPositionFilter] = useState<PositionFilter>('ALL');
@@ -155,9 +165,13 @@ export default function UsageTrendsScreen() {
     () => (leagues ?? []).map((l) => l.league_id).filter((id) => id && id !== focusId && id !== NO_LEAGUE_ID),
     [leagues, focusId],
   );
+  // "Last 3 weeks" asks the server for its period reading (`period=3`). Last
+  // week sends today's request under today's cache key.
+  const periodParam = period === 'three_weeks' ? 3 : null;
   const query = useQuery({
-    queryKey: ['usage-trends', focusId, otherIds.join(','), weeksParam(selectedWeeks)],
-    queryFn: () => getUsageTrends(focusId as string, otherIds, selectedWeeks),
+    queryKey: ['usage-trends', focusId, otherIds.join(','), weeksParam(selectedWeeks),
+      ...(periodParam ? ['period3'] : [])],
+    queryFn: () => getUsageTrends(focusId as string, otherIds, selectedWeeks, periodParam),
     enabled: enabled && !!focusId,
     staleTime: 10 * 60_000,
     // A new week selection keeps the current list on screen while it loads.
@@ -185,6 +199,15 @@ export default function UsageTrendsScreen() {
   const latest = weeks.length ? weeks[weeks.length - 1] : null;
   const focus = data?.leagues?.[0];
   const unit = units[view];
+  // The period applies to Simple only, and only with three or more weeks
+  // selected (the pill hides otherwise). While the period response loads,
+  // the previous one-week list is not shown under the period's titles; a
+  // server without the reading (no `period` in a settled answer) falls back
+  // to the one-week list rather than spinning.
+  const periodShown = view === 'simple' && weeks.length >= 3;
+  const periodMeta: UsagePeriodWeeks | null =
+    periodShown && period === 'three_weeks' ? data?.period ?? null : null;
+  const periodPending = periodShown && period === 'three_weeks' && !data?.period && query.isPlaceholderData;
   const list = useMemo(
     () => (data ? visiblePlayers(data.players, focus, metric, ownership, positionFilter) : []),
     [data, focus, metric, ownership, positionFilter],
@@ -217,7 +240,8 @@ export default function UsageTrendsScreen() {
 
   const reportView = useCallback(
     (next: { view?: UsageView; metric?: UsageMetric; ownership?: OwnershipFilter;
-             sort?: StatsSort | null; weeks?: number[] | null; order?: UsageOrder }) => {
+             sort?: StatsSort | null; weeks?: number[] | null; order?: UsageOrder;
+             period?: UsagePeriod }) => {
       track('usage_trends_view_changed', {
         league_id: focusId,
         metric: next.metric ?? metric,
@@ -226,9 +250,10 @@ export default function UsageTrendsScreen() {
         sort: sortLabel(next.sort !== undefined ? next.sort : statsSort, weeks),
         weeks: weeksParam(next.weeks !== undefined ? next.weeks : selectedWeeks),
         order: next.order ?? order,
+        period: next.period ?? period,
       }, 'UsageTrends');
     },
-    [focusId, metric, ownership, view, statsSort, weeks, selectedWeeks, order],
+    [focusId, metric, ownership, view, statsSort, weeks, selectedWeeks, order, period],
   );
 
   const leagueRowsFor = useCallback(
@@ -260,6 +285,7 @@ export default function UsageTrendsScreen() {
       ownership,
       view,
       order,
+      period,
     }, 'UsageTrends');
   };
 
@@ -422,6 +448,7 @@ export default function UsageTrendsScreen() {
         .map((p) => ({ kind: 'player' as const, key: p.player_id, player: p }));
     }
     const rows = (ps: UsagePlayer[]) => ps.map((p) => ({ kind: 'player' as const, key: p.player_id, player: p }));
+    if (periodMeta) return periodItems(list, metric, order, unit, periodMeta);
     if (order === 'week') {
       if (!list.length || latest == null) return [];
       return [
@@ -458,7 +485,7 @@ export default function UsageTrendsScreen() {
       out.push(...rows(list.slice(n)));
     }
     return out;
-  }, [view, order, list, metric, latest, unit, statsSort, weeks.length]);
+  }, [view, order, list, metric, latest, unit, statsSort, weeks.length, periodMeta]);
 
   const renderItem = ({ item }: { item: ListItem }) => {
     if (item.kind === 'section') {
@@ -480,6 +507,7 @@ export default function UsageTrendsScreen() {
             unit={unit}
             weeks={weeks}
             order={order}
+            period={periodMeta}
             focusStatus={focusStatus}
             leagueStatuses={(data?.leagues ?? []).map((lg) => statusIn(lg, p.player_id))}
             onAdd={() => focusId && doAdd(p, focusId)}
@@ -556,6 +584,8 @@ export default function UsageTrendsScreen() {
         text="Usage Trends is in-season only. It fills in once Week 1's games are done."
       />
     );
+  } else if (periodPending) {
+    body = <View style={styles.center}><ActivityIndicator color={ice.base} /></View>;
   } else {
     const list = (
       <FlatList
@@ -565,6 +595,8 @@ export default function UsageTrendsScreen() {
         renderItem={renderItem}
         contentContainerStyle={view === 'simple' ? styles.listSimple : styles.listStats}
         ListHeaderComponent={view === 'simple' ? (
+          // Order and period share one wrapping row: side by side where they
+          // fit, the period pill on its own line under the order on a phone.
           <View style={styles.orderRow}>
             <View style={styles.viewPill} accessibilityRole="tablist" accessibilityLabel="Order">
               {ORDERS.map((o) => {
@@ -590,6 +622,30 @@ export default function UsageTrendsScreen() {
                 );
               })}
             </View>
+            {periodShown ? (
+              <View style={styles.viewPill} accessibilityRole="tablist" accessibilityLabel="Period">
+                {PERIODS.map((pr) => {
+                  const on = period === pr.key;
+                  return (
+                    <Pressable
+                      key={pr.key}
+                      testID={`usage-trends.period.${pr.key}`}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: on }}
+                      onPress={() => {
+                        if (on) return;
+                        setPeriod(pr.key);
+                        lastPeriod = pr.key;
+                        reportView({ period: pr.key });
+                      }}
+                      style={[styles.viewSeg, on && styles.viewSegOn]}
+                    >
+                      <Text scale="dense" style={[styles.viewText, on && styles.viewTextOn]}>{pr.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         ) : null}
         refreshControl={
@@ -919,6 +975,57 @@ function FiltersSheet({
   );
 }
 
+// "Last 3 weeks": the list in the server's order for that reading
+// (`periodOrder`, ranks only), split into sections the way the server ranked
+// them. Section lines name the weeks each number covers.
+function periodItems(
+  list: UsagePlayer[], metric: UsageMetric, order: UsageOrder, unit: UsageUnit, meta: UsagePeriodWeeks,
+): ListItem[] {
+  const rows = (ps: UsagePlayer[]) => ps.map((p) => ({ kind: 'player' as const, key: p.player_id, player: p }));
+  const ordered = periodOrder(list, metric, order, unit);
+  if (!ordered.length) return [];
+  const span = weeksLabel(meta.weeks);
+  const noun = PLAYS_NOUN[metric];
+  if (order === 'week') {
+    return [
+      {
+        kind: 'section', key: 's-week3',
+        title: unit === 'share' ? `${span} average share of team ${noun}` : `${span} average ${metric} a game`,
+        sub: 'Highest first, over the games each player played. Anyone with fewer than 2 games is last.',
+      },
+      ...rows(ordered),
+    ];
+  }
+  const before = meta.base_weeks.length ? weeksLabel(meta.base_weeks) : null;
+  const split = periodSplit(ordered, metric);
+  const out: ListItem[] = [];
+  if (split.jumps) {
+    out.push({
+      kind: 'section', key: 's-news3', title: 'Biggest jumps over the last 3 weeks',
+      sub: `Share of team ${noun} in ${span} against ${before}, biggest jump first.`,
+    });
+    out.push(...rows(ordered.slice(0, split.jumps)));
+  }
+  if (split.backOrNew) {
+    out.push({
+      kind: 'section', key: 's-back3', title: 'Back or new over the last 3 weeks',
+      sub: `No games in ${before}, then a real role in ${span}.`,
+    });
+    out.push(...rows(ordered.slice(split.jumps, split.jumps + split.backOrNew)));
+  }
+  const n = split.jumps + split.backOrNew;
+  if (ordered.length > n) {
+    out.push({
+      kind: 'section', key: 's-rest3', title: n ? 'Everyone else' : 'All players',
+      sub: before
+        ? `By share of team ${noun} in ${span}. Anyone with fewer than 2 games is last.`
+        : `No earlier weeks to compare with yet. By share of team ${noun} in ${span}.`,
+    });
+    out.push(...rows(ordered.slice(n)));
+  }
+  return out;
+}
+
 function weeksParamEq(a: number[] | null, b: number[] | null): boolean {
   return weeksParam(a) === weeksParam(b);
 }
@@ -986,7 +1093,7 @@ const styles = StyleSheet.create({
   filtersText: { ...type.body, fontFamily: fonts.uiSemi },
   pressed: { backgroundColor: ink.ink3 },
   section: { gap: 2, paddingTop: space.md, paddingBottom: space.sm },
-  orderRow: { flexDirection: 'row', paddingTop: space.md },
+  orderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, paddingTop: space.md },
   cardWrap: { marginBottom: space.sm },
   listSimple: { paddingHorizontal: space.lg, paddingBottom: space.xxxl * 2 },
   listStats: { paddingBottom: space.xxxl * 2 },

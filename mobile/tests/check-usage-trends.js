@@ -112,7 +112,8 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
     // The words users read: string literals in headline + weekHeadline, ${...} expressions removed.
     const src = read('src/utils/usageTrends.ts');
     const copy = [src.split('export function headline')[1].split('export function isNewsWeek')[0],
-      src.split('export function weekHeadline')[1].split('/** Version A')[0]].join('\n');
+      src.split('export function weekHeadline')[1].split('/** Version A')[0],
+      src.split('export function periodHeadline')[1].split('/** Version A')[0]].join('\n');
     const words = [...copy.matchAll(/`[^`]*`|'[^'\n]*'/g)].map((m) => m[0].replace(/\$\{[^}]*\}/g, '')).join(' ');
     assert(!/\bpp\b|\bpts?\b|points|baseline|rolling|delta/i.test(words),
       '1p. the card vocabulary has no jargon (pp / pts — reads as fantasy points / baseline / rolling / delta)', words);
@@ -199,6 +200,59 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
     && eq(U.toggleWeek([6], 6), [6]), '1ae. toggling a week; the last one cannot be removed');
   assert(U.weeksParam(null) === 'default' && U.weeksParam([2, 6]) === '2,6', '1af. selection param');
 }
+{
+  // "Last 3 weeks" (docs/plans/usage-trends/scope-period-toggle.md): the
+  // server ranks and measures; these readers only order by its ranks, split
+  // its runs, and put its numbers into words.
+  const pb = (o) => ({ games: 3, avg: 40, avg_share: 47.2, base_games: 3, base_avg: 15, base_avg_share: 12.4,
+    kind: null, delta: null, delta_share: null, rank_jump: 1, rank_share: 1, rank_count: 1, ...o });
+  const withP = (id, o) => ({ ...P(id, 'WR', [9, 9, 9]), snaps: blk({ rank: 9, period: pb(o) }) });
+  const xs = [
+    withP('a', { rank_jump: 3, rank_share: 1, rank_count: 2 }),
+    withP('b', { rank_jump: 1, rank_share: 3, rank_count: 1, kind: 'jump' }),
+    withP('c', { rank_jump: 2, rank_share: 2, rank_count: 3, kind: 'new' }),
+    P('d', 'WR', [1, 1, 1]),                              // no period block: last
+  ];
+  const ids = (ys) => ys.map((p) => p.player_id).join('');
+  assert(ids(U.periodOrder(xs, 'snaps', 'jumps', 'share')) === 'bcad'
+    && ids(U.periodOrder(xs, 'snaps', 'jumps', 'count')) === 'bcad'
+    && ids(U.periodOrder(xs, 'snaps', 'week', 'share')) === 'acbd'
+    && ids(U.periodOrder(xs, 'snaps', 'week', 'count')) === 'bacd'
+    && ids(xs) === 'abcd',
+    '1ag. Last 3 weeks orders by the server rank for the order and unit showing (jump / share / count), never in place');
+  const ordered = U.periodOrder(xs, 'snaps', 'jumps', 'share');
+  assert(eq(U.periodSplit(ordered, 'snaps'), { jumps: 1, backOrNew: 1 })
+    && eq(U.periodSplit(ordered.slice(2), 'snaps'), { jumps: 0, backOrNew: 0 }),
+    "1ah. Last 3 weeks sections: the server's jumps, then its back-or-new run");
+  {
+    const src = read('src/utils/usageTrends.ts');
+    const body = src.split('export function periodOrder')[1].split('export function isPeriodNewsWeek')[0]
+      .replace('Number.MAX_SAFE_INTEGER', '').replace('rank(a) - rank(b)', '');
+    assert(!/\.avg\b|avg_share|delta|base_|\.games|[+\-*/]\s*\d|Math\./.test(body),
+      '1ai. the three-week order and split read ranks and kinds only: no average, share or jump is computed on the client');
+  }
+  const meta = { weeks: [7, 8, 9], base_weeks: [4, 5, 6] };
+  const jets = { team: 'NYJ' };
+  const jump = pb({ kind: 'jump', delta: 25, delta_share: 34.8 });
+  const say = (b, unit, m = meta) => U.periodHeadline(jets, 'snaps', b, m, unit);
+  assert(say(jump, 'share') === 'Up from 12% to 47% of Jets plays over Weeks 7–9'
+    && say(jump, 'count') === 'Up from 15 to 40 snaps a game over Weeks 7–9'
+    && say({ ...jump, games: 2 }, 'share') === 'Up from 12% to 47% of Jets plays in 2 games, Weeks 7–9',
+    '1aj. a three-week jump states both ends and the weeks', [say(jump, 'share'), say(jump, 'count')].join(' | '));
+  assert(say(pb({}), 'share') === 'Averaged 47% of Jets plays over Weeks 7–9'
+    && say(pb({}), 'count') === 'Averaged 40 snaps a game over Weeks 7–9'
+    && say(pb({ games: 1, avg: 58, avg_share: 96.7 }), 'share') === '97% of Jets plays in 1 game, Weeks 7–9'
+    && say(pb({ games: 0, avg: null, avg_share: null }), 'share') === 'No games in Weeks 7–9'
+    && say(undefined, 'share') === 'No games in Weeks 7–9',
+    "1ak. otherwise the card states the server's period average (what Weekly share ranks by) and how many games it covers");
+  assert(say(pb({ kind: 'new', base_games: 0, base_avg: null, base_avg_share: null }), 'share')
+      === 'Averaged 47% of Jets plays over Weeks 7–9, no games in Weeks 4–6'
+    && say(pb({ base_games: 0 }), 'share', { weeks: [1, 2, 3], base_weeks: [] }) === 'Averaged 47% of Jets plays over Weeks 1–3',
+    '1al. back or new over three weeks names the empty earlier weeks; with no earlier weeks nothing is claimed');
+  assert(U.isPeriodNewsWeek(jump, meta, 8) && !U.isPeriodNewsWeek(jump, meta, 6)
+    && !U.isPeriodNewsWeek(pb({}), meta, 8) && !U.isPeriodNewsWeek(undefined, meta, 8),
+    '1am. under Last 3 weeks the bars flare the period weeks of a jump or back-or-new card only');
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // 2 — wiring.
@@ -240,6 +294,36 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
       && /lastOrder = o\.key;\s*reportView\(\{ order: o\.key \}\);/.test(screen)
       && /order=\{order\}/.test(screen),
       '2e5. the order toggle: Simple view only, Biggest jumps by default, remembered, reported, and handed to the card');
+    // Last 3 weeks (scope-period-toggle.md).
+    const pill = screen.slice(screen.indexOf('ListHeaderComponent='), screen.indexOf('refreshControl='));
+    assert(/let lastPeriod: UsagePeriod = 'week';/.test(screen) && /useState<UsagePeriod>\(lastPeriod\)/.test(screen)
+      && /\{ key: 'week', label: 'Last week' \},\s*\{ key: 'three_weeks', label: 'Last 3 weeks' \}/.test(screen)
+      && /^ListHeaderComponent=\{view === 'simple' \?/.test(pill) && /\{periodShown \? \(/.test(pill)
+      && /const periodShown = view === 'simple' && weeks\.length >= 3;/.test(screen)
+      && /testID=\{`usage-trends\.period\.\$\{pr\.key\}`\}/.test(pill)
+      && /setPeriod\(pr\.key\);\s*lastPeriod = pr\.key;\s*reportView\(\{ period: pr\.key \}\);/.test(pill)
+      && /period=\{periodMeta\}/.test(screen),
+      '2e7. the period toggle: Simple view only (three or more weeks), Last week by default, remembered, reported, and handed to the card');
+    const trackBodies = [...screen.matchAll(/track\('(usage_trends_view_changed|usage_trends_action)', \{([\s\S]*?)\}, 'UsageTrends'\)/g)];
+    assert(trackBodies.length === 2 && trackBodies.every((m) => /^\s*period[:,]/m.test(m[2])),
+      '2e8. both order-carrying events report the period');
+    assert(/const periodParam = period === 'three_weeks' \? 3 : null;/.test(screen)
+      && /getUsageTrends\(focusId as string, otherIds, selectedWeeks, periodParam\)/.test(screen)
+      && /\(period \? `&period=\$\{period\}` : ''\)/.test(read('src/api/usageTrends.ts')),
+      "2e9. Last 3 weeks asks the server for its reading; Last week sends today's request unchanged");
+    const periodFn = screen.slice(screen.indexOf('function periodItems('), screen.indexOf('function weeksParamEq'));
+    assert(/if \(periodMeta\) return periodItems\(list, metric, order, unit, periodMeta\);\s*if \(order === 'week'\)/.test(simpleBranch)
+      && /const ordered = periodOrder\(list, metric, order, unit\);/.test(periodFn)
+      && /const split = periodSplit\(ordered, metric\);/.test(periodFn)
+      && !/sortByLatestWeek|sortStatsRows|newsSplit|\.avg|avg_share|delta|Math\./.test(periodFn),
+      "2e10. Last 3 weeks: both orders are the server's ranks, split into sections; the client sorts and computes nothing");
+    assert(/title: 'Biggest jumps over the last 3 weeks'/.test(periodFn) && /title: 'Back or new over the last 3 weeks'/.test(periodFn)
+      && /against \$\{before\}/.test(periodFn) && /No earlier weeks to compare with yet/.test(periodFn)
+      && /\$\{span\} average share of team/.test(periodFn),
+      '2e11. the three-week section lines say what the list is and which weeks it compares');
+    assert(/period\s*\?\s*periodHeadline\(player, metric, player\[metric\]\.period, period, unit\)\s*:\s*order === 'week'/.test(card)
+      && /isPeriodNewsWeek\(player\[metric\]\.period, period, w\)/.test(card),
+      '2e12. the card reads the period sentence and flares the period weeks under Last 3 weeks');
     assert(/order === 'week'\s*\?\s*weekHeadline\(player, metric, player\[metric\], weeks, unit\)\s*:\s*headline\(/.test(card),
       '2e6. the card reads the week sentence only in the Weekly share order');
     assert(/testID=\{`usage-trends\.sort\.\$\{testKey\}`\}/.test(table) && /onSort\(key\)/.test(table)
@@ -275,8 +359,8 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
     '2n. Version B actions: + add, ⇄ trade, podium Re-rank, chevron expander');
   assert(!/>\s*(Add|Trade|Re-rank)\s*</.test(table), '2o. Version B action buttons carry no text');
   assert(/<UsageLeagueList[^>]*compact/.test(table), '2p. the expanded row lists the other leagues');
-  assert(/getUsageTrends\(focusId as string, otherIds, selectedWeeks\)/.test(screen)
-    && /queryKey: \['usage-trends', focusId, otherIds\.join\(','\), weeksParam\(selectedWeeks\)\]/.test(screen)
+  assert(/getUsageTrends\(focusId as string, otherIds, selectedWeeks, periodParam\)/.test(screen)
+    && /queryKey: \['usage-trends', focusId, otherIds\.join\(','\), weeksParam\(selectedWeeks\),\s*\.\.\.\(periodParam \? \['period3'\] : \[\]\)\]/.test(screen)
     && /placeholderData: keepPreviousData/.test(screen),
     '2p2. the week selection reaches the server and keys the cache; the old list stays up while it loads');
   assert(/<TickLabel>WEEKS<\/TickLabel>/.test(screen) && /testID=\{`usage-trends\.week\.\$\{w\}`\}/.test(screen)

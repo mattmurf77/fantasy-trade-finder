@@ -43138,6 +43138,11 @@ def usage_trends_route():
       weeks       — optional comma list of completed weeks to include (any
                     subset of `available_weeks`, 1-18 of them). Absent = the
                     last four. 400 invalid_weeks otherwise.
+      period      — optional `3`: the Simple view's "Last 3 weeks" reading.
+                    Adds top-level `period {weeks, base_weeks}` and a
+                    `period` block on every metric (usage_trends.
+                    _period_metric / _rank_period). Absent = the response
+                    is byte-identical to before. 400 invalid_period otherwise.
 
     Response:
       {
@@ -43195,17 +43200,28 @@ def usage_trends_route():
         chosen = _usage.parse_weeks_param(request.args.get("weeks"), available)
     except ValueError as e:
         return jsonify({"error": "invalid_weeks", "message": str(e)}), 400
+    try:
+        period_n = _usage.parse_period_param(request.args.get("period"))
+    except ValueError as e:
+        return jsonify({"error": "invalid_period", "message": str(e)}), 400
     weeks = chosen or weeks
     payload = {"season": season, "weeks": weeks, "available_weeks": available,
                "in_season": bool(weeks), "league_id": league_id,
                "players": [], "leagues": []}
     if not weeks:
         return jsonify(payload)
+    # `?period=3` (the "Last 3 weeks" reading) also reads the baseline weeks
+    # before the period and caches under its own key. Absent: exactly as before.
+    period = _usage.period_weeks(weeks, available) if period_n else None
+    if period:
+        payload["period"] = {"weeks": period[0], "base_weeks": period[1]}
+    sel_key = ("players", season, tuple(weeks)) + ((period_n,) if period else ())
     try:
         players = _usage_cached(
-            ("players", season, tuple(weeks)), _USAGE_TRENDS_TTL,
+            sel_key, _USAGE_TRENDS_TTL,
             lambda: _usage.compute_normalized(
-                {w: _usage_week(season, w) for w in weeks}, weeks))
+                {w: _usage_week(season, w) for w in weeks + (period[1] if period else [])},
+                weeks, period=period))
     except Exception as e:
         log.warning("usage-trends: stats unavailable for %s %s: %s", season, weeks, e)
         return jsonify(unavailable[0]), unavailable[1]

@@ -5,12 +5,14 @@ import Svg, { Rect } from 'react-native-svg';
 import { Icon, PositionBadge, Text } from './chalkline';
 import { StatusPip } from './UsageLeagueList';
 import { chalk, flare, fonts, ink, radii, semantic, space, type } from '../theme/chalkline';
-import type { UsageMetric, UsagePlayer } from '../api/usageTrends';
+import type { UsageMetric, UsagePeriodWeeks, UsagePlayer } from '../api/usageTrends';
 import {
   availabilityLabel,
   headline,
   isNewsWeek,
+  isPeriodNewsWeek,
   ofTeam,
+  periodHeadline,
   weekHeadline,
   type LeagueStatus,
   type UsageOrder,
@@ -34,7 +36,11 @@ function barGeometry(n: number): { w: number; gap: number } {
   return { w: Math.max(3, Math.floor((CHART_MAX_W - (n - 1) * 2) / n)), gap: 2 };
 }
 
-function WeekBars({ player, metric, weeks }: { player: UsagePlayer; metric: UsageMetric; weeks: number[] }) {
+function WeekBars({ player, metric, weeks, news }: {
+  player: UsagePlayer; metric: UsageMetric; weeks: number[];
+  /** The flare weeks: the newest-week news, or a "Last 3 weeks" reading's weeks. */
+  news: (week: number) => boolean;
+}) {
   const block = player[metric];
   const { w: BAR_W, gap: BAR_GAP } = barGeometry(weeks.length);
   const width = weeks.length * BAR_W + (weeks.length - 1) * BAR_GAP;
@@ -58,7 +64,7 @@ function WeekBars({ player, metric, weeks }: { player: UsagePlayer; metric: Usag
           }
           if (st === 'bye') return null;
           const h = Math.max(2, Math.round(((block.shares[i] ?? 0) / 100) * BAR_MAX));
-          const fill = isNewsWeek(block.signal, w) ? flare.base : ink.lineStrongA11y;
+          const fill = news(w) ? flare.base : ink.lineStrongA11y;
           return <Rect key={w} x={x} y={CHART_H - h} width={BAR_W} height={h} fill={fill} />;
         })}
       </Svg>
@@ -66,7 +72,7 @@ function WeekBars({ player, metric, weeks }: { player: UsagePlayer; metric: Usag
         <View style={[styles.weekLabels, { gap: BAR_GAP }]} importantForAccessibility="no-hide-descendants">
           {weeks.map((w, i) => {
             const st = player.status[i];
-            const color = st === 'out' ? semantic.warn : isNewsWeek(block.signal, w) ? flare.base : chalk.dim;
+            const color = st === 'out' ? semantic.warn : news(w) ? flare.base : chalk.dim;
             return (
               <Text key={w} scale="dense" style={[styles.weekLabel, { width: BAR_W, color }]}>
                 {st === 'played' ? String(w) : '–'}
@@ -92,6 +98,9 @@ export interface UsageTrendCardProps {
   /** "jumps" (default): the signal sentence; "week": the newest week's number,
    *  which is what the list is sorted by in that order. */
   order?: UsageOrder;
+  /** Set under "Last 3 weeks": the card reads the server's period block
+   *  (`periodHeadline`) and flares the period's weeks. Absent = Last week. */
+  period?: UsagePeriodWeeks | null;
   focusStatus: LeagueStatus;
   /** Statuses across the caller's leagues, focused league first (pips). */
   leagueStatuses: LeagueStatus[];
@@ -107,6 +116,7 @@ export default function UsageTrendCard({
   unit,
   weeks,
   order = 'jumps',
+  period = null,
   focusStatus,
   leagueStatuses,
   onAdd,
@@ -133,12 +143,21 @@ export default function UsageTrendCard({
             <Text style={type.bodySm}>{player.team}</Text>
           </View>
           <Text style={styles.sentence}>
-            {order === 'week'
-              ? weekHeadline(player, metric, player[metric], weeks, unit)
-              : headline(player, metric, player[metric], latest, unit)}
+            {period
+              ? periodHeadline(player, metric, player[metric].period, period, unit)
+              : order === 'week'
+                ? weekHeadline(player, metric, player[metric], weeks, unit)
+                : headline(player, metric, player[metric], latest, unit)}
           </Text>
         </View>
-        <WeekBars player={player} metric={metric} weeks={weeks} />
+        <WeekBars
+          player={player}
+          metric={metric}
+          weeks={weeks}
+          news={(w) => (period
+            ? isPeriodNewsWeek(player[metric].period, period, w)
+            : isNewsWeek(player[metric].signal, w))}
+        />
       </View>
       <View style={styles.actions}>
         {focusStatus === 'free_agent' ? (

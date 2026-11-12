@@ -6,6 +6,8 @@
 import type {
   UsageLeague,
   UsageMetric,
+  UsagePeriodBlock,
+  UsagePeriodWeeks,
   UsagePlayer,
   UsageSignal,
 } from '../api/usageTrends';
@@ -15,6 +17,9 @@ export type OwnershipFilter = 'all' | 'rostered' | 'free_agents';
 export type UsageView = 'simple' | 'stats';
 /** Version A's order: the server's news-first order, or the newest week's number. */
 export type UsageOrder = 'jumps' | 'week';
+/** Version A's period: the newest week (today's reading) or the newest three
+ *  selected weeks (the server's `period=3` reading). */
+export type UsagePeriod = 'week' | 'three_weeks';
 export type UsageUnit = 'count' | 'share';
 export type PositionFilter = 'ALL' | 'RB' | 'WR' | 'TE';
 
@@ -215,6 +220,66 @@ export function weekHeadline(
   if (st === 'out') return `Didn't play in Week ${weeks[i]}`;
   if (st === 'bye') return `Bye in Week ${weeks[i]}`;
   return `${amount(block.shares[i], block.counts[i], player.team, metric, unit)} in Week ${weeks[i]}`;
+}
+
+/** "Last 3 weeks", either order: the list in the SERVER's order for that
+ *  reading (`rank_jump`, or `rank_share` / `rank_count` for the unit
+ *  showing). No number is compared here — only the server's ranks. */
+export function periodOrder(
+  visible: UsagePlayer[], metric: UsageMetric, order: UsageOrder, unit: UsageUnit,
+): UsagePlayer[] {
+  const key: 'rank_jump' | 'rank_share' | 'rank_count' =
+    order === 'jumps' ? 'rank_jump' : unit === 'count' ? 'rank_count' : 'rank_share';
+  const rank = (p: UsagePlayer) => p[metric].period?.[key] ?? Number.MAX_SAFE_INTEGER;
+  return [...visible].sort((a, b) => rank(a) - rank(b));
+}
+
+/** "Last 3 weeks" Biggest jumps, as section sizes over `periodOrder`: the
+ *  server's jumps, then its back-or-new players. It ranks them first, in
+ *  that order, so each is a contiguous run. */
+export function periodSplit(
+  ordered: UsagePlayer[], metric: UsageMetric,
+): { jumps: number; backOrNew: number } {
+  const kind = (i: number) => ordered[i][metric].period?.kind ?? null;
+  let jumps = 0;
+  while (jumps < ordered.length && kind(jumps) === 'jump') jumps += 1;
+  let back = 0;
+  while (jumps + back < ordered.length && kind(jumps + back) === 'new') back += 1;
+  return { jumps, backOrNew: back };
+}
+
+/** True when a bar's week belongs to a "Last 3 weeks" jump or back-or-new
+ *  reading (the flare-highlighted weeks under that period). */
+export function isPeriodNewsWeek(
+  block: UsagePeriodBlock | undefined, period: UsagePeriodWeeks, week: number,
+): boolean {
+  return !!block?.kind && period.weeks.includes(week);
+}
+
+/** A card's sentence under "Last 3 weeks": the server's average over the
+ *  period (the number Weekly share is ranked by) and, for a jump, where it
+ *  started, both named with the weeks they cover. No jargon. */
+export function periodHeadline(
+  player: Pick<UsagePlayer, 'team'>,
+  metric: UsageMetric,
+  block: UsagePeriodBlock | undefined,
+  period: UsagePeriodWeeks,
+  unit: UsageUnit = 'share',
+): string {
+  const label = weeksLabel(period.weeks);
+  if (!block || block.games === 0) return `No games in ${label}`;
+  const now = amount(block.avg_share, block.avg, player.team, metric, unit);
+  if (block.games === 1) return `${now} in 1 game, ${label}`;
+  const aGame = unit === 'count' ? ' a game' : '';
+  const span = block.games < period.weeks.length ? `in ${block.games} games, ${label}` : `over ${label}`;
+  if (block.kind === 'jump') {
+    const from = unit === 'count' ? String(Math.round(block.base_avg ?? 0)) : pct(block.base_avg_share);
+    return `Up from ${from} to ${now}${aGame} ${span}`;
+  }
+  const line = `Averaged ${now}${aGame} ${span}`;
+  return block.kind === 'new' && period.base_weeks.length
+    ? `${line}, no games in ${weeksLabel(period.base_weeks)}`
+    : line;
 }
 
 /** Version A's two sections: news in the newest week first, then the rest.
