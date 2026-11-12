@@ -47,6 +47,7 @@ class World:
         self.calls: list = []
         self.kill_after: int | None = None
         self.status_script: list = []          # statuses returned before any route
+        self.faults: dict = {}                  # path -> (status, body bytes), served first
         self.user_leagues: dict = {}            # (uid, season) -> [league obj]
         self.users: dict = {}
         self.next_pid = 5000
@@ -71,6 +72,9 @@ class World:
             st = self.status_script.pop(0)
             if st != 200:
                 return st, {}, b""
+        if path in self.faults:
+            st, body = self.faults[path]
+            return st, {}, body
         if path not in self.routes:
             # Like Sleeper: an unknown league or user is null; a list endpoint
             # with nothing in it (an empty leg, a user with no leagues that
@@ -159,7 +163,7 @@ class World:
         lid, season, n = spec["league_id"], spec["season"], spec["teams"]
         t0 = SEASON_START[season]
         reg = spec.get("reg_weeks", 3)
-        pws = reg + 1
+        pws = 0 if spec.get("no_playoffs") else reg + 1
         played = spec.get("played", reg + 2)
         rounds = spec.get("rounds", 10 if carry is None else 2)
         owners = spec["owners"]
@@ -175,7 +179,9 @@ class World:
             "total_rosters": n, "name": spec["name"], "previous_league_id": spec["prev"],
             "sport": "nfl", "season_type": "regular",
             "avatar": hashlib.md5(spec["name"].encode()).hexdigest(),
-            "draft_id": None, "bracket_id": 1, "loser_bracket_id": 2,
+            "draft_id": None,
+            "bracket_id": None if spec.get("no_playoffs") else 1,
+            "loser_bracket_id": None if spec.get("no_playoffs") else 2,
             "company_id": None, "shard": 7, "last_message_id": "123456789012345678",
             "metadata": {"latest_league_winner_roster_id": "1", "auto_continue": "on",
                          "custom_text": "Secret commissioner note text"},
@@ -392,7 +398,11 @@ class World:
             {"season": str(s), "round": r, "roster_id": o, "owner_id": h,
              "previous_owner_id": o} for (s, r, o), h in sorted(pick_owner.items())
             if h != o and s >= season]
-        if spec.get("status", "complete") == "complete":
+        if spec.get("no_playoffs"):
+            # Sleeper answers null for a bracket that does not exist (live, 2026-11-12).
+            self.routes[f"league/{lid}/winners_bracket"] = None
+            self.routes[f"league/{lid}/losers_bracket"] = None
+        elif spec.get("status", "complete") == "complete":
             win = [{"r": 1, "m": 1, "t1": 1, "t2": 4, "w": 1, "l": 4},
                    {"r": 1, "m": 2, "t1": 2, "t2": 3, "w": 2, "l": 3},
                    {"r": 2, "m": 3, "t1": 1, "t2": 2, "w": 2, "l": 1, "p": 1,
@@ -580,6 +590,20 @@ def standard_world() -> World:
 
 
 SEEDS = ["secretusername001"]
+
+
+def add_no_playoff_league(w: World) -> str:
+    """A complete 2024 dynasty league with playoffs switched off: settings
+    playoff_week_start 0, bracket_id null, both brackets answer null. Listed
+    for the seed user, so discovery finds it at hop 0. Returns its id."""
+    w.lineage([
+        {"n": 601, "season": 2024, "teams": 8,
+         "owners": {1: 1, **{r: 38 + r for r in range(2, 9)}}, "status": "complete",
+         "reg_weeks": 5, "played": 5, "no_playoffs": True,
+         "script": [(week_ts(2024, 3, 5), lambda api, ts: _trade(
+             api, 3, ts, [(1, 2, 0), (2, 1, 0)]))]},
+    ])
+    return L(601)
 
 
 # ---------------------------------------------------------------------------

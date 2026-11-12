@@ -77,8 +77,8 @@ class Discoverer:
     def cap_reached(self) -> bool:
         return self.store.kept_lineage_count() >= self.cap
 
-    def _get(self, path, expect=None):
-        obj = self.client.get(path, expect=expect)
+    def _get(self, path, expect=None, null_ok=False):
+        obj = self.client.get(path, expect=expect, null_ok=null_ok)
         harvest(obj, self.col)
         return obj
 
@@ -140,7 +140,8 @@ class Discoverer:
         done = []
         for season in todo:  # newest first: keeps lineage ids stable
             try:
-                leagues = self._get(f"/user/{uid}/leagues/nfl/{season}", expect=list)
+                leagues = self._get(f"/user/{uid}/leagues/nfl/{season}", expect=list,
+                                    null_ok=True) or []
             except RequestFailed:
                 # Not marked done for that season: a later run lists it again.
                 self.stats["failed_requests"] += 1

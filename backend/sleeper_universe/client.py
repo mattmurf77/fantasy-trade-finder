@@ -113,10 +113,12 @@ class TokenBucket:
                 elapsed = max(0.0, now - self.last)
                 self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
                 self.last = now
-                if self.tokens >= 1.0:
-                    self.tokens -= 1.0
+                if self.tokens >= 1.0 - 1e-9:
+                    self.tokens = max(0.0, self.tokens - 1.0)
                     return
-                self.sleep((1.0 - self.tokens) / self.rate)
+                # At least 1 ms: a float-precision remainder (1e-11 s) must not
+                # turn into a wait the clock cannot register.
+                self.sleep(max(0.001, (1.0 - self.tokens) / self.rate))
 
 
 def endpoint_class(path: str) -> str:
@@ -190,6 +192,7 @@ class SleeperClient:
         self.consecutive_429 = 0
         self.consecutive_failures = 0
         self.recent: deque = deque(maxlen=WINDOW)    # True = that response was a 429
+        self.nulls: Counter = Counter()               # null answers accepted as "none"
 
     @property
     def total_requests(self) -> int:
@@ -207,11 +210,14 @@ class SleeperClient:
                 f"(last: {cls} {what}). Sleeper looks down or unreachable. Work so far is "
                 "checkpointed; re-run the same command later to resume.")
 
-    def get(self, path: str, expect: type | None = None):
+    def get(self, path: str, expect: type | None = None, null_ok: bool = False):
         """GET a v1 path. Returns parsed JSON, or None for a 404 (when no
-        shape is expected). ``expect=list``: anything but a JSON list (a
-        dict, null, an empty body) is a failed attempt and is retried; a 404
-        is a failure. Raises RequestFailed or a HardStop."""
+        shape is expected). An empty body (zero bytes) is a failed attempt
+        everywhere. ``expect=list``: anything but a JSON list (a dict, null)
+        is a failed attempt and is retried; a 404 is a failure. With
+        ``null_ok`` a JSON ``null`` is accepted as "none of that thing",
+        returned as None and counted in ``self.nulls`` per endpoint class.
+        Raises RequestFailed or a HardStop."""
         cls = endpoint_class(path)
         url = self.base_url + "/" + path.lstrip("/")
         attempt = 0
@@ -235,8 +241,15 @@ class SleeperClient:
                     "checkpointed.")
             if status == 200:
                 text = (body or b"").strip()
+                if not text:
+                    self._failed(cls, "empty_body")
+                    attempt += 1
+                    if attempt > self.max_retries:
+                        raise RequestFailed(cls, "empty_body")
+                    self.sleep(self._backoff(attempt - 1))
+                    continue
                 try:
-                    data = json.loads(text) if text else None
+                    data = json.loads(text)
                 except ValueError:
                     raise BadResponseStop(
                         f"Stopped: Sleeper answered {cls} with HTTP 200 and a body that is "
@@ -245,6 +258,10 @@ class SleeperClient:
                 if expect is None or isinstance(data, expect):
                     self.consecutive_failures = 0
                     return data
+                if data is None and null_ok:
+                    self.consecutive_failures = 0
+                    self.nulls[cls] += 1
+                    return None
                 what = "not_a_list" if expect is list else "bad_shape"
                 self._failed(cls, what)
             elif status == 404:

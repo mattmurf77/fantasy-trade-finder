@@ -236,6 +236,10 @@ def build_report(conn) -> dict:
         flags.update(json.loads(fj or "[]"))
     rep["trade_flags"] = dict(sorted(flags.items()))
     rep["trades_with_any_flag"] = q("SELECT COUNT(*) FROM trades WHERE flags_json != '[]'")[0][0]
+    nulls = Counter()
+    for (sj,) in q("SELECT summary_json FROM runs WHERE summary_json IS NOT NULL"):
+        nulls.update((json.loads(sj) or {}).get("null_as_none") or {})
+    rep["null_answers_accepted_as_none_by_endpoint"] = dict(sorted(nulls.items()))
     rep["transactions_by_type_status"] = {f"{r[0]}/{r[1]}": r[2] for r in q(
         "SELECT type, status, COUNT(*) FROM transactions GROUP BY type, status ORDER BY 1, 2")}
     rep["transaction_types_seen"] = sorted({r[0] for r in q("SELECT DISTINCT type FROM transactions")

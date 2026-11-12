@@ -21,6 +21,13 @@ WEEKS = range(1, 19)
 MAX_FAILED_LEAGUES_IN_A_ROW = 3
 
 
+def _is_shape_kind(kind: str) -> bool:
+    """A failure about the answer's shape, not transport (network, 5xx, 429):
+    the code rejected what Sleeper sent."""
+    return kind == "league_id_mismatch" or kind.endswith(
+        (":not_a_list", ":bad_shape", ":empty_body"))
+
+
 class LeagueGone(Exception):
     pass
 
@@ -30,13 +37,35 @@ class LeagueMismatch(Exception):
     (an error object, another league)."""
 
 
+# Which list endpoints may answer JSON ``null`` for "none of that thing".
+# Evidence (2026-11-12): brackets answer null when the league has none (live:
+# a 2024 league with playoff_week_start 0 and bracket_id null), so null is an
+# empty bracket. For matchups, transactions, drafts, draft picks and traded
+# picks the captures only ever show lists ([] when empty: an unstarted draft's
+# picks, live; drafts and traded_picks, authored), which does not rule null
+# out: null is accepted as "none" there too, but COUNTED per endpoint
+# (client.nulls -> runs.summary_json -> report) so a real hole stays visible.
+# Rosters and users always exist for a league: null there is a failure. An
+# empty body and a dict are failures everywhere.
+NULL_IS_NONE = frozenset({"winners_bracket", "losers_bracket", "transactions", "matchups",
+                          "drafts", "picks", "traded_picks"})
+
+
+def _endpoint(path: str) -> str | None:
+    parts = path.strip("/").split("/")
+    return parts[2] if len(parts) > 2 else None
+
+
 def fetch_bundle(client, ring, col, league_id: str) -> dict:
     """Every endpoint of one league-season. List endpoints must answer with a
-    JSON list (``expect=list``): a dict, null or empty body is a failed
-    request (retried, then RequestFailed), so a hole is never stored as zero
-    rows."""
+    JSON list (``expect=list``): a dict or an empty body is a failed request
+    (retried, then RequestFailed), so a hole is never stored as zero rows;
+    ``null`` only where NULL_IS_NONE allows it, as an empty list."""
     def get(path, expect=list):
-        obj = client.get(path, expect=expect)
+        null_ok = expect is list and _endpoint(path) in NULL_IS_NONE
+        obj = client.get(path, expect=expect, null_ok=null_ok)
+        if obj is None and expect is list:
+            return []
         ident.harvest(obj, col)
         return obj
 
@@ -85,6 +114,7 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
         todo = todo[:limit]
     stats = {"pulled": 0, "failed": 0, "gone": 0, "queued": len(todo)}
     failed_in_a_row = 0
+    recent_kinds: list = []
     for i, row in enumerate(todo, 1):
         lid, season = str(row["league_id"]), row["season"]
         before = client.total_requests
@@ -102,11 +132,19 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
             stats["failed"] += 1
             failed_in_a_row += 1
             log(f"[{i}/{len(todo)}] league {lid}: failed ({kind})")
+            recent_kinds.append(kind)
             if failed_in_a_row >= MAX_FAILED_LEAGUES_IN_A_ROW:
+                last = recent_kinds[-MAX_FAILED_LEAGUES_IN_A_ROW:]
+                why = ""
+                if len(set(last)) == 1 and _is_shape_kind(kind):
+                    why = (f" All {failed_in_a_row} failed the same way ({kind}): an answer the "
+                           "code rejects, so the code's assumption about Sleeper's answer is "
+                           "likely wrong, not an outage. Look at one such answer before "
+                           "re-running.")
                 raise CircuitOpen(
-                    f"Stopped: {failed_in_a_row} league-seasons failed in a row (last: {kind}). "
-                    "Work so far is checkpointed; failures are in pull_failures. Re-run "
-                    "later to resume.") from None
+                    f"Stopped: {failed_in_a_row} league-seasons failed in a row (last: {kind})."
+                    f"{why} Work so far is checkpointed; failures are in pull_failures. "
+                    "Re-run later to resume.") from None
             continue
         failed_in_a_row = 0
         rows = bundle_rows(bundle, nfl_state)

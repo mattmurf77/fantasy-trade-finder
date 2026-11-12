@@ -230,15 +230,16 @@ def test_error_object_on_league_is_a_failed_league(tmp_path):
     assert len(list((tmp_path / "raw").rglob("*.json.gz"))) == len(ids) == 4
 
 
-@pytest.mark.parametrize("body", [b'{"error": "upstream timeout"}', b"", b"null"])
-def test_non_list_on_a_list_endpoint_is_not_checkpointed(tmp_path, body):
+@pytest.mark.parametrize("body, kind", [(b'{"error": "upstream timeout"}', "not_a_list"),
+                                        (b"", "empty_body")])
+def test_non_list_on_a_list_endpoint_is_not_checkpointed(tmp_path, body, kind):
     w = _patched(f"/league/{L(102)}/matchups/2", body)
     run_cli(w, tmp_path, "run")
     c = connect(tmp_path)
     assert c.execute("SELECT COUNT(*) FROM pull_checkpoints WHERE league_id=?",
                      (L(102),)).fetchone()[0] == 0
     assert c.execute("SELECT kind FROM pull_failures WHERE league_id=?",
-                     (L(102),)).fetchone()[0] == "league.matchups:not_a_list"
+                     (L(102),)).fetchone()[0] == f"league.matchups:{kind}"
     c.close()
     assert run_cli(standard_world(), tmp_path, "run")[0] == 0     # a later run fills it
     c = connect(tmp_path)

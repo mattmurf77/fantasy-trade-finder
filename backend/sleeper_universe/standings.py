@@ -4,7 +4,7 @@ of derived records against what Sleeper's rosters endpoint reports.
 Rules applied (stored inputs let anyone recompute them):
 
 * Regular season = played weeks before ``settings.playoff_week_start``
-  (all played weeks if the league has no such setting). Weeks from the
+  (all played weeks when it is 0 or missing: a league with no playoffs). Weeks from the
   playoff start on never enter the record; they are in ``matchups`` with
   phase 'playoff' or 'consolation'.
 * Head-to-head: the two rosters sharing a ``matchup_id`` that week; higher
@@ -152,15 +152,20 @@ def outcome_rows(conn, league_id, final_standings: list) -> list:
         elif not win and lg["status"] != "complete":
             finish, basis = None, "season_in_progress"
         elif rank.get(rid) is not None and not win:
+            # No playoff bracket at all (playoffs off: playoff_week_start 0,
+            # bracket null): the finish is the final regular-season rank, so
+            # labelled; no playoff result is recorded, not even "missed".
             finish, basis = rank[rid], "regular_season_rank"
         else:
             finish, basis = None, "unknown"
+        has_bracket = bool(win)
         out.append({"league_id": league_id, "roster_id": rid,
-                    "seed": seed.get(rid), "made_playoffs": int(rid in playoff),
+                    "seed": seed.get(rid) if has_bracket else None,
+                    "made_playoffs": int(rid in playoff) if has_bracket else None,
                     "playoff_round_reached": max_round.get(rid),
                     "winners_place": wplace.get(rid), "losers_place": lplace.get(rid),
                     "final_place": finish, "finish_basis": basis,
-                    "champion": int(wplace.get(rid) == 1)})
+                    "champion": int(wplace.get(rid) == 1) if has_bracket else None})
     return out
 
 
@@ -210,7 +215,12 @@ def standing_for_trade(conn, league_id, transaction_id) -> dict:
                         "wins": s["wins"], "losses": s["losses"], "ties": s["ties"],
                         "points_for": s["points_for"], "rank": s["rank"],
                         "games_back": s["games_back"],
-                        "weeks_remaining": (pws - 1 - s["week"]) if pws else None}
+                        # With no playoffs (pws 0) every scheduled week is regular
+                        # season: count the scheduled weeks still to come.
+                        "weeks_remaining": (pws - 1 - s["week"]) if pws else conn.execute(
+                            "SELECT COUNT(DISTINCT week) FROM matchups WHERE league_id=? AND"
+                            " roster_id=? AND week>? AND phase='regular'",
+                            (league_id, rid, s["week"])).fetchone()[0]}
             continue
         prev = lg["previous_league_id"]
         have = prev and conn.execute("SELECT 1 FROM pull_checkpoints WHERE league_id=?",

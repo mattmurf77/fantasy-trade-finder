@@ -209,6 +209,8 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
                                    limit=args.limit, refresh_incomplete=args.refresh_incomplete,
                                    nfl_state=state, log=log, clock=tclock)
             log(f"pull: {json.dumps(summary['pull'])}")
+            if client.nulls:
+                log(f"null answers accepted as none, by endpoint: {json.dumps(dict(client.nulls))}")
             summary["derive"] = derive_all(store.conn)
             log(f"derive: {json.dumps(summary['derive'])}")
         leak = leak_scan(data_dir, ring, names=col.names, raw_ids=col.raw_user_ids,
@@ -222,6 +224,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
         status = "interrupted"
         raise
     finally:
+        summary["null_as_none"] = dict(client.nulls)
         store.finish_run(run_id, _now(), status, client.requests, round(tclock() - t0, 3),
                          summary, leak, state)
         store.close()
