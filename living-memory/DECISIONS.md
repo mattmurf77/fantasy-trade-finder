@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-242 — Founders' review: a founder-only page to correct player labels; a correction is about future value, never about who starts; QB corrections are per QB format
+
+**Date:** 2026-11-12 · **Who:** the operator: "Can we spin up a feature page just for me (it can be a new tab in calibration): for Founders' review… presenting all players split by position and a simple tagging via buttons (or better yet the same labeling progression of the tiers feature)", and "The labels should be settings specific for QBs. Cornerstone QBs in SF are not cornerstone in other leagues". One label per player, the future-value-only rule and global scope for RB/WR/TE are the builder's and the main session's calls. Plan: [`../docs/plans/founder-review/`](../docs/plans/founder-review/).
+**Context:** The win-now engine's labels (D-238) were waiting on a review before revision 5 serves. A player has exactly one label; Cornerstone is the label for "now and future".
+**Decision:** A section in Calibration shown only to accounts in the server's `FOUNDER_ACCOUNTS` allow-list on a verified session (flag `founder.review`, shipped true, inert without the allow-list). Players by position in label bands; tap players, then a band. An override is stored per (player, scope) in `founder_label_overrides` and applied in `season_value.league_profile`: it swaps Cornerstone and Win-now piece for a starter, or Rebuild piece and Depth for a bench player, and never changes whether a player starts in a league. RB/WR/TE scope is `all`; QB scope is `superflex` or `single_qb`, set by the server from the league's slots. Overrides enter the season evidence digest.
+**Consequences:**
+- A correction reaches users only once revision 5 serves; the page and the admin label route show it at once. Measure the engine's own label agreement before correcting, or read `engine_label`.
+- Stored overrides keep feeding the engine when the page flag is off.
+- Unlabelled players (borderline or unprojected) cannot be corrected. Tight-end premium has no scope yet; the scope column can take one without a migration.
+- The page lives in the Calibration tab, so it needs `grading.blind` on.
+- No analytics on the page (founder-only tooling); waived.
+
 ## D-241 — Keep / untouchable is a hard rule on generated owner cards
 
 **Date:** 2026-11-11 · **Who:** the operator reported it ("Untouchables were showing in trade cards. Is that expected?") and then "turn on all of the features we're pushing live". Evaluator-only (not pool removal) and no exception for a pinned get are the builder's and the main session's calls.

@@ -658,6 +658,18 @@ The card's `season_block` (version `"season-1"`) and revision 5's You-side fit-b
 
 **Locations to update together:** `backend/trade_narrative.py` (`SEASON_*`), `backend/season_value.py` (labels, thresholds), `mobile/src/api/trades.ts` (normalizer), `mobile/src/components/TradeCard.tsx`, `mobile/tests/check-season-signal.js`, `docs/api-reference.md` (`season_block`).
 
+
+## Founders' review labels (`/api/founder/labels`, flag `founder.review`)
+
+The founder-only label review page ([design](plans/founder-review/design.md)) shares one vocabulary and one band order between the server and the app.
+
+- **Override vocabulary.** `cornerstone`, `win_now`, `rebuild`, `depth` — `season_value.OVERRIDE_LABELS` = `founder_review.LABELS` = mobile `utils/founderReview.LABELS`. Display names as the card's: "Cornerstone", "Win-now piece", "Rebuild piece", "Depth"; "No label" for the fifth band.
+- **Band order.** `cornerstone`, `win_now`, `rebuild`, `depth`, `none` — `founder_review.BANDS` = mobile `BANDS`; the read route serves it as `bands`.
+- **Scopes.** `all` (RB / WR / TE), `superflex`, `single_qb` (QB) — `season_value.OVERRIDE_SCOPES`. Server-side only: the client never sends a scope; it shows `qb_scope` as "QB labels · Superflex leagues" / "QB labels · 1-QB leagues". Superflex = a `SUPER_FLEX` slot or two or more `QB` slots (`season_value.is_superflex`, also `server._detect_scoring_format_from_meta`'s QB leg).
+- **Legal moves.** A starter (`startable` true) may be Cornerstone or Win-now; a bench player Rebuild or Depth; borderline / unprojected none (`movable_to` on every row; `utils/founderReview.targetsFor`).
+
+**Locations to update together:** `backend/season_value.py` (`OVERRIDE_LABELS`, `OVERRIDE_SCOPES`, `is_superflex`), `backend/founder_review.py` (`LABELS`, `BANDS`, `movable_to`), `mobile/src/utils/founderReview.ts`, `mobile/tests/check-founder-review.js` (§2 compares them).
+
 ---
 
 ## Owner trial metadata and ordering

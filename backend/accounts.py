@@ -1424,6 +1424,15 @@ def _delete_user_data(sleeper_user_id: str,
         )
         counts["app_feedback_anonymized"] = res.rowcount or 0
 
+        # Founders' review overrides judge an NFL player, not a person, and are
+        # engine inputs: keep the judgment, drop who set it.
+        res = conn.execute(
+            update(db.founder_label_overrides_table)
+            .where(db.founder_label_overrides_table.c.set_by.in_(user_ids))
+            .values(set_by=DELETED_USER_PLACEHOLDER)
+        )
+        counts["founder_label_overrides_anonymized"] = res.rowcount or 0
+
         # Identity layer — the bound account plus any session-attached one.
         n_acct = n_ident = 0
         for aid in acct_ids:
@@ -1516,6 +1525,7 @@ _EXPORT_TABLES: tuple = (
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
     ("overhauls", "overhauls_table", "account_user_id", ()),
+    ("founder_label_overrides", "founder_label_overrides_table", "set_by", ()),
 )
 
 _EXPORT_TABLES += tuple(

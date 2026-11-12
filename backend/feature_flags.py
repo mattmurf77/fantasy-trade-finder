@@ -1299,6 +1299,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "trades.roster_tier_rank",
     # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
     "grading.blind",
+    # docs/plans/founder-review/ — Founders' review (founder-only player label
+    # review in Calibration). OFF => /api/founder/* 404 and the app shows nothing.
+    # Access also needs FOUNDER_ACCOUNTS (env) and a verified session.
+    "founder.review",
     "grading.outlook_round",
     "grading.outlook_prepare",
     # docs/plans/offer-learnings/scope-next-move.md (WS5, R2) — at most one

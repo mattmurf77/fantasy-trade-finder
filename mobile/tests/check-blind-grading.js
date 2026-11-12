@@ -193,6 +193,9 @@ const REQUIRED_IDS = [
   'calibration.tag.wrong_for_my_window', 'calibration.tag.wrong_for_their_window',
   'calibration.tag.same_guy_again',
   'calibration.submit', 'calibration.skip', 'calibration.results', 'calibration.done',
+  // Founders' review (docs/plans/founder-review/): the Grading | Founders'
+  // review control, rendered only for a server-confirmed founder.
+  'calibration.segment.grading', 'calibration.segment.founder',
 ];
 
 // ── 0. Self-test ───────────────────────────────────────────────────────────
