@@ -645,8 +645,10 @@ def _fit_rank_fallback(side: str, moves: list, held: list,
 def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: list,
                    assets: dict) -> Optional[dict]:
     """Per team ("them", "you"): `moves` (league rank moves, the payload's
-    `ranks`), `held` (touched positions whose rank does not move) and
-    `touched` (the trade moves a ranked position at all). None when no rank
+    `ranks`), `held` (touched positions whose rank does not move), `all`
+    (every touched position's true before and after, noise-level moves
+    included, in QB, RB, WR, TE order) and `touched` (the trade moves a
+    ranked position at all). None when no rank
     can be stated (too few valued teams, or a team or an asset the context
     does not place where the card does)."""
     you, them = context.viewer_id, other_id
@@ -679,7 +681,7 @@ def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: lis
 
     rows = {}
     for side, uid in (("them", them), ("you", you)):
-        moves, held = [], []
+        moves, held, every = [], [], []
         for pos in _FIT_DEPTH_POSITIONS:
             if pos not in touched[uid]:
                 continue
@@ -690,6 +692,7 @@ def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: lis
             before = 1 + above(pos, was)
             later = 1 + above(pos, now) + sum(
                 (after[t][pos] > now) - (context.values[t][pos] > now) for t in after)
+            every.append({"pos": pos, "before": before, "after": later})
             if before == later:
                 held.append({"pos": pos, "rank": before})
             elif abs(now - was) >= FIT_RANK_MIN_MOVE * context.medians[pos]:
@@ -699,21 +702,18 @@ def _fit_rank_rows(context: FitLeagueContext, other_id, give: list, receive: lis
         # Gains first, larger moves first, then position order.
         moves.sort(key=lambda m: (m["after"] > m["before"], -abs(m["after"] - m["before"]),
                                   _FIT_DEPTH_POSITIONS.index(m["pos"])))
-        rows[side] = {"moves": moves, "held": held, "touched": bool(touched[uid])}
+        rows[side] = {"moves": moves, "held": held, "all": every,
+                      "touched": bool(touched[uid])}
     return rows
 
 
 def _fit_positions(row: Optional[dict]) -> list:
-    """The app's before/after table for one team: every position the rank
-    facts cover (`held` with before == after, plus `moves`), in QB, RB, WR, TE
-    order. A rank move under the noise bar is in neither list, so not here
-    either. Empty when no rank can be stated (`row` is None)."""
-    if not row:
-        return []
-    items = ([{"pos": h["pos"], "before": h["rank"], "after": h["rank"]} for h in row["held"]]
-             + [{"pos": m["pos"], "before": m["before"], "after": m["after"]}
-                for m in row["moves"]])
-    return sorted(items, key=lambda p: _FIT_DEPTH_POSITIONS.index(p["pos"]))
+    """The app's before/after table for one team: every ranked position the
+    trade touches, with its true rank before and after, in QB, RB, WR, TE
+    order. That includes a rank move under the noise bar, which is in neither
+    `moves` nor `held` (operator, 2026-11-11: "We should just show it").
+    Empty when no rank can be stated (`row` is None)."""
+    return [dict(p) for p in row["all"]] if row else []
 
 
 def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
