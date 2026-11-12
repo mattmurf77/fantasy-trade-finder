@@ -89,6 +89,8 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
 from .database import (
     init_db,
     load_founder_label_overrides, save_founder_label_overrides,
+    FounderNoteError, save_founder_rule_note, load_founder_rule_notes,
+    load_founder_rule_note_history,
     upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
@@ -4685,7 +4687,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 28
+DECK_PIPELINE_VERSION = 29
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4848,6 +4850,7 @@ DECK_PIPELINE_PINS = {
     26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
     27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
     28: "f9dc5f829bcd9a92",  # Founders' review (docs/plans/founder-review/): _season_evidence attaches the founder's label overrides that reach this league (season_value.with_label_overrides: players projected here, scope `all` or the league's QB format) and recomputes the evidence digest over them, so the request hash moves with them; league_profile applies them to the future axis only; no override that reaches the league: the same evidence object, digest, hash, terms and order.
+    29: "02e724a78ba569ee",  # Founders' review, use case 2: _run_trade_job takes a per-job rule_waterfall_probe (default None), called once after the rules-first rules are built and before the fit context and generation; only the founder's private diagnostic job passes one, and it always stops that job there; None (every real job): the same calls, terms, order and payload.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -12975,6 +12978,7 @@ def _run_trade_job(
     significance_capture=None,
     prepare_sink=None,
     work_check=None,
+    rule_waterfall_probe=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -13581,6 +13585,12 @@ def _run_trade_job(
                     user_sources=owner_context.get("user_sources"))
             except Exception:
                 log.exception("trade-job %s: rules-first rules unavailable (full solve)", job_id)
+        if rule_waterfall_probe is not None:
+            # Founders' review, use case 2 (rule-waterfall-design.md §7.3): the founder's
+            # diagnostic run reads the construction inputs here and always raises, so nothing
+            # below (generation, cards, impressions, publication, events) runs. None on every
+            # real job.
+            rule_waterfall_probe(owner_context, deck_rules, check_current)
         fit_context = _fit_league_context(owner_context, service)   # WS4b: once per job
         def _gen_owner(**_overrides):
             if owner_context is None:
@@ -30375,6 +30385,244 @@ def founder_labels():
     result = save_founder_label_overrides(to_set, to_clear, set_by=str(sess["user_id"]))
     log.info("founder-review: set=%d cleared=%d", result["set"], result["cleared"])
     return jsonify({**result, "overrides_total": len(load_founder_label_overrides())})
+
+
+# ─── Founders' review, use case 2: the decline waterfall ─────────────────────
+# docs/plans/founder-review/rule-waterfall-design.md §7. Same founder gate as
+# the label routes. A run is a PRIVATE trade job for the founder's own organic
+# request in the league their session has selected: _run_trade_job with a
+# preparation sink that is never reached, an isolated card registry, never
+# registered under a cache key, and `rule_waterfall_probe`, which measures the
+# waterfall at the construction inputs and always stops the job there. One run
+# at a time per process; 60-second cap through the job's cancellation check;
+# the latest result per (account, league) in memory only (a restart loses it).
+
+_RULE_WATERFALL_CAP_S = 60.0
+_RULE_WATERFALL_SOURCE = "founder_rule_waterfall"
+_rule_waterfall_lock = threading.Lock()
+_rule_waterfall_running: dict | None = None      # {"run_id", "key"} while a run is in progress
+_rule_waterfall_results: dict = {}               # (account, league) -> latest state
+_RULE_NOTE_SAVES_PER_HOUR = 60
+_rule_note_saves: dict = {}                       # account -> [monotonic save times]
+_RULE_WATERFALL_ERRORS = {
+    "diagnostic_timed_out": "The run took longer than 60 seconds and was stopped.",
+    "inputs_changed": "Your rankings, settings or league changed during the run. Run it again.",
+}
+
+
+class _NoPrepareSink:
+    """The run's preparation sink. Preparation mode keeps the value core, exposure events and
+    suppression grants out of the job; the probe stops the job before any sink use, so touching
+    this sink at all means the run left construction: it fails the job instead."""
+
+    def __getattr__(self, name):
+        raise RuntimeError("rule waterfall run reached the preparation sink")
+
+
+def _rule_waterfall_scope_error(league_id: str) -> str | None:
+    """Why the founder's organic deck in this league is not built rules-first, or None."""
+    if league_id == "league_demo":
+        return "The demo league has no rules-first deck."
+    if not (_owner_enabled(league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()):
+        return "This league's deck is not served by the owner engine alone, so it is not built rules-first."
+    if not is_enabled("deck.rules_first"):
+        return "Rules-first deck construction (deck.rules_first) is switched off."
+    return None
+
+
+def _rule_waterfall_job(run_id, key, league_id, context, prefs_preload, fairness,
+                        significance_capture, presentation_capture, *, cap_s=None):
+    """The run's worker thread: one private job, stopped at the construction inputs."""
+    global _rule_waterfall_running
+    from . import rule_waterfall
+    deadline = time.monotonic() + (_RULE_WATERFALL_CAP_S if cap_s is None else cap_s)
+    measured: dict = {}
+
+    def work_check():
+        if time.monotonic() > deadline:
+            raise TradeWorkCancelled("diagnostic_timed_out")
+
+    def probe(owner_context, deck_rules, check):
+        try:
+            if owner_context is None:
+                raise rule_waterfall.Unsupported("The owner engine's inputs could not be captured for this league.")
+            if deck_rules is None:
+                raise rule_waterfall.Unsupported(
+                    "This request is not built rules-first (organic owner-only decks only).")
+            generate = _bakeoff.owner_generator(owner_context["config"])
+            stages = rule_waterfall.server_stages(
+                sys.modules[__name__], context=owner_context, rules=deck_rules,
+                league=owner_context["league"], league_id=league_id,
+                significance_capture=significance_capture)
+            measured["waterfall"] = rule_waterfall.compute(
+                generate, owner_context, deck_rules, after=stages, check=check)
+        except TradeWorkCancelled:
+            raise
+        except rule_waterfall.Unsupported as exc:
+            measured["unsupported"] = str(exc)
+        except Exception as exc:
+            log.exception("founder rule waterfall: measurement failed")
+            measured["failed"] = f"The measurement failed ({type(exc).__name__})."
+        raise TradeWorkCancelled("diagnostic_complete")
+
+    job_id = "rule-waterfall-" + run_id
+    job = {"job_id": job_id, "key": key, "status": "running", "started_at": time.monotonic(),
+           "finished_at": None, "cards": [], "error": None, "source": _RULE_WATERFALL_SOURCE,
+           "is_pinned": False, "owner_model": _bakeoff.owner_arm(),
+           "owner_model_version": _bakeoff.owner_version(), "opponents_done": 0,
+           "opponents_total": 0, "final_checks_pending": True, "fairness_threshold": fairness}
+    state = {"status": "failed", "error": "The run did not finish."}
+    try:
+        with _trade_jobs_lock:
+            _trade_jobs[job_id] = job     # never under _trade_jobs_by_key: no request can find it
+        _run_trade_job(job_id, "", league_id, fairness, [], prefs_preload=prefs_preload,
+                       execution_context=context, presentation_capture=presentation_capture,
+                       significance_capture=significance_capture, prepare_sink=_NoPrepareSink(),
+                       work_check=work_check, rule_waterfall_probe=probe)
+        if "waterfall" in measured:
+            state = {"status": "complete", "error": None, "waterfall": measured["waterfall"],
+                     "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        elif "unsupported" in measured:
+            state = {"status": "unsupported", "error": measured["unsupported"]}
+        elif "failed" in measured:
+            state = {"status": "failed", "error": measured["failed"]}
+        else:
+            reason = job.get("error") or "unknown"
+            state = {"status": "failed", "error": _RULE_WATERFALL_ERRORS.get(
+                reason, "The run stopped before it reached the trade search ({}).".format(reason))}
+    except Exception as exc:
+        log.exception("founder rule waterfall: run failed")
+        state = {"status": "failed", "error": f"The run failed ({type(exc).__name__})."}
+    finally:
+        with _trade_jobs_lock:
+            _trade_jobs.pop(job_id, None)
+        with _rule_waterfall_lock:
+            previous = _rule_waterfall_results.get(key[:2]) or {}
+            if state["status"] != "complete":     # a failed run never replaces the last result
+                state = {**state, "waterfall": previous.get("waterfall"), "run_at": previous.get("run_at")}
+            _rule_waterfall_results[key[:2]] = state
+            if (_rule_waterfall_running or {}).get("run_id") == run_id:
+                _rule_waterfall_running = None
+        if state["status"] == "complete":
+            out = state["waterfall"]
+            log.info("founder rule waterfall: teams=%s started=%s served=%s elapsed_ms=%s",
+                     out["teams"], out["started"], out["served"], out["elapsed_ms"])
+
+
+def _rule_waterfall_catalog() -> list:
+    from . import rule_catalog
+    return [{k: v for k, v in row.items() if k not in ("source", "counted")}
+            for row in rule_catalog.as_rows()]
+
+
+@app.route("/api/founder/rule-waterfall", methods=["GET", "POST"])
+def founder_rule_waterfall():
+    """GET ?league_id= — {status, error, run_at, waterfall, catalog, notes} (design §7.1).
+    POST {league_id} — start one background run for the founder's own organic deck in the
+    league their session has selected: 202 {status: running, run_id}; 200 {status:
+    unsupported, error} when that deck is not built rules-first; 409 run_in_progress (one run
+    per process, any founder); 400 league_required / league_not_selected."""
+    global _rule_waterfall_running
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    account = str(sess["user_id"])
+    if request.method == "GET":
+        league_id = str(request.args.get("league_id") or "").strip()
+        if not league_id:
+            return jsonify(error="league_required"), 400
+        with _rule_waterfall_lock:
+            state = dict(_rule_waterfall_results.get((account, league_id)) or {})
+            running = (_rule_waterfall_running or {}).get("key", ())[:2] == (account, league_id)
+        status = "running" if running else state.get("status", "none")
+        return jsonify({"status": status, "error": None if running else state.get("error"),
+                        "run_at": state.get("run_at"), "waterfall": state.get("waterfall"),
+                        "catalog": _rule_waterfall_catalog(),
+                        "notes": load_founder_rule_notes(viewer_id=account)})
+    body = request.get_json(silent=True) or {}
+    league_id = str(body.get("league_id") or "").strip() if isinstance(body, dict) else ""
+    if not league_id:
+        return jsonify(error="league_required"), 400
+    league = sess.get("league")
+    if league is None or getattr(league, "league_id", None) != league_id:
+        return jsonify(error="league_not_selected"), 400
+    fmt = _active_format(sess)
+    key = (account, league_id, fmt)
+    with _rule_waterfall_lock:
+        if _rule_waterfall_running is not None:
+            return jsonify(error="run_in_progress"), 409
+        reason = _rule_waterfall_scope_error(league_id)
+        if reason is not None:
+            previous = _rule_waterfall_results.get(key[:2]) or {}
+            _rule_waterfall_results[key[:2]] = {"status": "unsupported", "error": reason,
+                                                "waterfall": previous.get("waterfall"),
+                                                "run_at": previous.get("run_at")}
+            return jsonify(status="unsupported", error=reason), 200
+        run_id = uuid.uuid4().hex[:12]
+        _rule_waterfall_running = {"run_id": run_id, "key": key}
+    try:
+        context = _capture_trade_execution(sess, account, league_id, fmt)
+        # Like a prepared job's private session: cards built by this job can never reach
+        # the session's card store or significance provenance.
+        context.trade_service._trade_cards = {}
+        context.trade_service._significance_exemptions = {}
+        try:
+            prefs_preload = _trade_job_preferences(account, league_id, sess, league)
+        except Exception:
+            prefs_preload = None          # the worker loads them itself, as for a real job
+        fairness = float(sess.get("trade_fairness_threshold", 0.75))
+        _start_trade_job_thread(target=_rule_waterfall_job, args=(
+            run_id, key, league_id, context, prefs_preload, fairness,
+            _capture_trade_significance(), _capture_trade_presentation()), kwargs={})
+    except Exception:
+        log.exception("founder rule waterfall: could not start")
+        with _rule_waterfall_lock:
+            _rule_waterfall_running = None
+        return jsonify(error="run_unavailable"), 500
+    log.info("founder rule waterfall: run started")
+    return jsonify(status="running", run_id=run_id), 202
+
+
+@app.route("/api/founder/rule-notes/<rule_key>", methods=["GET", "PUT"])
+def founder_rule_note(rule_key):
+    """PUT {body} — save a new version of the founder's note on one catalog rule ("" clears;
+    the history keeps every version): 200 the current note; 404 unknown_rule; 400
+    too_long / invalid_body; 429 rate_limited (60 saves an hour per account).
+    GET — that rule's note history, oldest first: {rule_key, history: [{body, author,
+    created_at}]} (author "you" or "founder"; never an account id)."""
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    account = str(sess["user_id"])
+    try:
+        if request.method == "GET":
+            return jsonify(rule_key=rule_key,
+                           history=load_founder_rule_note_history(rule_key, viewer_id=account))
+        body = request.get_json(silent=True)
+        text = body.get("body") if isinstance(body, dict) else None
+        now = time.monotonic()
+        with _rule_waterfall_lock:
+            recent = [t for t in _rule_note_saves.get(account, ()) if now - t < 3600]
+            if len(recent) >= _RULE_NOTE_SAVES_PER_HOUR:
+                return jsonify(error="rate_limited"), 429
+            recent.append(now)
+            _rule_note_saves[account] = recent
+        return jsonify(save_founder_rule_note(rule_key, text, account))
+    except FounderNoteError as exc:
+        return jsonify(error=exc.code), (404 if exc.code == "unknown_rule" else 400)
+
+
+@app.route("/api/admin/founder/rule-notes", methods=["GET"])
+def admin_founder_rule_notes():
+    """GET /api/admin/founder/rule-notes (X-Cron-Secret). Every rule that has ever had a
+    founder note: its current note (empty when cleared) and every version, oldest first, in
+    catalog order. Authors are "founder"; no account id is returned. Operator tool: read
+    only, not flag-gated, so engineering sessions can read the founder's questions."""
+    _require_cron_auth()
+    from . import rule_catalog
+    notes = [{**note, "history": load_founder_rule_note_history(note["rule_key"])}
+             for note in load_founder_rule_notes(include_empty=True) if note["versions"]]
+    return jsonify(catalog_version=rule_catalog.VERSION, notes=notes)
 
 
 @app.route("/api/admin/engine-metrics", methods=["GET"])

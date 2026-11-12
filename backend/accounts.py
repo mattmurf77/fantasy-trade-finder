@@ -794,6 +794,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # (docs/plans/platform-league-binding/). Deleted and exported like the
     # credentials; other league-mates' bindings are untouched.
     "platform_league_bindings",
+    # Founders' review (rule waterfall): a founder's notes on the engine's rules,
+    # written under their own account.
+    "founder_rule_notes",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each

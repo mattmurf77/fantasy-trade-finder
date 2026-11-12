@@ -193,6 +193,7 @@ counterparty board disclosure or client analytics event is added.
 - [`trade_offer_outcomes`](#trade_offer_outcomes)
 - [`offer_import_consents`](#offer_import_consents)
 - [`revised_offer_cards`](#revised_offer_cards)
+- [`founder_rule_notes`](#founder_rule_notes)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -1040,6 +1041,22 @@ The one card built for the user's own declined offer (offer-learnings WS8, flag 
 | `retired_at`, `retired_reason` | str, nullable | `acted` (the user passed or liked it: the evaluator answered `previous_disposition`) · `unavailable` (it no longer passes, or the partner no longer holds the ask) |
 
 Indexes: `uq_revised_offer_card_user_outcome` UNIQUE `(user_id, outcome_id)`; `ix_revised_offer_cards_user_league` on `(user_id, league_id)`. A new table; no `migration_cols` row.
+
+---
+
+## `founder_rule_notes`
+
+A founder's comment or question on one yes/no rule of the trade engine (Founders' review, use case 2: the decline waterfall; design `docs/plans/founder-review/rule-waterfall-design.md` §5). **Append-only history:** every save adds a row; the newest row per `rule_key` is the current note, and an empty `body` clears it without losing earlier versions. Written and read only through `database.save_founder_rule_note`, `load_founder_rule_notes` and `load_founder_rule_note_history`; a `rule_key` that `backend/rule_catalog.py` does not list is rejected (`unknown_rule`), and so is a body over `FOUNDER_NOTE_MAX_CHARS` (2,000) after trimming (`too_long`). The accessors return the rule's key and name, the current text and an author marker (`you` for the reading founder, else `founder`); account ids never leave the server. Deleted and exported with the author's account (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement; orders versions |
+| `rule_key` | str, not null | `rule_catalog.RULES[].key` (the engine's own reason string where one exists) |
+| `user_id` | str, not null | ACCOUNT id of the founder who wrote this version |
+| `body` | text, not null | free text, trimmed, at most 2,000 characters; `""` clears the note |
+| `created_at` | str, not null | ISO UTC time this version was saved (the current note's `updated_at`; the first version's is its `created_at`) |
+
+Index: `ix_founder_rule_notes_rule` on `(rule_key, id)`. A new table, created by `metadata.create_all` on fresh and existing databases; no `migration_cols` row.
 
 ---
 

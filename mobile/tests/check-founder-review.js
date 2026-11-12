@@ -69,8 +69,9 @@ assert(/const founder = founderQ\.data === true;/.test(SCREEN),
 assert(/\{founder \? \(\s*<View style=\{styles\.sectionRow\}>/.test(SCREEN),
   '1c. the Grading | Founders’ review control renders only when founder');
 assert(/const showFounder = founder && section === 'founder';/.test(SCREEN)
-  && /\{showFounder \? \(/.test(SCREEN) && (SCREEN.match(/<FounderLabelReview\b/g) || []).length === 1,
-  '1d. FounderLabelReview mounts once, only under showFounder (founder AND the section)');
+  && /\{showFounder \? \(/.test(SCREEN) && (SCREEN.match(/<FounderReview\b/g) || []).length === 1
+  && !/<FounderLabelReview\b/.test(SCREEN),
+  '1d. the founder section (FounderReview, which hosts FounderLabelReview) mounts once, only under showFounder');
 for (const [name, src] of [['CalibrationScreen', SCREEN], ['FounderLabelReview', REVIEW], ['LabelBandBoard', BOARD], ['api/founder', API]]) {
   assert(!/founder\.review|useFlag\(|useFeatureFlags|FOUNDER_ACCOUNTS|tester_allowlist/.test(src),
     `1e. ${name} reads no flag and no local allow-list`);
