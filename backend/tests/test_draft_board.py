@@ -1184,6 +1184,11 @@ def mfl_league(monkeypatch):
         "platform_host": MFL_HOST, "platform_season": 2026,
         "platform_my_team": "0007", "user_id": OPERATOR,
     })
+    # OPERATOR's own binding to franchise 0007 (per-user since
+    # platform-league-binding), stubbed like the league row above.
+    monkeypatch.setattr(server, "platform_bound_teams", lambda lid, plat=None: {"0007": OPERATOR})
+    monkeypatch.setattr(server, "get_platform_binding", lambda uid, lid, plat=None: (
+        {"team_id": "0007", "team_id_int": 7, "platform": "mfl"} if uid == OPERATOR else None))
     # `username` is what the MFL link/re-sync writers actually store for every
     # franchise, linking or not (`server.py:20188`). Without it here, #289's
     # route assertion would pass on the `Team <fid>` fallback and prove

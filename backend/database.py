@@ -79,6 +79,31 @@ engine   = create_engine(DATABASE_URL, echo=False, future=True,
                             else _pg_engine_kwargs()))
 metadata = MetaData()
 
+from . import test_profile as _tp   # onboarding test profile: storage re-key + outbound chokepoint
+
+
+from sqlalchemy.engine import Engine as _SAEngine
+
+
+@sa_event.listens_for(_SAEngine, "before_execute")
+def _tp_write_fence(conn, clauseelement, multiparams, params, execution_options):
+    """Onboarding test profile, review M1: default-deny any write a test-profile
+    request makes under a league outside its namespace (test_profile.check_write).
+    Registered on the Engine CLASS so every engine — the three here and any a
+    test builds — carries it; a real request pays one contextvar read."""
+    _tp.check_write(clauseelement, multiparams, params)
+
+
+def _not_test_league(col):
+    """Background loaders over leagues never return an onboarding test
+    profile's `qa_tp:` league unless a caller asks for it by id (review M2)."""
+    return ~col.startswith(_tp.LEAGUE_PREFIX, autoescape=True)
+
+
+def _not_test_user(col):
+    """…nor a synthetic `qa_` user (Test Stages and the test profile)."""
+    return ~col.startswith("qa_", autoescape=True)
+
 # Silent prepared offers are private artifacts, not shown impressions. The
 # participant index covers every consumed manager, including non-app members.
 # Store operations live in prepared_trade_store; these additive tables are
@@ -606,7 +631,9 @@ leagues_table = Table("leagues", metadata,
     Column("platform",          String),  # 'sleeper' (default/NULL) | 'espn' | 'mfl' | 'fleaflicker'
     Column("espn_season",       Integer), # ESPN seasonId used at import (re-sync key)
     Column("espn_auth",         String),  # 'public' | 'cookie' — how the league was read
-    Column("espn_my_team_id",   Integer), # the linking user's ESPN team id (binding)
+    Column("espn_my_team_id",   Integer), # LEGACY: last linker's team id — read only by the
+                                          # bindings backfill; per-user binding lives in
+                                          # platform_league_bindings
     # ── Generic multi-platform linking (MFL / Fleaflicker; flags
     # `mfl.link` / `fleaflicker.link`) — plan
     # docs/plans/multi-platform-linking-plan-2026-07-17.md. Reuses this row
@@ -616,7 +643,7 @@ leagues_table = Table("leagues", metadata,
     Column("platform_season",   Integer), # season/year used at import (re-sync key)
     Column("platform_host",     String),  # MFL wwwNN host (NULL for others)
     Column("platform_auth",     String),  # 'public' | 'cookie'
-    Column("platform_my_team",  String),  # linking user's franchise/team key (string id)
+    Column("platform_my_team",  String),  # LEGACY: last linker's franchise — see espn_my_team_id
     Column("platform_future_picks", Text),# MFL/Fleaflicker futureDraftPicks stored raw
                                            # (JSON list) — NOT wired into the engine yet
                                            # (pick-inclusive trades = +M follow-up)
@@ -646,6 +673,13 @@ leagues_table = Table("leagues", metadata,
     # Season-stamped, so a future season resolves nothing (#273).
     # NULL = unresolved → owned picks keep today's generic round label.
     Column("draft_slot_order", Text),
+    # ── League median (Sleeper `settings.league_average_match`) ──────────
+    # 1 = every week also books a result against the league median score,
+    # 0 = head-to-head only, NULL = unknown (not a Sleeper league, or not
+    # synced since this column arrived). Written by upsert_league from the
+    # league payload session init already fetched; refreshed on every sync.
+    # Descriptive only: the playoff forecast reads the live setting.
+    Column("median_game", Integer),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -1077,6 +1111,24 @@ revised_offer_cards_table = Table("revised_offer_cards", metadata,
     Column("retired_reason",    String),                    # acted | unavailable
     UniqueConstraint("user_id", "outcome_id", name="uq_revised_offer_card_user_outcome"),
     Index("ix_revised_offer_cards_user_league", "user_id", "league_id"),
+)
+
+# ---------------------------------------------------------------------------
+# founder_rule_notes — a founder's comment or question on one yes/no rule
+# ---------------------------------------------------------------------------
+# Founders' review, use case 2 (docs/plans/founder-review/rule-waterfall-design.md
+# §5). Append-only history: every save adds a row and the newest row per
+# rule_key is the current note (an empty body clears it), so a question is
+# never lost to an edit. rule_key must name a backend/rule_catalog.py rule.
+# Deleted and exported with the author's account
+# (accounts._ADDITIONAL_PRIVATE_TABLES).
+founder_rule_notes_table = Table("founder_rule_notes", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("rule_key",   String,  nullable=False),   # rule_catalog.RULES[].key
+    Column("user_id",    String,  nullable=False),   # ACCOUNT id of the founder who wrote it
+    Column("body",       Text,    nullable=False),   # free text, <= FOUNDER_NOTE_MAX_CHARS; "" clears
+    Column("created_at", String,  nullable=False),   # ISO-8601 UTC, when this version was saved
+    Index("ix_founder_rule_notes_rule", "rule_key", "id"),
 )
 
 # ---------------------------------------------------------------------------
@@ -2382,8 +2434,8 @@ usage_player_weeks_table = Table("usage_player_weeks", metadata,
 # (see the orphaned-pick notes below), so a user_id-derived key would split
 # one team's season into partial charts with no error anywhere.
 # owner_user_id is a nullable, RE-STAMPABLE attribute — resolved forward
-# via leagues.espn_my_team_id / platform_my_team when a manager later
-# links. The re-stamp does not violate append-only: the FACT ("team T held
+# via the manager's platform_league_bindings row when they later
+# link. The re-stamp does not violate append-only: the FACT ("team T held
 # roster R in period P") never changes; only our knowledge of who was
 # behind T does.
 #
@@ -2969,6 +3021,39 @@ platform_write_moves_table = Table("platform_write_moves", metadata,
 # Folds into the auth epic's `linked_sources` when that lands.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# platform_league_bindings — "this app user manages this team in this linked
+# ESPN / MFL / Fleaflicker league" (docs/plans/platform-league-binding/).
+# ---------------------------------------------------------------------------
+# One row per (user_id, league_id). The leagues row and league_members stay
+# ONE shared copy per league (name, format, every team's roster); the binding
+# is per user, because league-mates link the same league. Before this table
+# the binding lived on the shared leagues row (espn_my_team_id /
+# platform_my_team, last writer wins) and in which league_members row carried
+# the linker's real id (replaced wholesale by every import), so a second user's
+# link silently rebound or unlisted the first user.
+#
+# WRITTEN ONLY by that user's own link (upsert_espn_league /
+# upsert_platform_league, called from the link routes with the caller's
+# chosen team) and by the one-time evidence-gated backfill
+# (backfill_platform_league_bindings). Never by another user's link/import.
+# READ ONLY through get_platform_binding / platform_bound_teams (the seam test
+# test_platform_league_binding.py::test_binding_columns_have_one_reader pins it).
+# team_id is the platform-native id as a string (ESPN teamId, MFL franchise id,
+# Fleaflicker team id). source: 'link' | 'backfill'. created_at is kept on
+# re-link: the earliest binder labels a co-owned team in league_members.
+# User-keyed: deleted and exported with the account (accounts.py).
+platform_league_bindings_table = Table("platform_league_bindings", metadata,
+    Column("user_id",    String, primary_key=True),   # FTF user_id
+    Column("league_id",  String, primary_key=True),   # leagues.sleeper_league_id (platform-native)
+    Column("platform",   String, nullable=False),     # 'espn' | 'mfl' | 'fleaflicker'
+    Column("team_id",    String, nullable=False),     # platform-native team id, as text
+    Column("source",     String, nullable=False),     # 'link' | 'backfill'
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+    Index("ix_plb_league", "league_id"),
+)
+
 espn_credentials_table = Table("espn_credentials", metadata,
     Column("user_id",           String, primary_key=True),  # FTF user_id (one link per user)
     Column("swid",              String),                     # braced GUID — ESPN member id
@@ -3548,6 +3633,59 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
+# Founders' review (docs/plans/founder-review/design.md §3): the founder's label
+# override per player for the win-now season signal. One row per (player, scope):
+# scope is `all` for RB / WR / TE (global per player) and the league QB format for a
+# QB (`superflex` or `single_qb`, operator ruling 2026-11-12); any position can take
+# a narrower scope later (e.g. TE premium) without a migration. The label is a VALUE
+# in a closed vocabulary (season_value.OVERRIDE_LABELS), never per-label booleans, so
+# a multi-label model widens the key to (player_id, scope, label). Deleting the row
+# returns the player to the engine's label in that scope. Read by
+# server._season_evidence (every row, once per usable season-evidence build); written
+# only by POST /api/founder/labels. New table: metadata.create_all creates it.
+# Account deletion anonymizes set_by and keeps the judgment (accounts.py).
+founder_label_overrides_table = Table("founder_label_overrides", metadata,
+    Column("player_id", String, primary_key=True),   # Sleeper player id (QB/RB/WR/TE)
+    Column("scope",     String, primary_key=True),   # all | superflex | single_qb
+    Column("label",     String, nullable=False),     # cornerstone | win_now | rebuild | depth
+    Column("set_by",    String, nullable=False),     # the founder's account id (sess["user_id"])
+    Column("set_at",    String, nullable=False),     # ISO UTC; moves only when the label changes
+)
+
+
+def load_founder_label_overrides() -> list:
+    """[(player_id, scope, label)] for every stored founder override."""
+    t = founder_label_overrides_table
+    with engine.connect() as conn:
+        return [(str(r.player_id), r.scope, r.label)
+                for r in conn.execute(select(t.c.player_id, t.c.scope, t.c.label))]
+
+
+def save_founder_label_overrides(to_set: dict, to_clear, *, set_by: str) -> dict:
+    """Upsert `to_set` ({(player_id, scope): label}) and delete `to_clear`
+    ([(player_id, scope)]) in ONE transaction. Idempotent: an unchanged label keeps
+    its row (and set_at) untouched. Returns {"set": rows written, "cleared": rows deleted}."""
+    t = founder_label_overrides_table
+    now = datetime.now(timezone.utc).isoformat()
+    written = cleared = 0
+    with engine.begin() as conn:
+        current = {(str(r.player_id), r.scope): r.label for r in conn.execute(
+            select(t.c.player_id, t.c.scope, t.c.label).where(
+                t.c.player_id.in_(sorted({pid for pid, _ in to_set}) or [""])))}
+        for (pid, scope), label in sorted(to_set.items()):
+            if current.get((pid, scope)) == label:
+                continue
+            if (pid, scope) in current:
+                conn.execute(update(t).where(t.c.player_id == pid, t.c.scope == scope)
+                             .values(label=label, set_by=set_by, set_at=now))
+            else:
+                conn.execute(insert(t).values(player_id=pid, scope=scope, label=label,
+                                              set_by=set_by, set_at=now))
+            written += 1
+        for pid, scope in sorted(set(to_clear)):
+            cleared += conn.execute(delete(t).where(t.c.player_id == pid, t.c.scope == scope)).rowcount or 0
+    return {"set": written, "cleared": cleared}
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -3816,6 +3954,14 @@ _MODEL_CONFIG_DEFAULTS = [
     # / 2028 1st 1459 vs a 2184.6 current-year mid, measured on prod
     # 2026-08-24). 0 = pure market, the deploy-free revert to pre-D-161.
     ("market_r1_yoy_floor", 1.00, "D-161: a FUTURE-season 1st-round pick never prices below this fraction of the CURRENT class's round-1 market price (1.0 = firsts hold value YoY, operator re-ruling 2026-08-24). 0 = pure DynastyProcess curve, byte-identical to pre-D-161. Rounds 2-4 untouched"),
+    # ── Projected slot value (flag picks.projected_slot_value) ───────────
+    # docs/plans/pick-value-projected-slot/design.md. A next-draft 1st priced
+    # by its ORIGINAL team's projected slot from the saved league forecast.
+    ("pick_projection_weight",        1.00, "picks.projected_slot_value: strength of the adjustment, value = generic x (1 + weight x (ratio - 1)). 1 = full strength (matches DP's Early/Late 1st spread). 0 = every pick prices exactly as without the feature (deploy-free rollback)"),
+    ("pick_projection_season_scaling", 0.0, "picks.projected_slot_value: 0 (operator ruling 2026-11-11) = full weight once min_weeks passes; 1 = also multiply by completed / regular-season weeks (the original weeks-played ramp); between blends the two"),
+    ("pick_projection_min_weeks",     3.0,  "picks.projected_slot_value: no adjustment before this many completed regular-season weeks"),
+    ("pick_projection_max_age_days",  8.0,  "picks.projected_slot_value: a forecast run older than this is ignored, unless it had at most one regular-season week left"),
+    ("pick_projection_max_round",     1.0,  "picks.projected_slot_value: rounds above this stay generic"),
     # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
     # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
     # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.
@@ -3866,6 +4012,12 @@ _MODEL_CONFIG_DEFAULTS = [
     ("owner_bilateral_revision_enabled", 0.0, "Bilateral revision selector: exactly 1 selects owner-v2-bilateral-2 when bilateral is selected; 0 retains/restores owner-v2-bilateral-1; other arms and serving settings unchanged"),
     ("owner_outlook_evidence_enabled", 0.0, "Evidence-bound outlook candidate: exactly 1 selects owner-v2-bilateral-3 only when bilateral and revision selectors are both enabled; 0 restores revision 2; no automatic activation"),
     ("owner_bilateral_revision_4_enabled", 0.0, "Bilateral revision 4 (owner-v2-bilateral-4, built on revision 2): exactly 1 selects it when bilateral and revision selectors are both enabled, and it wins over owner_outlook_evidence_enabled; any other value leaves the revision 2/3 selection unchanged; no automatic activation"),
+    ("owner_bilateral_revision_5_enabled", 0.0, "Bilateral revision 5 (owner-v2-bilateral-5, win-now season signal, built on revision 2): exactly 1 selects it when bilateral and revision selectors are both enabled, and it wins over the revision 3 and 4 selectors; any other value leaves the revision 2/3/4 selection unchanged; no automatic activation"),
+    ("season_conflict_demotion", 0.10, "Revision 5 only: support taken from both sides of a card that works against the viewer's saved plan and qualified through the viewer's own rankings (order only, never inventory or terms); 0 = flagged and stated, not pushed down"),
+    ("season_partner_matching", 0.0, "Revision 5 only: 1 = stage 2, the season label table also reads every league-mate's plan fit (seller-buyer matching); 0 = the viewer only"),
+    ("season_shed_weight_tanking", 1.0, "Revision 5 only: a Tanking team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
+    ("season_shed_weight_rebuilding", 0.5, "Revision 5 only: a Rebuilding team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
+    ("owner_untouchable_hard", 1.0, "Owner-family generators (owner-v1, bilateral 1-4): 1 = Keep/untouchable is a hard rule, a generated card never sends a manager's untouchable unless the viewer pinned it on their own give side; 0 = the premium-return rule (an untouchable leaves only for a market gain with a same-position return); any other value reads as 1"),
     ("prepared_trade_inventory_enabled", 0.0, "Silent durable prepared trade inventory: exactly 1 enables preparation/adoption with the registered capability; default 0, no model or offer-limit changes"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
@@ -4320,6 +4472,9 @@ def _migrate_db() -> None:
         ("leagues",            "draft_status",          "VARCHAR"),
         ("leagues",            "draft_status_confidence", "VARCHAR"),
         ("leagues",            "draft_status_checked_at", "VARCHAR"),
+        # League median setting (docs/plans/league-projections/median-leagues-scope.md).
+        # NULL on every existing row until that league's next sync; no backfill.
+        ("leagues",            "median_game",           "INTEGER"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -4453,6 +4608,16 @@ def _migrate_db() -> None:
 
     # #258 — entity-decode MFL names stored before #210's import-time cleaning
     _backfill_mfl_name_entities()
+
+    # Per-user platform-league bindings (docs/plans/platform-league-binding/)
+    # — derive each pre-existing ESPN/MFL/Fleaflicker binding from evidence
+    # that still holds; leagues already carrying a binding are skipped, so
+    # every boot after the first is a no-op. Never fails the boot.
+    try:
+        n = backfill_platform_league_bindings()
+        print(f"[backfill] platform_league_bindings: {n}")
+    except Exception as e:
+        print(f"[backfill] platform_league_bindings skipped: {e}")
 
     # #562 re-QA P2-B — Calibration cards built before grading_cards.
     # partner_user_id get it while their deck rows and names are still live.
@@ -5769,10 +5934,14 @@ def load_leaderboard(
             return {"metric": metric, "window": window, "league_id": league_id,
                     "rows": [], "self_row": None}
 
+    # Synthetic QA users (qa_*: Test Stages, the onboarding test profile) are
+    # never on a board; over-fetch a little so dropping them keeps `limit`.
+    fetch = limit + 10
     if metric == "streak":
-        top = _streak_top(league_user_ids, limit)
+        top = _streak_top(league_user_ids, fetch)
     else:
-        top = _rank_count_top(_window_since(window), league_user_ids, limit)
+        top = _rank_count_top(_window_since(window), league_user_ids, fetch)
+    top = [(uid, val) for uid, val in top if not str(uid).startswith("qa_")][:limit]
 
     if not top:
         return {"metric": metric, "window": window, "league_id": league_id,
@@ -6970,6 +7139,14 @@ def get_unlocked_formats(user_id: str) -> list[str]:
 # League operations
 # ---------------------------------------------------------------------------
 
+def league_median_setting(meta) -> int | None:
+    """1/0 from a Sleeper league payload's `settings.league_average_match`;
+    None when the payload or the key is absent or not 0/1 (never guessed)."""
+    settings = meta.get("settings") if isinstance(meta, dict) else None
+    value = settings.get("league_average_match") if isinstance(settings, dict) else None
+    return value if type(value) is int and value in (0, 1) else None
+
+
 def upsert_league(
     league_id: str,
     user_id: str,
@@ -6981,6 +7158,7 @@ def upsert_league(
     platform: str | None = None,
     require_user: bool = False,
     only_if_exists: bool = False,
+    median_game: int | None = None,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -7005,6 +7183,9 @@ def upsert_league(
     raises AccountGone when that row is gone) and, for a row it found at its
     start or a platform league's, `only_if_exists`: update only, so a row an
     account deletion removed in between is never re-created.
+
+    `median_game` (1/0, see `league_median_setting`) is written on insert and
+    refreshed on every update that knows it; None leaves the stored value.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -7020,7 +7201,9 @@ def upsert_league(
         "created_at":        now,
         "updated_at":        now,
         "platform":          platform,
+        "median_game":       median_game,
     }
+    refresh = {"median_game": median_game} if median_game is not None else {}
 
     with engine.begin() as conn:
         if require_user:
@@ -7028,7 +7211,7 @@ def upsert_league(
         if only_if_exists:
             conn.execute(update(leagues_table)
                          .where(leagues_table.c.sleeper_league_id == league_id)
-                         .values(name=name, updated_at=now))
+                         .values(name=name, updated_at=now, **refresh))
             return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
@@ -7043,6 +7226,7 @@ def upsert_league(
             set_={
                 "name":       stmt.excluded.name,
                 "updated_at": stmt.excluded.updated_at,
+                **({"median_game": stmt.excluded.median_game} if refresh else {}),
             },
         )
         conn.execute(stmt)
@@ -7954,7 +8138,9 @@ def load_active_deck_user_leagues(days: int = 30) -> list[dict]:
             rows = conn.execute(
                 select(tbl.c.user_id, tbl.c.league_id)
                 .where(and_(ts_col >= cutoff,
-                            tbl.c.league_id != "league_demo"))
+                            tbl.c.league_id != "league_demo",
+                            _not_test_league(tbl.c.league_id),
+                            _not_test_user(tbl.c.user_id)))
                 .distinct()
             ).fetchall()
             for r in rows:
@@ -10066,6 +10252,9 @@ def load_global_like_rate(days: int = 30) -> tuple[int, int]:
         .where(and_(
             trade_decisions_table.c.decision.in_(("like", "pass")),
             trade_decisions_table.c.created_at >= cutoff,
+            # Synthetic QA users (qa_*: Test Stages, the onboarding test
+            # profile) never move a product-wide learning signal.
+            ~trade_decisions_table.c.user_id.startswith("qa_", autoescape=True),
         ))
         .group_by(trade_decisions_table.c.decision)
     )
@@ -10527,7 +10716,9 @@ def count_archetype_engagement(
             like_alias.c.action == "like",
         )).exists()
     )
-    conds = [deck_impressions_table.c.archetype == archetype, has_viewed]
+    conds = [deck_impressions_table.c.archetype == archetype, has_viewed,
+             # Synthetic QA users (qa_*) never move the global audition pool.
+             ~deck_impressions_table.c.user_id.startswith("qa_", autoescape=True)]
     if since_iso:
         conds.append(deck_impressions_table.c.served_at >= since_iso)
     q_viewed = (select(func.count())
@@ -10769,7 +10960,7 @@ def upsert_league_members(league_id: str, members: list[dict]) -> None:
     rows = [
         {
             "league_id":    league_id,
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -10977,7 +11168,8 @@ def write_session_init_members(league_id: str, members: list[dict], *, user_id: 
     writes again (the deletion matrix).
     """
     now = _now()
-    rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
+    rows = [{"league_id": str(league_id),
+             "user_id": _tp.masked_member_id(league_id, str(m["user_id"])),
              "username": m.get("username", ""),
              "display_name": m.get("display_name") or m.get("username", ""),
              "roster_data": json.dumps(m.get("player_ids", [])), "updated_at": now}
@@ -12369,6 +12561,9 @@ def create_trade_match(
     the match itself is the product event and must not fail on an audit
     field.
     """
+    for _uid in (user_a_id, user_b_id):
+        if _tp.outbound_blocked(_uid, league_id=league_id, payload=user_a_id, kind="trade_match"):
+            raise _tp.OutboundBlocked("trade match touching the onboarding test profile")
     now = _now()
     latency = None
     if first_like_at:
@@ -13768,7 +13963,8 @@ def load_league_ids_for_draft_status_refresh(
     ACTIVE_LEAGUE_WINDOW_DAYS); pass `active_within_days=None` for all of them.
     """
     cutoff = _active_league_cutoff(active_within_days)
-    q = select(leagues_table.c.sleeper_league_id)
+    q = select(leagues_table.c.sleeper_league_id).where(
+        _not_test_league(leagues_table.c.sleeper_league_id))
     if cutoff is not None:
         q = q.where(leagues_table.c.updated_at >= cutoff)
     with engine.connect() as conn:
@@ -14898,6 +15094,8 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
+    if _tp.outbound_blocked(user_id, payload=metadata, kind=type_):
+        return {"id": None, "user_id": user_id, "type": type_, "blocked": True}
     supplied_conn = conn
     row = {
         "user_id":       user_id,
@@ -14994,6 +15192,8 @@ def create_or_coalesce_league_join_notification(
     Returns the row dict, or None on failure (never raises — an inbox
     write must not be able to fail a session_init).
     """
+    if _tp.outbound_blocked(user_id, league_id=league_id, kind="league_member_joined"):
+        return None
     if not user_id or not league_id:
         return None
     day_start = datetime.now(timezone.utc).replace(
@@ -15594,6 +15794,9 @@ def claim_referral(referral_id: int, referred_user_id: str, method: str, *, conn
     One conditional UPDATE, so two concurrent first sessions can't both
     claim it. False when the row was already claimed (or isn't pending), or
     when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    if _tp.is_test_profile_id(referred_user_id) or _tp.is_test_profile_id(_tp.ACTOR.get()):
+        _tp.outbound_blocked("referrer", payload=referred_user_id, kind="referral_credit")
+        return False
     supplied_conn = conn
     from sqlalchemy.exc import IntegrityError
     r = referrals_table
@@ -16066,11 +16269,12 @@ def load_history_sweep_leagues(
     try:
         lq = select(lt.c.sleeper_league_id, lt.c.platform,
                     lt.c.default_scoring, lt.c.user_id,
-                    lt.c.espn_auth, lt.c.espn_season, lt.c.espn_my_team_id,
+                    lt.c.espn_auth, lt.c.espn_season,
                     lt.c.platform_auth, lt.c.platform_season,
-                    lt.c.platform_host, lt.c.platform_my_team)
+                    lt.c.platform_host)
         if cutoff is not None:
             lq = lq.where(lt.c.updated_at >= cutoff)
+        lq = lq.where(_not_test_league(lt.c.sleeper_league_id))
         with engine.connect() as conn:
             leagues = conn.execute(lq).fetchall()
             done = {
@@ -17071,6 +17275,12 @@ def upsert_espn_league(league_id: str, user_id: str, name: str,
     league metadata AND the ESPN binding columns (season / auth mode / the
     linking user's team id). `league_id` is the numeric ESPN league id
     stored in the sleeper_league_id PK column (see leagues_table comments).
+
+    `user_id` ↔ `espn_my_team_id` is written as THAT user's own row in
+    platform_league_bindings (the per-user binding every reader uses). The
+    leagues.espn_my_team_id column is still written — legacy, last writer
+    wins, read only by the backfill — so a rollback keeps working. Callers
+    pass the SESSION user and THEIR team only (never the row's linker).
     """
     now = _now()
     row = {
@@ -17107,6 +17317,7 @@ def upsert_espn_league(league_id: str, user_id: str, name: str,
             },
         )
         conn.execute(stmt)
+        _upsert_platform_binding(conn, user_id, league_id, "espn", espn_my_team_id)
 
 
 def get_espn_league(league_id: str) -> dict | None:
@@ -17132,12 +17343,19 @@ def replace_espn_league_members(league_id: str, members: list[dict]) -> None:
     transaction) so teams that vanish from ESPN don't leave stale rows —
     unlike Sleeper leagues, ESPN membership has no other writer to
     reconcile against.
+
+    Every team an app user is bound to (platform_league_bindings) is
+    labelled with that user's id, whoever's link or re-sync is writing — so
+    league-mate A's team keeps A's id when B imports (it used to become a
+    synthetic id, unlisting the league for A). Platform members only (their
+    dicts carry an `espn:`/`mfl:`/`fleaflicker:` team_key); Sleeper snapshots
+    (replace_league_members_snapshot) carry none and are untouched.
     """
     now = _now()
     rows = [
         {
             "league_id":    str(league_id),
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -17151,6 +17369,7 @@ def replace_espn_league_members(league_id: str, members: list[dict]) -> None:
             delete(league_members_table)
             .where(league_members_table.c.league_id == str(league_id))
         )
+        _label_bound_teams(conn, league_id, members, rows)
         if rows:
             conn.execute(insert(league_members_table), rows)
 
@@ -17159,36 +17378,24 @@ def load_espn_leagues_for_user(user_id: str) -> list[dict]:
     """Return every ESPN-imported league this user is bound to, with the
     full membership snapshot (rosters already in Sleeper player-id space) so
     the mobile client can build a standard /api/session/init payload.
+
+    "Bound" = the user's own platform_league_bindings row; `my_team_id` is
+    that row's team and the member carrying the caller's id is that team.
+    No binding → the league is not listed (fail closed, never another
+    user's team).
     """
-    if not user_id:
-        return []
-    with engine.connect() as conn:
-        member_rows = conn.execute(
-            select(league_members_table.c.league_id).where(
-                league_members_table.c.user_id == user_id
-            )
-        ).fetchall()
-        league_ids = sorted({r.league_id for r in member_rows})
-        if not league_ids:
-            return []
-        league_rows = conn.execute(
-            select(leagues_table).where(
-                (leagues_table.c.sleeper_league_id.in_(league_ids)) &
-                (leagues_table.c.platform == "espn")
-            )
-        ).fetchall()
     out = []
-    for lg in league_rows:
-        m = dict(lg._mapping)
+    for m, binding in _bound_league_rows(user_id, "espn"):
         out.append({
             "league_id":      m["sleeper_league_id"],
             "name":           m.get("name"),
             "platform":       "espn",
             "season":         m.get("espn_season"),
             "espn_auth":      m.get("espn_auth"),
-            "my_team_id":     m.get("espn_my_team_id"),
+            "my_team_id":     binding["team_id_int"],
             "total_rosters":  m.get("total_rosters"),
-            "members":        load_league_members(m["sleeper_league_id"]),
+            "members":        _members_as_seen_by(user_id, m["sleeper_league_id"],
+                                                  binding),
         })
     return out
 
@@ -17213,7 +17420,12 @@ def upsert_platform_league(league_id: str, user_id: str, name: str, platform: st
     the league metadata AND the generic binding columns (season / host / auth /
     the linking user's team key) on re-link. `future_picks` is stored raw as a
     JSON list (MFL/Fleaflicker) for the pick-inclusive follow-up; it is NOT
-    read by the trade engine today."""
+    read by the trade engine today.
+
+    `user_id` ↔ `my_team` is written as that user's own
+    platform_league_bindings row (see upsert_espn_league): callers pass the
+    SESSION user and THEIR team. leagues.platform_my_team is legacy (last
+    writer wins, read only by the backfill)."""
     now = _now()
     row = {
         "sleeper_league_id": str(league_id),
@@ -17253,6 +17465,7 @@ def upsert_platform_league(league_id: str, user_id: str, name: str, platform: st
             },
         )
         conn.execute(stmt)
+        _upsert_platform_binding(conn, user_id, league_id, platform, my_team)
 
 
 def set_platform_future_picks(league_id: str, future_picks: list) -> None:
@@ -17294,26 +17507,8 @@ def load_platform_leagues_for_user(user_id: str, platform: str) -> list[dict]:
     """Return every linked league of `platform` this user is bound to, with
     the full membership snapshot (rosters already in Sleeper player-id space)
     so the mobile client can build a standard /api/session/init payload."""
-    if not user_id:
-        return []
-    with engine.connect() as conn:
-        member_rows = conn.execute(
-            select(league_members_table.c.league_id).where(
-                league_members_table.c.user_id == user_id
-            )
-        ).fetchall()
-        league_ids = sorted({r.league_id for r in member_rows})
-        if not league_ids:
-            return []
-        league_rows = conn.execute(
-            select(leagues_table).where(
-                (leagues_table.c.sleeper_league_id.in_(league_ids)) &
-                (leagues_table.c.platform == platform)
-            )
-        ).fetchall()
     out = []
-    for lg in league_rows:
-        m = dict(lg._mapping)
+    for m, binding in _bound_league_rows(user_id, platform):
         out.append({
             "league_id":      m["sleeper_league_id"],
             "name":           m.get("name"),
@@ -17321,11 +17516,246 @@ def load_platform_leagues_for_user(user_id: str, platform: str) -> list[dict]:
             "season":         m.get("platform_season"),
             "host":           m.get("platform_host"),
             "auth":           m.get("platform_auth"),
-            "my_team":        m.get("platform_my_team"),
+            "my_team":        binding["team_id"],
             "total_rosters":  m.get("total_rosters"),
-            "members":        load_league_members(m["sleeper_league_id"]),
+            "members":        _members_as_seen_by(user_id, m["sleeper_league_id"],
+                                                  binding),
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Per-user platform-league binding (platform_league_bindings) — the ONE
+# accessor for "which team in this linked ESPN / MFL / Fleaflicker league is
+# this user's". docs/plans/platform-league-binding/design.md.
+# ---------------------------------------------------------------------------
+
+_BINDING_PLATFORMS = ("espn", "mfl", "fleaflicker")
+# Synthetic (non-app-user) member ids the importers mint for teams nobody in
+# the app is bound to: server._espn_member_id / _mfl_member_id /
+# _flea_member_id. Anything else in league_members.user_id is an app user.
+_SYNTHETIC_MEMBER_PREFIXES = ("espn:", "mfl:", "flea:", "fleaflicker:")
+_TEAM_KEY_FORMAT = {"espn": "espn:{lid}.t{tid}", "mfl": "mfl:{lid}.f{tid}",
+                    "fleaflicker": "fleaflicker:{lid}.t{tid}"}
+_SYNTHETIC_TEAM_ID = {"espn": "espn:{lid}.t{tid}", "mfl": "mfl:{lid}.f{tid}",
+                      "fleaflicker": "flea:{lid}.t{tid}"}
+
+
+def is_synthetic_member_id(user_id) -> bool:
+    """True for an importer-minted id (a team no app user is bound to)."""
+    return str(user_id or "").startswith(_SYNTHETIC_MEMBER_PREFIXES)
+
+
+def platform_team_key(platform: str, league_id, team_id) -> str:
+    """ADR-011's platform-native team slot key — the `team_key` the import
+    sites thread through their member dicts."""
+    return _TEAM_KEY_FORMAT[platform].format(lid=league_id, tid=team_id)
+
+
+def _binding_dict(row) -> dict:
+    d = dict(row._mapping)
+    d["team_id"] = str(d["team_id"])
+    try:
+        d["team_id_int"] = int(d["team_id"])
+    except (TypeError, ValueError):
+        d["team_id_int"] = None
+    return d
+
+
+def _upsert_platform_binding(conn, user_id, league_id, platform, team_id,
+                             source: str = "link") -> None:
+    """Write THIS user's own binding. Only link writers and the backfill call
+    this; a re-link moves the caller's own row and nobody else's. created_at
+    is kept on update (it orders co-owner labels)."""
+    if not user_id or team_id is None or str(team_id) == "":
+        return
+    now = _now()
+    t = platform_league_bindings_table
+    stmt = _dialect_insert(conn)(t).values(
+        user_id=str(user_id), league_id=str(league_id), platform=platform,
+        team_id=str(team_id), source=source, created_at=now, updated_at=now)
+    conn.execute(stmt.on_conflict_do_update(
+        index_elements=["user_id", "league_id"],
+        set_={"platform": stmt.excluded.platform, "team_id": stmt.excluded.team_id,
+              "source": stmt.excluded.source, "updated_at": stmt.excluded.updated_at}))
+
+
+def get_platform_binding(user_id, league_id, platform: str | None = None) -> dict | None:
+    """THE accessor for "my team" in a linked platform league.
+
+    Returns {user_id, league_id, platform, team_id (str), team_id_int (int or
+    None), source, created_at, updated_at}, or None when this user has no
+    binding for the league (or it is for another platform). None is final:
+    callers fail closed (league not theirs / re-link), never fall back to the
+    leagues row or another user's team."""
+    if not user_id or not league_id:
+        return None
+    t = platform_league_bindings_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.user_id == str(user_id),
+                                           t.c.league_id == str(league_id))).fetchone()
+    if row is None:
+        return None
+    b = _binding_dict(row)
+    if platform is not None and b["platform"] != platform:
+        return None
+    return b
+
+
+def _labels_from_binding_rows(league_id, rows) -> dict:
+    """{team_key: user_id} — each bound team labelled by its EARLIEST binder
+    (created_at, then user_id): one stable member row per team even when two
+    app accounts co-own it (backend/CLAUDE.md § Identity)."""
+    labels: dict = {}
+    # Onboarding test profile: member dicts carry the platform-NATIVE team
+    # key in a namespaced league too (`espn:<native>.t<n>`), so the label is
+    # keyed by the native id. A label never crosses worlds: a namespaced
+    # league is labelled only with its own test profile, a real league never
+    # with a test-world id (test_profile_linking pins both).
+    native = _tp.native_league_id(str(league_id))
+    owner = _tp.profile_of_league(league_id)
+    for r in sorted(rows, key=lambda r: (r.created_at or "", r.user_id)):
+        if owner is not None and r.user_id != owner:
+            continue
+        if owner is None and _tp.is_test_world_id(r.user_id):
+            continue
+        if r.platform in _TEAM_KEY_FORMAT:
+            labels.setdefault(platform_team_key(r.platform, native, r.team_id),
+                              r.user_id)
+    return labels
+
+
+def platform_bound_teams(league_id, platform: str | None = None) -> dict:
+    """{team_id (str): user_id} for every team an app user is bound to in this
+    league — the id the shared league_members snapshot carries for that team.
+    League-wide readers (franchise → member maps for picks, draft board,
+    standings order, the roster sweep) use this; "my team" uses
+    get_platform_binding."""
+    t = platform_league_bindings_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(t.c.league_id == str(league_id))).fetchall()
+    out: dict = {}
+    for r in sorted(rows, key=lambda r: (r.created_at or "", r.user_id)):
+        if platform is None or r.platform == platform:
+            out.setdefault(str(r.team_id), r.user_id)
+    return out
+
+
+def _label_bound_teams(conn, league_id, members, rows) -> None:
+    """In-transaction half of replace_espn_league_members: overwrite each
+    bound team's member id with its binder's id. `rows` parallels the
+    user_id-bearing `members`. No platform team_key → nothing to do (Sleeper)."""
+    keyed = [m for m in members if m.get("user_id")]
+    if not any(str(m.get("team_key") or "").startswith(("espn:", "mfl:", "fleaflicker:"))
+               for m in keyed):
+        return
+    t = platform_league_bindings_table
+    labels = _labels_from_binding_rows(league_id, conn.execute(
+        select(t).where(t.c.league_id == str(league_id))).fetchall())
+    for m, row in zip(keyed, rows):
+        label = labels.get(str(m.get("team_key") or ""))
+        if label:
+            row["user_id"] = label
+
+
+def _bound_league_rows(user_id, platform: str) -> list:
+    """[(leagues row dict, binding)] for every league of `platform` this user
+    holds a binding for, ordered by league id."""
+    if not user_id:
+        return []
+    t, lt = platform_league_bindings_table, leagues_table
+    with engine.connect() as conn:
+        bindings = {r.league_id: _binding_dict(r) for r in conn.execute(
+            select(t).where(t.c.user_id == str(user_id), t.c.platform == platform))}
+        if not bindings:
+            return []
+        league_rows = conn.execute(select(lt).where(
+            lt.c.sleeper_league_id.in_(sorted(bindings)) & (lt.c.platform == platform)
+        ).order_by(lt.c.sleeper_league_id)).fetchall()
+    return [(dict(r._mapping), bindings[r.sleeper_league_id]) for r in league_rows]
+
+
+def _members_as_seen_by(user_id, league_id, binding) -> list[dict]:
+    """The shared membership snapshot with the viewer's bound team carrying
+    the viewer's id (what the clients look for: `m.user_id === me`). The
+    stored label is the team's earliest binder, so a co-owning second app
+    account sees its team relabelled; a snapshot that predates the viewer's
+    binding is matched by the team's synthetic id. Nothing matches → no row
+    is the viewer's (fail closed: the client asks to re-link)."""
+    members = load_league_members(league_id)
+    if any(m.get("user_id") == user_id for m in members):
+        return members
+    platform, tid = binding["platform"], binding["team_id"]
+    candidates = {platform_bound_teams(league_id).get(tid)}
+    if platform in _SYNTHETIC_TEAM_ID:
+        candidates.add(_SYNTHETIC_TEAM_ID[platform].format(lid=league_id, tid=tid))
+    candidates.discard(None)
+    for m in members:
+        if m.get("user_id") in candidates:
+            m["user_id"] = user_id
+            break
+    return members
+
+
+def backfill_platform_league_bindings() -> dict:
+    """One-time, evidence-gated derivation of bindings that existed before
+    platform_league_bindings did. Runs at every boot from _migrate_db;
+    idempotent and non-destructive:
+
+      * only leagues with NO binding row yet are considered (anything the new
+        link code has touched is skipped, so a second boot derives nothing);
+      * the derived pair is (the ONE app user in league_members, the leagues
+        row's legacy team column). Every legacy writer set both in the same
+        request (the link stored caller ↔ chosen team; a re-sync kept the
+        team and re-labelled the caller), so they are the LAST linker's pair;
+      * zero or several app-user members → nothing derived (the first user's
+        binding was overwritten: they are asked to re-link); ESPN only — the
+        candidate's own SWID labelling a DIFFERENT team (`espn:{SWID}`) proves
+        the pair wrong → nothing derived;
+      * INSERT … ON CONFLICT DO NOTHING: never overwrites a binding a link
+        wrote meanwhile (deploy overlap), and never touches leagues /
+        league_members rows.
+    Returns counts (aggregates only)."""
+    counts = {"considered": 0, "bound": 0, "has_binding": 0, "no_team": 0,
+              "not_exactly_one_member": 0, "swid_conflict": 0}
+    lt, t, mt = leagues_table, platform_league_bindings_table, league_members_table
+    with engine.begin() as conn:
+        bound = set(conn.execute(select(t.c.league_id).distinct()).scalars())
+        leagues = conn.execute(select(
+            lt.c.sleeper_league_id, lt.c.platform, lt.c.espn_my_team_id,
+            lt.c.platform_my_team).where(lt.c.platform.in_(_BINDING_PLATFORMS))).fetchall()
+        for lg in leagues:
+            lid, platform = lg.sleeper_league_id, lg.platform
+            counts["considered"] += 1
+            if lid in bound:
+                counts["has_binding"] += 1
+                continue
+            team = lg.espn_my_team_id if platform == "espn" else lg.platform_my_team
+            if team is None or str(team).strip() == "":
+                counts["no_team"] += 1
+                continue
+            member_ids = set(conn.execute(select(mt.c.user_id).where(
+                mt.c.league_id == lid)).scalars())
+            real = sorted(u for u in member_ids if u and not is_synthetic_member_id(u))
+            if len(real) != 1:
+                counts["not_exactly_one_member"] += 1
+                continue
+            if platform == "espn":
+                swid = conn.execute(select(espn_credentials_table.c.swid).where(
+                    espn_credentials_table.c.user_id == real[0])).scalar()
+                norm = lambda s: str(s or "").strip().strip("{}").upper()
+                if swid and norm(swid) in {norm(u[len("espn:"):]) for u in member_ids
+                                           if str(u).startswith("espn:")}:
+                    counts["swid_conflict"] += 1
+                    continue
+            now = _now()
+            res = conn.execute(_dialect_insert(conn)(t).values(
+                user_id=real[0], league_id=lid, platform=platform,
+                team_id=str(team).strip(), source="backfill",
+                created_at=now, updated_at=now).on_conflict_do_nothing(
+                index_elements=["user_id", "league_id"]))
+            counts["bound"] += res.rowcount or 0
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -17530,6 +17960,8 @@ def queue_notification(
     `dedup_key` is the original key from _send_typed_push; it gets
     threaded through the bundle drain so frequency caps remain accurate.
     """
+    if _tp.outbound_blocked(user_id, payload=data, kind=kind):
+        return
     if not user_id or not kind or not deliver_after:
         return
     try:
@@ -17606,6 +18038,7 @@ def load_pending_matches_older_than(cutoff_iso: str) -> list[dict]:
                 )
                 .where(trade_matches_table.c.status == "pending")
                 .where(trade_matches_table.c.matched_at < cutoff_iso)
+                .where(_not_test_league(trade_matches_table.c.league_id))
             ).fetchall()
         for r in rows:
             out.append(dict(r._mapping))
@@ -17659,6 +18092,9 @@ def load_all_signed_up_users() -> list[dict]:
                     users_table.c.last_rank_at,
                     users_table.c.unlocked_formats,
                 ).where(users_table.c.signup_at.is_not(None))
+                # Synthetic QA users (test_users.py qa_*, the onboarding test
+                # profile qa_tp_*) never get digests, reviews or re-engagement.
+                .where(~users_table.c.sleeper_user_id.startswith("qa_", autoescape=True))
             ).fetchall()
         for r in rows:
             d = dict(r._mapping)
@@ -19409,3 +19845,87 @@ def load_usage_weeks(season: int, weeks: list[int]) -> dict[int, tuple[dict, dic
                 "played": bool(m["played"]), "snaps": m["snaps"],
                 "carries": m["carries"], "targets": m["targets"]}
     return out
+
+
+# ---------------------------------------------------------------------------
+# founder_rule_notes — accessors (founder review, use case 2)
+# ---------------------------------------------------------------------------
+FOUNDER_NOTE_MAX_CHARS = 2000
+
+
+class FounderNoteError(ValueError):
+    """An unknown rule key or an over-long note; ``code`` is the route's error string."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _founder_author(user_id, viewer_id) -> str:
+    """Who wrote a note, as the client may see it: never an account id."""
+    return "you" if viewer_id is not None and str(user_id) == str(viewer_id) else "founder"
+
+
+def save_founder_rule_note(rule_key: str, body: str, author_id: str, *, now: str | None = None) -> dict:
+    """Add a new version of the note on ``rule_key`` (the newest version is current; ""
+    clears it). Rejects a key ``rule_catalog`` does not list (``unknown_rule``) and a body over
+    FOUNDER_NOTE_MAX_CHARS after trimming (``too_long``). Returns the rule's current note in
+    ``load_founder_rule_notes`` shape for the author."""
+    from . import rule_catalog
+    if not rule_catalog.is_known(rule_key):
+        raise FounderNoteError("unknown_rule")
+    if not isinstance(body, str):
+        raise FounderNoteError("invalid_body")
+    text = body.strip()
+    if len(text) > FOUNDER_NOTE_MAX_CHARS:
+        raise FounderNoteError("too_long")
+    if not author_id:
+        raise FounderNoteError("no_author")
+    with engine.begin() as conn:
+        conn.execute(insert(founder_rule_notes_table).values(
+            rule_key=rule_key, user_id=str(author_id), body=text, created_at=now or _now()))
+    return next(n for n in load_founder_rule_notes(viewer_id=author_id, include_empty=True)
+                if n["rule_key"] == rule_key)
+
+
+def load_founder_rule_notes(*, viewer_id: str | None = None, include_empty: bool = False) -> list[dict]:
+    """The current note per rule, in catalog order: {rule_key, rule_name, body, author,
+    updated_at, created_at, versions}. ``author`` is "you" when ``viewer_id`` wrote the current
+    version, else "founder" (an operator read passes no viewer); account ids never leave.
+    Rules with no note, or whose current version is empty, are omitted unless
+    ``include_empty``."""
+    from . import rule_catalog
+    t = founder_rule_notes_table
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(select(t).order_by(t.c.rule_key, t.c.id))]
+    by_key: dict[str, list[dict]] = {}
+    for row in rows:
+        by_key.setdefault(row["rule_key"], []).append(row)
+    out = []
+    for rule in rule_catalog.RULES:
+        history = by_key.get(rule.key)
+        if not history:
+            if include_empty:
+                out.append({"rule_key": rule.key, "rule_name": rule.name, "body": "", "author": None,
+                            "updated_at": None, "created_at": None, "versions": 0})
+            continue
+        current = history[-1]
+        if not current["body"] and not include_empty:
+            continue
+        out.append({"rule_key": rule.key, "rule_name": rule.name, "body": current["body"],
+                    "author": _founder_author(current["user_id"], viewer_id),
+                    "updated_at": current["created_at"], "created_at": history[0]["created_at"],
+                    "versions": len(history)})
+    return out
+
+
+def load_founder_rule_note_history(rule_key: str, *, viewer_id: str | None = None) -> list[dict]:
+    """Every version of one rule's note, oldest first: {body, author, created_at}."""
+    from . import rule_catalog
+    if not rule_catalog.is_known(rule_key):
+        raise FounderNoteError("unknown_rule")
+    t = founder_rule_notes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(t.c.rule_key == rule_key).order_by(t.c.id)).fetchall()
+    return [{"body": r._mapping["body"], "author": _founder_author(r._mapping["user_id"], viewer_id),
+             "created_at": r._mapping["created_at"]} for r in rows]

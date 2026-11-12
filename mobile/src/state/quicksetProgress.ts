@@ -43,7 +43,13 @@ let cachedFormat: string | null = null;
 export async function hydrateQuicksetProgress(): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    if (!raw) return;
+    if (!raw) {
+      // No snapshot on disk (fresh install, or a test-profile switch that
+      // just swapped storage): route like a fresh user, not from memory.
+      cachedSaved = [];
+      cachedFormat = null;
+      return;
+    }
     const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.saved)) {
       cachedSaved = parsed.saved.filter((p: unknown): p is string => typeof p === 'string');

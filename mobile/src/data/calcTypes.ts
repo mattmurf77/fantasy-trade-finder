@@ -42,4 +42,10 @@ export interface CalcPlayer {
    *  so `MemberEnteredMarker` renders nothing there. */
   pickSource?: PickSource | null;
   pickSeason?: number | null;
+  /** Projected draft slot, copied VERBATIM off `GET /api/league/picks`
+   *  (wire names kept so `utils/projectedPick` validates this object the
+   *  same way it validates the wire row). Only the In-league calculator sets
+   *  them; absent everywhere else. */
+  proj_slot?: string;
+  proj_name?: string;
 }

@@ -37,6 +37,13 @@ export interface Player {
   // FB-147 — true when this player is on the Sleeper trade block in the
   // card's league (flag sleeper.trade_block). Backend omits when absent.
   on_block?: boolean;
+  // Projected draft slot (docs/plans/pick-value-projected-slot/): a PICK
+  // asset priced by the original team's projected slot carries both, e.g.
+  // proj_slot "1.02", proj_name "2027 1.02 (from dondags)" — `name` then
+  // ends " · projected". Absent on every other asset and on old servers.
+  // Validate with utils/projectedPick before use; never parse either string.
+  proj_slot?: string;
+  proj_name?: string;
 }
 
 export interface Trio {
@@ -174,6 +181,28 @@ export interface FitBlock {
   teams: FitBlockTeam[];
 }
 
+// Win-now season signal (template season-1, backend/trade_narrative.py
+// season_block; docs/plans/win-now-season-signal/lld.md §5.2). Every string is
+// server-composed and printed verbatim; the numbers ride along for analytics
+// parity and are never re-rendered. Absent when the server has nothing to show.
+export interface SeasonLabel {
+  id: string;
+  label: string;
+  text: string;
+  starts_for_you: boolean;
+}
+export interface SeasonBlock {
+  v: 'season-1';
+  line?: string;
+  season_pts_week?: number;
+  dynasty_pct?: number;
+  dynasty_dir?: 'cost' | 'gain' | 'even';
+  weeks?: number;
+  as_of?: string | null;
+  labels?: SeasonLabel[];
+  conflict?: { code: string; text: string };
+}
+
 export interface TradeCard {
   trade_id: string;
   league_id: string;
@@ -274,6 +303,10 @@ export interface TradeCard {
   // only when a team has something to show; absent otherwise. The card
   // renders `text` and the rank numbers only and never switches on `code`.
   fit_block?: FitBlock;
+  // Win-now season signal (next build): the season line, per-asset label
+  // tags and the plan-conflict sentence. Normalised by normalizeSeasonBlock;
+  // an older server sends none and the card renders exactly as before.
+  season_block?: SeasonBlock;
   // WS8 revised-offer card (flag trade.next_move): the server led the deck
   // with this card because Sleeper showed the user's own offer declined
   // (`revision`) or the user declined the other manager's counter

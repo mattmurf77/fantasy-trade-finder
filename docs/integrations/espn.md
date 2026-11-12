@@ -244,9 +244,14 @@ handling lives in `backend/sleeper_write.py` (`_ENV_KEY` at line 41,
 `token_encryption_available()` line 107, `encrypt_token`/`decrypt_token` lines
 116/120), reused by `espn_service`/`server.py` rather than duplicated.
 
-Related league-binding columns on the `leagues` table (`backend/database.py:254-257`):
-`platform` (`'espn'` for ESPN rows), `espn_season`, `espn_auth`
-(`'public'|'cookie'`), `espn_my_team_id`.
+Related league columns on the `leagues` table: `platform` (`'espn'` for ESPN
+rows), `espn_season`, `espn_auth` (`'public'|'cookie'`). **The team binding is
+per user** (2026-11-11): `platform_league_bindings` (user, league) → team, read
+through `database.get_platform_binding`. League-mates who both link one ESPN
+league each keep their own team; a re-sync, send, the #321 membership checks
+and the R9 sweep nudge all use the CALLER's (or credential owner's) own
+binding. `leagues.espn_my_team_id` is legacy (last linker) and read only by
+the backfill. See [plans/platform-league-binding/design.md](../plans/platform-league-binding/design.md).
 
 ### 2.4 Request-to-request flow
 

@@ -1,5 +1,125 @@
 # Decisions — Fantasy Trade Finder
 
+## D-247 — The onboarding test profile is a second identity derived from the operator's own id, living in its own namespace
+
+**Date:** 2026-11-12 · **Who:** the operator: "take on the identity of a new app user so I can test onboarding… ensure that my actual user data is retained and ensure that I can decide when to flip back"; 2026-11-11 "League linking is the one thing I really want to be able to test"; 2026-11-12 "I want to cover sleeper testing too". The namespace design, the fences and the flag being on are the builder's and the main session's calls. Plan: [`../docs/plans/onboarding-test-profile/`](../docs/plans/onboarding-test-profile/). (D-243 and D-244 are on the seller-labels branch.)
+**Context:** Test Stages replays canned states and cannot run the real linking flows. Resetting the operator's own account would destroy real rankings and history. A separate real account cannot reuse the operator's ESPN, MFL and Sleeper leagues.
+**Decision:** A test profile is the id `qa_tp_<real id>`, a pure function of the real working key: nothing stores the mapping and no request can name a target. Its leagues are stored as `qa_tp:<real>:<native id>` and its league-mates as `qa_tpo_<hex>`, written by the production linking flows through one write seam (`test_profile.storage_league_id`) and read back to the platform through `native_league_id`. Sleeper reads use `server._sleeper_identity`, which returns the real id only to make the read. Access needs the flag `dev.test_profile` **and** the real id in env `TEST_PROFILE_ACCOUNTS`; otherwise every route is 404 and a `tp.` token is refused. The flag ships on; the env var holds the operator's account only.
+**Consequences:**
+- Four guards hold isolation, each proven alone by sabotage: a request fence (a real or anonymous caller naming a test league gets 404), a database write fence (a test request cannot write a real id), an outbound chokepoint (no push, inbox row or platform write leaves a test profile), and loader exclusions (crons, global learning signals and analytics skip it).
+- Linking in the test profile uses the operator's real platform sign-ins. The real account may have to sign in to ESPN or MFL again afterwards; the operator accepted that.
+- Reset is a scoped delete driven by the schema: a test fails if a new identity column is not covered or listed with a reason.
+- The device swap (`mobile/src/utils/testProfileSwap.ts`) is crash-safe: the real session is stashed before the switch and restored on any interrupted step.
+- `submit_rankings` now enforces league membership for every user. It was unchecked before.
+- League-mates' names appear in the test profile's own rows, as they do in the real profile.
+- Rejected: wiping the real account; a second real account; a canned linking shortcut (built, then removed on the 2026-11-11 ruling).
+
+## D-246 — "My team" in a linked ESPN, MFL or Fleaflicker league is a per-user binding, never a league fact
+
+**Date:** 2026-11-12 · **Who:** the operator: "fix the ESPN overwrite bug". The model, the backfill rules and no feature flag are the builder's and the main session's calls. Plan: [`../docs/plans/platform-league-binding/`](../docs/plans/platform-league-binding/). (D-243 to D-245 are taken by work on other branches.)
+**Context:** `leagues.espn_my_team_id` / `platform_my_team` held "the linker's team" and every link overwrote them; every import replaced `league_members` wholesale. When a second league-mate linked the same league, the first user's league vanished from their list or they were bound to the other's team (wrong roster, false "wrong ESPN account", sends built from the wrong team), and the second linker was refused on every send because routes checked `leagues.user_id`. Any user calling an import route was bound to the last linker's team.
+**Decision:** A new additive table `platform_league_bindings` (user, league) → team, written only by that user's own link and read only through `database.get_platform_binding` / `platform_bound_teams`. League facts and rosters stay one shared copy; the member snapshot labels each bound team with its earliest binder. No binding fails closed with the existing `*_not_linked` 404. A boot backfill, idempotent and insert-only, derives a binding only where one app user and a legacy team exist and (ESPN) that user's own SWID does not label another team; it never guesses. Account deletion hands a shared league row to the earliest surviving binder. No feature flag: a flag-off path would keep corrupting data.
+**Consequences:**
+- Production at the time (read-only count): one linked ESPN league, intact; one linked MFL league whose first linker was overwritten and must re-link once.
+- The legacy columns are still written (rollback) and read only by the backfill. The founders-only calibration capture still reads them and is allow-listed.
+- League-mates in a linked league now see each other as real members, so a counterparty resolves through their own binding.
+- A link made on the old instance during a deploy overlap has no binding until the next boot's backfill.
+- Rejected: team on the credential row; binder in `league_members`; a per-user `leagues` primary key.
+
+## D-245 — Founders' review: the decline waterfall is a diagnostic full solve, run on demand, with a rule catalog and founder notes
+
+**Date:** 2026-11-12 · **Who:** the operator: "a table listing every yes/ no rule structured in a decline waterfall so I can see how many trades we started with vs how many passed all yes/no decisions. Give me the ability to comment or add questions to each yes/no rule as a free text field. Each row should have a simple rule name and a rule description that gives me enough context without knowing the rules by memory." The basis, the attribution order and the probe placement are the builders' and the main session's calls. Plan: [`../docs/plans/founder-review/`](../docs/plans/founder-review/) (rule-waterfall-design, -scope). D-243 and D-244 are reserved for the seller-side label fit and the sell bonus, still on a branch.
+**Context:** The served path skips most candidates without evaluating them (price envelope, rules-first admission), so its own counts cannot say what each rule removed. Per-rule counts existed only in the gated fallback's report.
+**Decision:** `backend/rule_catalog.py` lists every yes/no decision in waterfall order (45 entries, 40 waterfall rows) with a plain name and description; a test fails when the engine gains a rejection reason the catalog lacks. `backend/rule_waterfall.py` runs the served generator's own search with budgets raised, counts each candidate once at the reason the engine records, then the deck rules and the worker's after-the-deck stages; "started with" is every 1-for-1, 2-for-1 and 1-for-2 between the viewer and each team from the up-to-16 assets a side the search considers. A founder-gated background run (one per process, 60 s cap, latest result in memory per account and league) computes it from the inputs of a real deck request and stops at a probe before generation. Notes are append-only per rule (`founder_rule_notes`); `GET /api/admin/founder/rule-notes` (cron secret) lets an engineering session read them.
+**Consequences:**
+- The run's served count equals a real job's published deck; a package failing both a deck rule and a both-sides check is counted under the both-sides check, where the page path would drop it under the deck rule first.
+- Revised offers are not replayed and show "not measured" (up to 3 added, 3 replaced).
+- A run costs about 3 to 5 s of CPU and 230 to 420 MB on a laptop; on the production worker expect 10 to 20 s, during which a concurrent deck build is slower, not blocked.
+- Findings the catalog surfaced, for the operator to question: fairness removes about 90% of candidates and a setting under 65% does nothing; the overpay rule removed 0 at the default; "Not interested" is only a preference on owner decks, not a hard filter; the centrepiece rule is off in code and on in production; liked trades bypass every rule; the five-card floor can return near-copies of declined trades.
+- `DECK_PIPELINE_VERSION` 29 (the probe is one guarded call in `_run_trade_job`; absent, a job is byte-identical).
+
+## D-242 — Founders' review: a founder-only page to correct player labels; a correction is about future value, never about who starts; QB corrections are per QB format
+
+**Date:** 2026-11-12 · **Who:** the operator: "Can we spin up a feature page just for me (it can be a new tab in calibration): for Founders' review… presenting all players split by position and a simple tagging via buttons (or better yet the same labeling progression of the tiers feature)", and "The labels should be settings specific for QBs. Cornerstone QBs in SF are not cornerstone in other leagues". One label per player, the future-value-only rule and global scope for RB/WR/TE are the builder's and the main session's calls. Plan: [`../docs/plans/founder-review/`](../docs/plans/founder-review/).
+**Context:** The win-now engine's labels (D-238) were waiting on a review before revision 5 serves. A player has exactly one label; Cornerstone is the label for "now and future".
+**Decision:** A section in Calibration shown only to accounts in the server's `FOUNDER_ACCOUNTS` allow-list on a verified session (flag `founder.review`, shipped true, inert without the allow-list). Players by position in label bands; tap players, then a band. An override is stored per (player, scope) in `founder_label_overrides` and applied in `season_value.league_profile`: it swaps Cornerstone and Win-now piece for a starter, or Rebuild piece and Depth for a bench player, and never changes whether a player starts in a league. RB/WR/TE scope is `all`; QB scope is `superflex` or `single_qb`, set by the server from the league's slots. Overrides enter the season evidence digest.
+**Consequences:**
+- A correction reaches users only once revision 5 serves; the page and the admin label route show it at once. Measure the engine's own label agreement before correcting, or read `engine_label`.
+- Stored overrides keep feeding the engine when the page flag is off.
+- Unlabelled players (borderline or unprojected) cannot be corrected. Tight-end premium has no scope yet; the scope column can take one without a migration.
+- The page lives in the Calibration tab, so it needs `grading.blind` on.
+- No analytics on the page (founder-only tooling); waived.
+
+## D-241 — Keep / untouchable is a hard rule on generated owner cards
+
+**Date:** 2026-11-11 · **Who:** the operator reported it ("Untouchables were showing in trade cards. Is that expected?") and then "turn on all of the features we're pushing live". Evaluator-only (not pool removal) and no exception for a pinned get are the builder's and the main session's calls.
+**Context:** Owner-v1 (#285) treated an untouchable as reluctance: it could leave a roster when the return beat market and a player at the same position came back, for the viewer's marks and league-mates' alike. D-213 recorded that as a consequence; the glossary and invariants promised a hard filter. Roster setup's Keep made marks common.
+**Decision:** model_config `owner_untouchable_hard` (default 1) makes it hard in the owner evaluator shared by owner-v1 and bilateral revisions 1 to 5 on every entrance. A generated card never sends a manager's untouchable; the only exception is the viewer's own explicit give pin. D-170 stands: a hand-queued like still surfaces. 0 restores the old rule byte for byte and keeps request hashes.
+**Consequences:**
+- A deck is exactly the old deck minus its Keep cards: 6 to 10% fewer cards on Keep-heavy synthetic leagues. Removing Keep players from the search pool instead reshuffled about half the rest of the deck and was rejected.
+- A pinned request for a league-mate's Keep player now returns no cards for that player.
+- A viewer's revised offer that still sends their Keep player is no longer proposed. A league-mate's own like or standing offer of their own Keep player still mirrors.
+- Legacy engines and the value core are unchanged. Supersedes D-213's "owner-v1 lets one go only at a market gain".
+
+## D-240 — Next-draft firsts price by the original team's projected draft slot, at full strength (partial reversal of D-146)
+
+**Date:** 2026-11-11 · **Who:** the operator: "we should add value adjustments to next year firsts based on the projected draft order"; all eight design decisions approved ("I'm aligned with the 8 decisions for draft picks"); "For top end of draft picks, we should match that curve"; show the slot ("1.01 [Projected]"); and "turn on all of the features we're pushing live, including pick pricing". Plan: [`../docs/plans/pick-value-projected-slot/`](../docs/plans/pick-value-projected-slot/).
+**Context:** D-146 left future picks at one generic price. A 2027 1st from a team projected to pick in the top three priced the same as a contender's.
+**Decision:** Behind `picks.projected_slot_value` (shipped true), a next-draft round-1 pick in a Sleeper league with a usable saved forecast prices at `G × (1 + w·(ratio − 1))`: `ratio` is the original team's expected per-slot value over the curve's plain mean, so a league's total is unchanged. `w` is `pick_projection_weight` (1.0) at full strength; the weeks-played ramp stays behind `pick_projection_season_scaling` (0). An adjusted pick shows its rounded expected slot and carries `proj_slot` / `proj_name`. One pricing seam, Win Now included. Weekly baseline forecasts are kept 90 days.
+**Consequences:**
+- On the pinned prices a projected top-3 pick is about 3,349 and a likely playoff team's about 1,029, against 1,860 for both before. Slots 1 to 4 certain price 3,161 against DynastyProcess's 2027 early first at 2,983.
+- Replay of 23 recorded requests on invented forecasts: every league's total conserved; median deck loses under 3% of cards; 1 to 2 decks lose 25 to 27% (bar was 20%), smallest deck 78 cards. Shipped on by operator direction with that known.
+- Real forecasts were not priced before shipping; the operator checks in the app. Off without a deploy: `pick_projection_weight` 0.
+- Prices move with each weekly forecast, so stored pages rebuild weekly. The draft order is assumed to be worst max points first.
+- 2028 and later, rounds 2 and up, ESPN, MFL and leagues without a usable forecast are unchanged.
+
+## D-239 — The trade card stops showing league position ranks
+
+**Date:** 2026-11-11 · **Who:** the operator, on build 186: "The new position value change is disorienting when displayed above the card. Also I just don't think it's adding much. The starting lineup change feature below the value bar is better at this already. Let's remove the value change content." Tag loss accepted ("Yes").
+**Context:** The fit block showed a before/after table of league position ranks (added the same day), rank moves and rank-fact sentences above the player rows.
+**Decision:** Flag `trade.fit_position_ranks` (shipped false). Off: the block carries no `ranks`, no `positions` and no rank-fact lead; each team shows an outlook tag and a real reason, and a team with neither reason is left out. Server-side, so installed builds change without an update. The next build labels the block "Team fit".
+**Consequences:**
+- Installed builds require a lead to show a team, so about half of all outlook tags go with the rank facts, including some of D-237's corrected league-mate tags. The engine still uses the outlook. The next build can show a tag on its own.
+- Builds 184 to 186 keep the heading "League rank · position value" over the remaining content.
+- The block shows on 60 to 93% of cards on the test leagues; some cards show none.
+- The win-now season line renders inside this block, so it needs its own home before revision 5 serves.
+
+## D-237 — A league-mate with no saved outlook is assumed from their playoff chance in the saved forecast, in two bands, before the roster read
+
+**Date:** 2026-11-11 · **Who:** the operator: "Assumed team outlooks should use our projections for non app users. For example paulsmenis is shown as 'looks contending' when he has almost no chance to make the playoffs". Two bands, the wire `source`, the cache route and the flag pairing are the main session's and the builder's calls.
+**Context:** An undeclared league-mate's outlook came from roster shape (`infer_team_outlook`), which read almost every team as contending. The season forecast already holds each team's playoff probability.
+**Decision:** Behind `trade.partner_outlook_projection` (code default false, shipped true; needs `league.projections`), precedence per league-mate is: saved outlook, then the viewer's usable saved forecast (at or below 45% Rebuilding, above Contending; never Tanking or All-in), then the roster read. One function (`partner_outlook.assumed`) feeds the trade engine's partner input, the fit block's "Them" tag and Team Review. One forecast read per request, carried in the request preload, so the request signature covers it.
+**Consequences:**
+- Two bands only: an assumed Tanking or All-in would apply those plans' hard rules to a manager who never chose them. On three synthetic leagues four bands moved 5 of 11 league-mates to an extreme and changed 9 to 16 of the top 30 cards again.
+- The tag's wire `source` stays `roster` for a projection read, because installed builds drop any other value; the words are the same. The request evidence (`outlook_source`) and the owner proof (`outlook_read`) record the true source.
+- A stale, incomplete, old-model or missing forecast, a non-Sleeper league, or a roster that does not map to exactly one forecast team falls back to the roster read with no error.
+- Each weekly forecast changes the request signature for that viewer, so stored first pages and prepared decks rebuild weekly.
+- Not changed: the legacy generators, mock-draft CPU drafters and the value core still use the roster read. `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
+
+## D-238 — Win-now season signal: built end to end and shipped dark; the season evidence is the saved forecast, labels are an engine input, and Rebuilding/Tanking get the opposite curve
+
+**Date:** 2026-11-11 · **Who:** the operator: build it ("Yes exactly. And I think we should do this"; "we can build both now"), off-season signal deferred ("Defer for now"), Win Now screen kept separate ("Separate for now"), plan-conflict cards pushed down and stated ("Yes"), and the shed rule: "rebuilding and tanking should have the opposite curve as all in and contending teams. They should be prioritizing giving up lineup points per week. Softer for rebuilding, more aggressively for tanking". Stage-2 result accepted: "it mostly makes sense that two win now teams aren't going to trade as often". Plan: [`../docs/plans/win-now-season-signal/`](../docs/plans/win-now-season-signal/).
+**Context:** The engine's team-plan term read age and position only, so an All-in viewer could not be told which RBs help this season, and a card could work against a saved plan without saying so.
+**Decision:** Generator revision 5 (`trade_gen_bilateral_season`) reads projected points per game for the remaining regular-season weeks from the account's saved forecast, scores All-in and Contending viewers on lineup points gained, scores Rebuilding (weight 0.5) and Tanking (weight 1.0) on lineup points shed, labels players (win-now piece, cornerstone, rebuild piece, depth) and uses the labels in the plan term, demotes and names a card that works against a saved plan, and sends a `season_block` the app prints verbatim. Flag `trade.season_signal` ships **false**; revision 5 is selected by the knob `owner_bilateral_revision_5_enabled` (0). Revision 5 runs on the rules-first page path with bounds proven never to sit below the true score; negative season values fall back to the gated full solve.
+**Consequences:**
+- **Update, same day:** the flag `trade.season_signal` shipped **true** with the combined release (operator: "turn on all of the features we're pushing live"), which is stage A; revision 5 stays off (knob 0) pending the operator's call.
+- Nothing changes for users until the flag and the knob are on. Stage A (flag on, revision 2 serving) only records evidence and one `season-signal:` log line per job.
+- With the flag on, the evidence digest joins the request hash, so stage A starts new request units.
+- The app shows the season line, label tags and conflict sentence only inside the fit block; a card with no fit block shows the label tags alone.
+- Known limits: Sleeper leagues with a current forecast only; off-season has no signal; stage-2 partner matching (`season_partner_matching`, 0) failed its Not-sure bar and stays off; on the fixture Rebuilding moved more than Tanking in change, though Tanking sheds most in absolute terms.
+- `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
+
+## D-236 — League-median leagues are forecast with two results a week; the model version stays v6; the league's median setting is stored at link
+
+**Date:** 2026-11-11 · **Who:** the operator ("Let's make the model change to solve for median scoring leagues. Ensure we also include checking that when users link a new league and update the DB to store that setting"). The tie rule, keeping the version and the rename of the unsupported reason are this session's calls.
+**Context:** A Sleeper league with `league_average_match` gives every team a second result each week against the league's median score. `capture` refused those leagues, so one of the operator's two current-season unsupported leagues had no forecast.
+**Decision:** The median is taken over every team's score that week; above it wins, below it loses, equal ties. `capture` books the median result for completed weeks, so the current record equals Sleeper's; `simulate` books it for every simulated week from that week's scores, with no extra random draw; seeding and playoff odds use the combined record. Results and snapshots carry `league_format` (`median_game`, `games_per_week`). `core.VERSION` is not bumped, because a non-median league's result is byte-identical. `leagues.median_game` (nullable) is written at first link and refreshed on every sync from the league data already fetched; unknown never overwrites a known value. The forecast still reads the live Sleeper setting at capture. Divisions, best ball and manual seeding stay unsupported under the renamed reason `unsupported_divisions_bestball_or_manual_seeding`. Scope: `docs/plans/league-projections/median-leagues-scope.md`.
+**Consequences:**
+- The rule was checked against one real 12-team league: rebuilt records matched Sleeper's for all 12 teams over 9 weeks. A tie exactly at the median never occurred there, so that case is an assumption.
+- For a median league the record fields cover two games a week; the weekly win chance fields stay the head-to-head game and separate `median_*` fields carry the second.
+- `POST /api/cron/league-projections {"retry_unsupported": true}` re-attempts targets whose last attempt was unsupported, for use after a format becomes supported.
+- The column is not sent to clients yet.
+
 ## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
 
 **Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.

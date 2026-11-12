@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-077 | A second league-mate linking the same ESPN/MFL league unlists the first user, shows them the wrong roster, or tells them they used the wrong account | Backend / league linking / multi-user |
 | G-076 | `config/features.json` on main says a flag is off, but production has it on (seven flags, via Render's `FTF_FLAGS`) | Backend / feature flags / deploy config |
 | G-075 | Server-built decks or Calibration sessions offer trades with players the partner no longer has, in leagues nobody has opened lately | Backend / league data |
 | G-074 | git reports `… is far too short to be a packfile`, `fatal: stash failed`, or fetches crawl in a clone under `~/Documents` | Tooling / git / iCloud |
@@ -756,3 +757,9 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Symptom, plainly:** a like-rate readout split by `basis` (consensus vs divergence) — the exact mitigation [D-095] prescribes for grading a two-sided arm — shows arm C at 0% consensus cards. Arm C does serve unboarded partners; it just labels them wrong.
 - **Cause:** `backend/trade_gen_v2.py:1204` hardcodes `basis="divergence"` on every emitted card, regardless of whether the partner had a board.
 - **Fix:** stamp basis from `member.has_rankings` the way `trade_service` does. **Prevention:** any `basis`-split metric on `deck_impressions` filters arm C out or notes it is unlabelled until this is fixed. Found 2026-09-01 by the knob-sweep harness run (the harness's consensus counter read 0 for arm C in every cell).
+
+### G-077 — `leagues.espn_my_team_id` / `platform_my_team` are NOT anyone's team
+- **Symptom, plainly:** after a league-mate links the same ESPN, MFL or Fleaflicker league, the first user's league disappears from their list, or a re-sync shows them the other manager's roster, or a cookie league answers 403 `wrong_account` and clears their verification, or a send is built from the wrong team. The second linker gets `*_not_linked` on every send.
+- **Cause:** until 2026-11-12 those columns were read as "the linker's team", but every link overwrote them (last linker wins) and every import replaced `league_members` wholesale, relabelling the one real member row.
+- **Fix (D-246):** read "my team" only through `database.get_platform_binding(user_id, league_id, platform)` (none → fail closed, never fall back to the row) and every bound team through `platform_bound_teams`.
+- **Prevention:** `test_platform_league_binding.py::test_binding_columns_have_one_reader` fails on a new reader of the legacy columns. A test that inserts a raw `leagues` row with those columns must also seed a binding (`database._upsert_platform_binding`) or run `backfill_platform_league_bindings()`. Any feature that stores a per-user fact on a shared row is this bug again: test it with two users in one league.

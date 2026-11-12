@@ -81,7 +81,8 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             is_pick_asset, owned_picks_available, inject_owned_picks, pick_label, slot_order,
             priced_pick_value, elo_to_value, sleeper_credential, sleeper_write, record_event,
             fetch_json=None, mfl_propose=None, espn_propose=None, mfl_credential=None,
-            espn_credential=None, platform_rosters=None, generation_identity=None):
+            espn_credential=None, platform_rosters=None, generation_identity=None,
+            pick_projection=None, pick_projection_fields=None):
 
     # ── plumbing ────────────────────────────────────────────────────────
     def guarded(fn):
@@ -465,14 +466,21 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         pick_meta = {}
         if mine:
             order = slot_order(league_id)
+            # Projected slot value: the league's projection rides along only
+            # when there is one, so a None leaves both calls as before.
+            projection = pick_projection(league_id) if pick_projection else None
+            price_extra = (projection,) if projection is not None else ()
+            label_extra = (projection, fmt) if projection is not None else ()
             for r in pick_rows(league_id):
                 pid = str(r.get("pick_id"))
                 if pid not in mine:
                     continue
                 pick_meta[pid] = {"round": r.get("round"), "season": r.get("season")}
-                out.append({"id": pid, "kind": "pick", "name": pick_label(r, order), "position": "PICK",
-                            "team": None, "age": None, "value": round(float(priced_pick_value(r, order, fmt) or 0.0), 1),
-                            "label": pick_label(r, order)})
+                out.append({"id": pid, "kind": "pick", "name": pick_label(r, order, *label_extra), "position": "PICK",
+                            "team": None, "age": None, "value": round(float(priced_pick_value(r, order, fmt, *price_extra) or 0.0), 1),
+                            "label": pick_label(r, order, *label_extra),
+                            **(pick_projection_fields(r, order, projection, fmt)
+                               if projection is not None and pick_projection_fields else {})})
         return service.recommend_assets(out, outlook=settings.get("outlook"), pick_budget=settings.get("pick_budget"),
                                         pick_meta=pick_meta, scoring_format=fmt)
 

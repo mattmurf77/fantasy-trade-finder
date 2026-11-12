@@ -1,3 +1,81 @@
+## 2026-11-12 — Onboarding test profile (D-247), branch `feat/onboarding-test-profile`
+
+- **Full backend suite (Opus subagent, no edits in flight, before the last merge of main):** 15,168 passed, 0 failed. **Main session after merging main (#666 included) and turning the flag on:** the four `test_test_profile*.py` files, the pipeline digest, `test_receipts_append_only.py`, `test_platform_league_binding.py` and `test_research_trade_pipeline.py`: 229 passed. The full suite after the merge is the CI run on the PR.
+- **App (main session):** `tsc --noEmit` clean; `check-test-profile.js` 98 checks, `check-test-profile-swap.js` 3,364 checks (every crash point of the device swap), settings IA and update gate pass; testid-lint OK. Subagent: 178 of 178 `check-*.js` before the merge.
+- **What is pinned:** allow-list and flag inertness; no request can name a target id; a normal sign-up never mints a `qa_tp_` id; every onboarding gate reads as a new user; the real account's rows byte-identical after a full onboarding on ESPN, MFL and Sleeper; zero pushes, inbox rows or platform writes from a test profile; the request fence over path, query, form and body; the database write fence; crons, learning signals and analytics skip it; reset covers every identity column in the schema; a dead test token never mints a real session; isolation holds on real background threads.
+- **Reviews:** two independent read-only reviews (isolation; impact on real users). Four medium and eleven low findings, all fixed, each with a sabotage-proven test (design.md §13, §14).
+- **Sabotages:** every test red on its break and green on restore. Three removals stay green because another layer holds; they are listed in design.md §13 as expected.
+- **`test_receipts_append_only.py`:** main's version (#666, parent map) replaces the branch's narrower patch.
+- **Not verified:** anything on a device (stash and restore, the banner, the re-link prompt); live ESPN, MFL or Sleeper sign-in inside the profile; a real Postgres instance. The operator checklist is design.md §9.3.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Per-user team binding for linked platform leagues (D-246), branch `fix/platform-league-user-binding`
+
+- **Full backend suite (Opus subagent, no edits in flight):** 15,094 passed, 42 skipped, **1 failed**: `test_research_trade_pipeline.py::test_instrumentation_preserves_function_result_and_rejects_drift`, a `RecursionError` in `copy.deepcopy` of a small AST, unrelated to the touched code; it passes 4 of 4 alone. Not shown to fail on main. CI is the re-run.
+- **CI failure found and fixed (main session):** the one failure reproduced in CI (1 failed, 15,197 passed). Cause: `test_receipts_append_only.py` set a `_t10_parent` attribute on every parsed node, including the Load / Store / operator objects Python shares across all parsed files, so a later `copy.deepcopy` of any tree walked into a whole module's tree; this branch made that chain deep enough to hit the recursion limit in `test_research_trade_pipeline.py`. A probe plugin named the test. The scanner now keeps parents in its own map; the probe is silent and both files pass (112).
+- **`test_platform_league_binding.py` is new (36).** On main 31 fail, with the user-visible symptoms (league gone from the first user's list, the other user's team returned, 403 `wrong_account`, "send to your own team", second linker `espn_not_linked`, an unbound user's import answering 200). With the fix 36 pass.
+- **What is pinned:** both link orders, re-link, co-owners of one team, an unbound user fails closed, sends use the sender's own team and credential, the backfill derives only the trustworthy pair, is idempotent and never overwrites a binding written meanwhile, account deletion keeps the shared league for the other user, Sleeper snapshots are never relabelled, one reader of the legacy columns, Postgres-dialect DDL and upserts compile.
+- **Sabotages, red then restored (13, subagent):** binding keyed by league only; sends reading the row's team (ESPN, MFL); backfill guessing, dropping the SWID check, overwriting, ignoring "already bound"; deletion dropping the shared row; labels not written; co-owner not relabelled; re-sync falling back to the row; counterparty not resolved; Sleeper relabelled.
+- **Production count (main session, read-only, aggregates):** ESPN 1 linked league, intact; MFL 1 linked league, first linker overwritten.
+- **Existing tests changed in seeding only** (they stored the binding in the legacy column): draft order, roster history, draft board, two calibration capture files; `test_purge_entry_users.py` allow-list gained two non-user filter columns.
+- **Not verified:** a real Postgres instance; live ESPN or MFL; anything on a device (no app change).
+
+## 2026-11-12 — Founders' review Trade rules: catalog, waterfall, notes, routes and page (D-245), branch `feat/founder-rule-waterfall`
+
+- **Full backend suite (Opus subagent, before the last merge of main):** 15,161 passed, 42 skipped, 0 failed. **Main session after merging main:** the waterfall routes, catalog, waterfall, notes, label page, digest and paywall files: 179 passed. CI is the full re-run.
+- **App:** `tsc --noEmit` clean; 177 of 177 `check-*.js`; testid-lint OK (subagent). Main session re-ran `check-founder-rule-waterfall.js` (46) and `check-founder-review.js` (49).
+- **What is pinned:** the catalog lists every engine rejection reason (AST inventory, both directions) and its names and descriptions pass a plain-language lint; waterfall sums (started minus removed equals served) on fixture and synthetic leagues; the diagnostic's deck equals the served deck card for card; the run's served count equals a real job's published deck with a liked trade added; a run changes no database table, job store, page store, session or event; a real job without the probe is byte-identical; the founder gate on every route; one run at a time; the 60 s cap; a failed run never replaces the last result; notes history, cap, unknown key, rate limit; the admin read needs the cron secret and shows no account id.
+- **Sabotages, red then restored (46 across the two builders):** 20 on the catalog, waterfall and notes; 14 on the routes; 12 on the page. One variant stayed green and is explained: a probe that returns instead of raising still leaves the database and memory unchanged, because the raising sink stops the job; the stop-at-probe test catches it.
+- **Not verified:** anything on a device; production run time and memory (laptop: 3.4 s, +226 MB; a concurrent deck build went from 0.38 s to a median 0.63 s, worst 2.84 s).
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Founders' review label page (D-242), branch `feat/founder-label-review`
+
+- **Full backend suite (Opus subagent, before merging main):** 14,995 passed, 42 skipped, 0 failed. **Main session after merging main:** `test_founder_review.py`, the pipeline digest, the paywall table and the median-setting file: 93 passed. CI is the full re-run.
+- **App (subagent):** `tsc --noEmit` clean; 176 of 176 `check-*.js`; testid-lint OK. `check-founder-review.js` is new (49 checks; re-run by the main session).
+- **What is pinned:** access (flag off, allow-list unset, unlisted account, unverified session, device id never grants); the (engine label, override) table case by case; a QB override applies only in leagues of its QB format; no overrides is byte-identical; overrides reach plan fit, the conflict rule, the card labels and the admin route; the digest moves only for a league the override can affect; `DECK_PIPELINE_VERSION` 28.
+- **Sabotages, red then restored (18, subagent):** in the PR body.
+- **Main session change:** the flag ships true (inert without `FOUNDER_ACCOUNTS`); the test that pinned it false now pins code default false and shipped true.
+- **Not verified:** anything on a device; the runbook's account-id lookup against production.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Combined release branch (D-237 to D-241), branch `release/2026-11-12-train`
+
+- **Full backend suite (main session) on the combination of league-mate outlooks, rank removal, win-now, pick pricing and the Keep rule, with `picks.projected_slot_value` and `trade.season_signal` on:** **14,934 passed, 42 skipped, 0 failed.** Run before main's median-league merge and two test-only app edits; after that merge the projection, pick, season, fit, digest, untouchable and paywall files were re-run green. CI is the full re-run on the final head.
+- **App (main session):** `tsc --noEmit` clean; **175 of 175** `check-*.js`; testid-lint OK. Two checks were updated for the combined card: the season check accepts `displayName` on the player name line (projected picks), and the fit-block check's sandbox defines an absent season block.
+- **Pipeline pins:** 23 league-mate outlooks, 24 rank removal, 25 season signal, 26 projected slot value, 27 Keep rule. Each branch pinned 23 on its own; the combined digests were recomputed at each merge.
+- **One cross-feature finding:** with rank content off, a team with only a rank fact is left out of the fit block, so the league-mate outlook tag test now turns rank content on explicitly.
+- **Per-feature evidence:** pick pricing (builder's full suite 14,628 passed; 34 sabotages; replay of 23 recorded requests on invented forecasts: totals conserved, 1 to 2 decks over the 20% size bar, smallest deck 78 cards); rank removal (builder's full suite 14,543 passed; 14 sabotages); Keep rule (builder's full suite 14,555 passed; 6 sabotages; knob 0 byte-identical); entries above for D-237 and D-238.
+- **Not verified:** real forecasts priced by the new pick rule (a local read of production forecast data was refused by the permission system); anything on a device; production behaviour.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — League-mate outlooks from the saved forecast (D-237), branch `feat/partner-outlook-from-projection`
+
+- **Full suite (main session, after merging main):** **14,573 passed, 42 skipped, 0 failed.** `test_partner_outlook_projection.py` is new, 41 cases.
+- **What they pin:** the 45% boundary and two bands only; a saved outlook always wins; every unusable forecast (stale, incomplete, old model, refresh failed, pending, unsupported, no run, non-Sleeper) gives the roster read; a co-owned roster maps to its primary owner and an unmappable one keeps the roster read; one forecast read per job; the engine, the fit tag and Team Review agree; the read is in the request signature; flag off is byte-identical; rules-first page equals the gated full solve with projection reads.
+- **Sabotages, red then restored (15, Opus subagent; 1 in the main session):** listed in the PR body. Main session: with the wire-source map emptied the tag reads `projection`, which installed builds drop; the tag test went red.
+- **Review fix (main session):** the "Them" tag's wire `source` stays `roster` for a projection read, so build 186 keeps the tag.
+- **Synthetic 12-team leagues:** 6 to 7 of 11 assumed outlooks changed; top-30 overlap 8 to 10 of 30.
+- **Not verified:** production behaviour; anything on a device. Check after deploy: a league-mate with a low playoff chance reads "Looks rebuilding" on a card.
+
+## 2026-11-11 — Win-now season signal: server wiring, rules-first join, app card (D-238), branch `feat/season-signal-wi1`
+
+- **Full backend suite (main session, after merging main):** 14,759 passed, 42 skipped, **2 failed**, both `test_paywall_gate_allowlist.py`: the new admin route was not classified. Fixed (`NEVER_GATE`); those tests and `test_season_signal_worker.py` re-run green (31). The suite was not re-run in full after that one-line fix or after the later merge of main; CI is the full re-run.
+- **App (main session, after merging main):** `tsc --noEmit` clean; 174 of 174 `check-*.js`; testid-lint OK. `check-season-signal.js` is new (11 checks; 20 sabotages red then restored by the builder).
+- **Server wiring (`test_season_signal_worker.py`, 23):** flag off byte-identical; one forecast read per job; revision 2 never receives the evidence; a read failure serves today's deck; league-mates never count toward completeness; non-Sleeper is refused before any read; the admin route refuses without the secret; revision 5 presents and carries `season_block`; the knobs stay out of revisions 2 to 4's hash; the digest, never `as_of`, enters the hash; the pipeline bump. 11 sabotages red then restored.
+- **Rules-first join:** exhaustive admissibility audits on 7 small worlds; page equals gated, proof for proof, on 16 worlds (fixture league with real captured evidence, synthetic 12, 14 and 16 teams), and the first 5 and 30 cards equal the gated deck's. Three bound sabotages red then restored. Replay of 40 recorded requests under revisions 1 and 2: served set equal 40 of 40, 0 fallbacks.
+- **Not verified:** production; anything on a device; the `season-signal:` log line through a real job. `league.projections_provider_approved` is false in the repo config, so stage A records `no_forecast` unless production has it on.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — League-median forecasts and the stored league setting (D-236), branch `feat/projection-median-leagues`
+
+- **New: `test_league_projection_median.py` (32) and `test_league_median_setting.py` (16); `test_league_projection_batch.py` now 40.** Main session re-run of the three files: 88 passed. `-k "league_projection or cron"`: 640 passed (subagent). Full suite before the retry option was added: **14,556 passed, 42 skipped, 0 failed**; CI on the PR head covers the final tree.
+- **What they pin:** the median rule for even and odd team counts and a tie at the cutoff; a median league is admitted and each completed week books two results per team; with zero score SD every team's record is exactly head-to-head plus median; with noise, games per team equal twice the weeks and playoff chances sum to the playoff spots; a team that misses on head-to-head alone but gets in with median wins is seeded; a non-median league's result is byte-identical to main's (golden digests); scenarios and the outlook suggestion on a median league; the column exists after `_migrate_db`; first link, re-sync and NULL-fill; non-Sleeper leagues stay NULL; `retry_unsupported` mirrors `retry_incomplete`.
+- **Sabotages, red then restored (26, Opus subagent; one re-run in the main session):** bottom half wins; median over the wrong set; cutoff tie as a win; completed-week median skipped; median not added, added twice, or added for a non-median league in simulated weeks; marker ignored; record-scale check ignoring games per week; an extra random draw; value written only on insert (two paths); missing setting coerced to 0; migration entry dropped; session init not passing the setting; and ten on the retry option.
+- **Checked against one real median league (local, nothing committed):** rebuilt W-L-T matched the official records for all 12 teams over 9 weeks; head-to-head alone matched none. **Dry run against live feeds (main session, nothing written):** that league completes on v6 with `games_per_week` 2, 18 games per team so far, 28 expected, playoff chances summing to 6.
+- **CI fix (main session):** the "non-median result is unchanged" test pinned a sha256 of float results, which matched on macOS and not on the Linux runner (1 failed, 14,594 passed). Captures hold no floats and keep their pinned hash; results are now compared to the saved pre-change values (`fixtures/league_projection_h2h_golden.json`, verified against the old hashes before saving), exact for everything but floats and to 1e-9 for floats. Sabotage (median game applied to every league): red, then restored.
+- **Not verified:** a tie exactly at the median; anything on a device.
+
 ## 2026-11-11 — Why-pass frame opens from the ✕, branch `fix/pass-button-on-asking-card`
 
 - **Main session re-run:** `tsc --noEmit` clean; **173 of 173** `mobile/tests/check-*.js` files pass; testid-lint OK. `check-pass-reason-cadence.js` is 45 assertions: the asking card keeps the ✕, the ✕ opens the frame, every exit (chip, Just pass, close, scrim, escape, Android back) is a pass, the ask carries past a like or a swipe, and the panel is always inside the visible deck area (a sweep of more than 500 placements runs the real function).

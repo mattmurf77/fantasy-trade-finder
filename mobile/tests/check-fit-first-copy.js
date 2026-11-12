@@ -52,6 +52,19 @@
 //  14. The normalizer validates `positions` like `ranks` (at most 4) and
 //      yields [] when the server sent none.
 //
+// The rank-free block (operator, TestFlight 186, 2026-11-11: "remove the
+// value change content"; server flag trade.fit_position_ranks off). The
+// server sends `ranks: []`, `positions: []`, reason leads only, and omits a
+// team without one, so installed builds change without an update:
+//  15. The normalizer and the block JSX, transpiled and run on that payload
+//      (two teams, one team, no tag): every team kept with its tag and lead;
+//      no Before / After header, no FitRankRows, no rank text, no empty
+//      text node; an omitted team draws no row. The flag-on shape is the
+//      control (it must draw the header and the table). The label row reads
+//      "Team fit" on the rank-free block and today's label on the control.
+//  16. The label's predicate, run: "Team fit" when no team has `ranks` or
+//      `positions` rows, "League rank · position value" when either does.
+//
 // Run: node tests/check-fit-first-copy.js   (or: npm run test:fit-first-copy)
 
 'use strict';
@@ -154,7 +167,11 @@ const youRow = youAt >= 0 ? block.slice(youAt) : '';
   const name = '4. block renders server text only (no code read; only the label copy)';
   const literals = (block.match(/>\s*([A-Za-z][^<>{}]*?)\s*</g) || [])
     .map((m) => m.replace(/^>\s*|\s*<$/g, ''));
-  const allowed = ['League rank · position value', 'Them', 'You', 'Before', 'After'];
+  // The label row is the one string expression: the rank label or "Team fit"
+  // (check 16 runs it).
+  const label = block.match(/>\{fitRanked \? '([^']+)' : '([^']+)'\}</);
+  if (label) literals.push(label[1], label[2]);
+  const allowed = ['League rank · position value', 'Team fit', 'Them', 'You', 'Before', 'After'];
   const extra = literals.filter((l) => !allowed.includes(l));
   // The one exception: fitLeadShown hides a rank-fact lead the table restates.
   const leadFn = card.indexOf('export function fitLeadShown(');
@@ -356,6 +373,138 @@ const ordinalSrc = grabFn(read(CARD), 'export function fitRankOrdinal(').replace
   } else if (!/positions\?:\s*\{ pos: FitRankPos; before: number; after: number \}\[\];/.test(types)) {
     fail(name, 'FitBlockTeam needs `positions?: { pos: FitRankPos; before: number; after: number }[]`');
   } else ok(name);
+}
+
+// 15. The rank-free block, end to end (server flag trade.fit_position_ranks
+// off, 2026-11-11: every team `ranks: []`, `positions: []`, a reason lead,
+// teams without one omitted). The normalizer and the block's JSX are
+// transpiled and RUN on that payload: each team keeps its tag and lead, and
+// nothing rank-shaped renders (no Before / After header, no FitRankRows, no
+// rank text, no empty text node). The flag-on shape is run as a control so
+// the check can see a table when there is one.
+{
+  const name = '15. a rank-free block renders tag + lead only: no header, no table, no rank text, no blank text';
+  const rawApi = read(API);
+  const normAt = rawApi.indexOf('const fitTeams: FitBlockTeam[] =');
+  const normEnd = normAt < 0 ? -1 : rawApi.indexOf('\n      : [];', normAt);
+  const tableExpr = (card.match(/const fitTable = (!!\(fitThem\?\.positions\?\.length \|\| fitYou\?\.positions\?\.length\));/) || [])[1];
+  const rankedExpr = (card.match(/const fitRanked = ([^;]+);/) || [])[1];
+  if (!ts) fail(name, 'typescript is not installed (npm ci)');
+  else if (normAt < 0 || normEnd < 0 || !block || !tableExpr || !rankedExpr) fail(name, 'could not locate the normalizer, the block, fitTable or fitRanked');
+  else {
+    const normSrc = `function norm(raw: any) {\n${rawApi.slice(normAt, normEnd)}\n      : [];\nreturn fitTeams;\n}`;
+    const leadSrc = grabFn(read(CARD), 'export function fitLeadShown(').replace(/^export /, '');
+    const RowsMarker = function FitRankRows() { return null; };
+    const ranksMarker = (r) => `RANKS:${JSON.stringify(r)}`;
+    const styleProxy = new Proxy({}, { get: (_, k) => ({ style: String(k) }) });
+    let norm, render;
+    try {
+      [norm] = run(normSrc, ['norm'], {});
+      [render] = run(`${leadSrc}\nfunction render(fitThem: any, fitYou: any) {\n`
+        + `const fitTable = ${tableExpr};\nconst fitRanked = ${rankedExpr};\nconst seasonShown: any = undefined;\nreturn ${block};\n}`, ['render'],
+        { React, View: 'View', ChalklineText: 'ChalklineText', styles: styleProxy, type: styleProxy,
+          FitRankRows: RowsMarker, fitRanksText: ranksMarker });
+    } catch (e) { fail(name, `could not run the normalizer / block: ${e.message}`); }
+    if (norm && render) {
+      const nodes = (n, acc = []) => {
+        if (n && typeof n === 'object') { acc.push(n); n.children.forEach((c) => nodes(c, acc)); }
+        return acc;
+      };
+      const draw = (payload) => {
+        const teams = (norm({ fit_block: payload }) || []);
+        const them = teams.find((t) => t.side === 'them');
+        const you = teams.find((t) => t.side === 'you');
+        return { teams, tree: them || you ? render(them, you) : null };
+      };
+      const team = (side, lead, tag, extra = {}) => ({
+        side, lead: { code: lead[0], text: lead[1] }, ranks: [], positions: [],
+        ...(tag ? { tag: { code: tag[0], source: tag[1], text: tag[2] } } : {}), ...extra });
+      const cases = [
+        ['both teams', [team('them', ['plan_rebuild.them', 'Rebuild-leaning: adds Eli Brandt, 23'], ['rebuilder', 'roster', 'Looks rebuilding']),
+                        team('you', ['need.you', 'Upgrades WR: adds Lars Quill'], ['contender', 'declared', 'Contending'])]],
+        ['you only', [team('you', ['plan_win_now.you', 'Win-now: adds Lars Quill, 30'], ['contender', 'declared', 'Contending'])]],
+        ['them only, no tag', [team('them', ['need.them', 'Upgrades RB: adds Otto Vail'], null)]],
+      ];
+      const wrong = [];
+      for (const [label, teams] of cases) {
+        const { teams: kept, tree } = draw({ v: 'fit-2', teams });
+        const all = nodes(tree);
+        const texts = all.filter((n) => n.type === 'ChalklineText').map(textOf);
+        const tags = teams.filter((t) => t.tag).map((t) => t.tag.text);
+        if (kept.length !== teams.length) wrong.push(`${label}: the normalizer kept ${kept.length} of ${teams.length} teams`);
+        if (!tree || !all.some((n) => n.props.testID === 'trade-card.fit-block')) wrong.push(`${label}: no block rendered`);
+        for (const t of teams) {
+          if (!all.some((n) => n.props.testID === `trade-card.fit-team.${t.side}`)) wrong.push(`${label}: no ${t.side} row`);
+          if (!texts.includes(t.lead.text)) wrong.push(`${label}: ${t.side} lead missing`);
+        }
+        for (const side of ['them', 'you']) {
+          if (!teams.some((t) => t.side === side) && all.some((n) => n.props.testID === `trade-card.fit-team.${side}`)) {
+            wrong.push(`${label}: an omitted ${side} team rendered a row`);
+          }
+        }
+        if (tags.some((tg) => !texts.includes(tg))) wrong.push(`${label}: a tag was dropped`);
+        if (all.some((n) => n.props.testID === 'trade-card.fit-rank-head') || texts.includes('Before') || texts.includes('After')) {
+          wrong.push(`${label}: the Before / After header rendered`);
+        }
+        if (all.some((n) => n.type === RowsMarker)) wrong.push(`${label}: FitRankRows rendered`);
+        if (texts.some((tx) => tx.startsWith('RANKS:'))) wrong.push(`${label}: rank text rendered`);
+        if (texts.some((tx) => !tx.trim())) wrong.push(`${label}: an empty text node rendered`);
+        if (!texts.includes('Team fit') || texts.includes('League rank · position value')) {
+          wrong.push(`${label}: the label must read "Team fit"`);
+        }
+      }
+      // Control: the flag-on shape draws the header and the table.
+      const on = draw({ v: 'fit-2', teams: [team('you', ['holds.you', 'TE stays 4th'], null,
+        { positions: [{ pos: 'TE', before: 4, after: 4 }] })] });
+      const onNodes = nodes(on.tree);
+      if (!onNodes.some((n) => n.props.testID === 'trade-card.fit-rank-head') || !onNodes.some((n) => n.type === RowsMarker)) {
+        wrong.push('control: a team with positions must draw the header and FitRankRows');
+      }
+      if (!onNodes.filter((n) => n.type === 'ChalklineText').map(textOf).includes('League rank · position value')) {
+        wrong.push('control: the flag-on block keeps the label "League rank · position value"');
+      }
+      // No block at all: the normalizer adds nothing to render.
+      if (draw({ v: 'fit-2', teams: [] }).tree !== null) wrong.push('an empty teams list must render nothing');
+      if (wrong.length) fail(name, wrong.join('; '));
+      else ok(name);
+    }
+  }
+}
+
+// 16. The label row, run: "Team fit" when no team carries a rank (the
+// flag-off payload), today's "League rank · position value" when a team has
+// rank moves or a table (the flag-on payload). Same style, no testID.
+{
+  const name = '16. label row: "Team fit" without ranks, "League rank · position value" with ranks or a table';
+  const labelExpr = (card.match(/const fitRanked = ([^;]+);/) || [])[1];
+  const tableExpr = (card.match(/const fitTable = ([^;]+);/) || [])[1];
+  const labelNode = block.match(/<ChalklineText style=\{type\.label\} numberOfLines=\{1\}>\{fitRanked \? 'League rank · position value' : 'Team fit'\}<\/ChalklineText>/);
+  if (!labelExpr || !tableExpr || !labelNode) {
+    fail(name, "the label must be `<ChalklineText style={type.label} numberOfLines={1}>{fitRanked ? 'League rank · position value' : 'Team fit'}</ChalklineText>` with a `const fitRanked`");
+  } else {
+    let pick;
+    try {
+      // eslint-disable-next-line no-new-func
+      pick = new Function('fitThem', 'fitYou',
+        `const fitTable = ${tableExpr};\nconst fitRanked = ${labelExpr};\nreturn fitRanked ? 'League rank · position value' : 'Team fit';`);
+    } catch (e) { fail(name, `could not evaluate fitRanked: ${e.message}`); }
+    if (pick) {
+      const t = (ranks, positions) => ({ side: 'you', lead: { code: 'x', text: 'x' }, ranks, ...(positions ? { positions } : {}) });
+      const row = [{ pos: 'RB', before: 3, after: 1 }];
+      const cases = [
+        ['flag off, both teams', t([], []), t([], []), 'Team fit'],
+        ['flag off, one team', undefined, t([], []), 'Team fit'],
+        ['older server, no positions key, no moves', t([], undefined), undefined, 'Team fit'],
+        ['flag on, table only (held ranks)', t([], [{ pos: 'TE', before: 4, after: 4 }]), t([], []), 'League rank · position value'],
+        ['flag on, moves only (184/185 shape)', undefined, t(row, undefined), 'League rank · position value'],
+        ['flag on, moves and table', t(row, row), t(row, row), 'League rank · position value'],
+      ];
+      const wrong = cases.filter(([, them, you, want]) => pick(them, you) !== want)
+        .map(([label, them, you, want]) => `${label}: "${pick(them, you)}" (want "${want}")`);
+      if (wrong.length) fail(name, wrong.join('; '));
+      else ok(name);
+    }
+  }
 }
 
 // 8. Wire type.

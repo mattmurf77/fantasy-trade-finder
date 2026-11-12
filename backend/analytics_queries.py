@@ -755,7 +755,8 @@ def _event_count(conn, start_day, end_day, events):
     q = text(
         "SELECT COUNT(*) FROM user_events WHERE event_type IN :ev "
         "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
-        "AND user_id NOT LIKE 'device:%'"
+        "AND user_id NOT LIKE 'device:%' "
+        "AND user_id NOT LIKE 'qa\\_%' ESCAPE '\\'"
     ).bindparams(bindparam("ev", expanding=True))
     return conn.execute(q, {"ev": list(events), "s": start_day, "e": end_day}).scalar() or 0
 
@@ -909,6 +910,7 @@ def report_engagement(conn, start_day, end_day, include_demo, row_cap, **_):
         "SELECT current_streak AS s, COUNT(*) AS n FROM users "
         "WHERE current_streak IS NOT NULL AND current_streak > 0 "
         "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
+        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
         "GROUP BY current_streak ORDER BY current_streak LIMIT :cap"
     ), {"cap": row_cap}).mappings().all()
     streak_dist = {int(r["s"]): int(r["n"]) for r in streak_rows}
@@ -979,7 +981,8 @@ def report_adoption(conn, start_day, end_day, include_demo, row_cap, **_):
         ecount = conn.execute(text(
             "SELECT COUNT(*) FROM user_events ue WHERE ue.event_type IN :vev "
             "AND substr(ue.occurred_at,1,10) >= :s AND substr(ue.occurred_at,1,10) <= :e "
-            "AND ue.user_id NOT LIKE 'device:%'"
+            "AND ue.user_id NOT LIKE 'device:%' "
+            "AND ue.user_id NOT LIKE 'qa\\_%' ESCAPE '\\'"
         ).bindparams(bindparam("vev", expanding=True)),
             {"vev": list(evs), "s": start_day, "e": end_day}).scalar() or 0
         n = len(users)
@@ -1144,11 +1147,13 @@ def report_churn(conn, start_day, end_day, include_demo, row_cap, **_):
         "AND substr(last_active_at,1,10) < :cutoff "
         "AND sleeper_user_id NOT LIKE 'device:%' "
         "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
+        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
         "ORDER BY last_active_at DESC LIMIT :cap"
     ), {"cutoff": cutoff, "cap": row_cap}).mappings().all()
     active_total = conn.execute(text(
         "SELECT COUNT(*) FROM users WHERE last_active_at IS NOT NULL "
-        "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\'"
+        "AND sleeper_user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
+        "AND sleeper_user_id NOT LIKE 'qa\\_%' ESCAPE '\\'"
     )).scalar() or 0
     rows = [{"user_id": r["uid"], "last_active_at": r["last_active_at"],
              "last_rank_at": r["last_rank_at"],
@@ -1177,6 +1182,7 @@ def report_releases(conn, start_day, end_day, include_demo, row_cap, **_):
         "WHERE app_version IS NOT NULL AND event_type NOT IN :non_intent "
         "AND substr(occurred_at,1,10) >= :s AND substr(occurred_at,1,10) <= :e "
         "AND user_id NOT LIKE 'device:%' AND user_id NOT LIKE 'demo\\_%' ESCAPE '\\' "
+        "AND user_id NOT LIKE 'qa\\_%' ESCAPE '\\' "
         "LIMIT :cap"
     ).bindparams(bindparam("non_intent", expanding=True)),
         {"non_intent": sorted(NON_INTENT_EVENTS), "s": start_day, "e": end_day,
@@ -1499,7 +1505,8 @@ def evaluate_segment(conn, definition, start_day, end_day, include_demo, row_cap
             "SELECT sleeper_user_id FROM users")).scalars().all())
         if not include_demo:
             known = {u for u in known if u and not u.startswith("demo_")
-                     and not u.startswith("test_user_fp_")}
+                     and not u.startswith("test_user_fp_")
+                     and not u.startswith("qa_")}
         base |= known
     except Exception:
         pass
@@ -1722,7 +1729,7 @@ def report_rankquality(conn, start_day, end_day, include_demo, row_cap, **_):
 
     rows = []
     for uid, urows in by_user.items():
-        if not include_demo and (uid.startswith("demo_") or uid.startswith("device:")):
+        if not include_demo and uid.startswith(("demo_", "device:", "qa_")):
             continue
         pairs, deltas, own_d, other_d = [], [], [], []
         for r in urows:

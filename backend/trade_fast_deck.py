@@ -43,7 +43,11 @@ from time import perf_counter
 # Exact evaluations the page may spend before the gated full solve runs instead. The
 # heaviest recorded production request needed 1,637 to exhaust its admitted inventory.
 MAX_VERIFICATIONS = 12000
-_PARITY_TESTED = ("trade_gen_bilateral", "trade_gen_bilateral_candidate")
+# Revision 5 (the season layer) joined with WI-8: its page bounds read the season lineup
+# through its ``_page_bound_terms`` hook (``trade_first_page``); a request whose season
+# inputs break the bounds' premise is declined by the page (``unsupported_inputs:*``) and
+# served by the gated full solve.
+_PARITY_TESTED = ("trade_gen_bilateral", "trade_gen_bilateral_candidate", "trade_gen_bilateral_season")
 _ALL = 1 << 30  # take(n) with n past any inventory: run the search to exhaustion
 # The clients read mismatch_score as "Match strength" = mismatch / MATCH_SCALE x 100, clamped
 # (mobile/src/api/trades.ts). The generators set it to the card's position counted up from the
@@ -76,16 +80,20 @@ def _identity(card):
 
 def page(generate, context, rules, *, check=None):
     """``(cards, report)``: the whole admitted inventory from the page search, or
-    ``(None, reason)`` when it cannot be proven (``unsupported_request``, ``over_limit``)."""
+    ``(None, reason)`` when it cannot be proven (``unsupported_request``, ``over_limit``,
+    ``unsupported_inputs:<reason>``)."""
     from . import trade_first_page
     module = _module(generate)
     if module is None:
         return None, "unsupported_generator"
     if not trade_first_page._supported(context):
         return None, "unsupported_request"
-    search = trade_first_page.PageSearch(generator=module, max_verifications=MAX_VERIFICATIONS,
-                                         admit=rules.admits, rules_version=_version(),
-                                         **context, _check_current=check)
+    try:
+        search = trade_first_page.PageSearch(generator=module, max_verifications=MAX_VERIFICATIONS,
+                                             admit=rules.admits, rules_version=_version(),
+                                             **context, _check_current=check)
+    except trade_first_page.Unsupported as error:
+        return None, "unsupported_inputs:" + error.reason
     cards, report = search.take(_ALL)
     if not report.as_dict()["complete"]:
         return None, "over_limit"
@@ -122,7 +130,10 @@ def gated_full(generate, context, rules, *, check=None):
     search = _Gated(**context, _check_current=check)
     cards, raw = bilateral._generate_with_search(search, ranker=ranker, version=module.VERSION)
     report = raw.as_dict()
-    if getattr(module, "term_precedence", None) is not None:
+    if hasattr(module, "_generation_report"):
+        # Revision 5: the generator's own report over the gated result (same fields).
+        report = module._generation_report(search, cards, raw, started).as_dict()
+    elif getattr(module, "term_precedence", None) is not None:
         # The revision-2 report fields generate_bilateral_trades adds (same values).
         counts = {}
         for card in cards:

@@ -689,6 +689,10 @@ NOT_USER_KEYS = {
     # the deletion scrub renames OTHER users' taste for the person, whose
     # attr is "partner:<id>" (legal R28.20 (ii)): a derived key, not an id.
     ("user_taste", "attr"),
+    # the shared-league hand-over (platform-league-binding): the deleted
+    # user's own platform leagues (an enum filter) and the OTHER binders of
+    # each, reached through leagues.user_id, which the purge discovers.
+    ("leagues", "platform"), ("platform_league_bindings", "league_id"),
 }
 
 

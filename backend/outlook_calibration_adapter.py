@@ -76,6 +76,7 @@ def _input_identity(user_id, league_id, captured_metadata_ids=(), full_metadata_
         availability={p: {k: (metadata.get(p) or {}).get(k) for k in
                           ("injury_status", "fantasy_positions", "position", "player_id", "active")} for p in held | set(player_map)},
         slot_order=s._league_slot_order(league_id), provenance=provenance,
+        **({"pick_projection": projection_key} if (projection_key := s._pick_projection_key(league_id)) else {}),
         prefs=s.load_league_preferences_bulk(ids, league_id),
         asset_prefs={u: s.load_asset_preferences(user_id=u, league_id=league_id) for u in ids},
         rankings=s.load_member_rankings(league_id, exclude_user_id=user_id, scoring_format=fmt),
@@ -419,11 +420,12 @@ def capture(*, user_id, league_user_id, league_id):
             build_context(**roster_kwargs, slots=starters, platform="sleeper",
                           raw_rosters=raw["rosters"], capacity=capacity))
         order = s._league_slot_order(league_id)
+        projection = s._league_pick_projection(league_id)
         for pick in picks:
             pid = str(pick["pick_id"])
             if pid not in roster_ctx.assets:
                 roster_ctx.assets[pid] = Asset(pid, frozenset(),
-                    float(s._priced_pick_value(pick, order, fmt)), is_pick=True)
+                    float(s._priced_pick_value(pick, order, fmt, projection)), is_pick=True)
         from .calibration_roster_coverage import add_unranked_occupancy
         unpriced_occupancy = add_unranked_occupancy(roster_ctx, metadata)
         from .calibration_fixed_lineup import prepare as prepare_fixed_lineup

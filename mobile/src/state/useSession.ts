@@ -822,6 +822,21 @@ const leagueSessions = createLeagueSessionLifecycle({
   },
 });
 
+/** Onboarding test profile switch (state/testProfile.ts): drop every
+ *  in-memory session field and cancel in-flight league inits WITHOUT
+ *  signOut's server revoke or storage clear — the caller has already swapped
+ *  storage to the other profile and calls bootstrap() next. */
+export function resetSessionMemoryForProfileSwitch(): void {
+  leagueSessions.invalidate();
+  _inviteTs = 0;
+  useSession.setState({
+    user: null, league: null, leagues: [], hasToken: false, activeFormat: null,
+    formatExplicit: false, switching: false, isDemo: false, invitedBy: null,
+    invitedLeagueId: null, invitedLeagueName: null, inviteId: null,
+    rankingMethodPref: null, verification: null, verifyBannerDismissed: false,
+  });
+}
+
 /** Snapshot before an existing pre-init import/read, including same-token intent. */
 export function currentSessionGuard(): (error?: unknown) => void {
   const user = useSession.getState().user;

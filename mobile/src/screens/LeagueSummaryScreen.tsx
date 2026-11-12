@@ -66,6 +66,8 @@ import {
   takeLeagueSummaryIntent,
 } from '../state/leagueSummaryIntent';
 import type { SplitSide } from '../utils/positionSplit';
+import ProjectedPickTag from '../components/ProjectedPickTag';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -2310,10 +2312,28 @@ export default function LeagueSummaryScreen() {
                       {`${selected.tc.team.picks!.count} · ${fmtK(selected.tc.team.picks!.value)}`}
                     </Text>
                   </View>
-                  {selected.tc.team.picks!.items.map((p, i) => (
+                  {selected.tc.team.picks!.items.map((p, i) => {
+                    // Projected draft slot (utils/projectedPick): a valid
+                    // pair prints `proj_name` with the flare tag beside it;
+                    // otherwise the exact row below, unchanged.
+                    const proj = projectedPick(p);
+                    return (
                     <View key={`${p.label}-${i}`} style={styles.pickRow}>
                       <View style={styles.pickRowBody}>
+                        {proj ? (
+                          <View style={styles.pickRowProjLine}>
+                            <Text
+                              style={[type.title, styles.pickRowProjName]}
+                              numberOfLines={1}
+                              accessibilityLabel={`${proj.name}, ${projectedPickA11y(proj)}`}
+                            >
+                              {proj.name}
+                            </Text>
+                            <ProjectedPickTag />
+                          </View>
+                        ) : (
                         <Text style={type.title} numberOfLines={1}>{p.label}</Text>
+                        )}
                         {/* D17 — priced surface 5 of 5: the draft-capital
                             group. These picks are summed into the team's
                             total and into the league ranking, so a wrong
@@ -2330,7 +2350,8 @@ export default function LeagueSummaryScreen() {
                       </View>
                       <Text style={type.data}>{Math.round(p.value).toLocaleString('en-US')}</Text>
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               ) : null}
             </View>
@@ -3603,6 +3624,10 @@ const styles = StyleSheet.create({
   // The label column became a stack when the W3 M-C provenance marker
   // joined it; with no marker it renders exactly as the single Text did.
   pickRowBody: { flex: 1, gap: space.xs },
+  // Projected-slot pick: name + PROJECTED tag on one line; the NAME yields
+  // (ellipsizes) before the tag, which never shrinks.
+  pickRowProjLine: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  pickRowProjName: { flexShrink: 1 },
   // #299 — the draft-capital rows are NOT PlayerCards, so they don't shrink
   // with the tiles. Brought into proportion with the new 32pt tile (was 40)
   // so the picks group doesn't read as conspicuously tall beside the roster.

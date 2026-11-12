@@ -45,7 +45,7 @@ give_value receive_value favors gap likes_you standing_offer_reason standing_off
 sweetener gap_sweetener retest wildcard relaxed relaxed_reason roster_evaluation
 partner_fit need_fit fit breaker lane fit_premium aggression_variant reasons rationale
 meso_variants tier narrative match_context real_opponent outlook impression_id
-fit_block""".split())
+fit_block season_block""".split())
 PLAYER_FIELDS = frozenset("""id name position team age years_experience depth_chart_position
 depth_chart_order injury_status injury_body_part birth_date height weight college
 search_rank adp pick_value on_block""".split())
@@ -59,7 +59,8 @@ _PROOF_VERSIONS = {("owner_v1", "owner-v1"),
                    ("owner_v2_bilateral", "owner-v2-bilateral-1"),
                    ("owner_v2_bilateral", "owner-v2-bilateral-2"),
                    ("owner_v2_bilateral", "owner-v2-bilateral-3"),
-                   ("owner_v2_bilateral", "owner-v2-bilateral-4")}
+                   ("owner_v2_bilateral", "owner-v2-bilateral-4"),
+                   ("owner_v2_bilateral", "owner-v2-bilateral-5")}
 
 
 def _require(condition, reason):

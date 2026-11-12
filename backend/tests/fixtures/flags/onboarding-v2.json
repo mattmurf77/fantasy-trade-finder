@@ -8,6 +8,7 @@
   "trade.fast_deck": false,
   "trade.fast_deck_shadow": false,
   "deck.rules_first": true,
+  "trade.partner_outlook_projection": true,
   "_comment_fixture": "Onboarding-capture flag fixture, consumed by mobile/.maestro/capture/onboarding-signin@fresh.yaml and onboarding-tour@fresh.yaml (both tagged `# flags: onboarding-v2`), per capture-matrix-signoff.md's operator directive that the Analyst mascot scenes ARE captured (the one exception to ruling A). ORIGINALLY this was 'release.json with the onboarding-conversion experience forced ON'. As of open-access Phase A (2026-08-15, docs/business/product/2026-08-14-open-access-onboarding.md \u00a75) that surface is the RELEASE default, so this file's only remaining divergence from release.json is ONE key: onboarding.league_autoskip stays FALSE, because the `fresh` profile has exactly one league and autoskip would jump the picker, making scene S1.1 unreachable. Everything else mirrors release.json. Pinned by test_onboarding_v2_flags_are_release_plus_the_onboarding_surface.",
   "_comment": "Feature flags for the 2026-04-19 sprint. Every key defaults to false in backend/feature_flags.py. Flip a value to true here to enable the feature in the running deployment. Unknown keys are ignored with a console warning.",
   "swipe.community_compare": false,
@@ -63,6 +64,7 @@
   "picks.rank_year_labels": true,
   "picks.league_horizon": true,
   "picks.slot_labels": true,
+  "picks.projected_slot_value": true,
   "market.trade_capture": true,
   "market.roster_history": true,
   "market.manager_profiles": true,
@@ -188,6 +190,8 @@
   "_comment_testing": "QA/testing surfaces. testing.stage_users gates the synthetic stage-user spawner (POST/DELETE /api/test-users, backend/test_users.py) used to QA the onboarding flow with qa_* users at preset adoption stages. Requests must ALSO come from a tester-allowlist device/user (config/tester_allowlist.json or FTF_TESTER_ALLOWLIST), so flipping this on never exposes the surface to real users. Default false; flip only during onboarding QA windows.",
   "testing.stage_users": false,
   "testing.timing_readout": false,
+  "_comment_test_profile": "Onboarding test profile (docs/plans/onboarding-test-profile/, backend/test_profile.py). dev.test_profile gates /api/test-profile/* and the Settings > Testing row \"Test onboarding as a new user\". It is inert unless the account is ALSO listed in the server env var TEST_PROFILE_ACCOUNTS (comma-separated real working keys); the tester allow-list and device ids are never consulted. Default false.",
+  "dev.test_profile": true,
   "_comment_tiktok_discovery": "2026-07-26 TikTok-discovery deck engine (docs/plans/tiktok-discovery/). Flags flipped ON per-wave at each TestFlight ship. deck.value_model stays dark until an F8 replay win (PRD F6 gate). F8 eval harness is unflagged operator tooling.",
   "deck.signal_v2": true,
   "deck.thompson_v2": true,
@@ -252,6 +256,8 @@
   "trade.value_core": false,
   "_comment_grading_blind": "ON for every app user since 2026-10-05 (operator; <10 users, TestFlight-only) — no tester overlay needed; kill = set false. 2026-10-02 Calibration = in-app blind grading, value-core Gate 2 (docs/plans/blind-grading/). SHIPS FALSE and stays false here: it reaches testers only through the calibration_rollout experiment overlay (targeting is_tester_allowlist). The mobile Calibration tab is decided once at launch from the merged flag map and takes the Draft tab's slot. Server: /api/grading/* answer only when grading.blind resolves true for the caller (global OR overlay, server._grading_flag_for_caller) AND server._calibration_allowed (tester allowlist); otherwise 404. GET /api/admin/grading/report (X-Cron-Secret) is not gated. Kill = stop calibration_rollout. Requires deck.signal_v2 + suggestion.telemetry + trade.bakeoff for the current-engine arm.",
   "grading.blind": true,
+  "_comment_founder_review": "2026-11-11 Founders' review (docs/plans/founder-review/): a founder-only section in Calibration to review and correct the win-now season signal's player labels. Ships FALSE. Access needs this flag AND the caller's account id in the FOUNDER_ACCOUNTS env var AND a verified session; anything else is 404. Overrides only reach users through bilateral revision 5 (owner_bilateral_revision_5_enabled).",
+  "founder.review": true,
   "grading.outlook_round": false,
   "grading.outlook_prepare": false,
   "grading.revision4_arm": false,
@@ -265,6 +271,8 @@
   "trades.roster_tier_rank": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
+  "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
-  "trade.sleeper_offer_import": true
+  "trade.sleeper_offer_import": true,
+  "trade.season_signal": true
 }

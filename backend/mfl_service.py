@@ -135,6 +135,8 @@ def resolve_host(league_id: str, year: int, timeout: int = 15, _opener=None) -> 
     back. Injectable via `_opener` for tests (an opener that raises
     urllib.error.HTTPError with a Location header, or returns a response).
     """
+    from .test_profile import native_league_id   # test-profile read seam
+    league_id = native_league_id(league_id)
     if not str(league_id).strip().isdigit():
         raise MflError(f"league_id must be numeric, got {league_id!r}", kind="input")
     url = f"https://{MFL_API_HOST}/{int(year)}/home/{league_id}"
@@ -299,6 +301,10 @@ def fetch_my_leagues(cookie: str, year: int, timeout: int = 15,
 # ---------------------------------------------------------------------------
 
 def export_url(host: str, year: int, type_: str, league_id: str) -> str:
+    # Onboarding test profile: a stored `qa_tp:X:<id>` reads MFL as <id>
+    # (identity for every real id) — the read half of the linking seam.
+    from .test_profile import native_league_id
+    league_id = native_league_id(league_id)
     return (
         f"https://{host}/{int(year)}/export?TYPE={urllib.parse.quote(type_)}"
         f"&L={urllib.parse.quote(str(league_id))}&JSON=1"

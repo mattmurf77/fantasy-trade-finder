@@ -242,30 +242,40 @@ def _seed_json(fmt: str, pool: Mapping, generation) -> str:
     return out
 
 
-def _values_snapshot_id(fmt: str, pool: Mapping, picks, generation) -> str:
+def _values_snapshot_id(fmt: str, pool: Mapping, picks, generation,
+                        pick_projection_key: str | None = None) -> str:
     pick_rows = sorted(([str(p["pick_id"]), p.get("pool_value")] for p in picks),
                        key=lambda row: row[0])
     # Byte-identical to _canonical({"v": 1, "fmt": fmt, "seed": [...], "picks": [...]})
     # (sort_keys order: fmt, picks, seed, v), so the memoized seed JSON is reused
-    # as-is. test_roster_snapshot pins the equality.
+    # as-is. test_roster_snapshot pins the equality. A projection key (projected
+    # slot value) adds "pp" in its sort position; None adds nothing, so every
+    # vsn1 without one is unchanged.
+    projection = ('' if pick_projection_key is None
+                  else ',"pp":' + _canonical(pick_projection_key))
     canonical = ('{"fmt":' + _canonical(fmt) + ',"picks":' + _canonical(pick_rows)
+                 + projection
                  + ',"seed":' + _seed_json(fmt, pool, generation) + ',"v":1}')
     return VSN_PREFIX + _hash32(canonical)
 
 
 def values_snapshot_id(conn, fmt: str, league_id: str, pool: Mapping, *,
-                       pick_source: str, generation=None) -> str:
+                       pick_source: str, generation=None,
+                       pick_projection_key: str | None = None) -> str:
     """``vsn1`` for (fmt, league): the pool's seed Elo and age per player, plus
-    the ``pool_value`` of the pick rows the engine prices.
+    the ``pool_value`` of the pick rows the engine prices, plus the league's
+    pick-projection key (``server._pick_projection_key``) when one prices them.
 
     ``pool`` is ``g_universal_by_format[fmt]`` as server.py holds it, read only.
     ``generation`` is ``pool_generation()``; with it, the seed part is memoized.
     """
-    return _values_snapshot_id(fmt, pool, _read_picks(conn, str(league_id), pick_source), generation)
+    return _values_snapshot_id(fmt, pool, _read_picks(conn, str(league_id), pick_source), generation,
+                               pick_projection_key)
 
 
 def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
-                 pick_source: str, generation=None, parts: dict | None = None) -> tuple[str, str]:
+                 pick_source: str, generation=None, parts: dict | None = None,
+                 pick_projection_key: str | None = None) -> tuple[str, str]:
     """``(rfp1, vsn1)`` from one read of each input: members, picks, draft state.
 
     ``parts`` (a job's kickoff): filled from the same read with ``picks_key``
@@ -280,7 +290,7 @@ def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
         if parts.get("member_rows"):
             parts["expected_fp"] = _roster_fp(_stored_member_rows(parts["member_rows"]),
                                               picks, drafted)[0]
-    return fp, _values_snapshot_id(fmt, pool, picks, generation)
+    return fp, _values_snapshot_id(fmt, pool, picks, generation, pick_projection_key)
 
 
 def picks_key(picks, drafted: bool = False) -> str:

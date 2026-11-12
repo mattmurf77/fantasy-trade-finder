@@ -193,6 +193,7 @@ counterparty board disclosure or client analytics event is added.
 - [`trade_offer_outcomes`](#trade_offer_outcomes)
 - [`offer_import_consents`](#offer_import_consents)
 - [`revised_offer_cards`](#revised_offer_cards)
+- [`founder_rule_notes`](#founder_rule_notes)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -313,17 +314,18 @@ row. It inserts only on a Sleeper league's first init, with
 | `platform` | str | League source: NULL reads as `'sleeper'` (session init writes `'sleeper'` on a Sleeper league's first insert since 2026-11-03; older Sleeper rows stay NULL); `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
 | `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
 | `espn_auth` | str | `'public'` / `'cookie'` — how the ESPN league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
-| `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
+| `espn_my_team_id` | int | **Legacy (2026-11-11).** The LAST linker's ESPN team id — still written by `upsert_espn_league` (rollback safety), read only by the `platform_league_bindings` backfill. Never anyone's binding: see [`platform_league_bindings`](#platform_league_bindings) |
 | `platform_season` | int | Season/year at import for MFL/Fleaflicker (`mfl`/`fleaflicker`) — the re-sync key. NULL for ESPN/Sleeper rows (ESPN uses `espn_season`) |
 | `platform_host` | str | MFL's per-league `wwwNN.myfantasyleague.com` host (the wwwNN gotcha) — reused on re-sync so no re-resolve is needed. NULL for Fleaflicker/ESPN/Sleeper |
 | `platform_auth` | str | `'public'` / `'cookie'` for MFL/Fleaflicker (Phase 1 is public-only → always `'public'`) |
-| `platform_my_team` | str | The linking user's franchise/team key (MFL franchise id `"0001"`, Fleaflicker team id) — binds their `league_members` row across re-syncs (generic analog of `espn_my_team_id`; **string**, since these ids aren't numeric integers) |
+| `platform_my_team` | str | **Legacy (2026-11-11).** The LAST linker's franchise/team key (MFL `"0001"`, Fleaflicker team id) — written by `upsert_platform_league`, read only by the bindings backfill (see `espn_my_team_id`) |
 | `platform_future_picks` | text (JSON) | MFL/Fleaflicker `futureDraftPicks` stored **raw** (`[{franchise_id,year,round,original_owner}]`). Written at link/import by `upsert_platform_league`, and — for MFL since #207/#228 parity — **refreshed on the draft-status refresh cadence** by `server._refresh_mfl_future_picks` via the narrow `set_platform_future_picks` setter (never wiped when the export is unavailable). Normalized into `draft_picks` by `server._sync_mfl_owned_picks` since #158, so it **is** engine-visible through that store |
 | `draft_status` | str | #207 rookie-draft verdict for the league's CURRENT season: `'drafted'` / `'not_drafted'` / `'unknown'`. NULL = never checked. Written by `server._refresh_league_draft_status` (`backend/draft_status.py` decides); read by `/api/rankings` + `/api/trio` to year-tag the generic pick rungs. **Fail-safe: anything but `'drafted'` shows current-year picks** |
 | `draft_status_confidence` | str | `'high'` (platform-authoritative: Sleeper `complete`+`last_picked`, MFL `made==total`) / `'medium'` (roster heuristic, or a platform/roster conflict) / `'low'` (abstained). Recorded for diagnosis; the serialization path gates on the verdict only |
 | `draft_status_checked_at` | str | ISO UTC of the last check — stamped even for `'unknown'` so a persistently flaking league backs off. Drives the asymmetric cheap-skip TTLs in `server._DRAFT_STATUS_TTL_SECONDS` (drafted 12 h, not_drafted 3 h, unknown 1 h) |
 | `pick_assignment_settings` | text (JSON) | **W3 M-A (ADR-010)**, flag `picks.assign` — `{rounds:int, order_type:'linear'\|'snake', order:[user_id, …]}`. **NUMBERING ONLY.** Ownership is never stored here — it lives one row per slot in `draft_picks`. `order` is the round-1 pick sequence and `order_type` the shape; both change slot numbers and **never** who owns a pick, which is what makes the toggle safe to flip at any time. NULL = never configured (defaults: 4 rounds, linear, members sorted by `user_id`). Accessors: `load_pick_assignment_settings` / `save_pick_assignment_settings` |
 | `draft_slot_order` | text (JSON) | **D-090 (2026-08-19)**, flag `picks.slot_labels` — the league's resolved **CURRENT-season** draft order: `{schema:1, season:int, teams:int, type:'linear'\|'snake', reversal_round:int, slots:{roster_id: slot}, source:'sleeper_draft_order'}`. Written by `server._sync_sleeper_owned_picks` from the `draft_order` already carried on the `/league/<id>/drafts` payload that function fetches for the #228 exclusion, composed with its `roster_id → user_id` map — **zero additional upstream calls**. **NUMBERING ONLY**, exactly like `pick_assignment_settings` above and for the same reason: the ORDER is stored, the SLOT never is, so renumbering can never touch an owner (D18). Season-stamped, so a future season resolves nothing (#273). Written as NULL when the order is unset upstream or the season's draft has completed, so a stale order cannot outlive the draft it described. NULL = unresolved → owned-pick labels fall back to their generic round, which is every pre-D-090 row and every MFL league. Read at label time only (`server._league_slot_order`, 300 s TTL cache); **no engine input reads it and no price depends on it**. Accessors: `load_draft_slot_order` / `save_draft_slot_order`; resolution logic: `backend/pick_slots.py` |
+| `median_game` | integer, nullable | **2026-11-11** ([scope](plans/league-projections/median-leagues-scope.md)) — the Sleeper league-median setting (`settings.league_average_match`): `1` = every week each team also plays the league's median score (two results a week), `0` = head-to-head only, `NULL` = unknown (not a Sleeper league, a missing or unexpected setting, or not synced since the column arrived). Written by `upsert_league` from the league payload session init already fetched (`database.league_median_setting`; no extra call), on first link and on every later sync, so a commissioner's change between seasons is picked up; a `NULL` row is filled at that league's next sync (no backfill). An unknown value never overwrites a known one. ESPN / MFL / Fleaflicker rows stay `NULL` (no adapter reads an equivalent setting). **Descriptive only:** the playoff forecast reads the live Sleeper setting at capture, never this column. Not yet returned to clients. Migration entry in `_migrate_db`. |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -385,7 +387,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `write_session_init_members` (delete-then-insert in one transaction under the caller's users-row lock; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). A row that was there when the init's daemon started and is gone by its write (an account deletion) is not re-created by that init (2026-11-03), except in one Postgres interleaving, a public-data limit documented on `write_session_init_members`; session init only updates an imported league's rows. Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
-For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
+For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): **every team an app user is bound to (`platform_league_bindings`) carries that user's real FTF `user_id`** — whoever's link or re-sync writes the snapshot; a team two app accounts are bound to carries the earliest binder's id, and each binder's league list relabels it to them (`database._members_as_seen_by`). Every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
 MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same writer** (`replace_espn_league_members`, which is platform-agnostic) and the same snapshot rule, with synthetic counterparty ids `mfl:{league_id}.f{franchise_id}` / `flea:{league_id}.t{team_id}`. Rosters are crosswalked to Sleeper ids via `mfl_id` / `sportradar_id` respectively (`backend/mfl_service.py`, `backend/fleaflicker_service.py`, shared crosswalk in `espn_service`). League rows are written by the generic `upsert_platform_league`; loaded by `load_platform_leagues_for_user(user_id, platform)`.
 
@@ -664,7 +666,15 @@ depends on how the owner deck was built (ADR-030, `deck.rules_first`):
 recorded without applying the legacy divergence/relaxation discount.
 
 The once-per-run selected `bakeoff_runs.config_json` contains the full captured
-input ledger; organic runs store it under `config_json.owner_request`. Each
+input ledger; organic runs store it under `config_json.owner_request`. With flag
+`trade.season_signal` on, an organic trade job's owner request also carries
+`season_evidence` (schema `season-evidence-1`: state, reason, run id, model version,
+weeks, slots, `players` {id: {ppg, games}}, `unprojected`, `free_agent_level`, digest,
+`as_of`) beside `input_evidence`, whatever revision is selected; only its digest (or,
+when unavailable, its state and reason) joins the request hash. The per-impression
+`owner_request` keeps the card's assets' rows only. Under revision 5 the frozen proof
+(`valuation_json`) adds a private `season_signal` object (lld §4). The slim form keeps
+`season_evidence`. Each
 joins the package-scoped impression record by request hash and capture time,
 including board/pool values, lineup context, rosters and preferences. Capture
 timestamps are not market source timestamps:
@@ -1031,6 +1041,22 @@ The one card built for the user's own declined offer (offer-learnings WS8, flag 
 | `retired_at`, `retired_reason` | str, nullable | `acted` (the user passed or liked it: the evaluator answered `previous_disposition`) · `unavailable` (it no longer passes, or the partner no longer holds the ask) |
 
 Indexes: `uq_revised_offer_card_user_outcome` UNIQUE `(user_id, outcome_id)`; `ix_revised_offer_cards_user_league` on `(user_id, league_id)`. A new table; no `migration_cols` row.
+
+---
+
+## `founder_rule_notes`
+
+A founder's comment or question on one yes/no rule of the trade engine (Founders' review, use case 2: the decline waterfall; design `docs/plans/founder-review/rule-waterfall-design.md` §5). **Append-only history:** every save adds a row; the newest row per `rule_key` is the current note, and an empty `body` clears it without losing earlier versions. Written and read only through `database.save_founder_rule_note`, `load_founder_rule_notes` and `load_founder_rule_note_history`; a `rule_key` that `backend/rule_catalog.py` does not list is rejected (`unknown_rule`), and so is a body over `FOUNDER_NOTE_MAX_CHARS` (2,000) after trimming (`too_long`). The accessors return the rule's key and name, the current text and an author marker (`you` for the reading founder, else `founder`); account ids never leave the server. Deleted and exported with the author's account (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement; orders versions |
+| `rule_key` | str, not null | `rule_catalog.RULES[].key` (the engine's own reason string where one exists) |
+| `user_id` | str, not null | ACCOUNT id of the founder who wrote this version |
+| `body` | text, not null | free text, trimmed, at most 2,000 characters; `""` clears the note |
+| `created_at` | str, not null | ISO UTC time this version was saved (the current note's `updated_at`; the first version's is its `created_at`) |
+
+Index: `ix_founder_rule_notes_rule` on `(rule_key, id)`. A new table, created by `metadata.create_all` on fresh and existing databases; no `migration_cols` row.
 
 ---
 
@@ -1888,6 +1914,26 @@ Interim home; folds into the auth epic's `linked_sources` when that lands.
 
 ---
 
+## `platform_league_bindings`
+
+Per-user binding for linked ESPN / MFL / Fleaflicker leagues (2026-11-11, [design](plans/platform-league-binding/design.md)): "this app user manages this team in this league". The `leagues` row and `league_members` stay one shared copy per league; before this table "my team" was the shared `leagues.espn_my_team_id` / `platform_my_team` (last linker wins), so a league-mate's link rebound or unlisted the first user. Written **only** by that user's own link (`upsert_espn_league` / `upsert_platform_league`, same transaction as the row) and by the boot backfill; read **only** through `get_platform_binding(user_id, league_id, platform)` ("my team" — no row = not the user's league, fail closed) and `platform_bound_teams(league_id)` (every bound team → its earliest binder, the id `league_members` carries). Pinned by `test_platform_league_binding.py::test_binding_columns_have_one_reader`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | FTF user_id |
+| `league_id` | str PK | `leagues.sleeper_league_id` (platform-native id). Index `ix_plb_league` |
+| `platform` | str | `'espn'` \| `'mfl'` \| `'fleaflicker'` |
+| `team_id` | str | Native team id as text (ESPN teamId, MFL franchise id `"0001"`, Fleaflicker team id) |
+| `source` | str | `'link'` (the user's own link / re-sync) \| `'backfill'` |
+| `created_at` | str | Kept on re-link; orders co-owner labels |
+| `updated_at` | str | |
+
+**Backfill** (`backfill_platform_league_bindings`, `_migrate_db` every boot, idempotent): only leagues with no binding row yet; binds the league's single app-user `league_members` row to the legacy team column (the last link's own pair); zero or several app-user members, a null team, or (ESPN) the candidate's own SWID labelling another team → nothing (that user re-links). `INSERT … ON CONFLICT DO NOTHING`; never writes `leagues` / `league_members`.
+
+User-keyed: deleted with the account and exported (`accounts._ADDITIONAL_PRIVATE_TABLES`). On deletion a platform `leagues` row the user created is handed (`leagues.user_id`) to the earliest surviving binder instead of deleted.
+
+---
+
 ## `mfl_credentials`
 
 MFL authenticated linking (#177, `mfl.auth_link`). Encrypted MFL session cookies — one row per FTF `user_id` who signed in via `POST /api/mfl/auth-link`. The user's **password is never stored** (transient, single MFL login call); what's kept is the `MFL_USER_ID` cookie MFL returns. Written by `upsert_mfl_credential`; read/deleted by `get_mfl_credential` / `delete_mfl_credential`. Crypto reuses `backend/sleeper_write.py`'s Fernet helpers (same `SLEEPER_TOKEN_KEY`); if the key is absent the route falls back to session-only storage and this table stays empty.
@@ -2591,3 +2637,16 @@ not a storage, schema or evidence-retention change.
 
 Default-off weekly advisory sidecar. `league_projection_runs` owns run_id,user_id,league_id,request/input hashes, immutable request/snapshot/result JSON, created/updated/expiry timestamps, state/reason/details, worker_token and retry_count. The worker token fences abandoned attempts; recovery reuses saved inputs once. `league_projection_targets` owns a random target generation, unique(user_id,league_id), canonical league seat, season, next weekly eligibility, dispatch lease/token and last-attempt/last-success references. Both tables join the account deletion/export registry; writes lock the live user. New tables use metadata.create_all. No trade/ranking data is rewritten. Ordinary history retention is configurable(default7days); the last successful target baseline is retained until replaced or account deletion. Raw unrelated user profiles are not stored.
 Calibration native MFL range inputs add no tables. Frozen source/proof JSON records original native bounds, explicit partition totals, the representative-template-only role of slot arrays, account/native-franchise/canonical-seat provenance and unchanged fixed holdings. `calibration_native_lineup.py` joins `_ENGINE_CODE_MODULES` because both owner engines consume its optional exact assignment. Existing code-currentness and complete Calibration source hashes cover helper changes; no stored page is re-labeled current without matching source identity.
+
+### founder_label_overrides
+
+Founders' review ([design](plans/founder-review/design.md) §3): the founder's correction of a win-now season-signal player label. One row per **(player_id, scope)**; deleting the row returns the player to the engine's label in that scope. Written only by `POST /api/founder/labels`; read by `server._season_evidence` (every row, once per usable evidence build) → `season_value.with_label_overrides` → `league_profile`. New table: `metadata.create_all`, no `migration_cols` row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `player_id` | String, PK | Sleeper player id (QB/RB/WR/TE; never a pick) |
+| `scope` | String, PK | `all` (RB / WR / TE: every league) \| `superflex` / `single_qb` (QB: leagues of that QB format, `season_value.qb_scope` of the lineup slots). Any position can take a narrower scope later (e.g. TE premium) without a migration |
+| `label` | String, not null | `cornerstone` \| `win_now` \| `rebuild` \| `depth` (`season_value.OVERRIDE_LABELS`). A value, not per-label booleans: a multi-label model would widen the key to `(player_id, scope, label)` |
+| `set_by` | String, not null | the founder's account id (`sess["user_id"]`). Account deletion sets it to `deleted_user` and keeps the row (a judgment about an NFL player and an engine input); exported with the account (`accounts._EXPORT_TABLES`) |
+| `set_at` | String, not null | ISO UTC; changes only when the label changes |
+
