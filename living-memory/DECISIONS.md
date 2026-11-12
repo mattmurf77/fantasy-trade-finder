@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-246 — "My team" in a linked ESPN, MFL or Fleaflicker league is a per-user binding, never a league fact
+
+**Date:** 2026-11-12 · **Who:** the operator: "fix the ESPN overwrite bug". The model, the backfill rules and no feature flag are the builder's and the main session's calls. Plan: [`../docs/plans/platform-league-binding/`](../docs/plans/platform-league-binding/). (D-243 to D-245 are taken by work on other branches.)
+**Context:** `leagues.espn_my_team_id` / `platform_my_team` held "the linker's team" and every link overwrote them; every import replaced `league_members` wholesale. When a second league-mate linked the same league, the first user's league vanished from their list or they were bound to the other's team (wrong roster, false "wrong ESPN account", sends built from the wrong team), and the second linker was refused on every send because routes checked `leagues.user_id`. Any user calling an import route was bound to the last linker's team.
+**Decision:** A new additive table `platform_league_bindings` (user, league) → team, written only by that user's own link and read only through `database.get_platform_binding` / `platform_bound_teams`. League facts and rosters stay one shared copy; the member snapshot labels each bound team with its earliest binder. No binding fails closed with the existing `*_not_linked` 404. A boot backfill, idempotent and insert-only, derives a binding only where one app user and a legacy team exist and (ESPN) that user's own SWID does not label another team; it never guesses. Account deletion hands a shared league row to the earliest surviving binder. No feature flag: a flag-off path would keep corrupting data.
+**Consequences:**
+- Production at the time (read-only count): one linked ESPN league, intact; one linked MFL league whose first linker was overwritten and must re-link once.
+- The legacy columns are still written (rollback) and read only by the backfill. The founders-only calibration capture still reads them and is allow-listed.
+- League-mates in a linked league now see each other as real members, so a counterparty resolves through their own binding.
+- A link made on the old instance during a deploy overlap has no binding until the next boot's backfill.
+- Rejected: team on the credential row; binder in `league_members`; a per-user `leagues` primary key.
+
 ## D-242 — Founders' review: a founder-only page to correct player labels; a correction is about future value, never about who starts; QB corrections are per QB format
 
 **Date:** 2026-11-12 · **Who:** the operator: "Can we spin up a feature page just for me (it can be a new tab in calibration): for Founders' review… presenting all players split by position and a simple tagging via buttons (or better yet the same labeling progression of the tiers feature)", and "The labels should be settings specific for QBs. Cornerstone QBs in SF are not cornerstone in other leagues". One label per player, the future-value-only rule and global scope for RB/WR/TE are the builder's and the main session's calls. Plan: [`../docs/plans/founder-review/`](../docs/plans/founder-review/).

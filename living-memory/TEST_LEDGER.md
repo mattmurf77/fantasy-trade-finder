@@ -1,3 +1,14 @@
+## 2026-11-12 — Per-user team binding for linked platform leagues (D-246), branch `fix/platform-league-user-binding`
+
+- **Full backend suite (Opus subagent, no edits in flight):** 15,094 passed, 42 skipped, **1 failed**: `test_research_trade_pipeline.py::test_instrumentation_preserves_function_result_and_rejects_drift`, a `RecursionError` in `copy.deepcopy` of a small AST, unrelated to the touched code; it passes 4 of 4 alone. Not shown to fail on main. CI is the re-run.
+- **`test_platform_league_binding.py` is new (36).** On main 31 fail, with the user-visible symptoms (league gone from the first user's list, the other user's team returned, 403 `wrong_account`, "send to your own team", second linker `espn_not_linked`, an unbound user's import answering 200). With the fix 36 pass.
+- **What is pinned:** both link orders, re-link, co-owners of one team, an unbound user fails closed, sends use the sender's own team and credential, the backfill derives only the trustworthy pair, is idempotent and never overwrites a binding written meanwhile, account deletion keeps the shared league for the other user, Sleeper snapshots are never relabelled, one reader of the legacy columns, Postgres-dialect DDL and upserts compile.
+- **Sabotages, red then restored (13, subagent):** binding keyed by league only; sends reading the row's team (ESPN, MFL); backfill guessing, dropping the SWID check, overwriting, ignoring "already bound"; deletion dropping the shared row; labels not written; co-owner not relabelled; re-sync falling back to the row; counterparty not resolved; Sleeper relabelled.
+- **Production count (main session, read-only, aggregates):** ESPN 1 linked league, intact; MFL 1 linked league, first linker overwritten.
+- **Existing tests changed in seeding only** (they stored the binding in the legacy column): draft order, roster history, draft board, two calibration capture files; `test_purge_entry_users.py` allow-list gained two non-user filter columns.
+- **Not verified:** a real Postgres instance; live ESPN or MFL; anything on a device (no app change).
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Founders' review label page (D-242), branch `feat/founder-label-review`
 
 - **Full backend suite (Opus subagent, before merging main):** 14,995 passed, 42 skipped, 0 failed. **Main session after merging main:** `test_founder_review.py`, the pipeline digest, the paywall table and the median-setting file: 93 passed. CI is the full re-run.
