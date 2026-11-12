@@ -1210,6 +1210,10 @@ _DEFAULT_CFG: dict[str, float] = {
     # term, read by revision 5 only (order only, never inventory or terms).
     "season_shed_weight_tanking":    1.0,
     "season_shed_weight_rebuilding": 0.5,
+    # The viewer's label fit (amended 2026-11-12, operator direction): exactly 1 = a
+    # Rebuilding / Tanking viewer's re-scored team plan reads the season label table
+    # without partner matching. Revision 5 only; order only, never inventory or terms.
+    "season_viewer_label_fit":       1.0,
     # Keep / untouchable: 1 (default) = hard rule on every owner-family card
     # (pinned own give excepted); 0 = the premium-return rule. Owner arms only.
     "owner_untouchable_hard":   1.0,

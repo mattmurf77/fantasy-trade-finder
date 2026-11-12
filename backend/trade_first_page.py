@@ -119,7 +119,12 @@ evidence it names none, and the bounds, screen and memo are revision 2's:
   (F_R the free-agent points in R's lineup): T(R') >= its starters' points >=
   the best weight of R - G's assets (adding assets never lowers a max-weight
   independent set) >= R's starters minus G's. The support level computes the
-  re-scored team plan exactly (the generator's own ``_shed_parts``).
+  re-scored team plan exactly (the generator's own ``_shed_parts``). Its plan
+  fit is a market-weighted sum over the assets like revision 2's; when it reads
+  a per-asset fit other than ``_plan_asset`` (the viewer's label fit, hook term
+  ``shed["plan"]``), the side's plan column reads that fit, so the bound's plan
+  term is that sum exactly and the argument is unchanged. A shed side's support
+  never reads ``_plan_asset`` after eligibility, so nothing else moves.
 * The conflict demotion only lowers both supports, so every bound stays an
   upper bound (the support level is then above the exact score).
 With any season term the screen bounds through ``_Member.pre`` (same entries
@@ -359,6 +364,10 @@ class _Bounds:
         self.gamma, self.trade_wide = c("package_adj_gamma_market"), c("package_bench_trade_wide") > 0
         self.floor_market, self.floor_cross = c("package_floor_market"), c("package_floor_cross")
         self.season, self.shed_rate = self._season_terms(search)
+        # A shed-scored side whose re-scored team plan reads its own per-asset plan fit
+        # (revision 5's viewer label fit): the plan column reads that fit, not ``_plan_asset``.
+        self.shed_plan = {uid: terms["shed"]["plan"] for uid, terms in self.season.items()
+                          if terms["shed"] is not None and terms["shed"].get("plan") is not None}
         # Any season term: the screen bounds through ``_Member.pre`` (not the inlined
         # copy, which is revisions 1 and 2's bound, kept bit-identical).
         self.generic = bool(self.season)
@@ -473,13 +482,15 @@ class _Bounds:
 
     def rows(self, viewer, other, pool, sent_by_viewer):
         s, sign = self.search, (-1 if sent_by_viewer else 1)
+        v_plan = self.shed_plan.get(viewer["uid"]) or (lambda pid: s._plan_asset(viewer, pid))
+        o_plan = self.shed_plan.get(other["uid"]) or (lambda pid: s._plan_asset(other, pid))
         out = {}
         for pid in pool:
             m = s.market[pid]
             out[pid] = (m, sign * m * (s._features[viewer["uid"], pid]["direction"] or 0),
-                        sign * m * s._plan_asset(viewer, pid),
+                        sign * m * v_plan(pid),
                         -sign * m * (s._features[other["uid"], pid]["direction"] or 0),
-                        -sign * m * s._plan_asset(other, pid))
+                        -sign * m * o_plan(pid))
         return out
 
     def _need(self, uid, usable_ratio):

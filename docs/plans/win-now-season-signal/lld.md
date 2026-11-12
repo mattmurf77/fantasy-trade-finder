@@ -174,6 +174,22 @@ Tanking, weight 0.05 for Rebuilding). The support move is recorded as
 `support.components.team_plan` carries the re-scored value. In stage 2 a Rebuilding / Tanking
 partner's support moves the same way on its own side.
 
+**Amended 2026-11-12, operator direction: the viewer's label fit.** With
+`season_viewer_label_fit == 1` (default 1; any other value = the age table, byte-identical to the
+2026-11-11 build) and stage 2 off, `plan_fit` above is the viewer's plan shift over the **label
+table** of §3.3 (`_shed_plan_asset` → `_mirror_fit`, revision 2's fit where the table has no claim)
+instead of revision 2's age table, except that where the label decides for a `win_now` piece
+(RB or not) or an older `cornerstone` (`sv.young` false) the fit is `min(table, revision 2's age
+fit)`, both at the outlook's scale (`NEVER_MILDER`): the table only ever adds to the age rule for
+the players a Tanking / Rebuilding team should move. `_plan_asset` is untouched, so `team_plan_gain`, the intent path,
+the pools, every gate and the inventory are still revision 2's: the set of cards is unchanged and
+only the order moves. League-mates are never read this way at stage 2 off; at stage 2 on the knob
+changes nothing (the table already reaches every Rebuilding / Tanking team through `_plan_asset`).
+The proof's `season_signal.assets[].plan_lean` carries the per-asset fit the team plan read
+(`_shed_plan_asset`, scaled) and the generator report's `season_signal.viewer_label_fit` is `true`. The page
+search's bound reads the same per-asset fit for that side (`_page_bound_terms` →
+`shed["plan"]`; `trade_first_page._Bounds.rows`), so its plan term stays exact.
+
 ### 3.2 Season lineup
 
 Built once in `__init__` after `owner._Search.__init__` has filled `_lineup_assets` and before
@@ -217,7 +233,9 @@ replay reports how often it clips so the rate can be set.
   (`trade_gen_bilateral.py:143`): All-in ±0.8/+0.5/−0.5, Contending at 0.6 of that.
   `+0.40` and `−0.25` are the top and bottom of today's age lean, so the plan term keeps its range.
 
-- **Stage 2 only** (`season_partner_matching == 1`), Rebuilding or Tanking team: pick `1.0`;
+- **The mirror table** — stage 2 (`season_partner_matching == 1`) for every Rebuilding or Tanking
+  team through `_plan_asset`; and, amended 2026-11-12, the viewer's re-scored team plan only
+  (§3.1, `season_viewer_label_fit`) with stage 2 off: pick `1.0`;
   `rebuild` `+0.7`; `cornerstone` `+0.45` when young, else `+0.2`; `win_now` `−0.8` (RB) or `−0.45`;
   `depth` or `None` → `super()`; all × `1.0` (Tanking) or `0.6` (Rebuilding). Revision 2's
   board-led refinements for young WR/TE/QB and elite RBs (`trade_gen_bilateral_candidate.py:43-51`)
@@ -404,7 +422,9 @@ All in `backend/server.py`.
   wins over 4 and 3); branches in `owner_generator`, `owner_version`, `owner_evaluator`
   (`bakeoff_runner.py:318-360`).
 - **Knobs:** `owner_bilateral_revision_5_enabled`, `season_conflict_demotion`,
-  `season_partner_matching` in `trade_service._DEFAULT_CFG` (`trade_service.py:1184-1188`) and
+  `season_partner_matching` (and, amended, the two shed weights and `season_viewer_label_fit`,
+  2026-11-12: popped with the others when revision 5 is not selected, and from the request hash
+  unless exactly 1 when it is) in `trade_service._DEFAULT_CFG` (`trade_service.py:1184-1188`) and
   `database._MODEL_CONFIG_DEFAULTS` (`database.py:3864-3868`).
 - **Engine modules:** add `"season_value.py"`, `"league_projections/season_points.py"` to
   `_ENGINE_CODE_MODULES` (`server.py:4739-4756`). Bump `DECK_PIPELINE_VERSION` to the next free

@@ -4596,7 +4596,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 27
+DECK_PIPELINE_VERSION = 28
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4758,6 +4758,7 @@ DECK_PIPELINE_PINS = {
     25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector owner_bilateral_revision_5_enabled, default 0): one read-only forecast read per organic owner job, recorded on the request record (digest in the hash), passed only to revision 5; the five revision-5 knobs leave the request hash unless revision 5 is selected; presentment reads owner_presentment_version; trade_card_to_dict adds season_block; flag off and selector 0: context, hash, terms, order and payload unchanged.
     26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
     27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
+    28: "88322edc6a469414",  # Viewer label fit (model_config season_viewer_label_fit, default 1; revision 5 only): _owner_selected_assignment pops it with the other season knobs when revision 5 is not selected, and keeps it in the request hash only while exactly 1, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_bilateral_season / trade_first_page (engine code hash); knob 0 or revision 5 not selected: hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -22730,8 +22731,12 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False, seas
         # Revision 5's selector and season knobs never reshuffle revision 2-4 units.
         for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
                     "season_partner_matching", "season_shed_weight_tanking",
-                    "season_shed_weight_rebuilding"):
+                    "season_shed_weight_rebuilding", "season_viewer_label_fit"):
             canonical["config"].pop(key, None)
+    elif canonical["config"].get("season_viewer_label_fit") != 1.0:
+        # The viewer's label fit off is the rule every revision 5 unit before it was
+        # built under: it keeps their hashes. On (the default) it is a new unit.
+        canonical["config"].pop("season_viewer_label_fit", None)
     if season_evidence is not None:
         canonical["season_evidence"] = (
             {"digest": season_evidence.get("digest")} if season_evidence.get("digest")

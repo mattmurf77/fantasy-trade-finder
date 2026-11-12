@@ -53,6 +53,21 @@ Covered (each proven red against the named sabotage, then green on revert):
   - test_shed_scored_viewer_proof. Sabotage: record `season_direction` "add".
   - test_inferred_rebuilding_roster_is_scored_and_never_flagged. Sabotage: drop the
     `declared` precondition of `plan_conflict`.
+- Amended 2026-11-12 (operator direction: the viewer's label fit, `season_viewer_label_fit`):
+  - test_label_fit_sign_cases (Tanking, Rebuilding). Sabotages: `_shed_plan_asset` ignores
+    the knob; a win-now RB read as any win-now piece.
+  - test_label_fit_is_never_milder_than_the_age_rule_for_win_now_pieces_and_older_cornerstones
+    (Tanking, Rebuilding). Sabotages: the table's fit alone; the min also for rebuild pieces.
+  - test_label_fit_tanking_is_stronger_than_rebuilding. Sabotage: MIRROR_SCALE Rebuilding 1.0.
+  - test_label_fit_moves_the_order_never_the_inventory_and_only_the_viewer. Sabotages: the
+    table through `_plan_asset` for the viewer; for every Rebuilding / Tanking team.
+  - test_label_fit_leaves_other_viewers_unchanged. Sabotage: drop the shed precondition.
+  - test_label_fit_without_usable_evidence_is_revision_2. Sabotage: the table through
+    `_plan_asset` whatever the evidence.
+  - test_label_fit_only_exactly_one_is_on. Sabotage: the knob read as a truth value.
+  - test_win_now_rb_for_a_pick_shed_and_label_fit_share_one_clipped_term. Sabotage: the
+    label fit as its own support adjustment.
+  - test_shed_scored_viewer_proof (now per knob value).
 - Stage 2, two win-now teams (Part B): test_stage_2_win_now_pair_trade_on_a_ranking_
   discrepancy, test_stage_2_win_now_pair_trade_on_complementary_needs (what the code
   as built does; no sabotage: they describe, they do not guard a change).
@@ -61,6 +76,7 @@ Covered (each proven red against the named sabotage, then green on revert):
 """
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from functools import lru_cache
 import random
@@ -140,10 +156,12 @@ def world(outlook, *, neutral_board=False, seed=0):
 
 
 @lru_cache(maxsize=None)
-def deck(revision, outlook, season="usable", demotion=None, matching=None):
-    """(cards, report) for one generation; cached per arguments (several seconds each)."""
+def deck(revision, outlook, season="usable", demotion=None, matching=None, label_fit=None):
+    """(cards, report) for one generation; cached per arguments (several seconds each).
+    `label_fit`: `season_viewer_label_fit` (None: the default, 1)."""
     args = world(outlook)
-    config = {k: v for k, v in (("season_conflict_demotion", demotion), ("season_partner_matching", matching))
+    config = {k: v for k, v in (("season_conflict_demotion", demotion), ("season_partner_matching", matching),
+                                (r5.LABEL_FIT_KEY, label_fit))
               if v is not None}
     if revision == 2:
         return r2.generate_bilateral_trades(**args)
@@ -164,9 +182,9 @@ def proof(card):
 
 
 @lru_cache(maxsize=None)
-def probe(outlook="championship", matching=0.0):
+def probe(outlook="championship", matching=0.0, label_fit=1.0):
     return r5._Search(**world(outlook), season_evidence=_evidence(),
-                      config={"season_partner_matching": matching})
+                      config={"season_partner_matching": matching, r5.LABEL_FIT_KEY: label_fit})
 
 
 def delta(card, search=None):
@@ -302,11 +320,18 @@ def test_a_point_shed_by_tanking_weighs_what_a_point_gained_weighs_for_all_in():
         assert (True, True) in signs and (False, True) not in signs
 
 
+@pytest.mark.parametrize("label_fit", [1.0, 0.0])
 @pytest.mark.parametrize("outlook", ["rebuilder", "jets"])
-def test_shed_scored_viewer_proof(outlook):
+def test_shed_scored_viewer_proof(outlook, label_fit):
     """The viewer's season facts as for a win-now viewer, the direction, the components and
-    the support moved by the team-plan weight times the re-scored team plan."""
-    cards, report = deck(5, outlook)
+    the support moved by the team-plan weight times the re-scored team plan. The plan fit
+    of the re-scored team plan reads the label table under `season_viewer_label_fit` 1 (and
+    each asset's `plan_lean` is the table's fit), revision 2's age table at 0; the gates'
+    figure (`team_plan_gain`) is revision 2's either way."""
+    cards, report = deck(5, outlook, label_fit=label_fit)
+    search = probe(outlook, label_fit=label_fit)
+    me = search.teams["me"]
+    assert report.as_dict()["season_signal"].get("viewer_label_fit") is (True if label_fit else None)
     assert report.as_dict()["season_signal"]["viewer_scored"] is True
     assert report.as_dict()["starter_evidence"] == "projected_points_viewer"
     for card in cards[:200]:
@@ -325,9 +350,18 @@ def test_shed_scored_viewer_proof(outlook):
         adjustments = support["season_adjustments"]
         assert support["score"] == pytest.approx(min(1, max(0, support["season_unadjusted_score"]
                                                             + sum(adjustments.values()))), abs=1e-12)
-        assert all(a["plan_lean"] is None for a in signal["assets"])  # the label table is not read
+        give, receive = tuple(card.give_player_ids), tuple(card.receive_player_ids)
+        if label_fit:
+            assert [a["plan_lean"] for a in signal["assets"]] == [search._shed_plan_asset(me, a["id"])
+                                                                  for a in signal["assets"]]
+            assert parts["plan_fit"] == pytest.approx(
+                search._plan_fit(me, give, receive, search._shed_plan_asset), abs=1e-12)
+        else:
+            assert all(a["plan_lean"] is None for a in signal["assets"])  # the label table is not read
+            assert parts["plan_fit"] == pytest.approx(search._plan_fit(me, give, receive), abs=1e-12)
         assert data["viewer"]["team_plan_gain"] == pytest.approx(  # the gates' figure: revision 2's
-            r1._clip(parts["plan_fit"] + r1._clip(data["viewer"]["need_utility"] * 4)), abs=1e-12)
+            r1._clip(search._plan_fit(me, give, receive) + r1._clip(data["viewer"]["need_utility"] * 4)),
+            abs=1e-12)
 
 
 def test_inferred_rebuilding_roster_is_scored_and_never_flagged():
@@ -635,6 +669,200 @@ def test_stage_2_win_now_pair_trade_on_complementary_needs():
     assert partner["outgoing_starters"] == []                               # Goff sat on their bench
 
 
+# ── the viewer's label fit (amended 2026-11-12, operator direction) ─────────────
+# `season_viewer_label_fit` (default 1): a Rebuilding or Tanking viewer's re-scored team
+# plan reads the label table (`_mirror_fit`) instead of revision 2's age table, without
+# partner matching. Order only: `_plan_asset` (gates, pools, inventory) stays revision 2's.
+
+_SIGN_CASES = ("win_now", "win_now_rb", "rebuild", "cornerstone_young", "pick")
+
+
+def _label_examples(search):
+    """{case: the most valuable fixture asset of that case whose fit the label branch
+    decides} (not a board refinement of revision 2's that keeps precedence)."""
+    me = search.teams["me"]
+    found = {}
+    for pid in sorted(search.market, key=lambda p: (-search.market[p], p)):
+        pos, age, label = search._position(pid), getattr(search.players[pid], "age", None), search._label(pid)
+        case = ("pick" if pos == "PICK" else "win_now_rb" if label == "win_now" and pos == "RB" else
+                "cornerstone_young" if label == "cornerstone" and sv.young(pos, age) else label)
+        if case not in _SIGN_CASES or case in found:
+            continue
+        lean = 1.0 if case == "pick" else r5.MIRROR_LEAN[case]
+        if search._mirror_fit(me, pid) == pytest.approx(lean * r5.MIRROR_SCALE[me["outlook"]]):
+            found[case] = pid
+    return found
+
+
+@pytest.mark.parametrize("outlook", ["jets", "rebuilder"])
+def test_label_fit_sign_cases(outlook):
+    """The eight cases, each on a real fixture asset, as the signed plan-fit contribution
+    of that asset alone (plan fit is a market-weighted sum, so a card's is the mix):
+    sending a win-now piece raises the card and receiving one lowers it, a win-now RB
+    most of all; receiving a rebuild piece, a young cornerstone or a pick raises it and
+    sending one lowers it. A win-now piece's fit is the lower of the table's and the age
+    rule's. Sabotages: `_shed_plan_asset` ignores the knob (revision 2's age table); a
+    win-now RB read as any win-now piece."""
+    search = probe(outlook)
+    me = search.teams["me"]
+    found = _label_examples(search)
+    assert set(found) == set(_SIGN_CASES), found
+    send, get = {}, {}
+    for case, pid in found.items():
+        send[case] = search._plan_fit(me, (pid,), (), search._shed_plan_asset)
+        get[case] = search._plan_fit(me, (), (pid,), search._shed_plan_asset)
+        table = (1.0 if case == "pick" else r5.MIRROR_LEAN[case]) * r5.MIRROR_SCALE[outlook]
+        expected = min(table, search._plan_asset(me, pid)) if case.startswith("win_now") else table
+        assert get[case] == pytest.approx(expected) == pytest.approx(-send[case])
+    assert send["win_now_rb"] > send["win_now"] > 0 > get["win_now"] > get["win_now_rb"]
+    for case in ("rebuild", "cornerstone_young", "pick"):
+        assert get[case] > 0 > send[case], case
+
+
+@pytest.mark.parametrize("outlook", ["jets", "rebuilder"])
+def test_label_fit_is_never_milder_than_the_age_rule_for_win_now_pieces_and_older_cornerstones(outlook):
+    """Where the label decides for a win-now piece (RB or not) or an older cornerstone, the
+    viewer's fit is never above revision 2's age fit at the same outlook's scale, nor above
+    the table's: an old win-now RB keeps the age rule's -1.0 (x 0.6 Rebuilding), an older
+    cornerstone the age rule's -0.45 or lower. Young cornerstones, rebuild pieces and picks
+    take the table's fit. Sabotages: the table's fit alone (no min); the min also for
+    rebuild pieces."""
+    search = probe(outlook)
+    me = search.teams["me"]
+    scale = r5.MIRROR_SCALE[outlook]
+    seen = Counter()
+    for pid in sorted(search.market):
+        table, how = search._mirror_parts(me, pid)
+        fit, age_fit = search._shed_plan_asset(me, pid), search._plan_asset(me, pid)
+        if how in ("win_now", "cornerstone_old"):  # the rule as specified, not the constant
+            assert fit == min(table, age_fit) and fit <= age_fit and fit <= table, pid
+            seen[how] += 1
+            pos, age = search._position(pid), getattr(search.players[pid], "age", None)
+            if how == "win_now" and pos == "RB" and age is not None and age > r1._YOUNG["RB"]:
+                assert fit == pytest.approx(-1.0 * scale), pid       # the age rule, not the table's -0.8
+                seen["old_win_now_rb"] += 1
+            if how == "cornerstone_old" and age is not None:      # (no age: revision 2's 0.0)
+                assert fit <= -.45 * scale + 1e-12, pid               # never the table's +0.2
+        elif how is not None:
+            assert fit == table, pid
+            seen[how] += 1
+        else:
+            assert fit == age_fit, pid
+    assert min(seen[k] for k in ("win_now", "cornerstone_old", "old_win_now_rb", "rebuild", "pick")) > 0, seen
+
+
+def test_label_fit_tanking_is_stronger_than_rebuilding():
+    """Every asset's fit for a Rebuilding viewer is 0.6 of a Tanking viewer's (the same
+    board; the min with the age rule commutes with the common 0.6), so on every card both
+    decks hold the table moves a Tanking viewer's plan fit 1/0.6 times as far as a
+    Rebuilding viewer's. (The support move is not pinned: a Tanking team plan saturates at 1
+    more often, its shed term being twice Rebuilding's, and the decks differ: Tanking's hard
+    rules reject cards Rebuilding keeps.) Sabotage: MIRROR_SCALE Rebuilding at 1.0."""
+    jets, rebuilder = probe("jets"), probe("rebuilder")
+    for pid in sorted(jets.market):
+        assert rebuilder._shed_plan_asset(rebuilder.teams["me"], pid) == pytest.approx(
+            .6 * jets._shed_plan_asset(jets.teams["me"], pid), abs=1e-12), pid
+    fit = lambda c: proof(c)["season_signal"]["components"]["plan_fit"]
+    moves = {}
+    for outlook in ("jets", "rebuilder"):
+        before = {ident(c): fit(c) for c in deck(5, outlook, label_fit=0.0)[0]}
+        moves[outlook] = {ident(c): fit(c) - before[ident(c)] for c in deck(5, outlook)[0]}
+    common = sorted(set(moves["jets"]) & set(moves["rebuilder"]))
+    assert len(common) > 500 and any(abs(moves["jets"][k]) > 1e-6 for k in common)
+    for key in common:
+        assert moves["rebuilder"][key] == pytest.approx(.6 * moves["jets"][key], abs=1e-9), key
+
+
+@pytest.mark.parametrize("outlook", ["jets", "rebuilder"])
+def test_label_fit_moves_the_order_never_the_inventory_and_only_the_viewer(outlook):
+    """Knob 1 against knob 0: the same cards with the same terms, a different order; every
+    gate figure of the viewer and the whole counterparty side (Tanking and Rebuilding
+    league-mates among them, stage 2 off) unchanged. Sabotages: read the table through
+    `_plan_asset` for the viewer (it would reach the gates); read it for every Rebuilding /
+    Tanking team."""
+    off, _ = deck(5, outlook, label_fit=0.0)
+    on, _ = deck(5, outlook)
+    assert sorted(terms(c) for c in on) == sorted(terms(c) for c in off)
+    assert [ident(c) for c in on] != [ident(c) for c in off]
+    before = {ident(c): proof(c) for c in off}
+    gates = ("team_plan_gain", "utility", "intent", "benefits", "market_gain_fraction", "need_utility")
+    for card in on:
+        new, old = proof(card), before[ident(card)]
+        assert new["counterparty"] == old["counterparty"]
+        assert {k: new["viewer"][k] for k in gates} == {k: old["viewer"][k] for k in gates}
+        assert (new["eligible"], new["reason"]) == (old["eligible"], old["reason"])
+    search = probe(outlook)
+    mirrors = [t for uid, t in search.teams.items() if uid != "me" and t["outlook"] in r5.MIRROR_OUTLOOKS]
+    assert mirrors
+    old = r2._Search(**world(outlook))
+    for team in mirrors:
+        assert not search._season_shed(team) and not search._viewer_label_fit(team)
+        for pid in sorted(search.market):
+            assert search._shed_plan_asset(team, pid) == old._plan_asset(old.teams[team["uid"]], pid)
+
+
+@pytest.mark.parametrize("outlook", ["championship", "contender", "not_sure"])
+def test_label_fit_leaves_other_viewers_unchanged(outlook):
+    """All-in, Contending and Not-sure viewers: knob 1 is knob 0, card for card and proof
+    for proof, report included. Sabotage: drop the shed-scored precondition of
+    `_viewer_label_fit`."""
+    off, off_report = deck(5, outlook, label_fit=0.0)
+    on, on_report = deck(5, outlook)
+    assert [proof(c) for c in on] == [proof(c) for c in off]
+    assert [terms(c) for c in on] == [terms(c) for c in off]
+    strip = lambda r: {k: v for k, v in r.as_dict().items() if k != "elapsed_seconds"}
+    assert strip(on_report) == strip(off_report)
+
+
+@pytest.mark.parametrize("season", ["absent", "unavailable"])
+@pytest.mark.parametrize("outlook", ["jets", "rebuilder"])
+def test_label_fit_without_usable_evidence_is_revision_2(outlook, season):
+    """No evidence or unusable evidence: a Tanking / Rebuilding viewer's deck is revision
+    2's, cards, terms and order, with the knob on. Sabotage: read the table through
+    `_plan_asset` for the viewer whatever the evidence."""
+    base, _ = deck(2, outlook)
+    cards, report = deck(5, outlook, season, label_fit=1.0)
+    assert [terms(c) for c in cards] == [terms(c) for c in base]
+    assert "viewer_label_fit" not in report.as_dict()["season_signal"]
+
+
+@pytest.mark.parametrize("value", [0.5, 2.0])
+def test_label_fit_only_exactly_one_is_on(value):
+    """Any value but exactly 1 is knob 0: the same cards and proofs. Sabotage: read the knob
+    as a truth value."""
+    off, _ = deck(5, "jets", label_fit=0.0)
+    other, _ = deck(5, "jets", label_fit=value)
+    assert [proof(c) for c in other] == [proof(c) for c in off]
+
+
+def test_win_now_rb_for_a_pick_shed_and_label_fit_share_one_clipped_term():
+    """Item 4 (2026-11-12): a Tanking card that sends a win-now RB and brings back only
+    picks has the shed term (points given up), the label fit (a win-now RB out, a pick in)
+    and no conflict; the shed term and the label fit are two parts of ONE team-plan term,
+    clipped to [0, 1], so the viewer's support moves by at most the team-plan weight
+    times (1 - revision 2's team plan) above it, and the only adjustments are the shed
+    re-score and the demotion. Sabotage: add the label fit as its own support adjustment."""
+    cards, _ = deck(5, "jets")
+    search = probe("jets")
+    seen = 0
+    for card in cards:
+        give, receive = card.give_player_ids, card.receive_player_ids
+        data = proof(card)
+        support = data["viewer"]["support"]
+        assert set(support["season_adjustments"]) <= {"season_lineup_shed", "plan_conflict_demotion"}
+        old_plan = r1._clip(.5 + .5 * data["viewer"]["team_plan_gain"], 0, 1)  # revision 2's team plan
+        assert support["score"] - support["season_unadjusted_score"] <= (
+            r1._WEIGHTS["team_plan"] * (1 - old_plan) + 1e-12)
+        if (any(search._label(p) == "win_now" and search._position(p) == "RB" for p in give)
+                and all(search._position(p) == "PICK" for p in receive)):
+            signal = data["season_signal"]
+            assert signal["conflict"]["fired"] is False
+            assert signal["viewer"]["delta_pts_week"] < 0 and signal["components"]["lineup_gain"] > 0
+            assert signal["components"]["plan_fit"] > 0 and 0 <= signal["components"]["team_plan"] <= 1
+            seen += 1
+    assert seen >= 3
+
+
 # ── proof fields (lld §4) ─────────────────────────────────────────────────────
 
 def test_proof_carries_plan_fit_and_lineup_gain_separately():
@@ -747,18 +975,21 @@ def test_selector_composition(cfg, expected):
 def test_knob_defaults_are_dark():
     defaults = {k: v for k, v, _ in db._MODEL_CONFIG_DEFAULTS}
     for key, value in ((KEY, 0.), ("season_partner_matching", 0.), ("season_conflict_demotion", .10),
-                       ("season_shed_weight_tanking", 1.), ("season_shed_weight_rebuilding", .5)):
+                       ("season_shed_weight_tanking", 1.), ("season_shed_weight_rebuilding", .5),
+                       ("season_viewer_label_fit", 1.)):
         assert ts._DEFAULT_CFG[key] == value and defaults[key] == value
     assert bo.owner_version() != r5.VERSION and bo.owner_presentment_version() == presentment.GENERATOR_VERSION
 
 
 _DARK = ("owner_bilateral_revision_5_enabled", "season_conflict_demotion", "season_partner_matching",
-         "season_shed_weight_tanking", "season_shed_weight_rebuilding")
+         "season_shed_weight_tanking", "season_shed_weight_rebuilding", "season_viewer_label_fit")
 
 
 @pytest.mark.parametrize("extra", [{}, {KEY: 0., "season_conflict_demotion": .3, "season_partner_matching": 1.,
-                                         "season_shed_weight_tanking": 2., "season_shed_weight_rebuilding": 0.},
-                                   {KEY: 2., "season_partner_matching": 1., "season_shed_weight_rebuilding": 1.}],
+                                         "season_shed_weight_tanking": 2., "season_shed_weight_rebuilding": 0.,
+                                         "season_viewer_label_fit": 0.},
+                                   {KEY: 2., "season_partner_matching": 1., "season_shed_weight_rebuilding": 1.,
+                                    "season_viewer_label_fit": 1.}],
                          ids=["defaults", "zero", "two"])
 def test_other_revisions_unchanged_with_the_new_knobs_present(extra):
     from backend.tests import test_bilateral_revision_4 as golden

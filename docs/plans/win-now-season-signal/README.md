@@ -55,6 +55,41 @@ players received unchanged ([validation §2](validation.md)).
 - A new bilateral revision (`owner-v2-bilateral-5`) built dark, not an edit to revision 2.
 - The push-down is a fixed penalty of 0.10 on the ranking score, the size revision 4 already uses.
 
+**Amended 2026-11-12, operator direction (the viewer's label fit).** The operator:
+
+> "even with win now enabled, it's still dynasty. So more so I just expect that it's blended into
+> dynasty specific trade cards, but the aggressive ends (all in and tanking) should get more of
+> those trade suggestions if they have significant gaps or older less valuable producers."
+
+Agreed direction: a Tanking or Rebuilding **viewer's** re-scored team plan reads the label table
+(the mirror table, lld §3.3: win-now pieces out, a win-now RB most of all; rebuild pieces, young
+cornerstones and picks in; Tanking at full strength, Rebuilding at 0.6) without partner matching.
+Knob `season_viewer_label_fit` (default 1; 0 = the age table exactly as before). It is a ranking
+term inside the existing clipped team-plan term, beside the shed term: the set of cards and their
+terms are unchanged, only the order moves. **Stage 2 now means partner matching only**
+(`season_partner_matching`, still off): league-mates' plan fit is untouched at stage 2 off.
+**Never milder than the age rule (same day, coordinator direction).** The table alone was milder
+than revision 2 on win-now RBs over 24 (−0.8 against −1.0) and turned older cornerstones from −0.45
+to +0.2. Where the label decides for a win-now piece (RB or not) or an older cornerstone, the fit
+is now the lower of the table's and revision 2's age fit, both at the outlook's scale (`NEVER_MILDER`;
+Rebuilding stays exactly 0.6 × Tanking). Young cornerstones, rebuild pieces and picks take the
+table's fit. No constant changed.
+
+Measured on the fixture league (knob 0 → 1, combined rule): the first 30 are unchanged for both
+Tanking and Rebuilding (30 of 30, same order); about 2% of cards' ranking score moves, at most 0.013
+(Tanking) / 0.025 (Rebuilding). The only fits that still differ from the age rule are the ones
+where the age rule was soft on a seller's piece or wrong on a rebuild piece (a young win-now piece
++0.45 → −0.45, a young win-now RB −0.15 → −0.8, a young backup RB coming back −0.15 → +0.7), and
+those cards sit outside the first 30. The first 30 already sell older producers through the age
+rule and the shed term (15 of 30 Tanking cards send a win-now piece, against 10 for revision 2),
+and two limits stop the plan term moving them further: the ranker orders by the weaker side's
+support, and the viewer is the weaker side on only 11 (Tanking) / 8 (Rebuilding) of the first 30;
+and the team-plan term is capped at 0.20 and already saturated on 14 Tanking cards. What would
+move it (approximate re-rank, not built): a plan weight of 0.3 on both sides (Tanking 14 → 19 of
+30 sending a win-now piece), or a sell bonus outside the clipped plan term, applied to both supports
+as the demotion is, of 0.05 × the card's market share of older producers sent (14 → 22)
+([lld §3.1](lld.md)).
+
 **Open:** [open-questions.md](open-questions.md) (seven, two needed before serving).
 
 ## Files

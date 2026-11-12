@@ -23,12 +23,21 @@ record differ. Usable:
   All-in team's strength, so points shed count for the trade. It is a ranking term
   only: its lineup, plan fit, candidate pools, gates and inventory stay revision
   2's, and the support moves after eligibility (`_season_signal`), as the demotion does.
+- The viewer's label fit (`season_viewer_label_fit == 1`, the default; amended
+  2026-11-12, operator direction): a Rebuilding or Tanking viewer's plan fit in that
+  re-scored team plan reads the label table (`_mirror_fit`: win-now pieces out,
+  rebuild pieces, young cornerstones and picks in; Tanking at full strength,
+  Rebuilding at 0.6) instead of revision 2's age table, never milder than it for a
+  win-now piece or an older cornerstone (NEVER_MILDER). Still a ranking term only:
+  `_plan_asset`, and with it the gates, pools and inventory, stay revision 2's.
+  0 = the age table, exactly as before.
 - Plan conflict (`season_value.plan_conflict`, the one predicate): a card that
   works against the viewer's saved plan is flagged; when it qualified through the
   viewer's own rankings, both support scores fall by `season_conflict_demotion`
   after eligibility (order only, never inventory or terms), as revision 4 demotes.
-- Stage 2 (`season_partner_matching == 1`): the label table also reads every
-  league-mate's plan fit, Rebuilding and Tanking teams by a mirror table.
+- Stage 2 (`season_partner_matching == 1`, partner matching): the label table also
+  reads every league-mate's plan fit, Rebuilding and Tanking teams by the mirror
+  table, through `_plan_asset` (so for them, and for the viewer, it reaches the gates).
 
 Prices, package pricing, the fairness score, the market floor and the overpay
 gate are revision 2's. No database, server, provider or network access occurs in
@@ -58,11 +67,19 @@ MIRROR_OUTLOOKS = ("rebuilder", "jets")
 # Plan-fit leans for a season-scored team (lld §3.3): the top and bottom of the
 # age lean revision 2 uses, so the plan term keeps its range.
 LEAN_STARTS_LABELLED, LEAN_STARTS, LEAN_BENCH = .40, .25, -.25
-# Stage 2 mirror table for Rebuilding / Tanking teams (starting values).
+# The mirror table for Rebuilding / Tanking teams (starting values): the viewer's
+# re-scored team plan (`season_viewer_label_fit`) and, in stage 2, every such team.
 MIRROR_LEAN = {"rebuild": .7, "cornerstone_young": .45, "cornerstone": .2,
                "win_now_rb": -.8, "win_now": -.45}
 MIRROR_SCALE = {"jets": 1.0, "rebuilder": .6}
 DEMOTION_KEY, MATCHING_KEY = "season_conflict_demotion", "season_partner_matching"
+LABEL_FIT_KEY = "season_viewer_label_fit"
+# Under the viewer's label fit (2026-11-12, operator direction): where the label decides
+# for a win-now piece (RB or not) or an older cornerstone, the fit is the label's or
+# revision 2's age fit, whichever is lower (both at the outlook's scale): the table only
+# ever adds reason to send such a player, never softens the age rule. Young cornerstones,
+# rebuild pieces and picks take the label's fit.
+NEVER_MILDER = frozenset(("win_now", "cornerstone_old"))
 # The shed term's strength per outlook (model_config knobs; Tanking mirrors All-in).
 SHED_KEYS = {"jets": "season_shed_weight_tanking", "rebuilder": "season_shed_weight_rebuilding"}
 # Conflict kinds: "board" (qualified through the viewer's own rankings) or the
@@ -100,6 +117,8 @@ class SeasonLayer:
         self.season_conflict_demotion = float(given.get(DEMOTION_KEY, ts._c(DEMOTION_KEY)))
         self.season_partner_matching = given.get(MATCHING_KEY, ts._c(MATCHING_KEY)) == 1.0
         self.season_shed_weight = {outlook: float(given.get(key, ts._c(key))) for outlook, key in SHED_KEYS.items()}
+        self.season_viewer_label_fit = given.get(LABEL_FIT_KEY, ts._c(LABEL_FIT_KEY)) == 1.0
+        self._label_fit_cache = {}
         self.season_evidence = season_evidence
         self._season_on = sv.usable(season_evidence)
         self._season_ppg = {pid: item["ppg"] for pid, item in
@@ -144,7 +163,7 @@ class SeasonLayer:
         after = self._season_total((team["roster"] - set(give)) | set(receive), team)[0]
         gross = sum(self.market[p] for p in give + receive)
         lineup_gain = incumbent._clip(-self.season_shed_weight[team["outlook"]] * RATE * (after - before) / gross)
-        plan_fit = self._plan_fit(team, give, receive)
+        plan_fit = self._plan_fit(team, give, receive, self._shed_plan_asset)
         return plan_fit, lineup_gain, incumbent._clip(.5 + .5 * incumbent._clip(plan_fit + lineup_gain), 0, 1)
 
     def _team(self, uid, roster, *args):
@@ -210,29 +229,36 @@ class SeasonLayer:
         return LEAN_STARTS_LABELLED if self._label(pid) in ("win_now", "cornerstone") else LEAN_STARTS
 
     def _mirror_fit(self, team, pid):
-        """Stage 2: a Rebuilding or Tanking team's fit from the labels, or None for today's rule."""
+        """A Rebuilding or Tanking team's fit from the labels, or None for today's rule."""
+        return self._mirror_parts(team, pid)[0]
+
+    def _mirror_parts(self, team, pid):
+        """(fit, how): the mirror table's fit as `_mirror_fit` gives it, and what decided it:
+        "pick", "board" (revision 2's board-led refinement), the label read, or None."""
         pos, age = self._position(pid), getattr(self.players[pid], "age", None)
         if pos == "PICK":
-            return 1.0 * MIRROR_SCALE[team["outlook"]]
+            return 1.0 * MIRROR_SCALE[team["outlook"]], "pick"
         feature = self._features[team["uid"], pid]
         direction = feature["direction"]
         # Revision 2's board-led refinements keep precedence (trade_gen_bilateral_candidate.py:43-51).
         if pos == "RB" and feature["known"] and feature["personal_tier"] in ORDERED_TIERS[:3]:
-            fit = .4
+            fit, how = .4, "board"
         elif (pos in ("WR", "TE", "QB") and owner._finite(age) and age <= incumbent._YOUNG[pos]
               and direction is not None and abs(direction) >= .025):
-            fit = .85 if direction >= .025 else -.10
+            fit, how = (.85 if direction >= .025 else -.10), "board"
         else:
             label = self._label(pid)
             if label == "rebuild":
-                fit = MIRROR_LEAN["rebuild"]
+                fit, how = MIRROR_LEAN["rebuild"], "rebuild"
             elif label == "cornerstone":
-                fit = MIRROR_LEAN["cornerstone_young" if sv.young(pos, age) else "cornerstone"]
+                young = sv.young(pos, age)
+                fit = MIRROR_LEAN["cornerstone_young" if young else "cornerstone"]
+                how = "cornerstone_young" if young else "cornerstone_old"
             elif label == "win_now":
-                fit = MIRROR_LEAN["win_now_rb" if pos == "RB" else "win_now"]
+                fit, how = MIRROR_LEAN["win_now_rb" if pos == "RB" else "win_now"], "win_now"
             else:
-                return None
-        return fit * MIRROR_SCALE[team["outlook"]]
+                return None, None
+        return fit * MIRROR_SCALE[team["outlook"]], how
 
     def _plan_asset(self, team, pid):
         key = team["uid"], pid
@@ -252,10 +278,38 @@ class SeasonLayer:
         self._plan_cache[key] = fit
         return fit
 
-    def _plan_fit(self, team, give, receive):
-        """The plan part of team plan (revision 2's plan shift), recorded beside lineup gain."""
+    def _viewer_label_fit(self, team):
+        """The viewer, shed-scored, with `season_viewer_label_fit` on and stage 2 off: its
+        re-scored team plan reads the label table. (In stage 2 `_plan_asset` already reads
+        it for every Rebuilding / Tanking team, so stage 2 is exactly as built.)"""
+        return (self.season_viewer_label_fit and not self.season_partner_matching
+                and team["uid"] == self.user_id and self._season_shed(team))
+
+    def _shed_plan_asset(self, team, pid):
+        """The per-asset plan fit a shed-scored side's re-scored team plan reads: for the
+        viewer under `_viewer_label_fit`, the label table (revision 2's fit where the table
+        has no claim; the lower of the two for a win-now piece or an older cornerstone,
+        NEVER_MILDER), else `_plan_asset`. Never read by the gates, pools or inventory."""
+        if not self._viewer_label_fit(team):
+            return self._plan_asset(team, pid)
+        key = team["uid"], pid
+        if key not in self._label_fit_cache:
+            fit, how = self._mirror_parts(team, pid)
+            age_fit = self._plan_asset(team, pid)  # revision 2's, already at this outlook's scale
+            if fit is None:
+                fit = age_fit
+            elif how in NEVER_MILDER:
+                # The label only adds to the age rule for these: never a milder fit.
+                fit = min(fit, age_fit)
+            self._label_fit_cache[key] = fit
+        return self._label_fit_cache[key]
+
+    def _plan_fit(self, team, give, receive, asset=None):
+        """The plan part of team plan (revision 2's plan shift), recorded beside lineup gain.
+        `asset`: the per-asset fit read (default `_plan_asset`)."""
+        asset = asset or self._plan_asset
         gross = sum(self.market[p] for p in give + receive)
-        return sum(sign * self.market[p] * self._plan_asset(team, p)
+        return sum(sign * self.market[p] * asset(team, p)
                    for sign, ids in ((1, receive), (-1, give)) for p in ids) / gross
 
     # --- candidate seats (lld §3.4) ------------------------------------------
@@ -371,7 +425,10 @@ class SeasonLayer:
                 "future": info.get("future"),
                 "starts_for_viewer": self.starts_for(viewer, pid) if projected else None,
                 "gain_for_viewer": self.season_gain(viewer, pid) if projected else None,
-                "plan_lean": self._season_lean(viewer, pid) if win_now else None})
+                # A shed viewer under the label fit: the per-asset fit its re-scored team
+                # plan read (`_shed_plan_asset`, at the outlook's scale).
+                "plan_lean": self._season_lean(viewer, pid) if win_now else
+                self._shed_plan_asset(viewer, pid) if self._viewer_label_fit(viewer) else None})
         data["season_signal"] = {"rules_version": RULES_VERSION, "label_rules_version": LABEL_RULES_VERSION,
             "evidence": {"state": evidence["state"], "reason": evidence["reason"], "digest": evidence["digest"],
                          "run_id": evidence.get("run_id"), "captured_at": evidence.get("captured_at"),
@@ -424,7 +481,9 @@ class SeasonLayer:
         - "shed": for a shed-scored team, {"rate": weight x RATE, "points": its season
           lineup now (points a week), "starters": {id: ppg} of that lineup, "levels":
           {position: free-agent level}, "team_plan": (outgoing, incoming) -> the re-scored
-          team plan `_season_signal` gives this side}; else None.
+          team plan `_season_signal` gives this side, "plan": id -> the per-asset plan fit
+          that team plan reads when it is not `_plan_asset` (the viewer's label fit), else
+          None}; else None.
         - "nonnegative": every projected ppg and free-agent level is >= 0 (the bounds'
           premise; the page search declines the request otherwise).
         Reads only; changes no card, term or order."""
@@ -444,7 +503,9 @@ class SeasonLayer:
             points, starters, _ = self._season_total(team["roster"], team)
             terms["shed"] = {"rate": self.season_shed_weight[team["outlook"]] * RATE, "points": points,
                              "starters": {pid: self._season_ppg[pid] for pid in starters}, "levels": levels,
-                             "team_plan": lambda outgoing, incoming: self._shed_parts(team, outgoing, incoming)[2]}
+                             "team_plan": lambda outgoing, incoming: self._shed_parts(team, outgoing, incoming)[2],
+                             "plan": ((lambda pid: self._shed_plan_asset(team, pid))
+                                      if self._viewer_label_fit(team) else None)}
         return terms
 
     def _decision(self, card, data, reason, eligible=False):
@@ -526,6 +587,9 @@ def _generation_report(search, cards, raw, started):
             "evidence_reason": None if evidence is None else evidence.get("reason"),
             "evidence_digest": evidence.get("digest") if search._season_on else None,
             "viewer_scored": viewer_scored, "partner_matching": search.season_partner_matching,
+            # Present only when the viewer's label fit applies (knob 0: the report is today's).
+            **({"viewer_label_fit": True} if search._season_on
+               and search._viewer_label_fit(search.teams[search.user_id]) else {}),
             "shed_weights": dict(search.season_shed_weight),
             "conflict_demotion": search.season_conflict_demotion, **dict(season)},
         elapsed_seconds=round(perf_counter() - started, 6))

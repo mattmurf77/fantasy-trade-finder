@@ -828,25 +828,29 @@ def season_evidence(context, seed, *, fill=FREE_AGENT_LEVEL):
             "digest": "synthetic-%d" % seed}
 
 
-def season_small(outlook, seed, matching=0.0, **overrides):
+def season_small(outlook, seed, matching=0.0, label_fit=1.0, **overrides):
     context = small(seed=seed, viewer_outlook=outlook, **overrides)
     return {**context, "season_evidence": season_evidence(context, seed),
-            "config": {"season_partner_matching": matching}}
+            "config": {"season_partner_matching": matching, "season_viewer_label_fit": label_fit}}
 
 
-# (viewer outlook, seed, season_partner_matching): every scored and shed direction,
-# and stage 2, where league-mates are season-scored and shed-scored too.
-_SEASON_AUDIT = [("championship", 1, 0.0), ("contender", 2, 0.0), ("rebuilder", 3, 0.0), ("jets", 4, 0.0),
-                 ("championship", 5, 1.0), ("jets", 6, 1.0), ("not_sure", 7, 1.0)]
+# (viewer outlook, seed, season_partner_matching, season_viewer_label_fit): every scored
+# and shed direction, and stage 2, where league-mates are season-scored and shed-scored
+# too; Rebuilding / Tanking viewers with their label fit on (2026-11-12) and off.
+_SEASON_AUDIT = [("championship", 1, 0.0, 1.0), ("contender", 2, 0.0, 1.0), ("rebuilder", 3, 0.0, 1.0),
+                 ("jets", 4, 0.0, 1.0), ("championship", 5, 1.0, 1.0), ("jets", 6, 1.0, 1.0),
+                 ("not_sure", 7, 1.0, 1.0), ("rebuilder", 8, 0.0, 1.0), ("jets", 9, 0.0, 1.0),
+                 ("jets", 4, 0.0, 0.0)]
 
 
-@pytest.mark.parametrize("outlook,seed,matching", _SEASON_AUDIT)
-def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, seed, matching, crown):
+@pytest.mark.parametrize("outlook,seed,matching,label_fit", _SEASON_AUDIT)
+def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, seed, matching, label_fit, crown):
     """I18's direct form: every level of every candidate bounds the exact weaker support
     of the proof the generator returns, after the shed term and the demotion; the
     support level is exact unless the demotion fired. Sabotages: bound a season team's
-    lineup from ``_lineup_assets``; ignore the shed term in the bounds."""
-    search = season._GenerationSearch(**season_small(outlook, seed, matching))
+    lineup from ``_lineup_assets``; ignore the shed term in the bounds; bound a
+    label-fit viewer's plan from ``_plan_asset`` (2026-11-12)."""
+    search = season._GenerationSearch(**season_small(outlook, seed, matching, label_fit))
     eligible, moved = 0, Counter()
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
         for (screened, pre, priced, support), give, receive, member in fp.screened_universe(search):
@@ -863,6 +867,9 @@ def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, 
                 assert support - weaker <= 1e-9  # the support level is the exact score
             else:
                 moved["demoted"] += 1
+            viewer = search.teams[search.user_id]
+            moved["label_fit"] += search._viewer_label_fit(viewer) and abs(
+                data["season_signal"]["components"]["plan_fit"] - search._plan_fit(viewer, give, receive)) > 1e-9
             for side in ("viewer", "counterparty"):
                 adjustments = data[side]["support"].get("season_adjustments") or {}
                 moved["shed_up"] += adjustments.get("season_lineup_shed", 0) > 1e-6
@@ -873,6 +880,8 @@ def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, 
         assert moved["shed_up"] > 0
     if outlook in ("championship", "contender") or matching:
         assert moved["season_need"] > 0
+    # The viewer's label fit is on exactly for a Rebuilding / Tanking viewer without stage 2.
+    assert (moved["label_fit"] > 0) == (outlook in ("rebuilder", "jets") and not matching and label_fit == 1.0)
 
 
 def test_revision_5_screen_uses_the_season_terms_and_the_inlined_screen_stays_revision_2s():

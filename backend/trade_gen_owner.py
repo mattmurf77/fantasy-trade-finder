@@ -223,7 +223,7 @@ class _Search:
         if self.config.get("owner_bilateral_revision_5_enabled") != 1.0:
             for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
                         "season_partner_matching", "season_shed_weight_tanking",
-                        "season_shed_weight_rebuilding"):
+                        "season_shed_weight_rebuilding", "season_viewer_label_fit"):
                 self.config.pop(key, None)
         # Read once; never in report or proof bytes (the request hash carries it).
         self.untouchable_hard = untouchable_hard(self.config)

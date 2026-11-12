@@ -156,9 +156,9 @@ refuses, such as best ball or divisions, `provider.py:199-210`; the off-season):
 |---|---|---|
 | Owner context (`server._owner_generation_context`, `server.py:21993`) | builds and records it | one new key, as `partner_activity` is attached today (`server.py:22096-22100`) |
 | Revision 5 search, viewer team with an All-in or Contending outlook | **yes** | lineup in points; plan fit from the label table; pool seats; conflict rule |
-| Revision 5 search, viewer team Rebuilding or Tanking | labels only | conflict rule (flag, demote, state). Plan fit unchanged |
+| Revision 5 search, viewer team Rebuilding or Tanking | labels and points | conflict rule (flag, demote, state); the shed term (amended 2026-11-11); the re-scored team plan's plan fit from the label table (amended 2026-11-12, `season_viewer_label_fit`). Order only: gates, pools and inventory unchanged |
 | Revision 5 search, viewer "Not sure" | no | nothing |
-| Revision 5 search, the other team | no in stage 1; label table in stage 2 (`season_partner_matching`) | seller–buyer matching, graded separately |
+| Revision 5 search, the other team | no in stage 1; label table in stage 2 (`season_partner_matching`) | seller–buyer matching, graded separately. Stage 2 is partner matching only from 2026-11-12 |
 | Revision 2's `starter_evidence` field | filled by revision 5 | `state: "projected"`, `projected_starter_delta` in points per week |
 | Lane (`window` / `value`, `trade_gen_bilateral.py:507`) | indirectly | it already keys on plan gain, which is now season-based for win-now viewers |
 | Fit block and the new season block (`trade_narrative.py`) | reads the proof only | a "Win-now" claim requires the new definition |
@@ -238,7 +238,9 @@ in the season layer assumes their values.
 | `trade.season_signal` | flag | false | the worker builds and records season evidence once per owner job. Off: no read, no key, bytes unchanged |
 | `owner_bilateral_revision_5_enabled` | `model_config` | 0 | exactly 1 selects revision 5 (when the bilateral and revision selectors are on); wins over the revision 3 and 4 selectors |
 | `season_conflict_demotion` | `model_config` | 0.10 | support taken from a plan-conflict card (order only). 0 = flag and state, no push-down |
-| `season_partner_matching` | `model_config` | 0 | 1 = stage 2: label table on every team's plan fit |
+| `season_partner_matching` | `model_config` | 0 | 1 = stage 2, partner matching: label table on every team's plan fit |
+| `season_shed_weight_tanking` / `_rebuilding` | `model_config` | 1.0 / 0.5 | the shed term's strength (amended 2026-11-11) |
+| `season_viewer_label_fit` | `model_config` | 1 | exactly 1: a Rebuilding / Tanking viewer's re-scored team plan reads the label table, stage 2 off (amended 2026-11-12); order only |
 | `grading.season_round` | flag | false | Calibration round `outlook-v2-v5-1` (revision 2 beside revision 5) |
 
 Code constants, versioned together as `SEASON_RULES_VERSION = "season-signal-1"` and
