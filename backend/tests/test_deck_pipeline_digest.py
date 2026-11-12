@@ -65,6 +65,7 @@ FROZEN_PINS = {
     27: "68bb3f499c837968",  # Keep is a hard rule (owner_untouchable_hard, default 1); knob 0: request hash, terms and order unchanged.
     28: "f9dc5f829bcd9a92",  # Founders' review: label overrides join the season evidence and its digest; none reaching the league: unchanged.
     29: "02e724a78ba569ee",  # Founders' review, use case 2: a per-job rule-waterfall probe (default None) at the construction inputs; None: unchanged.
+    30: "8b2ee05d3e179b04",  # Sell bonus (season_sell_bonus_tanking / _rebuilding, revision 5 only); bonus 0 or revision 5 not selected: request hash, terms and order unchanged. Shipped in the same bump as the viewer label fit (season_viewer_label_fit, default 1): a Rebuilding / Tanking viewer's re-scored team plan reads the season label table, never milder than the age rule.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 

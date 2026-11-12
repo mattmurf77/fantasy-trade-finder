@@ -1,3 +1,14 @@
+## 2026-11-12 — Seller-side label fit and sell bonus (D-243, D-244), branch `feat/season-seller-labels`
+
+- **Full backend suite (Opus subagent, no edits in flight, before the last merge of main):** 15,113 passed, 42 skipped, 0 failed. **Main session after merging main:** the season, worker, digest, arm-A, rule catalog, waterfall and waterfall-route files: 235 passed. CI is the full re-run.
+- **What is pinned:** the eight sign cases for Tanking and Rebuilding; never milder than the age rule for an old win-now running back and an older cornerstone; Rebuilding's plan-fit move is exactly 0.6 of Tanking's on shared cards; the sell bonus's sign and scale, Tanking above Rebuilding, picks neutral; order only (set equality); viewer only, stage 2 included; All-in, Contending, Not-sure, no or unusable evidence unchanged; any value ≤ 0 is off and keeps today's request hash; knobs out of revisions 1 to 4's config and hash; no double count with the conflict demotion; the page-first bound reads the same fit and adds the bonus exactly (admissibility audit, page equals gated, finite take 5 and 30).
+- **Byte identity (offline, `PYTHONHASHSEED=0`, 15 revision-5 configurations):** knobs off identical to the branch before each change.
+- **Sabotages, red then restored (33, subagent):** 15 on the label fit, 3 on the never-milder rule, 15 on the sell bonus. Two tests were strengthened after a sabotage first stayed green.
+- **Real-ranker measurements:** in D-244.
+- **Pipeline:** one bump, 30, for both; pin recomputed by the main session after merging main.
+- **Not verified:** production; a recorded-request replay; anything on a device (no app change).
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Per-user team binding for linked platform leagues (D-246), branch `fix/platform-league-user-binding`
 
 - **Full backend suite (Opus subagent, no edits in flight):** 15,094 passed, 42 skipped, **1 failed**: `test_research_trade_pipeline.py::test_instrumentation_preserves_function_result_and_rejects_drift`, a `RecursionError` in `copy.deepcopy` of a small AST, unrelated to the touched code; it passes 4 of 4 alone. Not shown to fail on main. CI is the re-run.
