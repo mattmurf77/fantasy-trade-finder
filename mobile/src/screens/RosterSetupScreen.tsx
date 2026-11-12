@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
-import { useQuery, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Svg, { Path } from 'react-native-svg';
 
 import {
@@ -32,14 +32,14 @@ import TierTargetChips from '../components/TierTargetChips';
 import { LockGlyph } from '../components/PlayerContextMenu';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { getAssetPrefs, setAssetPref, type OwnedPick } from '../api/league';
-import { getRankings, reorderRankings, saveTiers, splitRankings } from '../api/rankings';
-import { getTradeValues } from '../api/calc';
+import { reorderRankings, saveTiers } from '../api/rankings';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { useRosterSetup } from '../state/rosterSetup';
 import { setPendingGuidedRegen } from '../state/onboardingBus';
 import { useMyRosterAssets } from '../hooks/useMyRosterAssets';
+import { useSetupSections } from '../hooks/useSetupSections';
 import { haptics } from '../utils/haptics';
 import { tierForElo, TIER_LABEL } from '../utils/tierBands';
 import {
@@ -50,6 +50,8 @@ import {
   listForState,
   orderedIdsForSave,
   picksBeyondCap,
+  playerSection,
+  trackedAssetIds,
   prefillStates,
   rankSteps,
   sortPicks,
@@ -220,32 +222,9 @@ export default function RosterSetupScreen() {
     enabled: rosterSetupOn && !!leagueId,
     staleTime: 60_000,
   });
-  const valuesQuery = useQuery({
-    queryKey: ['calc-values', fmt],
-    queryFn: ({ signal }) => getTradeValues(fmt, signal),
-    enabled: rosterSetupOn,
-    staleTime: 5 * 60_000,
-  });
-  // The caller's own board per position — the SAME unscoped keys Quick Rank
-  // reads, so a warm cache is free and a save here invalidates them both.
-  const boardQueries = useQueries({
-    queries: SETUP_POSITIONS.map((p) => ({
-      queryKey: ['rankings', activeFormat, p],
-      queryFn: () => getRankings(p),
-      enabled: rosterSetupOn,
-      staleTime: 30_000,
-    })),
-  });
-  const boardsSettled = boardQueries.every((q) => q.isSuccess || q.isError);
-  const boardByPos = useMemo(() => {
-    const out: Partial<Record<Position, Map<string, RankedPlayer>>> = {};
-    SETUP_POSITIONS.forEach((p, i) => {
-      const rows = splitRankings(boardQueries[i]?.data as any).rows as RankedPlayer[];
-      out[p] = new Map(rows.map((r) => [String(r.id), r]));
-    });
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardQueries.map((q) => q.dataUpdatedAt).join('|')]);
+  // The board + values reads that decide each player's section, shared
+  // with the TradesHome card so both apply ONE rule (`useSetupSections`).
+  const { valuesQuery, boardsSettled, boardByPos, sectionOf } = useSetupSections(rosterSetupOn);
 
   const loading =
     (!roster.rostersReady && !roster.rostersError)
@@ -263,17 +242,10 @@ export default function RosterSetupScreen() {
     const values = new Map((valuesQuery.data?.players ?? []).map((v) => [String(v.id), v]));
     const players: (SetupAsset & { sortVal: number })[] = [];
     for (const id of roster.playerIds) {
-      let found: RankedPlayer | undefined;
-      let pos: Position | undefined;
-      for (const p of SETUP_POSITIONS) {
-        const r = boardByPos[p]?.get(id);
-        if (r) { found = r; pos = p; break; }
-      }
       const v = values.get(id);
-      const posFromValues = v && (SETUP_POSITIONS as readonly string[]).includes(v.position)
-        ? (v.position as Position) : undefined;
-      const section = pos ?? posFromValues;
+      const section = playerSection(id, boardByPos, v?.position);
       if (!section) continue;
+      const found: RankedPlayer | undefined = boardByPos[section]?.get(id);
       const team = found?.team ?? v?.team ?? null;
       const age = found?.age ?? v?.age ?? null;
       players.push({
@@ -306,7 +278,12 @@ export default function RosterSetupScreen() {
     return [...players.map(({ sortVal: _s, ...a }) => a), ...picks];
   }, [loading, loadError, valuesQuery.data, roster.playerIds, roster.picks, boardByPos, fmt]);
 
-  const allAssetIds = useMemo(() => assets.map((a) => a.id), [assets]);
+  // What the snapshot records: THE tracked set (`utils/rosterSetup.trackedAssetIds`),
+  // the same set the TradesHome card diffs — every player listed above, every pick.
+  const allAssetIds = useMemo(
+    () => (assets.length === 0 ? [] : trackedAssetIds(roster.playerIds, sectionOf, roster.picks.map((p) => p.pick_id))),
+    [assets, roster.playerIds, roster.picks, sectionOf],
+  );
   const visibleAssets = useMemo(
     () => (filterIds ? assets.filter((a) => filterIds.includes(a.id)) : assets),
     // eslint-disable-next-line react-hooks/exhaustive-deps

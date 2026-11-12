@@ -10,7 +10,8 @@ const api = read('backend/league_projections/api.py');
 assert(standings.includes("const batchProjections = useFlag('league.projections')"));
 assert(standings.includes("enabled: !batchProjections && segment === 'projected'"));
 assert(summary.includes('enabled: !batchProjections && oddsEnabled'));
-assert(summary.includes('{batchProjections ? <LeagueProjectionSection />'));
+// League Rankings shows Home's playoff tile; the full section is Standings' only.
+assert(summary.includes('{batchProjections ? (\n          <HomePlayoffBanner') && !summary.includes('LeagueProjectionSection'));
 assert(section.includes("['league-projection-batch', userId, leagueId]"));
 assert(section.includes('getLeagueProjectionBatch'));
 assert(!api.includes('service.wake('));
@@ -53,18 +54,16 @@ vm.runInNewContext(ts.transpileModule(read('mobile/src/utils/projectionCoverage.
 assert.equal(cov.incompleteSentence(1), '1 lineup slot had a starter whose score is not recorded yet, so these odds are incomplete.');
 assert.equal(cov.incompleteSentence(3), '3 lineup slots had a starter whose score is not recorded yet, so these odds are incomplete.');
 assert.equal(cov.incompleteSentence(undefined), 'Some lineup slots had a starter whose score is not recorded yet, so these odds are incomplete.');
-const fa = cov.freeAgentFillSentence;
-assert.equal(fa({fa_filled_slots: 12, zero_filled_slots: 1}), '12 open lineup slots use the best available free agent; 1 has none and counts as 0.');
-assert.equal(fa({fa_filled_slots: 1, zero_filled_slots: 3}), '1 open lineup slot uses the best available free agent; 3 have none and count as 0.');
-assert.equal(fa({fa_filled_slots: 2, zero_filled_slots: 0}), '2 open lineup slots use the best available free agent.');
-assert.equal(fa({fa_filled_slots: 1}), '1 open lineup slot uses the best available free agent.');
-assert.equal(fa({fa_filled_slots: 0, zero_filled_slots: 1}), '1 open lineup slot has no free agent available and counts as 0.');
-assert.equal(fa({zero_filled_slots: 4}), '4 open lineup slots have no free agent available and count as 0.');
-for (const none of [undefined, null, {}, {fa_filled_slots: 0, zero_filled_slots: 0}, {estimated: true, missing_lineup_slots: 2}]) {
-  assert.equal(fa(none), null, `no free-agent line for ${JSON.stringify(none)}`);
+// The league-level free-agent / counts-as-0 summary line was removed
+// (operator, 2026-11-12): no helper, no render, no copy. The status line and
+// the incomplete sentence above stay; the per-row "(free agent)" marker below stays.
+assert.equal(cov.freeAgentFillSentence, undefined, 'the free-agent summary helper is gone');
+const coverageSource = read('mobile/src/utils/projectionCoverage.ts');
+for (const gone of ['freeAgentFillSentence', 'freeAgentLine', 'league-projections.free-agents', 'best available free agent', 'counts as 0', 'count as 0']) {
+  assert(!section.includes(gone) && !coverageSource.includes(gone), `${gone} is gone from the projection section`);
 }
-assert(section.includes('const freeAgentLine = freeAgentFillSentence(result?.coverage);'));
-assert(section.includes('{freeAgentLine ? <Text variant="bodySm" style={styles.text} testID="league-projections.free-agents">{freeAgentLine}</Text> : null}'));
+assert(section.includes("result.coverage?.estimated ? 'Partial Sleeper data' : null"), 'the status line stays');
+assert(section.includes('testID="league-projections.incomplete">{incompleteSentence(missingSlots)}'), 'the incomplete sentence stays');
 // Team-week lineup: a slot in free_agent_fills is marked "(free agent)"; a roster starter is not.
 const fills = [{slot_index: 1, slot: 'WR', player_id: '9', name: 'Free Guy', points: '11.2', estimate_status: 'available'}];
 assert.equal(cov.lineupRowText({slot: 'WR', player: {player_id: '9', name: 'Free Guy', points: '11.2'}}, 1, fills), 'WR: Free Guy (free agent) · 11.2');

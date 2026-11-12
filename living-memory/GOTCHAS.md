@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-078 | Find a Trade shows "N new on your roster" right after roster setup, opens an empty screen, and returns every session | Mobile / roster setup |
 | G-077 | A second league-mate linking the same ESPN/MFL league unlists the first user, shows them the wrong roster, or tells them they used the wrong account | Backend / league linking / multi-user |
 | G-076 | `config/features.json` on main says a flag is off, but production has it on (seven flags, via Render's `FTF_FLAGS`) | Backend / feature flags / deploy config |
 | G-075 | Server-built decks or Calibration sessions offer trades with players the partner no longer has, in leagues nobody has opened lately | Backend / league data |
@@ -757,6 +758,13 @@ Number sequentially. Don't delete entries even if "obviously fixed by now" — f
 - **Symptom, plainly:** a like-rate readout split by `basis` (consensus vs divergence) — the exact mitigation [D-095] prescribes for grading a two-sided arm — shows arm C at 0% consensus cards. Arm C does serve unboarded partners; it just labels them wrong.
 - **Cause:** `backend/trade_gen_v2.py:1204` hardcodes `basis="divergence"` on every emitted card, regardless of whether the partner had a board.
 - **Fix:** stamp basis from `member.has_rankings` the way `trade_service` does. **Prevention:** any `basis`-split metric on `deck_impressions` filters arm C out or notes it is unlabelled until this is fixed. Found 2026-09-01 by the knob-sweep harness run (the harness's consensus counter read 0 for arm C in every cell).
+
+### G-078 — The roster-changed card counted assets roster setup never lists
+- **Symptom, plainly:** "15 new on your roster" on Find a Trade right after completing roster setup; opening it shows "Those assets are no longer on your roster"; the card comes back every session.
+- **Cause:** the card diffed every rostered asset (kickers, defenses, IDP and unvalued players included) against a snapshot written only from the players the setup screen lists (those with a QB / RB / WR / TE section) plus picks. Assets the screen never lists were never recorded as seen.
+- **Fix (2026-11-12):** one definition of a tracked asset (`playerSection`, `trackedAssetIds` in `mobile/src/utils/rosterSetup.ts`), read through one hook (`useSetupSections`) by both `RosterSetupScreen` and `RosterSetupEntryCard`; the card diffs and retires with the tracked set. No stored-record migration: the false count goes on the next render and a real new player still raises the card.
+- **Prevention:** when one surface writes a "seen" set and another diffs against it, both build the set from the same function. `check-roster-setup.js` §9t executes it with assets the setup screen cannot show.
+- **Still open:** the record is keyed by league, not by user, so two accounts on one device in the same league share it (reachable through the test profile).
 
 ### G-077 — `leagues.espn_my_team_id` / `platform_my_team` are NOT anyone's team
 - **Symptom, plainly:** after a league-mate links the same ESPN, MFL or Fleaflicker league, the first user's league disappears from their list, or a re-sync shows them the other manager's roster, or a cookie league answers 403 `wrong_account` and clears their verification, or a send is built from the wrong team. The second linker gets `*_not_linked` on every send.

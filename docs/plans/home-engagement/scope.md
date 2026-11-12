@@ -411,3 +411,27 @@ The foundation files (§6.1), `check-home-tab.js`, `check-league-candidates-300.
 ### 6.6 Per-agent exit gate
 
 `cd mobile && npx tsc --noEmit` clean. Your new guard, plus every guard in §3 "must pass UNMODIFIED", plus `node tests/check-position-split-parity.js` and `check-standings-order.js`. `bash scripts/testid-lint.sh` OK. One commit on your branch; no push.
+
+---
+
+## Addendum 2026-11-12 — League Rankings shows the playoff tile, not the projected standings
+
+**Ask (operator):** hide the projected-standings section on League Rankings and show the same tile Home shows, so the full projected standings are reached only through the dedicated Standings page. Full gates, no express, no new flag.
+
+**What changed.** `mobile/src/screens/LeagueSummaryScreen.tsx`: under `league.projections` the slot that mounted `LeagueProjectionSection` now mounts `components/home/HomePlayoffBanner` (one component, one query key `['league-projection-batch', userId, leagueId]`, one util `utils/homePlayoffBanner`; not forked, not moved). It is keyed `${userId}:${leagueId}` like Home's, and gets the roster id the Home way: `findMyRoster` over `['league-rosters', leagueId]` (shared key, `staleTime: 5 * 60_000`, enabled only for a Sleeper league with the flag on). `onDetails` tracks `home_tile_tapped {tile: 'standings'}` and opens `Standings` with `{ segment: 'projected' }`. `onReviewOutlook` tracks `home_tile_tapped {tile: 'outlook'}` and opens the Trade DNA sheet with `suggestOutlook`: from the League tab root with Home's own `navigate('Trades', { screen: 'TradesHome', params })`, from the legacy root-stack `LeagueSummary` push with `popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome', params } })` (a bare `navigate('Trades')` is unhandled from the root stack in React Navigation 7). The `outlook.odds` strip path (flag off) is untouched. `LeagueProjectionSection` stays and is now mounted only by `StandingsScreen`. Home is unchanged.
+
+**States on League Rankings (flag on).** Same as on Home: loading → "Loading forecast…"; current → the percentage as a link; not current → the last saved percentage plus "last saved"; no estimate → a plain status ("First forecast pending", "Update pending", "League data incomplete", "League rules unsupported"); read error → "Update unavailable". "View ›" renders in every state. Non-Sleeper league, logged out, no league or mid-switch: the tile renders nothing, so the page goes straight from the basis toggle to the chart card. A top-bar league switch hides the tile while switching, then the new key remounts it on the new league's query.
+
+**Analytics.** Existing event and values only: `home_tile_tapped` with `tile: standings | outlook`, screen = `route.name` (`LeagueRankings` or `LeagueSummary`), so League Rankings taps separate from Home's (`Home`) by the screen column. No taxonomy change. Noted in `docs/business/analytics/2026-10-10-home-hub-addendum.md`.
+
+**Evidence.** New guard `mobile/tests/check-league-rankings-playoff-tile.js` (`npm run test:league-rankings-playoff-tile`): the mount and its absence of the section, Standings still mounting it, the key and roster id, the strip path unchanged, both handlers executed for both routes, the event shape, Home's mount verbatim, the single query key, Standings' `goBack`. `check-league-projections.js`'s League Rankings assertion now pins the tile and the section's absence. Every new or changed assertion was sabotaged red and restored green with an unchanged checksum (15 cases). `tsc --noEmit`, every `tests/check-*.js` and `testid-lint` pass.
+
+**Docs.** `mobile/src/screens/CLAUDE.md` (LeagueSummaryScreen, StandingsScreen rows): updated. `mobile/src/components/CLAUDE.md` (`home/` row): updated. `mobile/tests/README.md`: updated. Analytics addendum: updated. API reference, data dictionary, config reference, cross-client invariants, architecture/HLD, glossary: n/a, no route, schema, flag, invariant or architecture change. Web: out of scope.
+
+**Manual TestFlight checklist.**
+1. League tab, Sleeper league with a saved forecast: the "Playoff chance" row sits under the basis toggle; no projected-standings table on the page. The percentage matches Home's.
+2. Tap the percentage, then Back: Standings opens on Projected with the full projected standings; Back returns to League Rankings. Repeat with "View ›".
+3. With a "Consider <outlook>" prompt showing, tap "Review outlook": the Trade DNA sheet opens with the suggested card marked and the saved outlook still selected.
+4. Switch league from the top bar while on League Rankings: the row shows the new league's number (or nothing for ESPN/MFL), never the old one.
+5. ESPN or MFL league: no tile and no projections on League Rankings.
+6. Old entry (deep link `app/league/summary`): the tile shows; its links open Standings (Back returns to that page) and the Trade DNA sheet.
