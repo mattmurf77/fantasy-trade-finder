@@ -1329,6 +1329,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # Sleeper offers are imported. OFF (default) ⇒ no call, no row, GET/POST
     # /api/sleeper/offer-import 404 (DELETE still withdraws).
     "trade.sleeper_offer_import",
+    # docs/plans/win-now-season-signal/ (lld §6). ON ⇒ once per organic owner
+    # job, for a Sleeper league, the worker reads the account's saved league
+    # forecast (read only: no run queued, no provider call), records the season
+    # evidence on the owner request record and logs one `season-signal:` line;
+    # bilateral revision 5, when selected, scores with it, and its cards carry
+    # `season_block`. OFF (default) ⇒ no read, no line, no key anywhere.
+    "trade.season_signal",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

@@ -27,7 +27,7 @@ import { LockGlyph } from './PlayerContextMenu';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
-import type { Player, TradeCard as TradeCardData, FitBlockTeam } from '../shared/types';
+import type { Player, TradeCard as TradeCardData, FitBlockTeam, SeasonBlock } from '../shared/types';
 
 // #362 — chip copy helpers. Both derive entirely from the server-stamped
 // `standing_offer_mine` payload; neither invents a season the offer does
@@ -69,6 +69,12 @@ export function fitRanksText(ranks: FitBlockTeam['ranks']): string {
 export function fitLeadShown(team: FitBlockTeam): boolean {
   if (!team.positions?.length) return true;
   return !/^(holds|shifts)\./.test(team.lead.code);
+}
+
+// Win-now season signal — the server's label tag for one asset, verbatim, or
+// undefined (no label, or no block). The card never composes season text.
+export function seasonLabelFor(block: SeasonBlock | undefined, id: string): string | undefined {
+  return block?.labels?.find((l) => l.id === id)?.text;
 }
 
 // WS4b fit block — one team's before/after table rows: position, rank
@@ -332,6 +338,15 @@ function TradeCardComp({
   // (a table or rank moves). Without one (server flag trade.fit_position_ranks
   // off, 2026-11-11) the block is tags and reasons, so it reads "Team fit".
   const fitRanked = fitTable || !!(fitThem?.ranks?.length || fitYou?.ranks?.length);
+  // Win-now season signal (lld §5.3): same gate as the fit block, so an
+  // edited card (whose package the server did not score) shows none of it.
+  const seasonShown = fitFirstEnabled && !data.edited ? data.season_block : undefined;
+  const seasonTag = (p: Player) => {
+    const text = seasonLabelFor(seasonShown, p.id);
+    return text ? (
+      <ChalklineText style={styles.fitTag} numberOfLines={1} testID={`trade-card.season-label.${p.id}`}>{text}</ChalklineText>
+    ) : undefined;
+  };
   // WS8 revised-offer card — the server's one sentence saying the user's
   // earlier offer was declined and what changed. Double-gated on the flag
   // like the fit block; an edited card hides it (it describes the package
@@ -593,6 +608,7 @@ function TradeCardComp({
         p.team || 'FA',
         marked ? 'untouchable' : null,
         p.on_block ? 'on the block' : null,
+        seasonLabelFor(seasonShown, p.id) ?? null,
         p.injury_status ? `injury ${p.injury_status}` : null,
       ]
         .filter(Boolean)
@@ -787,6 +803,15 @@ function TradeCardComp({
               </View>
             </View>
           ) : null}
+          {/* Win-now season signal, under the You team at the block's full
+              width: the season line on one line, the conflict sentence on up
+              to two, both server text printed verbatim. */}
+          {seasonShown?.line ? (
+            <ChalklineText style={styles.fitLead} numberOfLines={1} testID="trade-card.season-line">{seasonShown.line}</ChalklineText>
+          ) : null}
+          {seasonShown?.conflict ? (
+            <ChalklineText style={styles.fitLead} numberOfLines={2} testID="trade-card.season-conflict">{seasonShown.conflict.text}</ChalklineText>
+          ) : null}
         </View>
       ) : null}
 
@@ -883,6 +908,7 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'give')}
                 onLongPress={longPressFor(p, 'give')}
+                belowNameSlot={seasonTag(p)}
                 // #226 — informational badges live in the wrapping header
                 // row; the in-flow rightSlot keeps only the interactive
                 // controls (stacked, so the narrow column keeps its width).
@@ -938,6 +964,7 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'receive')}
                 onLongPress={longPressFor(p, 'receive')}
+                belowNameSlot={seasonTag(p)}
                 // #226 — same treatment as the give column: badge in the
                 // header row, controls stacked in the in-flow rightSlot.
                 badgeSlot={p.on_block ? blockBadge(p) : undefined}

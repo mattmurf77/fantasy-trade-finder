@@ -21,7 +21,7 @@ sell win-now pieces, a contender as wanting players who would start for it.
 
 | Option | Consequence |
 |---|---|
-| **One step later (recommended)** | The first release changes decks only for users with a win-now outlook, plus the push-down for Rebuilding and Tanking. "Not sure" users are provably untouched. Matching then gets its own replay and its own graded deck |
+| **One step later (recommended)** | The first release changes decks only for users with a win-now outlook, plus the order (never the cards) for Rebuilding and Tanking (amended 2026-11-11). "Not sure" users are provably untouched. Matching then gets its own replay and its own graded deck |
 | With the first release | One release, one grading pass. But every user's deck moves at once, including users who saved no plan, and a bad result cannot be traced to one cause |
 
 Why later: in the prototype, scoring the other team in points as well changed every outlook's deck
@@ -31,6 +31,10 @@ half, and most league-mates' outlooks are read from rosters, not saved (a median
 outlook among a request's league-mates in the recorded requests).
 
 ## 2. A team with no saved outlook that the engine reads as Contending: season-score it? — before serve
+
+*Amended 2026-11-11, operator direction:* built as recommended, and extended to the mirror: a
+roster read as Rebuilding is scored in the shed direction, and is never called a conflict. The
+question stays open only as the yes/no for serving.
 
 Fifteen of the 247 recorded requests are this case. The engine already treats such a team as
 Contending, using age.

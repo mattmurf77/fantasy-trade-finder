@@ -163,6 +163,30 @@ earlier additive arm (`grading.revision4_arm`) is superseded and inert while the
 See [scope](plans/offer-learnings/scope-revision-4.md) and
 [round scope](plans/offer-learnings/scope-revision-4-round.md).
 
+## Bilateral revision 5 (win-now season signal)
+
+`trade_gen_bilateral_season.py` adds default-dark `owner-v2-bilateral-5`, a mixin over revision
+2's search, selected by `owner_bilateral_revision_5_enabled=1` inside revision serving (it wins
+over the v3 and v4 selectors). Its one new input is the **season evidence**: the league forecast
+(`league_projections`, a saved weekly snapshot) gains a second reader. With flag
+`trade.season_signal` on, `server._owner_generation_context` reads the account's last saved
+forecast once per organic owner job (`server._season_evidence`: `batch.view` + `store.get`, read
+only, Sleeper only), and the pure leaf `season_value.py` (with
+`league_projections/season_points.py`) turns it into points per game over the upcoming weeks;
+`_season_viewer_complete` applies the viewer completeness rule. The evidence is recorded on the
+owner request record beside `input_evidence` (digest in the request hash) whatever revision is
+selected, and is a generator keyword only under revision 5. Revision 5 scores an All-in /
+Contending viewer's lineup in projected points, reads plan fit from the league label table
+(`season_value.league_profile`), seats starters in the candidate pools, scores a Rebuilding /
+Tanking viewer in the shed direction (order only), and flags plan conflicts
+(`season_value.plan_conflict`, demoted by `season_conflict_demotion`, order only). Proofs carry
+`season_signal`; `trade_narrative` composes the You-side leads in `fit_block` and the card's
+`season_block`. Presentment reads proofs under `bakeoff_runner.owner_presentment_version`.
+Rules-first (`deck.rules_first`) serves revision 5 through its page path only once revision 5
+is in `trade_fast_deck`'s supported set (WI-8); until then it takes the full solve. The admin
+route `GET /api/admin/season-signal/labels` serves the label table to the operator review tool
+(`backend/eval/season_label_review.py`). See [plan](plans/win-now-season-signal/) (hld, lld).
+
 ## Independent model evaluation (offline foundation, 2026-09-22)
 
 `backend/eval/scorecard_dimensions.py` evaluates all six dimensions independently

@@ -45,6 +45,9 @@ export interface PlayerCardProps {
   // badges belong in flow so they reflow instead of colliding. Classic
   // branch only (the dense branch has its own in-flow layout).
   badgeSlot?: React.ReactNode;
+  // Win-now season signal — one short line directly under the name (the
+  // trade card's label tag). Classic branch only; absent ⇒ byte-identical.
+  belowNameSlot?: React.ReactNode;
   showInjury?: boolean;            // render the injury-status tag (default true). Off for Trios tiles (feedback #33).
   // #58 (cozy) — dense 60px two-line row, used ONLY by the Tiers board.
   // Renders a separate layout branch: line 1 = name + team + RK/injury
@@ -138,6 +141,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
     compact = false,
     rightSlot,
     badgeSlot,
+    belowNameSlot,
     showInjury = true,
     dense = false,
     statsSlot,
@@ -377,6 +381,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
           <Text scale="body" style={[type.title, styles.name]} numberOfLines={1}>
             {player.name}
           </Text>
+          {belowNameSlot}
 
           <View style={styles.meta}>
             <Text scale="body" style={type.bodySm}>{teamStr}</Text>

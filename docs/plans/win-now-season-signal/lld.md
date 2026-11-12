@@ -151,6 +151,29 @@ below calls `super()` and returns its value untouched.
 outlook is the one the engine already resolved (`trade_gen_owner.py:297-306`), declared or roster
 read.
 
+**Amended 2026-11-11, operator direction: the shed direction.** `_season_shed(team)`: evidence
+usable **and** `team["outlook"] in ("rebuilder", "jets")` **and** (viewer **or**
+`season_partner_matching == 1`) **and** not native bounds; declared or roster read. Such a team is
+scored as a **ranking term only**: `_lineup`, `_plan_asset` (stage 1), `_pool`, `utility`,
+`team_plan_gain`, the intent path and every gate stay revision 2's, so the inventory and terms are
+revision 2's. After eligibility (`_season_signal`, where the demotion already sits):
+
+```
+d          = season lineup after − before (points a week, unrounded; §3.2's _season_total)
+lineup_gain = clip(−w × RATE × d / gross_market)          # w: season_shed_weight_tanking 1.0,
+                                                          #    season_shed_weight_rebuilding 0.5
+team_plan  = clip(.5 + .5 × clip(plan_fit + lineup_gain), 0, 1)   # plan_fit: revision 2's plan shift
+support   += 0.20 × (team_plan − revision 2's team_plan)         # 0.20 = the team-plan weight
+```
+
+For an All-in team `clip(4 × need_utility)` equals `clip(RATE × d / gross_market)` (weight 0.25,
+season units), so at `w = 1` a point shed by a Tanking team moves `lineup_gain` exactly as a point
+gained moves it for an All-in team. The replaced lineup part is revision 2's need term (0 for
+Tanking, weight 0.05 for Rebuilding). The support move is recorded as
+`support.season_adjustments.season_lineup_shed` beside `season_unadjusted_score`, and
+`support.components.team_plan` carries the re-scored value. In stage 2 a Rebuilding / Tanking
+partner's support moves the same way on its own side.
+
 ### 3.2 Season lineup
 
 Built once in `__init__` after `owner._Search.__init__` has filled `_lineup_assets` and before
@@ -225,6 +248,10 @@ revision 4 applies its rules (`trade_gen_bilateral_r4.py:182-186`):
 - **All-in / Contending:** `d ≤ −0.5` / `d ≤ −1.0`.
 - **Rebuilding / Tanking:** the max-market received asset has label `win_now`; at least one given
   asset is a pick or has label `rebuild` or `cornerstone`; `Σ future(receive) < Σ future(give)`.
+  *Amended 2026-11-11, operator direction:* checked second; first, the points mirror
+  `d ≥ +0.5` (Tanking) / `d ≥ +1.0` (Rebuilding) (`season_value.CONFLICT_ADD`, beside
+  `CONFLICT_DROP`). `plan_conflict` stays the one predicate and returns the trigger
+  (`"points"` / `"label"`) or `False`; the proof records it as `conflict.trigger`.
 - `kind`: `"board"` when `intent.path == "personal_board"`. When the path is `"declared_intent"`
   and `intent.declared_match` is true: `"target"` if the buy target is on the viewer's target list,
   else `"position"`. Any other case (including a card that qualified only because the plan itself
@@ -265,6 +292,13 @@ Added to the frozen proof (private; impressions already store it). Present only 
 }
 ```
 
+- *Amended 2026-11-11, operator direction:* `viewer.season_direction` (`"add"` for All-in /
+  Contending, `"shed"` for Rebuilding / Tanking) whenever the viewer is scored, so copy and tooling
+  never infer the direction from the outlook. A shed-scored viewer carries the same `viewer`
+  season facts as a win-now one; `components.lineup_gain` is the shed term as scored (positive
+  when points are shed), `components.team_plan` the re-scored team plan; `assets[].plan_lean` is
+  `null` (the label table is not read for it); `conflict.trigger` names the rule that fired;
+  `conflict.threshold` is `CONFLICT_ADD[plan]` for these plans.
 - `viewer.starter_evidence` (revision 2's field, `trade_gen_bilateral_candidate.py:83-87`) becomes
   `{"state": "projected", "projected_starter_delta": d, "proxy": "season_points_per_game_v1", …}`
   when scored, and stays as revision 2 writes it otherwise. The report's `starter_evidence` string
@@ -285,6 +319,14 @@ text to the app: it prints `lead.text`, `mobile/src/api/trades.ts:197-202`):
 | `conflict.you` | `Away from {plan}: {delta} pts/wk` · Rebuild/Tank: `Away from {plan}: adds a win-now piece` |
 | `season_win_now.you` | `Win-now: {name} starts, +{x.x}/wk` |
 | `season_starter.you` | `Starts for you: {name}, +{x.x}/wk` |
+| `season_shed.you` | *Amended 2026-11-11, operator direction.* `{plan}: {-x.x} pts/wk, adds {asset}` (`Rebuilding`, `Tanking`, or `Rebuild-leaning` for a roster read): a `shed` viewer's card that sheds ≥ 0.5 a week; `{asset}` the most valuable incoming pick or projected `rebuild` / `cornerstone` |
+
+*Amended 2026-11-11:* a Rebuilding / Tanking conflict's lead is `conflict.you` with the signed
+delta (`Away from Tanking: +2.1 pts/wk`) when `conflict.trigger == "points"`, and `conflict_plan.you`
+(`Away from Tanking: adds a win-now piece`) when it is `"label"`. A shed-scored viewer gets the
+season line and the Them side's label rule like a win-now viewer; with no season lead, today's
+plan lead (`Rebuilding: adds …`). The copy reads `viewer.season_direction`; a scored proof without
+it composes nothing.
 
 `_fit_plan`'s win-now branch (`trade_narrative.py:561-564`) and `_fit_need`
 (`trade_narrative.py:585-611`) are skipped for a side whose proof is season-scored. For the Them
@@ -435,7 +477,7 @@ Each test is proven red against the named sabotage, then green on revert
 | I1 | Flag off and selector 0: worker output byte-identical | `test_season_signal_worker.py` | attach the evidence key when the flag is off |
 | I2 | Revision 5 without usable evidence = revision 2's identities, terms, order | `test_trade_gen_bilateral_season.py` | let `_lineup` use season assets when `state != "usable"` |
 | I3 | "Not sure" viewer with usable evidence = revision 2 | same | add `not_sure` to the scored outlooks |
-| I4 | Rebuilding / Tanking viewer: same inventory and terms; penalty 0 → same order | same | score a rebuilder's lineup in points |
+| I4 | Rebuilding / Tanking viewer: same inventory and terms as revision 2; the order differs (amended 2026-11-11, operator direction; was "penalty 0 → same order") | same | let the shed term qualify a card (add it to `team_plan_gain` / `utility` in `_owner`) |
 | I5 | Equal value, equal age, starter beats backup for All-in | same | read the label table with `starts_for` always true |
 | I6 | Non-starter's plan lean equals a pick's | same | give non-starters `0.0` |
 | I7 | Conflict penalty never changes the inventory | same | apply the penalty before `utility` is computed |

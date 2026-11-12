@@ -12,6 +12,18 @@
 - Each weekly forecast changes the request signature for that viewer, so stored first pages and prepared decks rebuild weekly.
 - Not changed: the legacy generators, mock-draft CPU drafters and the value core still use the roster read. `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
 
+## D-238 — Win-now season signal: built end to end and shipped dark; the season evidence is the saved forecast, labels are an engine input, and Rebuilding/Tanking get the opposite curve
+
+**Date:** 2026-11-11 · **Who:** the operator: build it ("Yes exactly. And I think we should do this"; "we can build both now"), off-season signal deferred ("Defer for now"), Win Now screen kept separate ("Separate for now"), plan-conflict cards pushed down and stated ("Yes"), and the shed rule: "rebuilding and tanking should have the opposite curve as all in and contending teams. They should be prioritizing giving up lineup points per week. Softer for rebuilding, more aggressively for tanking". Stage-2 result accepted: "it mostly makes sense that two win now teams aren't going to trade as often". Plan: [`../docs/plans/win-now-season-signal/`](../docs/plans/win-now-season-signal/).
+**Context:** The engine's team-plan term read age and position only, so an All-in viewer could not be told which RBs help this season, and a card could work against a saved plan without saying so.
+**Decision:** Generator revision 5 (`trade_gen_bilateral_season`) reads projected points per game for the remaining regular-season weeks from the account's saved forecast, scores All-in and Contending viewers on lineup points gained, scores Rebuilding (weight 0.5) and Tanking (weight 1.0) on lineup points shed, labels players (win-now piece, cornerstone, rebuild piece, depth) and uses the labels in the plan term, demotes and names a card that works against a saved plan, and sends a `season_block` the app prints verbatim. Flag `trade.season_signal` ships **false**; revision 5 is selected by the knob `owner_bilateral_revision_5_enabled` (0). Revision 5 runs on the rules-first page path with bounds proven never to sit below the true score; negative season values fall back to the gated full solve.
+**Consequences:**
+- Nothing changes for users until the flag and the knob are on. Stage A (flag on, revision 2 serving) only records evidence and one `season-signal:` log line per job.
+- With the flag on, the evidence digest joins the request hash, so stage A starts new request units.
+- The app shows the season line, label tags and conflict sentence only inside the fit block; a card with no fit block shows the label tags alone.
+- Known limits: Sleeper leagues with a current forecast only; off-season has no signal; stage-2 partner matching (`season_partner_matching`, 0) failed its Not-sure bar and stays off; on the fixture Rebuilding moved more than Tanking in change, though Tanking sheds most in absolute terms.
+- `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
+
 ## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
 
 **Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.

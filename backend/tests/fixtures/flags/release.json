@@ -276,5 +276,6 @@
   "trade.fit_first_copy": true,
   "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
-  "trade.sleeper_offer_import": true
+  "trade.sleeper_offer_import": true,
+  "trade.season_signal": false
 }
