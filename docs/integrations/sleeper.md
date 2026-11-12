@@ -20,6 +20,7 @@
 5. [Call frequency / caching](#5-call-frequency--caching)
 6. [Instrumentation guidance](#6-instrumentation-guidance)
 7. [Weekly season projection feed](#weekly-season-projection-feed)
+8. [Research crawler: the Sleeper trade universe](#research-crawler-the-sleeper-trade-universe)
 
 ---
 
@@ -625,3 +626,14 @@ Plus `GET https://api.sleeper.app/v1/state/nfl` to know which weeks are complete
 - **The URL has no `/v1/` segment.** `_sleeper_fixture_path` (UI-test seam) and `api_observability.sleeper_endpoint_class` expect `/v1/`, so under `FTF_SLEEPER_FIXTURES_DIR` this call errors (the route turns that into a 503), and apihealth labels it `other`. The projections feed has the same latent gap.
 - **Logging.** Season/week, status and row counts are safe to log. The feed carries no user data.
 - **Rights.** As with projections, access is not a contractual grant of commercial or redistribution rights.
+
+## Research crawler: the Sleeper trade universe
+
+`scripts/sleeper_universe.py` (logic `backend/sleeper_universe/`, usage and the full allow-list in its [README](../../backend/sleeper_universe/README.md)) is an operator-run research program, never imported by the app. It builds a local dataset of completed trades with the rosters, standings and schedule they happened in. Plan: `docs/plans/sleeper-trade-universe/` ([scope](../plans/sleeper-trade-universe/scope.md)).
+
+- **Calls** (public REST v1 only, no auth, no GraphQL): `/state/nfl` once per run; `/user/<username>` per seed username; `/user/<id>/leagues/nfl/<season>` per user and season in scope; `/league/<id>` for each predecessor walked; per league-season `/league/<id>`, `/rosters`, `/users`, `/transactions/1..18`, `/matchups/1..18`, `/drafts`, `/draft/<id>/picks` per draft, `/traded_picks`, `/winners_bracket`, `/losers_bracket` (about 44 requests); `/league/<id>/rosters` once per league expanded during discovery.
+- **Rate**: one process, one client (a second live client raises), token bucket at 4 requests a second by default (`--rate`, hard maximum 10, a quarter of Sleeper's stated 1,000 a minute at the default). Retries with back-off on 429, 5xx and network errors, honours `Retry-After`, and stops hard after 5 consecutive 429s (`--max-429`) with progress checkpointed. User-Agent `FTF-Research-Crawler/1.0`, no personal detail. It does not use `backend/sleeper_http.py`'s circuit (that is the app's per-process circuit; the crawler runs in its own process).
+- **Persisted** (git-ignored `data/sleeper-universe/`, kept indefinitely): identity-stripped raw responses per league-season and a SQLite store. An allow-list per payload type keeps ids, enums, numbers and roster/player/pick lists; every Sleeper user id (owner, co-owner, transaction `creator`, draft `picked_by`, draft-order keys, league members) is replaced by an HMAC-SHA256 under a key outside the repo (`SLEEPER_UNIVERSE_HMAC_KEY` or `hmac.key`).
+- **Not persisted**: usernames, display names, team names, league and draft names, avatars, nicknames, descriptions, free-text notes (waiver notes become a closed code), any raw user id, `/league/<id>/users` in raw form, anything from `/user/<username>`.
+- **Shapes relied on beyond §3.2** (from the captured fixtures in `backend/tests/fixtures/outlook-calibration/`): matchup rows carry `players_points` (player id → points) and `starters_points` (a list aligned with `starters`); Sleeper draft-pick objects carry no timestamp (`backend/draft_board_service.py`, `picked_at`), so the crawler times every pick of a completed draft at the draft's `last_picked`. Which leg offseason trades are booked under is not assumed: events are ordered by timestamp, and the report shows trade dates per leg.
+- **Logging**: league ids, counts, endpoint classes and status codes only; a seed is referred to by its line number.

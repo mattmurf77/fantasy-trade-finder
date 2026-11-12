@@ -56,6 +56,12 @@ fixtures live in `backend/tests/fixtures/`.
 
 These read public endpoints and write only local captures. Re-run only to refresh/extend fixtures.
 
+## Research crawl — network, writes only `data/sleeper-universe/`
+
+| Script | Purpose |
+|---|---|
+| `sleeper_universe.py` | Sleeper trade universe crawler (research, never imported by the app; no production DB). Discovers dynasty leagues breadth-first from a seed file, pulls each league-season (about 44 public REST v1 requests, one throttled client, 4 a second by default), strips identity by allow-list (owners as keyed hashes only), derives trades, rosters at each trade, standings, schedule and outcomes, and reports aggregates plus a leak scan. Resumable per league-season. Logic and usage: [`backend/sleeper_universe/README.md`](../backend/sleeper_universe/README.md) |
+
 ## Operator checks — network, read-only, write nothing
 
 | Script | Purpose |
