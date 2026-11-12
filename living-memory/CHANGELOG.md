@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — League selector header on Standings, Usage Trends, Track record and Win Now (D-252)
+
+- **What changed:** these four pages carry the same top bar as the tab screens, with the back button and title under it. Switching league reloads the page for that league.
+- **Fixed with it:** Usage Trends no longer shows the old league's players under the new league's name while loading; a Standings projection row no longer carries over to another league.
+- **Usage Trends:** the league-name line under the header is gone; the weeks label stays.
+- **Needs the next app build.** The header is taller, so lists have less room on small phones. Not verified on a device.
+
 ## 2026-11-12 — Founders' review: any label for any player (D-251)
 
 - **What changed:** the label page no longer restricts starters to Cornerstone / Win-now and bench players to Rebuild / Depth, and unlabelled players can be given a label. Mixed selections move together.

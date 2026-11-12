@@ -1,13 +1,24 @@
 # Decisions — Fantasy Trade Finder
 
+## D-252 — The league selector header goes on Standings, Usage Trends, Track record and Win Now
+
+**Date:** 2026-11-12 · **Who:** the operator: "Yes add the selector to the recommended pages", answering the list in D-249. Which state each page drops on a switch is the builder's and the main session's call. Plan: [`../docs/plans/free-agents-header-rank/scope.md`](../docs/plans/free-agents-header-rank/scope.md) (addendum 2026-11-12). Extends D-249.
+**Context:** D-249 put the global top bar on Free Agents and left four other league-scoped root pushes with a plain native header.
+**Decision:** The four register through `RootNav.LeagueTopBarHeader`, which gains an optional right slot (Usage Trends' info button). Each page reloads for the switched league and drops what belonged to the old one: Standings keys its projection section by league; Usage Trends shows a spinner instead of the old league's players, collapses the expanded row, closes the availability sheet and a claim from another league, and starts the list at the top; Win Now remounts; Track record refetches. Filters, weeks, view, order and period stay. Usage Trends loses its league-name line, which the header now shows directly above.
+**Consequences:**
+- The header is 116pt against 64pt before (iPhone SE: Usage Trends' list area goes from 450pt to 398pt). Tight but usable; not restructured.
+- Two bugs that a league switch would have exposed are fixed with it (old league's players and Add / Trade buttons under the new league's name; an expanded projection row carried to another team).
+- Not changed, by decision: League summary, Draft room, Mock draft, Pick assignment, Record picks, Shop asset (they take a league from route params). League summary uses the same projection section without a league key: to check.
+- App-only; needs the next build. Nothing verified on a device.
+
 ## D-251 — A founder label is the label: any of the four for any player, applied as given wherever its scope reaches
 
 **Date:** 2026-11-12 · **Who:** the operator: "For founder's review player labels, remove the controls limiting which label I can assign". Applying a stored label literally in every league its scope reaches, and leaving the unprojected Win-now case to the age rule, are the builder's and the main session's calls, put to the operator. Plan: [`../docs/plans/founder-review/scope.md`](../docs/plans/founder-review/scope.md) (addendum 2026-11-12). Amends D-242.
 **Context:** D-242 let a starter be only Cornerstone or Win-now, a bench player only Rebuild or Depth, and left a borderline or unprojected player unmovable. A stored override was read as a judgment of the player's future only and translated per league by whether he starts there.
 **Decision:** Every row is movable to all four labels, mixed selections included, and the engine uses the stored label as given (`season_value.overridden_label`), for labelled, borderline and unprojected players alike. `startable` and `future` are never changed, so a label may disagree with them. Scope is unchanged (QB per QB format, RB / WR / TE everywhere), as are the founder-only routes. "Back to engine" for a player the engine leaves unlabelled is the No label band and saves as a clear.
 **Consequences:**
-- A stored label no longer translates per league: an RB made Cornerstone is Cornerstone in every league, including one where he sits. Production held no stored overrides when this shipped (read-only count), so nothing existing changed meaning. Per-league labels would need a per-league key: open with the operator.
-- For an All-in or Contending viewer, an unprojected player's label is not read (`_season_lean` returns before it); the age rule decides. Every other consumer reads it. Open with the operator.
+- A stored label no longer translates per league: an RB made Cornerstone is Cornerstone in every league, including one where he sits. Production held no stored overrides when this shipped (read-only count), so nothing existing changed meaning. The operator confirmed it the same day: "Every league. Per league labels doesn't make sense."
+- For an All-in or Contending viewer, an unprojected player's label is not read (`_season_lean` returns before it); the age rule decides. Every other consumer reads it. The operator, the same day: "Maybe. Let's review after I set the labels." Left as is until then.
 - The server change reaches TestFlight 1.22.0 (187) on deploy: all chips light for any selection. On 187 an engine-unlabelled player who has been given a label cannot be returned to No label (Reset skips him); the next build fixes that.
 - A player rostered after the league's forecast snapshot shows back in No label after Save until the next weekly forecast.
 - The pipeline digest did not change; `season_value.py` is in the engine code hash, so stored pages go cold once on deploy. The win-now engine (revision 5) is still not serving.
