@@ -284,11 +284,86 @@ for (const [players, picks, want] of [
   assert(got === want, `9i2. roster-changed title: ${players} player(s), ${picks} pick(s) → "${want}"`, got);
 }
 assert(
-  CARD.includes(": newOnRosterTitle(newIds, roster.picks.map((p) => p.pick_id));")
+  CARD.includes(": newOnRosterTitle(newIds, pickIds);")
+    && CARD.includes('const pickIds = roster.picks.map((p) => p.pick_id);')
     && !/new on your roster/.test(CARD)
     && CARD.includes('accessibilityLabel={title}') && CARD.includes('{title}</ChalkText>')
     && CARD.includes('`${title}. Set them so your trades use them.`'),
   '9i3. the card title, collapsed row, its label and the body all use newOnRosterTitle over the card\'s own picks',
+);
+// ── 9t. ONE tracked set (2026-11-12 fix): the snapshot records it, the card
+// diffs it. The real useSetupSections hook is EXECUTED over stub reads, and
+// its sectionOf feeds the util exactly as the card and the screen do.
+{
+  const hookSrc = read('src/hooks/useSetupSections.ts');
+  const hookJs = ts.transpileModule(hookSrc, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+  }).outputText;
+  // Boards: QB q1, RB r1. Values: w1 WR (off-board), t1 TE, k1 K, k2 K,
+  // d1 DEF, lb1 LB. x1 is in neither (unvalued).
+  const BOARDS = { QB: [{ id: 'q1' }], RB: [{ id: 'r1' }], WR: [], TE: [] };
+  const VALUES = [['w1', 'WR'], ['t1', 'TE'], ['k1', 'K'], ['k2', 'K'], ['d1', 'DEF'], ['lb1', 'LB'], ['q1', 'QB']]
+    .map(([id, position]) => ({ id, position }));
+  const hm = { exports: {} };
+  new Function('module', 'exports', 'require', hookJs)(hm, hm.exports, (name) => ({
+    react: { useMemo: (f) => f(), useCallback: (f) => f },
+    '@tanstack/react-query': {
+      useQuery: () => ({ data: { players: VALUES }, isSuccess: true, isError: false }),
+      useQueries: ({ queries }) => queries.map((q) => ({ data: { rankings: BOARDS[q.queryKey[2]] }, isSuccess: true, isError: false, dataUpdatedAt: 1 })),
+    },
+    '../api/rankings': { getRankings: () => null, splitRankings: (d) => ({ rows: d?.rankings ?? [], empty: null }) },
+    '../api/calc': { getTradeValues: () => null },
+    '../state/useSession': { useSession: (sel) => sel({ activeFormat: 'sf_ppr' }) },
+    '../utils/rosterSetup': u,
+  })[name] || (() => { throw new Error(`unexpected require ${name}`); })());
+  const sec = hm.exports.useSetupSections(true);
+  const sectionOf = sec.sectionOf;
+  assert(sec.settled && ['q1', 'r1', 'w1', 't1', 'k1', 'd1', 'lb1', 'x1'].map((id) => sectionOf(id) || '-').join(',') === 'QB,RB,WR,TE,-,-,-,-',
+    '9t1. the executed hook sections board players, then QB/RB/WR/TE values; K / DEF / IDP / unvalued get none');
+  const picks = ['pk1'];
+  const tracked = (players) => u.trackedAssetIds(players, sectionOf, picks);
+  const card = (players, seen) => u.newAssetIds(tracked(players), seen);
+  const roster0 = ['q1', 'r1', 'w1', 'k1', 'd1', 'lb1', 'x1'];
+  // A completed setup writes the screen's allAssetIds = tracked(roster).
+  const seen = tracked(roster0);
+  assert(seen.join(',') === 'q1,r1,w1,pk1', '9t2. the snapshot is the tracked set: sectioned players, then picks', seen.join(','));
+  assert(card(roster0, seen).length === 0,
+    '9t3. right after a completed setup, a roster with K / DEF / IDP / an unvalued player raises no card');
+  assert(card([...roster0, 'k2', 'lb1'], seen).length === 0, '9t4. a kicker or IDP arrival raises no card');
+  const one = card([...roster0, 't1'], seen);
+  const screenList = tracked([...roster0, 't1']).filter((id) => one.includes(id));
+  assert(one.join(',') === 't1' && u.newOnRosterTitle(one, picks) === '1 new player on your roster'
+    && screenList.join(',') === 't1',
+    '9t5. one real arrival → "1 new player on your roster", and the filtered screen lists exactly him', one.join(','));
+  // A pre-fix device record: the old screen wrote the sectioned set, the old
+  // card diffed EVERY rostered id, so the same record showed a false count.
+  const preFix = ['q1', 'r1', 'w1', 'pk1'];
+  const oldCard = u.newAssetIds([...roster0, ...picks], preFix);
+  assert(oldCard.length === 4 && card(roster0, preFix).length === 0
+    && card([...roster0, 't1'], preFix).join(',') === 't1',
+    '9t6. a pre-fix record: the old false count (4) is gone with no write, and a real new player still raises it');
+}
+// Every write path records the set the card diffs.
+assert(
+  /const tracked = ready \? trackedAssetIds\(roster\.playerIds, sections\.sectionOf, pickIds\) : \[\];/.test(CARD)
+    && /const newIds = ready \? newAssetIds\(tracked, record!\.seenAssetIds\) : \[\];/.test(CARD)
+    && CARD.includes('...(record?.seenAssetIds ?? []), ...tracked]')
+    && !CARD.includes('roster.assetIds'),
+  '9t7. the card diffs the tracked set and its retire path absorbs the tracked set (never the raw roster)',
+);
+assert(
+  /trackedAssetIds\(roster\.playerIds, sectionOf, roster\.picks\.map\(\(p\) => p\.pick_id\)\)/.test(SCREEN)
+    && (SCREEN.match(/seenAssetIds: union\(prev\?\.seenAssetIds \?\? \[\], allAssetIds\)/g) || []).length === 1
+    && /\? prev\?\.seenAssetIds \?\? \[\]\s*: union\(prev\?\.seenAssetIds \?\? \[\], allAssetIds\),/.test(SCREEN)
+    && !SCREEN.includes('roster.assetIds')
+    && /const section = playerSection\(id, boardByPos, v\?\.position\);\s*if \(!section\) continue;/.test(SCREEN),
+  '9t8. finalizeDone and recordSkip write allAssetIds = the tracked set; the screen lists by the same playerSection',
+);
+assert(
+  /useSetupSections\(rosterSetupOn\)/.test(SCREEN) && /useSetupSections\(!isDemo && record\?\.status === 'done', 5 \* 60_000\)/.test(CARD)
+    && !/useQueries|getTradeValues|getRankings\(/.test(SCREEN)
+    && CARD.includes("&& (record.status !== 'done' || sections.settled);"),
+  '9t9. the screen and the card read sections through the one hook (the card waits for them on a done record); the screen keeps no reads of its own',
 );
 const base = {
   flagOn: true, leagueId: 'L1', isDemo: false, hydrated: true, hasRecord: false,

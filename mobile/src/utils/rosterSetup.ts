@@ -331,6 +331,31 @@ export function marketTierShown(current: Tier, market: Tier | null | undefined):
   return market && market !== current ? market : null;
 }
 
+/** The section roster setup lists a player under: the first QB/RB/WR/TE
+ *  board holding him, else his consensus-values position when that is
+ *  QB/RB/WR/TE; null for anyone else (K, DEF, IDP, unvalued). */
+export function playerSection(
+  id: string,
+  boardByPos: Partial<Record<Position, { has(id: string): boolean }>>,
+  valuesPosition: string | null | undefined,
+): Position | null {
+  for (const p of SETUP_POSITIONS) if (boardByPos[p]?.has(id)) return p;
+  return valuesPosition && (SETUP_POSITIONS as readonly string[]).includes(valuesPosition)
+    ? (valuesPosition as Position) : null;
+}
+
+/** THE assets roster setup tracks: rostered players with a section, then
+ *  every owned pick. The `seenAssetIds` snapshot records exactly these and
+ *  the roster-changed card diffs exactly these, so the card never counts an
+ *  asset the screen cannot list. */
+export function trackedAssetIds(
+  playerIds: readonly string[],
+  sectionOf: (id: string) => Position | null,
+  pickIds: readonly string[],
+): string[] {
+  return [...playerIds.filter((id) => sectionOf(id) != null), ...pickIds];
+}
+
 /** Assets on the roster now that the stored snapshot never saw (prd §3.3).
  *  Removals never prompt. */
 export function newAssetIds(
