@@ -1179,6 +1179,7 @@ Two readers are deliberately NOT on the waterfall and are not defects: the sync 
 |---|---|---|
 | 1 | `market_pick_slot_value(season, round, slot)` — DP's row for that exact slot | D-090 resolved a real slot (current season, published order) |
 | 2 | `market_pick_pool_value(season, round)` — the mid-tercile round curve | no slot: **every future-year pick** (DP publishes per-slot rows only for the current class), unsupported platform, unpublished or unresolvable order, or `picks.slot_labels` off |
+| 2b | step 2's price × `(1 + w·(ratio − 1))` — the ORIGINAL team's projected slot distribution over DP's per-slot curve | flag `picks.projected_slot_value`: a next-draft round-1 pick in a Sleeper league with a usable saved forecast (`server._league_pick_projection`). A slot D-090 resolved without a DP row prices as a point mass on that slot. See [Projected slot value](#projected-slot-value) |
 | 3 | the stored ladder `pool_value` | DP unreachable, or a season it neither publishes nor extrapolates to |
 
 The slot is **resolved once per league** (`server._league_slot_order` → `pick_slots.slot_for`) and passed in; it is never resolved inside the pricing function, which runs per pick. The SAME resolution drives the label, so a card cannot say "2026 1.03" while charging for a generic first.
@@ -1332,6 +1333,22 @@ Aggregate asset values shown to users are expressed as pick-equivalent labels
 ("≈N firsts", `_aggregate_pick_label`), never raw numerics — on every client,
 ungated. Per-asset value uses the 8-rung `Tier` enum (server-computed). Raw
 numeric values are a debugging/share-image-only representation (#277/#280).
+
+## Projected slot value
+
+Flag `picks.projected_slot_value` (default off; intended ON). Spec: [plans/pick-value-projected-slot/](plans/pick-value-projected-slot/design.md).
+
+**The price** is step 2b of the waterfall above: `G × (1 + w·(ratio − 1))`, G = step 2's price. `ratio` is zero-sum across the league (each slot's column sums to 1), so a league's total next-draft-first value is unchanged. Every surface reads it through `server._priced_pick_value` with the league's projection hoisted once (`_league_pick_projection`), so the card, calculator, Picks screen, eveners, power rankings, calibration capture and Win-Now cannot disagree.
+
+**The display contract (operator ruling 2026-11-11).** A pick the projection priced shows its **projected slot**: the expected slot under the same distribution that set its price (playoff probability spread evenly over the playoff slots), rounded to the nearest slot (halves up), clamped to 1..league size, formatted by `pick_slots.slot_suffix` — `"<round>.<slot, two digits>"`, the same as D-090's real-slot labels (`"1.02"`, `"1.10"`, `"1.14"`).
+
+| field | value | where |
+|---|---|---|
+| `name` / `label` (existing) | `"2027 1.02 · projected"`, `"2027 1.02 (from dondags) · projected"` — the plain-text marker `" · projected"` (U+00B7) so app builds that predate the fields still say it is a projection | every owned-pick name: deck-card `give_players[]`/`receive_players[]` `name`, `/api/trade/evaluate` `eveners[].name`, `GET /api/league/picks` `label`, power rankings `picks.items[].label`, team-overhaul assets `name`/`label`, Matches name arrays (`_pick_labels_by_id`) |
+| `proj_slot` (new) | `"1.02"` | every ASSET payload above except the Matches name arrays (bare strings) |
+| `proj_name` (new) | `"2027 1.02"` / `"2027 1.02 (from dondags)"` — the name with the slot in place of the round word and **no** marker | same as `proj_slot` |
+
+Rules: both new fields are present **only** on a pick the projection priced, and absent (never null) on every other pick, which keeps today's exact name. A real D-090 slot wins: such a pick reads `"2027 1.01"` with no fields. **Clients never compose, split or parse these strings**: the new app prints `proj_name` followed by its own PROJECTED tag (accent colour per the design system), and falls back to `name`. Nothing keys, dedupes or hashes a pick by its display name — asset ids (`{league}_{season}_{round}_{original_roster_id}`) are unchanged. Win-Now's asset `name` (`"2027 Round 1 · <team>"`) and the og share card's labels are outside this contract and unchanged.
 
 ## Draft-pick year decay is PER ROUND — firsts are flat (D-079, 2026-08-19)
 

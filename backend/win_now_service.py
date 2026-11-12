@@ -312,6 +312,16 @@ def load_bundle(actor, fetch):
             "baseline": baseline, "meta": metadata, "n_sims": n_sims, "league_meta": meta}
 
 
+def _pick_projection(league_id):
+    """The league's projected-slot-value projection, from the same cached
+    reader every other pick surface uses (`server._league_pick_projection`).
+    Flag off: None without importing the server, so pricing is unchanged."""
+    if not is_enabled("picks.projected_slot_value"):
+        return None
+    from . import server
+    return server._league_pick_projection(str(league_id))
+
+
 def build_context(actor, bundle, params, fetch):
     from . import trade_service as pricing
     from .trade_service import elo_to_value
@@ -339,6 +349,7 @@ def build_context(actor, bundle, params, fetch):
     if not isinstance(transfers, list):
         raise Unavailable("pick_ownership_unavailable")
     owners = {(int(p["season"]), int(p["round"]), str(p["roster_id"])): int(p["owner_id"]) for p in transfers}
+    projection = _pick_projection(league["league_id"])
     for p in picks:
         if int(p["season"]) <= int(league["season"]):
             continue
@@ -346,7 +357,7 @@ def build_context(actor, bundle, params, fetch):
         owner = owners.get((int(p["season"]), int(p["round"]), original), int(original))
         if owner != by_user.get(str(p.get("owner_user_id"))):
             continue
-        value = priced_pool_value(p, scoring_format=actor["scoring_format"])
+        value = priced_pool_value(p, scoring_format=actor["scoring_format"], projection=projection)
         assets[p["pick_id"]] = {"id": p["pick_id"], "name": f"{p['season']} Round {p['round']} · {p.get('original_username') or original}",
                                 "position": "PICK", "owner_roster_id": owner, "is_pick": True,
                                 "market_value": value, "tradeable": value > 0 and league.get("pick_trading", True),

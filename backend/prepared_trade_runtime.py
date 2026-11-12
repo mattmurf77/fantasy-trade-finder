@@ -327,6 +327,7 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None,
             for r in records["deck_suppressions"]},
         "pick_read_source": server._pick_read_source(),
         "slot_order": server._league_slot_order(lid),
+        **({"pick_projection": projection_key} if (projection_key := server._pick_projection_key(lid)) else {}),
         "preferences": server._trade_job_preferences(uid, lid, session, session["league"]),
         "config": dict(server._trade_service_mod._cfg), "flags": server.flags_dict()}
     # Hash each private component, not private values, in the lookup receipt.

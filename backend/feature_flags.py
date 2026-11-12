@@ -510,6 +510,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # owned-pick label is the pre-D-090 string, BYTE-IDENTICAL, at all five
     # sites that build one.
     "picks.slot_labels",
+    # picks.projected_slot_value (docs/plans/pick-value-projected-slot/):
+    # a NEXT-draft round-1 pick in a Sleeper league with a usable saved
+    # forecast prices by its ORIGINAL team's projected slot distribution,
+    # zero-sum across the league; an adjusted pick names its projected slot
+    # ("2027 1.02 · projected", plus proj_slot / proj_name). Read live in
+    # server._league_pick_projection. Off ⇒ every pick price, label and cache
+    # key is byte-identical to today.
+    "picks.projected_slot_value",
     # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
     # market.trade_capture: capture executed Sleeper league trades (public
     # v1 /league/<id>/transactions/<week>, type=trade + complete) into the

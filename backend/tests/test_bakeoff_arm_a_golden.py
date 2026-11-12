@@ -737,6 +737,21 @@ policy_shadow_log_cap
     # nothing for a market floor to clamp.
     "market_r1_yoy_floor",
 
+    # ── projected slot value, 2026-11-11 ───────────────────────────────────
+    # docs/plans/pick-value-projected-slot/design.md. Five knobs, one
+    # disposition, the same as `market_r1_yoy_floor` above and for both of
+    # its reasons. WHERE THEY ARE READ: `server._league_pick_projection` →
+    # `_c`, hoisted once per league in `_owned_pick_assets`, on the
+    # `_run_trade_job` thread before any arm's `_cfg_override` is entered, so
+    # an arm pin is unreachable; and they price an ASSET (a next-draft 1st)
+    # rather than decide which package to build. The flag
+    # `picks.projected_slot_value` is off by default, and the golden's PICK
+    # assets are literal `_Pick` objects that never reach `priced_pool_value`.
+    # DECISION: EXCLUDED from MODEL_A_PROFILE; the golden stands.
+    "pick_projection_weight", "pick_projection_min_weeks",
+    "pick_projection_max_age_days", "pick_projection_max_round",
+    "pick_projection_season_scaling",
+
     # ── consensus roster-fit sort key, 2026-09-02 ──────────────────────────
     # docs/plans/consensus-fit-sort-key/scope.md. One knob, one disposition.
     #

@@ -195,6 +195,12 @@ export interface OwnedPick {
    *  is platform truth (every pre-W3 row reads as platform — no backfill
    *  ran). Server-authoritative: the client never infers it. */
   source?: PickSource | null;
+  /** Projected draft slot (docs/plans/pick-value-projected-slot/): present
+   *  together on a pick priced by its original team's projected slot —
+   *  `proj_slot` "1.02", `proj_name` "2027 1.02 (from dondags)" (`label`
+   *  then ends " · projected"). Read only through `utils/projectedPick`. */
+  proj_slot?: string;
+  proj_name?: string;
 }
 export interface LeaguePicksResponse {
   my_picks: OwnedPick[];
@@ -661,6 +667,10 @@ export interface PowerRankedTeam {
       pick_id?: string | null;
       season?: number | null;
       source?: PickSource | null;
+      /** Projected draft slot — same pair as `OwnedPick`; read only through
+       *  `utils/projectedPick`. Absent on old servers. */
+      proj_slot?: string;
+      proj_name?: string;
     }>;
   };
   positions_value?: number;

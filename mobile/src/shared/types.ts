@@ -37,6 +37,13 @@ export interface Player {
   // FB-147 — true when this player is on the Sleeper trade block in the
   // card's league (flag sleeper.trade_block). Backend omits when absent.
   on_block?: boolean;
+  // Projected draft slot (docs/plans/pick-value-projected-slot/): a PICK
+  // asset priced by the original team's projected slot carries both, e.g.
+  // proj_slot "1.02", proj_name "2027 1.02 (from dondags)" — `name` then
+  // ends " · projected". Absent on every other asset and on old servers.
+  // Validate with utils/projectedPick before use; never parse either string.
+  proj_slot?: string;
+  proj_name?: string;
 }
 
 export interface Trio {

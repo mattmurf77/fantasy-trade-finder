@@ -62,6 +62,7 @@
   "picks.rank_year_labels": true,
   "picks.league_horizon": true,
   "picks.slot_labels": true,
+  "picks.projected_slot_value": false,
   "market.trade_capture": true,
   "market.roster_history": true,
   "market.manager_profiles": true,

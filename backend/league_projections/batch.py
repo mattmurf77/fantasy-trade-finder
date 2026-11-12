@@ -28,6 +28,8 @@ def settings():
     ZoneInfo(schedule["timezone"])
     if not 0 <= schedule["weekday"] <= 6 or not 0 <= schedule["hour"] <= 23 or not 0 <= schedule["minute"] <= 59 or not 1 <= values["batch_limit"] <= 8 or not 1 <= values["retention_days"] <= 30:
         raise ValueError("invalid_projection_batch_configuration")
+    if not values["retention_days"] <= values.get("baseline_retention_days", values["retention_days"]) <= 400:
+        raise ValueError("invalid_projection_batch_configuration")
     # The app-wide score SD and the outlook cuts are configuration, never code
     # defaults: a file without them is refused here, before any run or view.
     config(values["model"])

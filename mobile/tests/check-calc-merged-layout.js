@@ -301,7 +301,10 @@ assert(/compactChipSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side)
     && /styles\.chipCol/.test(before[0])
     && /styles\.compactChipSlot/.test(before[1]),
     '17d. …the stacked one in its 44pt chipCol, the column one in the meta line\'s chip slot');
-  assert(/\{compact \? \(\s*<Text style=\{\[type\.title, styles\.compactName\]\} numberOfLines=\{1\}>\s*\{p\.name\}\s*<\/Text>\s*\) : \(/.test(side),
+  // The projected-slot pick (check-projected-pick-tag.js) prints the
+  // server's `proj_name` here and adds a VoiceOver label; line 1 is still the
+  // name alone — the PROJECTED tag gets its own line after the conditional.
+  assert(/\{compact \? \(\s*<Text\s+style=\{\[type\.title, styles\.compactName\]\}\s+numberOfLines=\{1\}(?:\s+accessibilityLabel=\{proj \? `\$\{proj\.name\}, \$\{projectedPickA11y\(proj\)\}` : undefined\})?\s*>\s*\{(?:p\.name|proj \? proj\.name : p\.name)\}\s*<\/Text>\s*\) : \(/.test(side),
     '17e. compact line 1 holds the name and nothing else',
     'the chip sharing line 1 is what left ~67pt for the name and ellipsized all but 1 of the top 100 dynasty assets');
 }

@@ -13,6 +13,7 @@ import {
 import { ink, chalk, flare, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Icon, Badge, Text as ChalklineText } from './chalkline';
 import PlayerCard from './PlayerCard';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
 import CardImpactBlock from './CardImpactBlock';
@@ -573,14 +574,19 @@ function TradeCardComp({
     if (variant === 'swipe' && onRemoveAsset) {
       actions.push({ name: 'remove', label: 'Remove from this trade' });
     }
+    // Projected draft slot: the row speaks the name it prints (PlayerCard
+    // prints `proj_name` for a valid pair) and says why the pick is priced
+    // as it is. Absent/malformed ⇒ `proj` null ⇒ today's label.
+    const proj = projectedPick(p);
     return {
       accessibilityLabel: [
-        p.name,
+        proj ? proj.name : p.name,
         String(p.position),
         p.team || 'FA',
         marked ? 'untouchable' : null,
         p.on_block ? 'on the block' : null,
         p.injury_status ? `injury ${p.injury_status}` : null,
+        proj ? projectedPickA11y(proj) : null,
       ]
         .filter(Boolean)
         .join(', '),

@@ -314,7 +314,9 @@ def compute_power_rankings(
                     if lineup_slots is not None else None)
         pick_items = [
             {"label": str(i.get("label") or ""),
-             "value": round(float(i.get("value") or 0.0), 1)}
+             "value": round(float(i.get("value") or 0.0), 1),
+             # projected slot value: present only on a forecast-priced pick
+             **{k: i[k] for k in ("proj_slot", "proj_name") if k in i}}
             for i in (picks_by_owner or {}).get(user_id) or []
         ]
         picks_value = round(sum(i["value"] for i in pick_items), 1)
