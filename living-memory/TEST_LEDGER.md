@@ -6,6 +6,12 @@
 - **Not verified (no device, D-056):** that the deck ScrollView reports its visible area on iOS (a 400 ms fallback places the panel inside the card if it does not); the scroll-in under the scrim; whether a swipe fires through the frame; VoiceOver containment. Checklist in the PR body.
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
 
+## 2026-11-11 — Rank table lists every touched position, branch `feat/fit-rank-table-all-positions`
+
+- **`test_fit_block_v3.py`: 74 pass** (main session re-run). `positions` is every ranked position the trade touches with its true rank before and after, noise-level changes included; `ranks`, the lead (`flat.*` for a noise-only team), `tag`, `v` and whether the block shows are unchanged; a noise-only card with no lead still has no block. Fit, narrative, digest, fast-deck and revised-offer subset: 514 passed (subagent). `check-fit-first-copy.js`: 14 of 14; the app needed no change.
+- **Sabotages, red then restored (7, Opus subagent):** held-plus-moves only; held omitted; untouched positions listed; reversed order; `shown` driven by `positions`; `ranks` taking the `positions` list; the lead counting noise-level changes as moves.
+- Operator decision ("Yes. We should just show it"). Server-only. FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Rules-first deck construction (D-235, ADR-030), branch `feat/deck-rules-first`
 
 - **Replay of all 247 recorded requests (main session, before the review fixes):** served set equal 247 of 247; page deck equal to the gated full solve 247 of 247; 0 fallbacks; 0 downstream guard removals; deck size min 69, median 196, max 510 on both paths; CPU per search median 0.35 s against 4.0 s. First card the same 167 of 247; first 30 share a median of 25. Re-run on the final merged code: result in the PR.
