@@ -268,6 +268,7 @@ import {
   consumeGuidedRegenSource,
   isRegenPosition,
 } from '../state/onboardingBus';
+import { consumeTeamReviewSave, prefsChangedStripVisible } from '../state/teamReviewSaveBus';
 import {
   useGuide,
   requestGuideStep,
@@ -1331,10 +1332,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // search is already in flight (that search will land under whatever
     // prefs are current by the time it started).
     if (
-      consolidateOn &&
       prefsChangedSinceGenerateRef.current &&
-      deck.length > 0 &&
-      job?.status !== 'running'
+      prefsChangedStripVisible(consolidateOn, deck.length, job?.status)
     ) {
       setShowPrefsChangedStrip(true);
     }
@@ -6264,6 +6263,20 @@ export default function TradesScreen({ navigation, route }: any) {
       params: { guidedEntry: 'n8', ...(position ? { position } : {}) },
     });
   }
+
+  // A preference save in Team Review (pushed over this screen) is a Trade DNA
+  // save made elsewhere: on return, mark the deck stale and show the same
+  // "Preferences changed" strip under the same rule as handleEditSheetClose.
+  // Never regenerates; nothing was posted when nothing was saved.
+  useFocusEffect(
+    useCallback(() => {
+      if (!consumeTeamReviewSave(leagueId)) return;
+      prefsChangedSinceGenerateRef.current = true;
+      if (prefsChangedStripVisible(consolidateOn, deck.length, job?.status)) {
+        setShowPrefsChangedStrip(true);
+      }
+    }, [leagueId, consolidateOn, deck.length, job?.status]),
+  );
 
   // Consume the QuickSet→Trades handoff on focus: snapshot the old deck,
   // force a fresh job (server cache key doesn't see board changes), and

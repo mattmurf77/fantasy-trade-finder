@@ -20,6 +20,8 @@ import {
 } from '../api/league';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
+import { OUTLOOK_DISPLAY_NAME } from '../components/OutlookBiasReceipt';
+import { clearTeamReviewSave, noteTeamReviewSave } from '../state/teamReviewSaveBus';
 import {
   getTeamReview, type BeatId, type OutlookOption, type TeamReviewResponse,
   type PlayoffBand,
@@ -65,33 +67,53 @@ import {
 // is empty. The analytics `beat` property and the step indices bind to the
 // server's list.
 
-const OUTLOOK_LABEL: Record<OutlookOption, string> = {
-  championship: 'All-in',
-  contender: 'Contender',
-  rebuilder: 'Rebuilder',
-  jets: 'Full teardown',
-  not_sure: 'Not sure',
-};
-
-/** The outlook to send as `team_outlook` when the user is saving something
- *  ELSE (positions) and has neither a saved outlook nor a pick this visit.
- *  Under `source: 'projection'`, `inferred` is the playoff forecast's
- *  SUGGESTION, which must never be saved without an explicit choice — so the
- *  backfill is the roster verdict instead. Any other source: `inferred`, as
- *  before. Explicit choices (Confirm on the window beat, a chip tap) do not
- *  come through here. */
-function backfillOutlook(w: TeamReviewResponse['window'] | undefined): OutlookOption {
-  if (!w) return 'not_sure';
-  if (w.source === 'projection') return w.roster_inferred ?? 'not_sure';
-  return w.inferred ?? 'not_sure';
-}
+// The app's ONE outlook vocabulary (All-in, Contending, Rebuilding, Tanking,
+// Not sure), shared with Home, the Trade DNA sheet and the deck. Team Review
+// used to carry its own table ("Contender / Rebuilder / Full teardown").
+const OUTLOOK_LABEL: Readonly<Record<string, string>> = OUTLOOK_DISPLAY_NAME;
 
 const BAND_LABEL: Record<PlayoffBand, string> = {
   likely: 'Likely', tossup: 'Toss-up', unlikely: 'Unlikely',
 };
-const BAND_COLOR: Record<PlayoffBand, string> = {
-  likely: semantic.pos, tossup: semantic.warn, unlikely: semantic.neg,
-};
+
+/** The window beat's line under the outlook choices: what the engine uses
+ *  RIGHT NOW. Nothing saved means the engine runs on its own read of the
+ *  roster until Confirm — a forecast suggestion included. */
+function windowSaveLine(savedName: string | null, suggested: boolean): string {
+  if (savedName) {
+    return `Your saved outlook is ${savedName}. Every trade we show you uses it. `
+      + 'Pick another and tap Confirm to change it.';
+  }
+  if (suggested) {
+    return 'Nothing is saved yet. This is only a suggestion: until you tap Confirm, '
+      + 'trades use our read of your roster instead.';
+  }
+  return 'Nothing is saved yet. Until you tap Confirm, trades use our read of your roster.';
+}
+
+/** One line per outlook that switches rules on, in the rule catalog's own
+ *  names (`window.outlook_rules`). An outlook without rules gets no line. */
+function outlookRuleLines(
+  options: string[], rules: Partial<Record<string, string[]>> | undefined,
+  labels: Readonly<Record<string, string>>,
+): string[] {
+  return options
+    .filter((o) => (rules?.[o] ?? []).length > 0)
+    .map((o) => `Choosing ${labels[o]} switches on: ${(rules?.[o] ?? []).join('; ')}.`);
+}
+
+/** The standing beat's playoff line, from the saved weekly forecast, worded
+ *  the way Home's playoff tile words it (one decimal; "last saved" when the
+ *  forecast is not current). */
+function playoffChanceLine(
+  chance: { playoff_probability: number; captured_at: string; current: boolean },
+  savedOn: string,
+): { percent: string; note: string } {
+  return {
+    percent: `${(chance.playoff_probability * 100).toFixed(1)}%`,
+    note: chance.current ? `From the forecast saved ${savedOn}.` : `Last saved ${savedOn}.`,
+  };
+}
 
 const CORE = ['QB', 'RB', 'WR', 'TE'] as const;
 
@@ -109,9 +131,6 @@ const PLAN_POS_LABEL: Record<string, string> = {
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 // #365 — model numbers are small and signed; the sign is the whole point
 // (a positive term pushes you toward contending, a negative one away).
-// #364 — the unpriced slots, named. `unpriced_slots` repeats a slot once per
-// lineup seat (2 DL, 2 LB, ...), so collapse to distinct names in roster order.
-const slotList = (slots: string[]) => Array.from(new Set(slots)).join(', ');
 const signed = (n: number) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}`;
 
 export default function TeamReviewScreen() {
@@ -197,28 +216,26 @@ export default function TeamReviewScreen() {
     if (!leagueId) return false;
     setSaving(true);
     try {
-      // #369 ROOT CAUSE. `POST /api/league/preferences` REQUIRES `team_outlook`
-      // and 400s on a body without one (`backend/server.py:15788-15790`);
-      // `apiRequest` throws on non-2xx (`mobile/src/api/client.ts:553`). The
-      // depth beat posted a positions-only body, so its write threw every
-      // time, `done.current.add('positions_set')` on the next line never ran,
-      // the catch swallowed it, and no analytics fired — which is why the plan
-      // beat could only ever show the window. Backfill the field here, in the
-      // one place every beat writes through: session choice, then the stored
-      // declaration, then the inference. An explicit value in `patch` still
-      // wins, because the spread comes second. The inference leg goes through
-      // `backfillOutlook`, so a forecast suggestion is never saved here.
-      const fallbackOutlook: OutlookOption =
-        outlook ?? data?.window.declared ?? backfillOutlook(data?.window);
-      await saveLeaguePreferences(
-        leagueId, { team_outlook: fallbackOutlook, ...patch } as any,
-      );
+      // The body is exactly what the user chose. A positions save carries no
+      // `team_outlook`: the route leaves the stored outlook as it is, so an
+      // unsaved outlook stays unsaved. (#369 backfilled one here because the
+      // route used to 400 without it; that backfill saved the roster read as
+      // a declared outlook the user never picked.)
+      await saveLeaguePreferences(leagueId, patch as any);
       // #424 — every write through here invalidates the shared
       // ['league-prefs', leagueId] key, not just the plan beat's. The window
       // and depth beats used to leave TradesHome's 5-minute-stale copy (and
       // now the merged calculator's outlook row, which reads the same key)
       // showing the pre-review value to a user who backed out early.
       qc.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      // The later beats (partners above all) read this payload, which was
+      // fetched before the save. Refetch it in the background: the cached
+      // data stays on screen until the new payload lands, so the current
+      // beat never drops to the loading spinner.
+      qc.invalidateQueries({ queryKey: ['team-review', leagueId] });
+      // Find a Trade shows "Preferences changed" on return, as after a Trade
+      // DNA save.
+      noteTeamReviewSave(leagueId);
       done.current.add(action);
       emit('team_review_action_taken', { beat, action });
       // The shared adoption receipt — deliberately the SAME event the guide and
@@ -233,7 +250,7 @@ export default function TeamReviewScreen() {
     } finally {
       setSaving(false);
     }
-  }, [leagueId, beat, emit, outlook, data, qc]);
+  }, [leagueId, beat, emit, qc]);
 
   if (!leagueId) {
     return (
@@ -309,6 +326,7 @@ export default function TeamReviewScreen() {
             scoped={scoped}
             onSave={savePrefs}
             saving={saving}
+            onOpenRosterSetup={() => nav.navigate('RosterSetup', { entry: 'manual_dna' })}
           />
         )}
       </ScrollView>
@@ -360,6 +378,9 @@ export default function TeamReviewScreen() {
               // — no new state layer, no new route, and nothing fires when the
               // user never scoped anyone.
               if (scoped) {
+                // The scoped search below builds a fresh deck under the saved
+                // preferences, so a "Preferences changed" nudge would be stale.
+                clearTeamReviewSave();
                 // R1 (time to suggestion; source `team_review`, granted Q-A):
                 // the scoped hand-off's auto-run is a search, so the tap
                 // begins it here — the deck's dispatch claims this id, as for
@@ -425,8 +446,11 @@ function Bubble({ pose, children }: { pose: any; children: React.ReactNode }) {
 
 function Standing({ data }: { data: TeamReviewResponse }) {
   const s = data.standing;
-  const o = s.outlook;
-  const cov = o?.priced_slot_coverage;
+  const chance = s.playoff_chance;
+  const line = chance
+    ? playoffChanceLine(chance, new Date(chance.captured_at).toLocaleDateString(
+      undefined, { month: 'short', day: 'numeric' }))
+    : null;
   return (
     <View testID="team-review.beat.standing">
       <Bubble pose="point">Here&apos;s where you actually sit.</Bubble>
@@ -451,26 +475,17 @@ function Standing({ data }: { data: TeamReviewResponse }) {
         </View>
       </View>
 
-      {o ? (
-        <View style={styles.card} testID="team-review.beat.standing.outlook">
-          <View style={styles.rowBetween}>
-            <ChalkText style={styles.kicker}>Playoff outlook</ChalkText>
-            <ChalkText style={styles.ribbon}>
-              PROJECTED
-            </ChalkText>
-          </View>
-          <ChalkText style={[styles.band, { color: BAND_COLOR[o.band] }]}>
-            {BAND_LABEL[o.band]}
+      {/* The SAVED weekly forecast — the same number Home, Standings and the
+          window beat read. No usable forecast: no playoff line at all. */}
+      {chance && line ? (
+        <View style={styles.card} testID="team-review.standing.playoff-chance">
+          <ChalkText style={styles.kicker}>Playoff chance</ChalkText>
+          <ChalkText style={styles.big}>{line.percent}</ChalkText>
+          <ChalkText style={styles.fine}>{line.note}</ChalkText>
+          <ChalkText style={styles.fine}>
+            Share of simulated seasons in which your team makes the playoffs, from
+            projected weekly lineups. Updated weekly.
           </ChalkText>
-          {cov && cov.affects_strength && cov.fraction < 1 ? (
-            <ChalkText style={styles.fine} testID="team-review.standing.coverage">
-              Offensive positions only. We rank QB, RB, WR and TE — we do not rank
-              IDP or kickers, so {cov.total_slots - cov.priced_slots} of your{' '}
-              {cov.total_slots} starting slots
-              {cov.unpriced_slots.length ? ` (${slotList(cov.unpriced_slots)})` : ''}
-              {' '}carry no value here. This outlook reads your offense.
-            </ChalkText>
-          ) : null}
         </View>
       ) : null}
 
@@ -833,7 +848,9 @@ function Window({
         </View>
       ) : null}
 
-      <ChalkText style={styles.dim}>Is that right? This steers every trade we show you.</ChalkText>
+      <ChalkText style={styles.dim} testID="team-review.window.save-state">
+        {windowSaveLine(w.declared ? OUTLOOK_LABEL[w.declared] : null, fromProjection)}
+      </ChalkText>
       <View style={styles.chips}>
         {w.options.map((o) => {
           const suggested = fromProjection && recommended === o;
@@ -859,6 +876,11 @@ function Window({
           );
         })}
       </View>
+      {outlookRuleLines(w.options, w.outlook_rules, OUTLOOK_LABEL).map((ruleLine) => (
+        <ChalkText key={ruleLine} style={styles.fine} testID="team-review.window.outlook-rules">
+          {ruleLine}
+        </ChalkText>
+      ))}
     </View>
   );
 }
@@ -1128,17 +1150,20 @@ function Partners({
 // current value it cannot read. That honesty is deliberate — a fabricated
 // "None" would read as a setting.
 function Plan({
-  data, leagueId, scoped, onSave, saving,
+  data, leagueId, scoped, onSave, saving, onOpenRosterSetup,
 }: {
   data: TeamReviewResponse;
   leagueId: string;
   scoped: { id: string; name: string } | null;
   onSave: (patch: Record<string, unknown>, action: string) => Promise<boolean>;
   saving: boolean;
+  onOpenRosterSetup: () => void;
 }) {
   // Read-only flag consumption, so a lever that is dark is never advertised.
   const listsOn = useFlag('trade.preference_lists');
   const intentOn = useFlag('trades.intent_modes');
+  // Roster setup is where Keep and Move are set; the Move list is its own.
+  const rosterSetupOn = useFlag('trades.roster_setup');
   const pinnedGive = useFinderTargets((s) => s.pinnedGive);
   const pinnedReceive = useFinderTargets((s) => s.pinnedReceive);
 
@@ -1174,14 +1199,14 @@ function Plan({
 
   const saved = prefsQ.data;
   const [draft, setDraft] = useState<{
-    outlook: OutlookOption; acquire: string[]; shed: string[];
+    outlook: OutlookOption | null; acquire: string[]; shed: string[];
   } | null>(null);
   useEffect(() => {
     if (!saved) return;
     setDraft({
-      // A positions tap posts this as `team_outlook`, so with nothing saved it
-      // is the backfill, never the forecast suggestion.
-      outlook: saved.team_outlook ?? data.window.declared ?? backfillOutlook(data.window),
+      // The SAVED outlook only. Nothing saved selects no chip, and a
+      // positions tap then posts no `team_outlook` at all.
+      outlook: saved.team_outlook ?? null,
       acquire: saved.acquire_positions ?? [],
       shed: saved.trade_away_positions ?? [],
     });
@@ -1189,16 +1214,16 @@ function Plan({
 
   const [failed, setFailed] = useState(false);
 
-  // Every tap posts the FULL triple — last-write-wins, the same autosave shape
-  // the Trade DNA sheet uses (#236). Sending all three is also what makes a
-  // positions edit safe: the body can never be missing `team_outlook`.
+  // Every tap posts the positions, last-write-wins (the #236 autosave shape),
+  // plus `team_outlook` only when one is saved or just picked. With nothing
+  // saved, a positions tap leaves the outlook unsaved.
   const commit = async (
-    next: { outlook: OutlookOption; acquire: string[]; shed: string[] },
+    next: { outlook: OutlookOption | null; acquire: string[]; shed: string[] },
     action: string,
   ) => {
     setDraft(next);
     const ok = await onSave({
-      team_outlook: next.outlook,
+      ...(next.outlook ? { team_outlook: next.outlook } : {}),
       acquire_positions: next.acquire,
       trade_away_positions: next.shed,
     }, action);
@@ -1214,7 +1239,7 @@ function Plan({
   return (
     <View testID="team-review.beat.plan">
       <Bubble pose="celebrate">
-        Here&apos;s every dial the finder has, and where you stand on each.
+        Here&apos;s what the finder takes from you, and where you stand on each.
       </Bubble>
 
       <View style={styles.card} testID="team-review.plan.levers">
@@ -1225,6 +1250,11 @@ function Plan({
         ) : (
           <>
             <ChalkText style={styles.planLbl}>Window</ChalkText>
+            {draft.outlook === null ? (
+              <ChalkText style={styles.dim} testID="team-review.plan.outlook-unsaved">
+                Not saved. Trades use our read of your roster until you pick one.
+              </ChalkText>
+            ) : null}
             <View style={styles.chips}>
               {data.window.options.map((o) => (
                 <Pressable
@@ -1307,9 +1337,15 @@ function Plan({
         <View style={styles.card} testID="team-review.plan.assets">
           <ChalkText style={styles.kicker}>Player rules</ChalkText>
           <Row
-            label="Never trade away"
+            label="Keep"
             value={countLabel(assets?.untouchables?.length, 'player')}
           />
+          {rosterSetupOn ? (
+            <Row
+              label="Move"
+              value={countLabel(assets ? (assets.trade_block ?? []).length : undefined, 'asset')}
+            />
+          ) : null}
           <Row
             label="Targeting"
             value={countLabel(assets?.targets?.length, 'player')}
@@ -1319,8 +1355,29 @@ function Plan({
             value={countLabel(assets?.not_interested?.length, 'player')}
           />
           <ChalkText style={styles.fine}>
-            Set these on a player in the deck — tap a name on any trade card.
+            Not interested makes a player less likely to be offered to you. It
+            does not block him.
           </ChalkText>
+          {rosterSetupOn ? (
+            <>
+              <Pressable
+                testID="team-review.plan.roster-setup"
+                accessibilityRole="link"
+                accessibilityLabel="Set Keep and Move in Roster setup"
+                onPress={onOpenRosterSetup}
+                style={styles.linkRow}
+              >
+                <ChalkText style={styles.link}>Set Keep and Move in Roster setup</ChalkText>
+              </Pressable>
+              <ChalkText style={styles.fine}>
+                Targeting and Not interested are set on a player in the deck.
+              </ChalkText>
+            </>
+          ) : (
+            <ChalkText style={styles.fine}>
+              Set these on a player in the deck — tap a name on any trade card.
+            </ChalkText>
+          )}
         </View>
       ) : null}
 
@@ -1407,12 +1464,6 @@ const styles = StyleSheet.create({
   read: { ...type.body, color: chalk.base },
   dim: { ...type.bodySm, color: chalk.dim },
   fine: { ...type.bodySm, color: chalk.faint },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  ribbon: {
-    ...type.label, color: semantic.warn, borderWidth: 1, borderColor: semantic.warn,
-    borderRadius: radii.xs, paddingHorizontal: 5, paddingVertical: 1,
-  },
-  band: { fontFamily: fonts.displayBold, fontSize: 22, textTransform: 'uppercase' },
 
   line: {
     flexDirection: 'row', alignItems: 'center', gap: space.sm,
@@ -1428,6 +1479,8 @@ const styles = StyleSheet.create({
   // all-caps line per card).
   planLbl: { ...type.label, color: chalk.dim, marginTop: space.xs },
   planErr: { ...type.bodySm, color: semantic.neg },
+  linkRow: { paddingVertical: space.sm },
+  link: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   chip: {

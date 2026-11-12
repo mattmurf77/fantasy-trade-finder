@@ -1398,7 +1398,7 @@ Per-(user, league) team-building outlook. Unique on `(user_id, league_id)`.
 |---|---|---|
 | `id` | int PK | |
 | `user_id`, `league_id` | str | |
-| `team_outlook` | str | `championship` / `contender` / `rebuilder` / `jets` / `not_sure` |
+| `team_outlook` | str | `championship` / `contender` / `rebuilder` / `jets` / `not_sure`, or `""` (`database.UNSAVED_OUTLOOK`, 2026-11-12): **no outlook declared**. The column is NOT NULL, so a row created by a positions-only save (`POST /api/league/preferences` without `team_outlook`) stores `""`; `load_league_preference` and `load_league_preferences_bulk` return it as `None`, the same as no row, so the engine keeps its inferred outlook. A positions-only save on an existing row never touches this column. |
 | `acquire_positions` | JSON text | e.g. `["WR","TE"]` |
 | `trade_away_positions` | JSON text | e.g. `["QB"]` |
 | `avoid_positions` | JSON text | **#360/#361** — positions the user will not accept on the RECEIVE side, e.g. `["QB","TE"]`, drawn from `{QB,RB,WR,TE,PICK}`. Added additively via `_migrate_db()` with **no SQL `DEFAULT` and no backfill**: `ALTER TABLE … ADD COLUMN` is issued bare, so every pre-existing row reads `NULL`, and `load_league_preference`'s `_parse_positions` maps `NULL`, `""`, malformed JSON and non-list JSON all to `[]` — the correct "avoiding nothing". Adding a SQL default would make SQLite and Postgres disagree about what a pre-existing row contains. Read is **not** flag-gated (`GET`/`POST /api/league/preferences` always serve and accept it); `trade.avoid_positions` gates only whether the ENGINE reads the column, so a kill-switch flip never destroys the data. |
