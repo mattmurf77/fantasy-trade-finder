@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -60,7 +60,11 @@ export default function FreeAgentsScreen() {
 
   const query = useQuery({
     // Position is part of the key: the backend caps each response at ~50
-    // rows AFTER filtering, so each position gets its own full page.
+    // rows AFTER filtering, so each position gets its own full page. The
+    // league is too: a switch from the header's league selector (RootNav
+    // LeagueTopBarHeader → TopBar → LeagueSwitcherSheet) changes `leagueId`
+    // once the new session is up, which is a new key, so the list refetches
+    // for the new league (spinner, never the old league's rows).
     queryKey: ['free-agents', leagueId, filter],
     queryFn: () => getFreeAgents(leagueId as string, filter),
     enabled: !!leagueId,
@@ -84,6 +88,15 @@ export default function FreeAgentsScreen() {
   const [claimTarget, setClaimTarget] = useState<FreeAgentRow | null>(null);
   // The capability as it was at the tap; the sheet holds it from there.
   const [claimMove, setClaimMove] = useState<FaMoveCapability | null>(null);
+  // The league the claim was opened in. The sheet mounts only while it is
+  // still the active league, and a league switch drops the claim, so a row
+  // from one league can never be claimed in another.
+  const [claimLeagueId, setClaimLeagueId] = useState<string | null>(null);
+  useEffect(() => {
+    setClaimTarget(null);
+    setClaimMove(null);
+    setClaimLeagueId(null);
+  }, [leagueId]);
   // D1 state 9: claims submitted this app session (empty unless the server
   // answered `submit`, so the rows are unchanged on today's server).
   const pendingClaims = useClaimsPending((s) => s.keys);
@@ -92,6 +105,7 @@ export default function FreeAgentsScreen() {
       if (!leagueId) return;
       if (faMoveOpensSheet(move, row) || addPlatform === 'sleeper') {
         setClaimMove(move);
+        setClaimLeagueId(leagueId);
         setClaimTarget(row);
       } else {
         explainNoAdd(addPlatform);
@@ -180,8 +194,10 @@ export default function FreeAgentsScreen() {
             <View>
               <Text style={styles.explainer}>
                 Best available players in your league, ranked by your values.
-                Drop lines show the weakest same-position player on your
-                roster worth less than the free agent.
+                Ranks like TE23 count every player at the position on your
+                board, rostered or not. Drop lines show the weakest
+                same-position player on your roster worth less than the free
+                agent.
               </Text>
               {usageTrendsOn ? (
                 <Pressable
@@ -224,7 +240,7 @@ export default function FreeAgentsScreen() {
       )}
       {/* #179 claim sheet — keyed by player so bid/drop state resets per
           claim. Mounted only where onAdd routes to it. */}
-      {claimTarget && leagueId ? (
+      {claimTarget && leagueId && claimLeagueId === leagueId ? (
         <ClaimSheet
           key={claimTarget.player_id}
           row={claimTarget}
@@ -248,7 +264,8 @@ export default function FreeAgentsScreen() {
 
 
 // One FA row: dense PlayerCard (60px two-line) — line 2 carries the drop
-// suggestion; right cluster = positional FA rank over the caller-board value.
+// suggestion; right cluster = the player's overall positional rank on the
+// caller's board (server `pos_rank`: rostered players counted, so TE23).
 // #179: rightSlot carries the Add affordance — secondary where Add opens the
 // claim sheet (the Sleeper hand-off, or D1's in-app move), ghost/dim for
 // platforms with no write path (tap explains why).

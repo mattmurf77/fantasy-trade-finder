@@ -17,6 +17,10 @@
 #                    player's value is strictly BELOW the FA's. No same-
 #                    position rostered player below the FA → no suggestion.
 #                    delta = fa_value - drop_value (always > 0 when present).
+#   pos_rank       = OVERALL rank at the position on that same board, every
+#                    non-pick pool player counted whether rostered or not
+#                    (operator, 2026-11-12: an FA tight end who is the 23rd
+#                    TE reads TE23, not TE1).
 #
 # Kept import-light and side-effect free (players in, dicts out) so the
 # ranking rules are directly unit-testable without Flask or a DB.
@@ -106,28 +110,34 @@ def compute_free_agents(pool_players: list,
 
     Returns dicts: {player_id, name, position, team, age, value, pos_rank,
     drop_suggestion: {player_id, name, position, value, delta} | None}.
-    pos_rank is the FA's 1-based rank within its position across the WHOLE
-    FA pool (not the filtered page), so "FA RB3" reads the same under every
-    filter.
+    pos_rank is the player's 1-based OVERALL rank at its position on the
+    caller's board: every non-pick pool player at that position, rostered or
+    not, ordered by the same board value the rows are priced from. A free-
+    agent TE who is the 23rd TE on the board is TE23, not TE1. It depends on
+    neither the position filter nor which rosters loaded.
     """
     user_roster = list(user_roster)
     rostered = set(rostered_ids) | set(user_roster)
     players_by_id = {p.id: p for p in pool_players}
 
-    ranked = sorted(
+    # The whole board at the four positions, picks excluded (#222), in the
+    # one board-value order (stable sort: ties keep pool order).
+    board = sorted(
         ((p, board_value(p.id, user_elo, seed_elo))
          for p in pool_players
-         if p.position in FA_POSITIONS and p.id not in rostered
-         and not is_pick_asset(p)),         # #222 — picks are never FAs
+         if p.position in FA_POSITIONS and not is_pick_asset(p)),
         key=lambda t: t[1], reverse=True,
     )
 
-    # Positional rank over the full FA pool, before any position filter.
+    # Overall positional rank over the WHOLE board — rostered players
+    # included — before any roster exclusion or position filter.
     pos_rank: dict[str, int] = {}
     seen_per_pos: dict[str, int] = {}
-    for p, _v in ranked:
+    for p, _v in board:
         seen_per_pos[p.position] = seen_per_pos.get(p.position, 0) + 1
         pos_rank[p.id] = seen_per_pos[p.position]
+
+    ranked = [t for t in board if t[0].id not in rostered]
 
     # The caller's lowest-valued rostered player per position — the only
     # ever-suggested drop candidate. Roster entries outside the universal

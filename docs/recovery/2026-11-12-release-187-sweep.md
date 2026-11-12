@@ -63,3 +63,5 @@ These four worktrees needed `--force` because their documents were never committ
 **Not in this sweep:** `.claude/worktrees/platform-forecasts` (the branch carrying this ledger; removed once it is on `main`, tip recorded in the PR); `competent-driscoll-5fbebf` and `unruffled-ramanujan-e4e8f6` (other sessions' worktrees holding nested untracked folders, including a local database; left for their owners); the main checkout.
 
 **Recover:** `git branch <name> <sha>`.
+
+**2026-11-12, after the sweep:** all 28 entries above were removed once this file was on `main` (#670, `0ae86582`). `.claude/worktrees/platform-forecasts` went with them: branch `feat/forecasts-espn-mfl`, tip `8879b9d7`, an ancestor of `origin/main`; `origin` branch deleted too.

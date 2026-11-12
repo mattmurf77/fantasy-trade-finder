@@ -42,7 +42,9 @@ import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 // truncating league name, ice chevron-down (ice = tappable) — and tapping
 // it opens the shared LeagueSwitcherSheet from ANY tab (this is the one
 // global sheet instance; the per-screen mounts were removed with the pills
-// they served). Sessions with no active league (account-only) fall back to
+// they served). RootNav's LeagueTopBarHeader mounts a second TopBar on the
+// Free Agents push so the selector stays as the header there too; each
+// TopBar owns its sheet and only the focused screen's can be tapped. Sessions with no active league (account-only) fall back to
 // the app wordmark. Bell + settings stay on the right; per the mock the
 // bell sits inboard of the gear so its unread badge is away from the
 // screen edge.
