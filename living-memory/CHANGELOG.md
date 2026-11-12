@@ -19,6 +19,13 @@
 - **Existing data:** a startup backfill rebuilds what can be trusted and never guesses. In production one MFL league's first linker has to re-link once.
 - **No app change.** Not verified against live ESPN or MFL.
 
+## 2026-11-12 — Founders' review: Trade rules page, the rule catalog and the decline waterfall (D-245)
+
+- **What:** a second page in Founders' review listing every yes/no rule with a plain name and description, how many candidate trades each removed for the selected league ("Started with N → M served"), and a note field per rule with history.
+- **How it counts:** an on-demand diagnostic run that evaluates every candidate; one run at a time, capped at 60 s, writes nothing a real request reads.
+- **For engineering:** `GET /api/admin/founder/rule-notes` (cron secret) returns the founder's notes.
+- **State:** behind the same founder gate as the label page; needs `FOUNDER_ACCOUNTS` on the server and the next app build. Not verified on a device or in production.
+
 ## 2026-11-12 — Founders' review: player label page (D-242)
 
 - **What:** a founder-only section in Calibration to review and correct the win-now engine's player labels, by position, with the tier board's tap-then-band interaction and a per-position summary of corrections.

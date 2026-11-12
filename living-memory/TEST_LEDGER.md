@@ -7,6 +7,14 @@
 - **Production count (main session, read-only, aggregates):** ESPN 1 linked league, intact; MFL 1 linked league, first linker overwritten.
 - **Existing tests changed in seeding only** (they stored the binding in the legacy column): draft order, roster history, draft board, two calibration capture files; `test_purge_entry_users.py` allow-list gained two non-user filter columns.
 - **Not verified:** a real Postgres instance; live ESPN or MFL; anything on a device (no app change).
+
+## 2026-11-12 — Founders' review Trade rules: catalog, waterfall, notes, routes and page (D-245), branch `feat/founder-rule-waterfall`
+
+- **Full backend suite (Opus subagent, before the last merge of main):** 15,161 passed, 42 skipped, 0 failed. **Main session after merging main:** the waterfall routes, catalog, waterfall, notes, label page, digest and paywall files: 179 passed. CI is the full re-run.
+- **App:** `tsc --noEmit` clean; 177 of 177 `check-*.js`; testid-lint OK (subagent). Main session re-ran `check-founder-rule-waterfall.js` (46) and `check-founder-review.js` (49).
+- **What is pinned:** the catalog lists every engine rejection reason (AST inventory, both directions) and its names and descriptions pass a plain-language lint; waterfall sums (started minus removed equals served) on fixture and synthetic leagues; the diagnostic's deck equals the served deck card for card; the run's served count equals a real job's published deck with a liked trade added; a run changes no database table, job store, page store, session or event; a real job without the probe is byte-identical; the founder gate on every route; one run at a time; the 60 s cap; a failed run never replaces the last result; notes history, cap, unknown key, rate limit; the admin read needs the cron secret and shows no account id.
+- **Sabotages, red then restored (46 across the two builders):** 20 on the catalog, waterfall and notes; 14 on the routes; 12 on the page. One variant stayed green and is explained: a probe that returns instead of raising still leaves the database and memory unchanged, because the raising sink stops the job; the stop-at-probe test catches it.
+- **Not verified:** anything on a device; production run time and memory (laptop: 3.4 s, +226 MB; a concurrent deck build went from 0.38 s to a median 0.63 s, worst 2.84 s).
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
 
 ## 2026-11-12 — Founders' review label page (D-242), branch `feat/founder-label-review`

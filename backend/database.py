@@ -1089,6 +1089,24 @@ revised_offer_cards_table = Table("revised_offer_cards", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# founder_rule_notes — a founder's comment or question on one yes/no rule
+# ---------------------------------------------------------------------------
+# Founders' review, use case 2 (docs/plans/founder-review/rule-waterfall-design.md
+# §5). Append-only history: every save adds a row and the newest row per
+# rule_key is the current note (an empty body clears it), so a question is
+# never lost to an edit. rule_key must name a backend/rule_catalog.py rule.
+# Deleted and exported with the author's account
+# (accounts._ADDITIONAL_PRIVATE_TABLES).
+founder_rule_notes_table = Table("founder_rule_notes", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("rule_key",   String,  nullable=False),   # rule_catalog.RULES[].key
+    Column("user_id",    String,  nullable=False),   # ACCOUNT id of the founder who wrote it
+    Column("body",       Text,    nullable=False),   # free text, <= FOUNDER_NOTE_MAX_CHARS; "" clears
+    Column("created_at", String,  nullable=False),   # ISO-8601 UTC, when this version was saved
+    Index("ix_founder_rule_notes_rule", "rule_key", "id"),
+)
+
+# ---------------------------------------------------------------------------
 # trade_policy_shadow — candidates the TREATMENT policy rejected
 # ---------------------------------------------------------------------------
 # Without this table the treatment's discarded candidates vanish from the
@@ -19751,3 +19769,87 @@ def load_usage_weeks(season: int, weeks: list[int]) -> dict[int, tuple[dict, dic
                 "played": bool(m["played"]), "snaps": m["snaps"],
                 "carries": m["carries"], "targets": m["targets"]}
     return out
+
+
+# ---------------------------------------------------------------------------
+# founder_rule_notes — accessors (founder review, use case 2)
+# ---------------------------------------------------------------------------
+FOUNDER_NOTE_MAX_CHARS = 2000
+
+
+class FounderNoteError(ValueError):
+    """An unknown rule key or an over-long note; ``code`` is the route's error string."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _founder_author(user_id, viewer_id) -> str:
+    """Who wrote a note, as the client may see it: never an account id."""
+    return "you" if viewer_id is not None and str(user_id) == str(viewer_id) else "founder"
+
+
+def save_founder_rule_note(rule_key: str, body: str, author_id: str, *, now: str | None = None) -> dict:
+    """Add a new version of the note on ``rule_key`` (the newest version is current; ""
+    clears it). Rejects a key ``rule_catalog`` does not list (``unknown_rule``) and a body over
+    FOUNDER_NOTE_MAX_CHARS after trimming (``too_long``). Returns the rule's current note in
+    ``load_founder_rule_notes`` shape for the author."""
+    from . import rule_catalog
+    if not rule_catalog.is_known(rule_key):
+        raise FounderNoteError("unknown_rule")
+    if not isinstance(body, str):
+        raise FounderNoteError("invalid_body")
+    text = body.strip()
+    if len(text) > FOUNDER_NOTE_MAX_CHARS:
+        raise FounderNoteError("too_long")
+    if not author_id:
+        raise FounderNoteError("no_author")
+    with engine.begin() as conn:
+        conn.execute(insert(founder_rule_notes_table).values(
+            rule_key=rule_key, user_id=str(author_id), body=text, created_at=now or _now()))
+    return next(n for n in load_founder_rule_notes(viewer_id=author_id, include_empty=True)
+                if n["rule_key"] == rule_key)
+
+
+def load_founder_rule_notes(*, viewer_id: str | None = None, include_empty: bool = False) -> list[dict]:
+    """The current note per rule, in catalog order: {rule_key, rule_name, body, author,
+    updated_at, created_at, versions}. ``author`` is "you" when ``viewer_id`` wrote the current
+    version, else "founder" (an operator read passes no viewer); account ids never leave.
+    Rules with no note, or whose current version is empty, are omitted unless
+    ``include_empty``."""
+    from . import rule_catalog
+    t = founder_rule_notes_table
+    with engine.connect() as conn:
+        rows = [dict(r._mapping) for r in conn.execute(select(t).order_by(t.c.rule_key, t.c.id))]
+    by_key: dict[str, list[dict]] = {}
+    for row in rows:
+        by_key.setdefault(row["rule_key"], []).append(row)
+    out = []
+    for rule in rule_catalog.RULES:
+        history = by_key.get(rule.key)
+        if not history:
+            if include_empty:
+                out.append({"rule_key": rule.key, "rule_name": rule.name, "body": "", "author": None,
+                            "updated_at": None, "created_at": None, "versions": 0})
+            continue
+        current = history[-1]
+        if not current["body"] and not include_empty:
+            continue
+        out.append({"rule_key": rule.key, "rule_name": rule.name, "body": current["body"],
+                    "author": _founder_author(current["user_id"], viewer_id),
+                    "updated_at": current["created_at"], "created_at": history[0]["created_at"],
+                    "versions": len(history)})
+    return out
+
+
+def load_founder_rule_note_history(rule_key: str, *, viewer_id: str | None = None) -> list[dict]:
+    """Every version of one rule's note, oldest first: {body, author, created_at}."""
+    from . import rule_catalog
+    if not rule_catalog.is_known(rule_key):
+        raise FounderNoteError("unknown_rule")
+    t = founder_rule_notes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(t.c.rule_key == rule_key).order_by(t.c.id)).fetchall()
+    return [{"body": r._mapping["body"], "author": _founder_author(r._mapping["user_id"], viewer_id),
+             "created_at": r._mapping["created_at"]} for r in rows]
