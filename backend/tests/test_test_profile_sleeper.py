@@ -501,6 +501,49 @@ def test_platform_write_cores_refuse_a_test_profile_session(world):
     assert (status, body["error"]) == (403, "test_profile_blocked")
 
 
+def test_mfl_free_agent_move_refuses_a_test_profile_before_any_mfl_call(world, monkeypatch):
+    """The MFL move (in-app-claims design.md §4) is a platform write: live,
+    with the profile holding an MFL credential and a binding in its namespaced
+    league, a fully formed move is refused at `_fa_move_core`'s chokepoint,
+    for the namespaced id and the native one alike, and nothing reaches MFL
+    or the move/consent tables. The capability never offers `submit` either."""
+    import backend.mfl_service as mfl_service
+    import backend.mfl_write as mfl_write
+    from backend import fa_move_copy as fcopy
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("SLEEPER_TOKEN_KEY", Fernet.generate_key().decode())
+    flags = {"dev.test_profile", "mfl.send_add_drop"}
+    monkeypatch.setattr(server, "is_enabled", lambda k: k in flags)
+    monkeypatch.setattr(mfl_write, "FA_MOVE_SHAPES_VERIFIED", True)
+    monkeypatch.setitem(fcopy.CURRENT_CONSENT_VERSION, "mfl", fcopy.MFL_ROSTER_MOVES_V1)
+    mfl_calls = []
+    for mod, name in ((mfl_write, "fa_move"), (mfl_service, "fetch_rosters"),
+                      (mfl_service, "resolve_host"), (mfl_service, "fetch_league_bundle")):
+        monkeypatch.setattr(mod, name, lambda *a, _n=name, **k: mfl_calls.append(_n))
+    native, fid = "61204", "0003"
+    store = tp.storage_league_id(PID, native)
+    with world["engine"].begin() as conn:
+        conn.execute(insert(db.leagues_table).values(
+            sleeper_league_id=store, user_id=PID, name="MFL", platform="mfl",
+            platform_season=2026, platform_host="www44.myfantasyleague.com",
+            platform_auth="cookie", platform_my_team=fid))
+        db._upsert_platform_binding(conn, PID, store, "mfl", fid)
+    db.upsert_mfl_credential(PID, "tp-coach", server._sleeper_write.encrypt_token("MFL_USER_ID=tp"),
+                             2026)
+    sess = {"user_id": PID, "verified": True}
+    for lid in (store, native):
+        body, status = server._fa_move_core(sess, {
+            "league_id": lid, "add_player_id": "1001", "drop_player_id": "1002",
+            "move_kind": "add", "attempt_id": "tp-attempt-0001",
+            "consent": {"copy_version": fcopy.MFL_ROSTER_MOVES_V1, "locale": "en-US"}})
+        assert (status, body["error"]) == (403, "test_profile_blocked"), lid
+        assert server._fa_move_capability(sess, lid, None)[0]["mode"] != "submit"
+    assert mfl_calls == []
+    with world["engine"].connect() as conn:
+        assert conn.execute(select(db.platform_write_moves_table)).fetchall() == []
+        assert conn.execute(select(db.platform_write_consents_table)).fetchall() == []
+
+
 def test_background_readers_skip_the_sleeper_linked_profile(world):
     w = world
     tok = _onboard(w)

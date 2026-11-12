@@ -42573,18 +42573,19 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
 # replay, the double-move block, consent, the `sent`/`result` rows, the
 # outcome classification, the roster save); what differs is the credential
 # (the MFL session cookie, bound to `mfl_username`), the league binding (the
-# linker's franchise on the leagues row), the live `rosters` export and the
-# crosswalk from FTF (Sleeper) ids to MFL ids.
+# CALLER's own franchise from platform_league_bindings, D-246), the live
+# `rosters` export and the crosswalk from FTF (Sleeper) ids to MFL ids.
 
 def _fa_move_mfl_binding(user_id: str, league_id: str):
     """(cred, row, my_fid): the caller's stored MFL credential, the league
-    row, and their franchise id when the row is bound to them (else None)."""
+    row, and the caller's OWN franchise id from their per-user binding
+    (`get_platform_binding`), else None. Never the leagues row's
+    `platform_my_team` / `user_id`: those hold the last linker (D-246)."""
     from .database import get_mfl_credential, get_platform_league
     cred = get_mfl_credential(user_id)
     row = get_platform_league(league_id, "mfl")
-    my_fid = None
-    if row and str(row.get("user_id") or "") == str(user_id):
-        my_fid = str(row.get("platform_my_team") or "").strip() or None
+    binding = get_platform_binding(user_id, league_id, "mfl") if row else None
+    my_fid = str((binding or {}).get("team_id") or "").strip() or None
     return cred, row, my_fid
 
 
@@ -42595,14 +42596,27 @@ def _fa_move_mfl_account(cred) -> str:
     return str((cred or {}).get("mfl_username") or "").strip().lower()
 
 
+def _fa_move_mfl_my_member(league_id: str, my_fid: str) -> tuple[str, list[str] | None]:
+    """(member_id, roster): the franchise's row in the shared league_members
+    snapshot and its stored roster (FTF ids), or roster None when no row is
+    stored. The row is labelled with the app user bound to the franchise (its
+    EARLIEST binder, so possibly a co-owner rather than the caller), else the
+    synthetic `mfl:{league}.f{fid}` id: the map the owned-pick sync and the
+    roster sweep use (`platform_bound_teams`). A snapshot written before the
+    label still carries the synthetic id, so that is tried second."""
+    synthetic = _mfl_member_id(league_id, my_fid)
+    label = platform_bound_teams(league_id, "mfl").get(str(my_fid))
+    rows = {str(r.get("user_id")): r for r in load_league_members(league_id)}
+    for member in ([label] if label else []) + [synthetic]:
+        if member in rows:
+            return member, [str(p) for p in (rows[member].get("player_ids") or [])
+                            if p not in (None, "")]
+    return label or synthetic, None
+
+
 def _fa_move_mfl_my_roster(league_id: str, my_fid: str) -> list[str] | None:
-    """The caller's stored roster (FTF ids) from the league_members snapshot,
-    keyed by the franchise's member id. None when no row is stored."""
-    member = _mfl_member_id(league_id, my_fid)
-    for r in load_league_members(league_id):
-        if str(r.get("user_id")) == member:
-            return [str(p) for p in (r.get("player_ids") or []) if p not in (None, "")]
-    return None
+    """The caller's stored roster (FTF ids): `_fa_move_mfl_my_member`'s."""
+    return _fa_move_mfl_my_member(league_id, my_fid)[1]
 
 
 def _fa_move_capability_mfl(sess, league_id: str) -> tuple[dict, dict]:
@@ -42751,13 +42765,13 @@ def _fa_move_core_mfl(sess, req: dict, now: datetime, t0: float) -> tuple[dict, 
     def _on_auth():
         _fa_move_drop_mfl_credential(user_id, sess, "credential_rejected")
 
-    my_players = _fa_move_mfl_my_roster(league_id, my_fid)
+    member_id, my_players = _fa_move_mfl_my_member(league_id, my_fid)
     return _fa_move_send(
         sess=sess, req=req, platform=platform, platform_user_id=account, now=now,
         grant=grant, write=_write, auth_error=_mfl_write.MflWriteAuthError,
         write_error=_mfl_write.MflWriteError, on_auth=_on_auth,
         add_name=add_name, drop_name=drop_name, league_name=league_name,
-        member_id=_mfl_member_id(league_id, my_fid), my_players=my_players)
+        member_id=member_id, my_players=my_players)
 
 
 def _fa_move_send(*, sess, req: dict, platform: str, platform_user_id: str, now: datetime,

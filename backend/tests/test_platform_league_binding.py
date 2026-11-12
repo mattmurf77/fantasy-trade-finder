@@ -640,14 +640,164 @@ def test_sleeper_member_snapshot_is_never_relabelled(bare_db):
     assert uids == sorted([A, B])
 
 
-def test_platform_free_agent_moves_do_not_exist():
-    """Free-agent moves are Sleeper-only (server._FA_MOVE_FLAGS); an ESPN /
-    MFL move would need the SENDER's binding exactly like a trade send. If
-    this fails, a platform move was added: route its team through
-    get_platform_binding and extend the send tests above."""
-    assert set(server._FA_MOVE_FLAGS) == {"sleeper"}
+# ===========================================================================
+# MFL free-agent moves (docs/plans/in-app-claims/design.md §4a): like a trade
+# send, the MOVER's own binding and credential, whoever linked last. The move
+# is live here only by patching both locks (`mfl.send_add_drop` and
+# mfl_write.FA_MOVE_SHAPES_VERIFIED); the adapter is a fake.
+# ===========================================================================
+
+def test_platform_free_agent_moves_are_sleeper_and_mfl_only():
+    """ESPN has no move (no flag, no builder). If one is added, route its team
+    through get_platform_binding and extend the move tests below."""
+    assert set(server._FA_MOVE_FLAGS) == {"sleeper", "mfl"}
     with patch.object(server, "is_enabled", lambda k: True):
-        assert not server._fa_move_live("espn") and not server._fa_move_live("mfl")
+        assert not server._fa_move_live("espn")
+
+
+@pytest.fixture()
+def mv(env):
+    """`env` with the MFL move live, a fake adapter and a counted rosters read.
+    patch.object, not monkeypatch: `env` patches is_enabled / fetch_rosters
+    itself and depends on monkeypatch, so a monkeypatch undo would run after
+    env's restore and leak env's stubs into later test files."""
+    from contextlib import ExitStack
+    from backend import fa_move_copy as fcopy
+    mv1 = fcopy.MFL_ROSTER_MOVES_V1
+    fake = MagicMock(return_value={"status": "complete", "result": "accepted",
+                                   "transaction_id": None, "added": [], "dropped": [],
+                                   "raw": ""})
+    bundle = _load(MFL_FIXTURE)
+    reads, events = [], []
+    with ExitStack() as stack:
+        for target, name, value in (
+                (server, "is_enabled", lambda k: k in FLAGS | {"mfl.send_add_drop"}),
+                (mfl_write, "FA_MOVE_SHAPES_VERIFIED", True),
+                (fcopy, "DRAFT_CONSENT_VERSIONS",
+                 frozenset({fcopy.ESPN_ROSTER_MOVES_V1, fcopy.ESPN_ROSTER_MOVES_V2})),
+                (mfl_write, "fa_move", fake),
+                (mfl, "fetch_rosters", lambda *a, **kw: reads.append(kw.get("cookie"))
+                 or copy.deepcopy(bundle["rosters"])),
+                (server, "record_event",
+                 lambda uid, name, **kw: events.append((uid, name, kw))),
+                (server._roster_refresh, "stamp", lambda lid: None)):
+            stack.enter_context(patch.object(target, name, value))
+        stack.enter_context(patch.dict(fcopy.CURRENT_CONSENT_VERSION, {"mfl": mv1}))
+        inverse = server._sleeper_to_mfl_map()
+        held = {str(i) for ids in mfl.parse_roster_ids(bundle["rosters"]).values()
+                for i in ids}
+        free = next(s for s in sorted(inverse) if str(inverse[s]) not in held)
+        env.mv = SimpleNamespace(fake=fake, reads=reads, events=events, inverse=inverse,
+                                 free=free, consent={"copy_version": mv1, "locale": "en-US"})
+        yield env
+
+
+def _mfl_credential(uid):
+    db_module.upsert_mfl_credential(
+        uid, f"mfl-{uid}", server._sleeper_write.encrypt_token(f"MFL_USER_ID={uid}"), 2026)
+
+
+def _move(env, uid, drop):
+    import uuid
+    return env.c.post("/api/league/free-agents/move", headers=_h(env.tok[uid]),
+                      data=json.dumps({"league_id": MFL_LEAGUE, "add_player_id": env.mv.free,
+                                       "drop_player_id": drop, "move_kind": "add",
+                                       "attempt_id": str(uuid.uuid4()),
+                                       "consent": env.mv.consent}))
+
+
+def _members(env):
+    with env.engine.connect() as conn:
+        return {r.user_id: json.loads(r.roster_data) for r in conn.execute(
+            select(db_module.league_members_table).where(
+                db_module.league_members_table.c.league_id == MFL_LEAGUE))}
+
+
+def _rows(env, table):
+    with env.engine.connect() as conn:
+        return [dict(r._mapping) for r in conn.execute(select(table))]
+
+
+def _capability(env, uid):
+    return server._fa_move_capability(server._sessions[env.tok[uid]], MFL_LEAGUE, None)[0]
+
+
+@pytest.mark.parametrize("order", [(A, B), (B, A)])
+def test_mfl_move_uses_movers_franchise_and_cookie(mv, order):
+    env = mv
+    teams = {A: "0001", B: "0002"}
+    for uid in order:
+        assert _mfl_link(env, uid, teams[uid]).status_code == 200
+        _mfl_credential(uid)
+    for uid in (A, B):
+        assert (_capability(env, uid)["mode"], _capability(env, uid)["connect"]) == (
+            "submit", "ok"), uid
+    for mover, other in ((A, B), (B, A)):
+        env.mv.fake.reset_mock()
+        before = _members(env)
+        drop = _mfl_roster(teams[mover])[0]
+        r = _move(env, mover, drop)
+        assert r.status_code == 200, (mover, r.get_data(as_text=True))
+        (cookie, _host, _year, req), _ = env.mv.fake.call_args
+        assert cookie == f"MFL_USER_ID={mover}", mover
+        assert req.drop_player_id == str(env.mv.inverse[drop])
+        assert req.add_player_id == str(env.mv.inverse[env.mv.free])
+        after = _members(env)
+        assert after[mover] == [p for p in before[mover] if p != drop] + [env.mv.free]
+        assert after[other] == before[other]
+        assert env.mv.reads[-1] == f"MFL_USER_ID={mover}"
+    grants = _rows(env, db_module.platform_write_consents_table)
+    assert sorted((g["user_id"], g["platform_user_id"]) for g in grants) == sorted(
+        [(A, f"mfl-{A}"), (B, f"mfl-{B}")])
+    moves = _rows(env, db_module.platform_write_moves_table)
+    assert {(x["user_id"], x["platform_user_id"]) for x in moves} == {
+        (A, f"mfl-{A}"), (B, f"mfl-{B}")}
+    assert sorted(uid for uid, name, _ in env.mv.events
+                  if name == "fa_move_write_succeeded") == sorted([A, B])
+
+
+def test_mfl_move_by_a_co_owner_moves_the_shared_franchise(mv):
+    """A and C both bound to 0001 (A first). C's move is C's cookie and C's
+    consent on 0001, saved on the one member row (labelled A); no row for C."""
+    env = mv
+    for uid, fid in ((A, "0001"), (B, "0002"), (C, "0001")):
+        assert _mfl_link(env, uid, fid).status_code == 200
+        _mfl_credential(uid)
+    assert C not in _members(env)
+    assert (_capability(env, C)["mode"], _capability(env, C)["connect"]) == ("submit", "ok")
+    before = _members(env)
+    drop = _mfl_roster("0001")[0]
+    r = _move(env, C, drop)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    (cookie, _h2, _y, req), _ = env.mv.fake.call_args
+    assert cookie == f"MFL_USER_ID={C}" and req.drop_player_id == str(env.mv.inverse[drop])
+    after = _members(env)
+    assert C not in after and after[B] == before[B]
+    assert after[A] == [p for p in before[A] if p != drop] + [env.mv.free]
+    (grant,) = _rows(env, db_module.platform_write_consents_table)
+    assert (grant["user_id"], grant["platform_user_id"]) == (C, f"mfl-{C}")
+
+
+def test_mfl_move_by_an_unbound_user_with_a_credential_fails_closed(mv):
+    """C holds an MFL credential and is the leagues row's LAST linker by the
+    legacy columns, but has no binding: not linked, before any MFL call."""
+    env = mv
+    _mfl_link(env, A, "0001")
+    _mfl_link(env, B, "0002")
+    _mfl_credential(C)
+    with env.engine.begin() as conn:
+        conn.execute(db_module.leagues_table.update().values(user_id=C,
+                                                             platform_my_team="0003"))
+    move = _capability(env, C)
+    assert (move["mode"], move["connect"]) == ("unsupported", "other_account")
+    before = _members(env)
+    r = _move(env, C, _mfl_roster("0003")[0])
+    assert r.status_code == 409 and r.get_json()["error"] == "mfl_not_linked"
+    env.mv.fake.assert_not_called()
+    assert env.mv.reads == []
+    assert _rows(env, db_module.platform_write_consents_table) == []
+    assert _rows(env, db_module.platform_write_moves_table) == []
+    assert _members(env) == before
 
 
 # ===========================================================================

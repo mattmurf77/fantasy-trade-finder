@@ -44,6 +44,7 @@ MY_FID, THEIR_FID = "0003", "0004"
 HOST = "www44.myfantasyleague.com"
 YEAR = 2026
 MFL_USER = "Coach_Matt"
+LAST_LINKER = "last_linker_of_0004"
 XWALK = {ADD: "15001", DROP: "15002", KEEP: "15003", THEIRS: "15004"}
 MV1 = copy.MFL_ROSTER_MOVES_V1
 PRE_UPDATE_1 = {"mode": "unsupported", "claims": False, "league_platform": "mfl",
@@ -120,19 +121,29 @@ def m(h, monkeypatch):
     monkeypatch.setitem(copy.CURRENT_CONSENT_VERSION, "mfl", MV1)
     monkeypatch.setattr(copy, "DRAFT_CONSENT_VERSIONS",
                         frozenset({copy.ESPN_ROSTER_MOVES_V1, copy.ESPN_ROSTER_MOVES_V2}))
+    # The caller's team is THEIR binding (D-246). The legacy leagues columns
+    # name a later linker of another franchise, as production rows can: a
+    # path that read them would move the wrong team.
     with h.engine.begin() as conn:
         conn.execute(db_module.leagues_table.insert().values(
-            sleeper_league_id=MFL_LEAGUE, user_id=USER, name="Dynasty MFL", platform="mfl",
-            platform_season=YEAR, platform_host=HOST, platform_auth="cookie",
-            platform_my_team=MY_FID))
+            sleeper_league_id=MFL_LEAGUE, user_id=LAST_LINKER, name="Dynasty MFL",
+            platform="mfl", platform_season=YEAR, platform_host=HOST,
+            platform_auth="cookie", platform_my_team=THEIR_FID))
+        db_module._upsert_platform_binding(conn, USER, MFL_LEAGUE, "mfl", MY_FID)
     db_module.upsert_mfl_credential(USER, MFL_USER, sleeper_write.encrypt_token("MFL_USER_ID=abc"),
                                     YEAR)
+    # The snapshot labels the bound franchise with its binder (D-246).
     db_module.upsert_league_members(MFL_LEAGUE, [
-        {"user_id": server._mfl_member_id(MFL_LEAGUE, MY_FID), "username": "me",
-         "player_ids": [DROP, KEEP]},
+        {"user_id": USER, "username": "me", "player_ids": [DROP, KEEP]},
         {"user_id": server._mfl_member_id(MFL_LEAGUE, THEIR_FID), "username": "them",
          "player_ids": [THEIRS]}])
     return h
+
+
+def _unbind(h, user=USER):
+    with h.engine.begin() as conn:
+        conn.execute(db_module.platform_league_bindings_table.delete().where(
+            db_module.platform_league_bindings_table.c.user_id == user))
 
 
 def post(h, **over):
@@ -141,10 +152,9 @@ def post(h, **over):
     return h.post(**over)
 
 
-def mfl_roster(h):
+def mfl_roster(h, member=USER):
     rows = db_module.load_league_members(MFL_LEAGUE)
-    me = server._mfl_member_id(MFL_LEAGUE, MY_FID)
-    return next(json.loads(r["roster_data"]) for r in rows if r["user_id"] == me)
+    return next(json.loads(r["roster_data"]) for r in rows if r["user_id"] == member)
 
 
 # ---------------------------------------------------------------------------
@@ -344,8 +354,7 @@ def test_live_but_not_connectable_is_never_submit(m):
     m.sess["verified"] = False
     assert server._fa_move_capability(m.sess, MFL_LEAGUE, None)[0]["mode"] == "unsupported"
     m.sess["verified"] = True
-    with m.engine.begin() as conn:
-        conn.execute(db_module.leagues_table.update().values(user_id="someone_else"))
+    _unbind(m)
     move = server._fa_move_capability(m.sess, MFL_LEAGUE, None)[0]
     assert (move["mode"], move["connect"]) == ("unsupported", "other_account")
     db_module.delete_mfl_credential(USER)
@@ -375,6 +384,33 @@ def test_add_drop_completes_crosswalked_and_saves_the_roster(m):
     assert result["result"] == "accepted" and result["status"] == "complete"
     assert mfl_roster(m) == [KEEP, ADD]
     assert [e[2]["props"]["league_platform"] for e in m.events_named("fa_move_write_succeeded")] == ["mfl"]
+
+
+CO_OWNER = "co_owner_bound_first"
+
+
+@pytest.mark.parametrize("label", ["synthetic", "caller", "co_owner"])
+def test_the_franchise_row_is_found_however_it_is_labelled(m, label):
+    """The shared snapshot labels a bound franchise with its EARLIEST binder
+    (database._labels_from_binding_rows), else the synthetic id. The drop list
+    and the roster save find the caller's franchise row in all three cases,
+    and never create a second row for it."""
+    member = {"synthetic": server._mfl_member_id(MFL_LEAGUE, MY_FID),
+              "caller": USER, "co_owner": CO_OWNER}[label]
+    with m.engine.begin() as conn:
+        t = db_module.league_members_table
+        conn.execute(t.update().where(t.c.user_id == USER).values(user_id=member))
+        if label == "co_owner":
+            conn.execute(db_module.platform_league_bindings_table.insert().values(
+                user_id=CO_OWNER, league_id=MFL_LEAGUE, platform="mfl", team_id=MY_FID,
+                source="link", created_at="2000-01-01T00:00:00+00:00",
+                updated_at="2000-01-01T00:00:00+00:00"))
+    assert server._fa_move_mfl_my_roster(MFL_LEAGUE, MY_FID) == [DROP, KEEP]
+    r = post(m)
+    assert r.status_code == 200, r.get_json()
+    assert mfl_roster(m, member) == [KEEP, ADD]
+    ids = sorted(x["user_id"] for x in db_module.load_league_members(MFL_LEAGUE))
+    assert ids == sorted([member, server._mfl_member_id(MFL_LEAGUE, THEIR_FID)])
 
 
 def test_grant_and_sent_row_exist_when_mfl_is_called(m):
@@ -494,12 +530,16 @@ def test_without_consent_in_the_body_it_asks_first(m):
     assert body["consent"]["copy_version"] == MV1 and m.mfl.calls == []
 
 
-def test_another_users_league_row_is_not_linked(m):
+def test_without_a_binding_the_league_is_not_linked(m):
+    """The leagues row naming the caller as its last linker is not a binding."""
+    _unbind(m)
     with m.engine.begin() as conn:
-        conn.execute(db_module.leagues_table.update().values(user_id="someone_else"))
+        conn.execute(db_module.leagues_table.update().values(user_id=USER,
+                                                             platform_my_team=MY_FID))
     r = post(m)
     assert r.status_code == 409 and _err(r)["error"] == "mfl_not_linked"
     assert m.mfl.calls == [] and m.consents() == []
+    assert getattr(m, "roster_reads", 0) == 0 and m.moves() == []
 
 
 def test_the_cookie_is_never_logged_or_returned(m, caplog):
