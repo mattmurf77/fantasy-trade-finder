@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-257 — Projected pick labels are an exact 1..N rank; values do not move
+
+**Date:** 2026-11-12 · **Who:** the operator: "Pick labels: yes. Make them exact", answering "Should projected pick labels become a 1-to-12 ranking, so each slot appears once?". The operator was told that pick values stay as they are. The tie-break is the builder's call. Scope: [`../docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md`](../docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md).
+**Context:** a projected pick's label showed the expected slot rounded half-up. Labels were not a permutation: two teams could both show 1.04, nobody showed 1.01, and every playoff lock showed 1.10 in a 12-team, 6-spot league.
+**Decision:** the label slot is the ORIGINAL team's rank when all the forecast's teams are ordered by expected slot ascending, from 1.01 to 1.N, with N the number of teams in the run. Equal expected slots are broken by expected win-equivalents from the forecast's `expected_record` (W + ½T), fewer first, so the stronger team picks later. Roster id breaks any remaining tie. The win tie-break is used only when every team has the record. `pick_projection.slot_ranks` computes the map once per run, and `projected_slot` is the only reader.
+**Consequences:**
+- Prices are byte-identical. The rank is display only, and nothing sorts or prices by it.
+- `DECK_PIPELINE_VERSION` stays 30. `pick_projection.py` and `pick_values.py` are hashed into every stored page's `engine_version`, so cards built with the old labels are not served after the deploy.
+- A near-lock (99.9 %) ranks just before a 100 % lock even with more expected wins, because expected slot comes first.
+- Gates, the PROJECTED tag, the "newest run from any user" rule, the max-PF draft order and the Standings "expected pick if this team misses" line are unchanged. Backend only; no app build needed.
+
 ## D-254 — Standings is one sortable table with a Record | Points pill; nothing on the page starts a simulation
 
 **Date:** 2026-11-12 · **Who:** the operator: "let's go with one row. W-L, Projected W-L, Playoff Odds %. A pill in the top right of the table to toggle to Points summary. That changes the columns to 'PF', 'Max PF', 'Proj Max PF'", after asking for a version "that doesn't need the current and projected tabs" with sortable columns, and "Expanded tiles are hard to identify" for the open team. The outlined card, the projected record's form, the event reuse and the removal of the old simulation path are the builder's and the main session's calls. Plan: [`../docs/plans/home-engagement/scope-standings-table.md`](../docs/plans/home-engagement/scope-standings-table.md); mockups `mockups/projection-expanded-row/`.

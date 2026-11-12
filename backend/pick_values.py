@@ -794,8 +794,10 @@ def _projection_terms(row: dict, projection, scoring_format: str,
 def projected_pick_slot(row: dict, projection, scoring_format: str = "1qb_ppr") -> int | None:
     """The projected slot to SHOW for an unslotted pick, or None when
     `priced_pool_value` did not apply the projection to this row (so the pick
-    keeps today's exact label). Derived from the same terms as the price, so
-    the label and the value cannot disagree about which picks moved."""
+    keeps today's exact label). Gated on the same terms as the price, so the
+    label and the value cannot disagree about which picks moved; the slot is
+    the original team's rank in the league's projected order (D-257,
+    `pick_projection.slot_ranks`), display only — no price reads it."""
     if projection is None:
         return None
     if market_pick_pool_value(row.get("season"), row.get("round"), scoring_format) is None:
@@ -804,7 +806,7 @@ def projected_pick_slot(row: dict, projection, scoring_format: str = "1qb_ppr") 
     if terms is None:
         return None
     from .pick_projection import projected_slot
-    return projected_slot(terms[1])
+    return projected_slot(projection, row.get("original_roster_id"))
 
 
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",

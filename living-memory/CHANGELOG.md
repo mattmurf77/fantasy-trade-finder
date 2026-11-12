@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Projected pick labels rank 1..N, each slot once (D-257)
+
+- **What changed:** a projected 2027 1st now shows its original team's rank in the league's projected order, so a 12-team league shows 1.01 to 1.12 with no repeats. Before, two teams could share 1.04 and all playoff locks showed 1.10. Ties go to the team with fewer expected wins, so the best team picks last.
+- **Unchanged:** pick values (byte-identical), gates, the PROJECTED tag, traded picks following the original team.
+- **Backend only**, branch `feat/projected-pick-rank`. Not merged. Scope: `docs/plans/pick-value-projected-slot/pick-slot-rank/`.
+
 ## 2026-11-12 — Standings is one sortable table (D-254)
 
 - **What changed:** no Current / Projected tabs. One row per team with a Record | Points pill: Record shows W-L, projected W-L and playoff odds; Points shows PF, Max PF and projected Max PF. Every heading sorts.
