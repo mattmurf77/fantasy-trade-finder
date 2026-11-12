@@ -698,6 +698,9 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            product record per privacy policy §5; submitted freeform text
 #            is removed because it can itself contain personal identifiers).
 #
+#   HAND OVER a linked ESPN/MFL/Fleaflicker leagues row the user created that a
+#            surviving league-mate is bound to (platform_league_bindings):
+#            leagues.user_id → the earliest such binder; deleted otherwise.
 #   ALSO DELETE newer private tables in _ADDITIONAL_PRIVATE_TABLES,
 #            durable sessions, account-linked billing (including raw payloads),
 #            own deck impressions/outcomes (outcomes also by their own
@@ -787,6 +790,10 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # offer-learnings WS8: the revised-offer card built for the user's own
     # declined offer.
     "revised_offer_cards",
+    # Per-user platform-league bindings: "I manage team T in linked league L"
+    # (docs/plans/platform-league-binding/). Deleted and exported like the
+    # credentials; other league-mates' bindings are untouched.
+    "platform_league_bindings",
     # Founders' review (rule waterfall): a founder's notes on the engine's rules,
     # written under their own account.
     "founder_rule_notes",
@@ -1377,6 +1384,24 @@ def _delete_user_data(sleeper_user_id: str,
         _del("notification_queue", db.notification_queue_table)
         _del("wrapped_events", db.wrapped_events_table)
         _del("sleeper_credentials", db.sleeper_credentials_table)
+        # A linked ESPN/MFL/Fleaflicker league row is SHARED by every app user
+        # bound to it (platform_league_bindings). One this user created that a
+        # surviving league-mate is still bound to is handed to the earliest
+        # such binder rather than deleted out from under them; the deleted
+        # user's own binding goes with _ADDITIONAL_PRIVATE_TABLES.
+        plb, lt = db.platform_league_bindings_table, db.leagues_table
+        handed = 0
+        for lid in conn.execute(select(lt.c.sleeper_league_id).where(
+                lt.c.user_id.in_(user_ids),
+                lt.c.platform.in_(("espn", "mfl", "fleaflicker")))).scalars().all():
+            heir = conn.execute(select(plb.c.user_id).where(
+                plb.c.league_id == lid, plb.c.user_id.notin_(user_ids))
+                .order_by(plb.c.created_at, plb.c.user_id).limit(1)).scalar()
+            if heir:
+                conn.execute(update(lt).where(lt.c.sleeper_league_id == lid)
+                             .values(user_id=heir))
+                handed += 1
+        counts["platform_leagues_handed_over"] = handed
         _del("league_members", db.league_members_table)
         _del("leagues", db.leagues_table)
         _del("bad_trade_flags", db.bad_trade_flags_table)

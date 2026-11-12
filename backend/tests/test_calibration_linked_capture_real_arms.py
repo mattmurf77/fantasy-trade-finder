@@ -17,6 +17,9 @@ def test_linked_capture_runs_both_models_from_same_raw_snapshot(large_exclusive,
     with engine.begin() as conn:
         conn.execute(db.leagues_table.insert().values(sleeper_league_id=LEAGUE,
             platform=platform,user_id=ME,espn_my_team_id=1,espn_auth='public',platform_my_team='0001',platform_auth='public',platform_host='www1'))
+        # ME's own binding (per-user since platform-league-binding): the
+        # link writers record it beside the row; the raw insert above doesn't.
+        db._upsert_platform_binding(conn, ME, LEAGUE, platform, '1' if platform=='espn' else '0001')
         # Own flat member row is deliberately absent: validated provider
         # account binding and fresh native seat are authoritative here.
     account = 'second-account' if fixed_groups=='second-account' else ME

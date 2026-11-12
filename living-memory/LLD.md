@@ -218,6 +218,7 @@ Changes to any of these MUST update [`../docs/cross-client-invariants.md`](../do
 4. **Goal-driven execution** — define verifiable success criteria; loop until met.
 
 ### Specific patterns
+- **A per-user fact never lives on a shared row** (2026-11-12, D-246, G-077). "My team" in a linked ESPN / MFL / Fleaflicker league is a `platform_league_bindings` row read through `database.get_platform_binding`; the shared `leagues` and `league_members` rows hold league facts only. No binding fails closed. Test any per-user fact about a league with two users in that league.
 - **Layer code is pure where possible.** `ranking_service.py` and `trade_service.py` operate on inputs + return outputs; persistence is wrapped at the route layer.
 - **No magic numbers in service code.** Tunables go in `config/features.json` or `model_config` table. Document new keys in [`../docs/config-reference.md`](../docs/config-reference.md).
 - **Use the debug ring buffer.** Backend code logs to the in-memory ring buffer (200 entries, accessible via `GET /api/debug/log?n=100`). No persistent log files.

@@ -134,6 +134,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
+- [Linked ESPN/MFL league missing for a user, or showing someone else's team (2026-11-11)](#linked-espnmfl-league-missing-for-a-user-or-showing-someone-elses-team-2026-11-11)
 - [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 - [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
 - [Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)](#playoff-forecasts-a-leagues-run-stops-or-needs-re-running-before-its-weekly-slot-2026-11-11)
@@ -1616,6 +1617,31 @@ impression, 2026-08-16) somehow lack link rows; telemetry-era trades are deliber
 to the live matcher. First corpus report:
 `docs/business/analytics/2026-08-16-organic-trade-corpus.md`; scope addendum:
 `docs/plans/matchmaking-engine/backfill-scope.md`.
+## Linked ESPN/MFL league missing for a user, or showing someone else's team (2026-11-11)
+
+**Cause (before 2026-11-11):** "my team" in a linked ESPN / MFL / Fleaflicker league
+was a league-level column, so a league-mate's link took the league away from the
+first linker (unlisted, re-synced onto the other team, sends from the other team,
+`wrong_account` on a cookie re-sync). Fixed by per-user bindings
+(`platform_league_bindings`, [design](plans/platform-league-binding/design.md)).
+
+**Count the damage:** the read-only aggregate query in
+[design.md §7](plans/platform-league-binding/design.md#7-counting-the-damage-read-only-postgres)
+(run through `backend/tools/prod_analytics.py`, which forces a read-only session).
+After deploy, the boot log prints `[backfill] platform_league_bindings: {considered,
+bound, has_binding, no_team, not_exactly_one_member, swid_conflict}`;
+`not_exactly_one_member` + `swid_conflict` are leagues where someone may need to re-link.
+
+**Repairing one user:** the user re-links the league from the league picker and picks
+their team (ESPN sign-in re-proves the team for a cookie league). That writes their own
+binding and nothing else. There is no data fix to run: a first linker whose binding was
+overwritten before the fix left no record of their choice, and the backfill does not
+guess. A cookie-league user who got "wrong ESPN account" on a re-sync after a
+league-mate linked also signs in to ESPN again (their `verified_at` was nulled).
+
+**Never** write `platform_league_bindings` by hand from `leagues.espn_my_team_id` /
+`platform_my_team`: those hold whichever league-mate linked last.
+
 ## ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)
 
 The identity-binding release (feedback #321) verifies WHOSE ESPN account a
