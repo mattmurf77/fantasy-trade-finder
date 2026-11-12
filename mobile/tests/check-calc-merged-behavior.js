@@ -59,7 +59,8 @@ assert((trades.match(/setDeckOrigin\(null\)/g) || []).length >= 3,
   'a sticky origin would keep the overlay after the deck stopped being the calculator\'s');
 
 // The ✕ must be RESTORED in overlay mode — the shipped form deletes it.
-assert(/disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*null\s*:\s*\(/.test(card),
+// (Optional WS3 conjunct: the cadence asking card also keeps it, build 186.)
+assert(/disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*(?:&&\s*!disposition\.reasons\.cadence\s*)?\?\s*null\s*:\s*\(/.test(card),
   '2. overlay mode keeps the single ✕ button',
   'the pass button is still suppressed whenever reasons are wired');
 

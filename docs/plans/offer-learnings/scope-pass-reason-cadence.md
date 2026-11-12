@@ -33,6 +33,7 @@ coordinator's branch, not on `main`)
   **Just pass**. A chip is the pass and the reason in one tap; the deck advances at once
   (no layer 2, no waiting). **Just pass** is one tap, records no reason, and is today's plain
   pass. The swipe gesture still passes the card with no reason. ✓ is unchanged.
+  *Correction 2026-11-11 (TestFlight build 186 "a card with no pass button" → operator): the asking card keeps its ✕, which opens the chips + Just pass as a frame over the card; every exit from the frame is a pass; an ask whose frame never opened carries to the next card. See `docs/config-reference.md`.*
 - Once the prompt has been answered or dismissed (any pass on the asked card), it stays quiet
   for the next **M passes** (`pass_reason_quiet_for`, starting value 5). A like resets the
   run of consecutive passes; it does not shorten the quiet period.

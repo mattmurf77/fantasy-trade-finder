@@ -5918,6 +5918,8 @@ export default function TradesScreen({ navigation, route }: any) {
     registerGuideScroller('Trades', {
       scrollTo: (y, animated) => mainScrollRef.current?.scrollTo({ y, animated }),
       getScrollY: () => guideScrollYRef.current,
+      measureViewport: (cb) =>
+        mainScrollRef.current?.getNativeScrollRef()?.measureInWindow((_x, y, _w, h) => cb(y, h)),
     });
     return () => unregisterGuideScroller('Trades');
   }, []);
@@ -7335,12 +7337,15 @@ export default function TradesScreen({ navigation, route }: any) {
       haptics.swipe();
       if (swipeUndoOn) {
         // "Passed — Undo": the toast's hold matches the pending-POST
-        // window, so the affordance and the commit expire together.
+        // window, so the affordance and the commit expire together. Undo
+        // only on a HELD pass: a reasoned pass (`passAttempt` supplied — a
+        // cadence chip, a decline tile) and every pass while decline reasons
+        // are on commit at once, so `undoPass` would find nothing to undo.
         setToast({
           msg: 'Passed',
           tone: 'success',
           holdMs: UNDO_HOLD_MS,
-          action: { label: 'Undo', onPress: undoPass },
+          action: heldPass ? { label: 'Undo', onPress: undoPass } : undefined,
         });
       }
     }

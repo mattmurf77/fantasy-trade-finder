@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { track } from '../api/events';
 import { fetchedPassReasonCadence } from '../api/flags';
 import { useFlag } from '../state/useFeatureFlags';
@@ -19,6 +19,12 @@ import {
 // State is per screen mount (in memory): a fresh deck screen starts a fresh run.
 // N and M are re-read from the last flag fetch on every call, so a knob change
 // lands on the next foreground refetch without an app release.
+//
+// "Shown" is the why-pass frame OPENING (TradeCard mounts PassReasonChips on
+// the asking card's ✕), not the card being fronted. `shownRef` remembers it
+// until the card's disposition is recorded, so `record` can tell a pass made
+// through the frame (spends the ask) from a like or a swipe on an armed card
+// whose frame never opened (the ask carries to the next card).
 
 export function usePassReasonCadence(): {
   on: boolean;
@@ -27,12 +33,15 @@ export function usePassReasonCadence(): {
 } {
   const on = useFlag('trade.pass_reason_cadence');
   const [state, setState] = useState(INITIAL_CADENCE);
+  const shownRef = useRef(false);
 
   const record = useCallback(
     (decision: 'like' | 'pass') => {
       if (!on) return;
+      const prompted = shownRef.current;
+      shownRef.current = false;
       const cfg = normalizeCadence(fetchedPassReasonCadence());
-      setState((s) => recordDisposition(on, s, decision, cfg));
+      setState((s) => recordDisposition(on, s, decision, cfg, prompted));
     },
     [on],
   );
@@ -48,12 +57,14 @@ export function usePassReasonCadence(): {
       cadence: {
         mode: ask ? 'ask' : 'quiet',
         consecutivePasses,
-        onShown: (tradeId: string) =>
+        onShown: (tradeId: string) => {
+          shownRef.current = true;
           track(
             'pass_reason_prompt_shown',
             { trade_id: tradeId, consecutive_passes: consecutivePasses },
             'Trades',
-          ),
+          );
+        },
         onDismissed: (tradeId: string) =>
           track('pass_reason_prompt_dismissed', { trade_id: tradeId }, 'Trades'),
       },
