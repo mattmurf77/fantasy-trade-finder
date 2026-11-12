@@ -8,6 +8,17 @@
 - **Not verified:** anything on a device; a real Postgres instance.
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
 
+## 2026-11-12 — Playoff-odds overconfidence check (research, no model change), branch `research/playoff-odds-calibration`
+
+- **Question (operator):** are playoff odds too extreme because the model treats every future week as independent?
+- **Data:** the earlier SD backtest's cache only (9 leagues, 110 teams, 990 team-weeks, weeks 1 to 9 of 2026); no network; the backtest's headline numbers reproduce exactly.
+- **Result (Opus subagent):** no evidence of week-to-week persistence in a team's projection error. Persistent share of relative error −2.6% (95% interval −5.0% to −0.1%); lag-1 correlation +0.06 (−0.02 to 0.13); a team's summed error over 5 weeks has 0.89 of the variance independence implies (0.76 to 1.01), over 9 weeks 0.79 (0.60 to 1.00). Wins overdispersion 1.13 at 5 weeks (0.93 to 1.34), not significant. A persistent team SD of 3 or more is rejected at 1%; v4's 5 is never matched. Favourites won 71.1% against 71.8% predicted over 495 games.
+- **Effect on odds:** adding a persistent draw at SD 3 moves playoff odds by 0.1 point on average (largest 0.7); at v4's 5, 0.3 on average (largest 1.7). A 5–4 team at 95% or better occurs in this data under every variant tested.
+- **Not measured:** error that grows with how far ahead a forecast is made (the cache holds each week's final projection only). A proxy puts it at about 1 to 6 points for near-certain teams. The remaining schedules were not cached, so the odds re-simulation drew random pairings; 45 matchup reads would make it exact.
+- **Caveat:** the stored projections may include post-game information, which biases this check toward "not overconfident".
+- **Decision:** none. SD 25 and the independent draw stand. Write-up: `docs/plans/league-projections/calibration-check/README.md`.
+- **Tests:** `test_projection_calibration_stats.py` 8 passed (synthetic: independence gives a ratio near 1; planted team effect and drift are recovered); digest test passed.
+
 ## 2026-11-12 — Standings single table (D-254), branch `feat/standings-single-table`
 
 - **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 184 of 184 `check-*.js`, with the new `check-standings-table.js` at 105 of 105; testid-lint OK. Backend: the digest test, every analytics-taxonomy test and the 19 tests that read `mobile/src`: 512 passed; `test_league_projection_median.py` 32 passed. Backend change is comments only in the taxonomy.
