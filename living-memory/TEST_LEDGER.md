@@ -1,3 +1,14 @@
+## 2026-11-12 — Release: sell bonus, test profile, in-app claims (dark) on `main` at `12ac0f1d`; TestFlight 1.22.0 (187)
+
+- **CI on the merged heads:** #667 `c618c77f` and #669 `0b49ca38` green on all four checks (`backend-tests`, `mobile-typecheck`, `web-structure`, `maestro-testid-lint`). #669 contained #667 and #668, so #668 landed inside it; `origin/main`'s tree is identical to `0b49ca38`'s.
+- **Full backend suite, main session, on `0b49ca38`, no edits in flight:** 15,396 passed, 42 skipped, 0 failed (21 min).
+- **App, main session, clean checkout of `0b49ca38` after `npm ci`:** `tsc --noEmit` clean; 180 of 180 `check-*.js`; testid-lint OK.
+- **A date-expired test, fixed:** `test_trade_interest_disposition.py::test_batched_5000_row_history_measurement` failed CI on #667 and #668 (1 failed of about 15,270 each) and would have failed every branch from 2026-11-12T12:00Z: likes seeded at 2026-08-14T12:00Z against a 90-day cutoff read from the unpinned server clock. The fixture now pins `server.datetime` too. Other tests seed fixed August dates; none failed, but the same pattern is worth a sweep.
+- **Production (read-only checks):** deploy of `12ac0f1d` live 14:36 UTC; the binding backfill reports 2 considered, 2 already bound; `GET /api/feature-flags` shows `dev.test_profile` true, `mfl.send_add_drop` and `sleeper.send_add_drop` false; no errors or tracebacks in the logs from 14:33 to 14:40 UTC. Env `FOUNDER_ACCOUNTS` and `TEST_PROFILE_ACCOUNTS` were set to the operator's account (confirmed against the verified session and Sleeper's username lookup) before this deploy.
+- **TestFlight:** EAS production build 1.22.0 (187) from a clean checkout of `12ac0f1d`, auto-submit scheduled.
+- **Not verified:** anything on a device; the founder and test-profile capabilities under the operator's own session; live ESPN, MFL or Sleeper.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — In-app add/drop: MFL adapter, dark, on per-user bindings (D-248), branch `feat/in-app-claims`
 
 - **Full backend suite (Opus subagent, no edits in flight, on the branch with main, the sell bonus branch's base and the test profile merged):** 15,340 passed, 42 skipped, **1 failed**: `test_trade_interest_disposition.py::test_batched_5000_row_history_measurement`. Not this branch: the test seeded likes at 2026-08-14T12:00Z and pinned only `database.datetime`, while `server._project_trade_dispositions` takes its 90-day cutoff from the real clock, so it began failing everywhere at 2026-11-12T12:00Z (it also failed CI on #667). Fixed by pinning the server clock in the fixture (main session); the file is 21 of 21 after.
