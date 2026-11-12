@@ -582,7 +582,7 @@ export default function LeagueSummaryScreen() {
   });
 
   // Under `league.projections` this page shows Home's playoff tile, not the
-  // full projected standings: those live on the Standings page (Projected).
+  // full projected standings: those live in the Standings page's table.
   // The tile needs the user's roster id the way Home finds it, on the shared
   // `['league-rosters', id]` key (check-session-seed S-2's staleTime).
   const tileUserId = useSession((s) => s.user?.user_id);
@@ -596,7 +596,7 @@ export default function LeagueSummaryScreen() {
   // 'LeagueRankings' (tab root) or 'LeagueSummary' (legacy root push).
   const onTileDetails = () => {
     track('home_tile_tapped', { tile: 'standings' }, route.name);
-    navigation.navigate('Standings', { segment: 'projected' });
+    navigation.navigate('Standings');
   };
   // Home's "Review outlook" destination: the Trade DNA sheet with the
   // suggestion marked; it saves nothing. The legacy root push sits above
@@ -1757,7 +1757,7 @@ export default function LeagueSummaryScreen() {
             one-line strip; OutlookStripAndSection owns the strip/section
             switch so this mount site stays one expression.
             Under `league.projections` the slot holds Home's playoff tile
-            (2026-11-12): its links open Standings on Projected, the one
+            (2026-11-12): its links open Standings, whose one table is the
             place the full projected standings render. */}
         {batchProjections ? (
           <HomePlayoffBanner key={`${tileUserId}:${leagueId}`}
@@ -3102,9 +3102,10 @@ function OutlookStripAndSection({
 // and playoff odds (band chip) as ONE thing. Rendered only when `outlook.odds`
 // is on; degrades quietly (renders nothing) while the endpoint is dark/404s so
 // the screen never shows a broken projection block.
-// Exported for StandingsScreen's Projected segment, so the calibration rules
-// above live in one place.
-export function SeasonOutlookSection({
+// League rankings is its only host (Standings' single table replaced the
+// Projected segment that also mounted it), so the calibration rules above
+// live in one place.
+function SeasonOutlookSection({
   query,
 }: {
   query: UseQueryResult<LeagueOutlookResponse>;
@@ -3264,8 +3265,7 @@ function OutlookRow({
 // the section simply doesn't render for these leagues, which reads as a bug;
 // one row explaining why is the whole fix. No retry affordance — there is
 // nothing the user can do, and offering one would imply there is.
-// Exported for StandingsScreen's Projected segment.
-export function OutlookUnsupportedRow() {
+function OutlookUnsupportedRow() {
   return (
     <View style={styles.oddsSection} testID="league-summary.odds.unsupported">
       <TickLabel color={semantic.warn}>Season outlook</TickLabel>
