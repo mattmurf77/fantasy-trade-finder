@@ -101,8 +101,11 @@ if (guard) {
   // assertions exist to catch. Either exact shape, nothing else.
   const XI = /disposition\.reasons\s*\?\s*null\s*:\s*\(/;                          // pre-#384
   const XO = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*\?\s*null\s*:\s*\(/;  // #384 overlay build
+  // WS3 build-186 fix: the cadence asking card keeps its ✕ (the chip row is
+  // often below the fold); only the inline TILE form removes it.
+  const XC = /disposition\.reasons\s*&&\s*!reasonsAsOverlay\s*&&\s*!disposition\.reasons\.cadence\s*\?\s*null\s*:\s*\(/;
   assert(
-    XI.test(inGuard) || XO.test(inGuard),
+    XI.test(inGuard) || XO.test(inGuard) || XC.test(inGuard),
     'TradeCard: the ✕ renders only when `disposition.reasons` is absent',
     'without this condition a flag-ON build shows the ✕ AND the tiles',
   );

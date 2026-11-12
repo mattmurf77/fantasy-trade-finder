@@ -112,8 +112,10 @@ export interface DispositionReasons extends DeclineReasonPanelProps {
    *  commit the deferred deck advance, or the card is stranded (review #1). */
   onOverlayDismissed?: (banked: boolean) => void;
   /** Flag `trade.pass_reason_cadence` (WS3). The host strips a 'quiet' card's
-   *  reasons entirely, so present here means the cadence is asking: the
-   *  one-tap PassReasonChips row replaces the ✕ and the tile panel. */
+   *  reasons entirely, so present here means the cadence is asking. The card
+   *  looks like any other (✓ and ✕, no tile panel); the ✕ opens the
+   *  PassReasonChips frame over the card, and every exit from that frame is a
+   *  pass (a chip = pass + reason; anything else = `onDismissed` + `onPass`). */
   cadence?: PassReasonCadenceCard;
 }
 
@@ -340,7 +342,13 @@ function TradeCardComp({
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
   // Props comment): the host owns the "arrived from the calculator" fact.
+  // Also the open state of the cadence card's why-pass frame (WS3): the host
+  // never sets `reasonsAsOverlay` on a cadence card, so the two never share it.
   const [reasonOverlayOpen, setReasonOverlayOpen] = useState(false);
+  // Centre of the ✓/✕ row in card coordinates — the why-pass frame anchors
+  // its panel here (PassReasonChips' placement invariant). A ref: measured
+  // only on a cadence card, read when the frame mounts, never re-renders.
+  const actionRowMidRef = useRef<number | null>(null);
   // Review #1 — a layer-1 tile BANKS the pass (`advance('pass', {
   // deferDeckAdvance: true })`) and the host only fronts the next card from
   // layer 2. So the sheet must stay up through layer 2, and a backdrop
@@ -355,7 +363,8 @@ function TradeCardComp({
   // node can ever claim the id. Skipped when the inline-tile form removes the
   // button — an id pointing at an unmounted node measures to null anyway.
   const passBtnRef = useRef<View | null>(null);
-  const passBtnMounted = !!disposition && !(disposition.reasons && !reasonsAsOverlay);
+  const passBtnMounted =
+    !!disposition && !(disposition.reasons && !reasonsAsOverlay && !disposition.reasons.cadence);
   useEffect(() => {
     if (!passBtnMounted) return;
     registerGuideTarget('trades.pass-btn', passBtnRef);
@@ -960,14 +969,26 @@ function TradeCardComp({
           double-firing. */}
       {disposition ? (
         <>
-          <View style={styles.dispositionRow}>
+          <View
+            style={styles.dispositionRow}
+            onLayout={
+              disposition.reasons?.cadence
+                ? (e) => {
+                    actionRowMidRef.current = e.nativeEvent.layout.y + e.nativeEvent.layout.height / 2;
+                  }
+                : undefined
+            }
+          >
             {/* Decline-reason capture (flag `feedback.decline_reasons`,
                 SPEC §1): with `reasons` wired, the three layer-1 tiles ARE
                 the pass, so the ✕ is removed and this row holds the ✓
                 alone — unchanged in every other respect. `reasons` absent
                 (flag off, and on every non-deck mount) ⇒ this renders
-                byte-identically to the shipped ✓/✕ row. */}
-            {disposition.reasons && !reasonsAsOverlay ? null : (
+                byte-identically to the shipped ✓/✕ row. The cadence
+                asking card (`reasons.cadence`) KEEPS the ✕ — it opens the
+                why-pass frame (TestFlight build 186: a ✕-less card read as
+                having no way to pass). */}
+            {disposition.reasons && !reasonsAsOverlay && !disposition.reasons.cadence ? null : (
               <Pressable
                 ref={passBtnRef}
                 collapsable={false}
@@ -975,15 +996,19 @@ function TradeCardComp({
                 onPress={
                   // Overlay mode: the ✕ opens the reason sheet, and the
                   // PANEL commits the pass (its layer-1 tap is the
-                  // disposition — same contract as the inline form). Without
-                  // reasons wired it is the plain pass it has always been.
+                  // disposition — same contract as the inline form). On the
+                  // cadence asking card it opens the why-pass frame, which
+                  // always ends in a pass. Without reasons wired it is the
+                  // plain pass it has always been.
                   disposition.reasons && reasonsAsOverlay
                     ? () => {
                         reasonBankedRef.current = false;
                         setReasonOverlayOpen(true);
                         disposition.reasons!.onOverlayOpened?.();
                       }
-                    : disposition.onPass
+                    : disposition.reasons?.cadence
+                      ? () => setReasonOverlayOpen(true)
+                      : disposition.onPass
                 }
                 disabled={disposition.disabled}
                 style={({ pressed }) => [
@@ -1018,17 +1043,9 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons?.cadence ? (
-            <PassReasonChips
-              onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
-              onSkip={() => {
-                disposition.reasons!.cadence!.onDismissed(data.trade_id);
-                disposition.onPass();
-              }}
-              onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
-              disabled={disposition.disabled}
-            />
-          ) : disposition.reasons && !reasonsAsOverlay ? (
+          {/* The cadence card mounts no panel here: its reasons live in the
+              why-pass frame, mounted last in the card so it covers it. */}
+          {disposition.reasons?.cadence ? null : disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
           ) : null}
           {disposition.reasons && reasonsAsOverlay ? (
@@ -1205,6 +1222,25 @@ function TradeCardComp({
           </View>
         )
       )}
+      {/* WS3 why-pass frame — opened only by the cadence card's ✕, laid over
+          the whole card (absolute fill, after every card block; only the
+          Matches-only `footer` follows, and it never renders on a deck
+          card). Every exit is a pass: a chip is the pass + its reason; Just
+          pass, the scrim, the accessibility escape and Android back are the
+          plain pass that closes the prompt. There is no way back to the
+          card. */}
+      {disposition?.reasons?.cadence && reasonOverlayOpen ? (
+        <PassReasonChips
+          anchorY={actionRowMidRef.current}
+          onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
+          onSkip={() => {
+            disposition.reasons!.cadence!.onDismissed(data.trade_id);
+            disposition.onPass();
+          }}
+          onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
+          disabled={disposition.disabled}
+        />
+      ) : null}
       {footer ?? null}
     </View>
   );

@@ -265,6 +265,7 @@ from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
+from . import partner_outlook as _partner_outlook   # trade.partner_outlook_projection
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
@@ -3687,7 +3688,18 @@ def _trade_job_preferences(user_id, league_id, sess, league):
     seeded = None
     if not outlook:
         seeded, _ = _infer_user_outlook(user_id, league_id, sess, league)
-    return {"prefs": prefs, "seeded_outlook": seeded}
+    out = {"prefs": prefs, "seeded_outlook": seeded}
+    if _partner_outlook.enabled(is_enabled):
+        # trade.partner_outlook_projection: the request's ONE forecast read.
+        # It rides the preload, so the worker uses exactly these reads and the
+        # request signature (job cache, stored pages, prepared inventory)
+        # changes whenever a league-mate's assumed outlook would. Flag off:
+        # the key is absent and the preload is byte-identical.
+        out["partner_projection"] = _partner_outlook.session_reads(
+            sess, user_id, league_id,
+            [m.user_id for m in getattr(league, "members", ()) or ()],
+            platform=getattr(league, "platform", "sleeper"))
+    return out
 
 
 def _trade_request_signature(prefs_preload):
@@ -4581,7 +4593,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 23
+DECK_PIPELINE_VERSION = 24
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4615,6 +4627,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_load_presentment_exclusions", "_presentment_need_gate_bypass",
     "_owner_cards_valid", "_owner_selected_assignment", "_owner_generation_context",
     "_owner_canonical", "_first_session_confidence_ok", "_audition_statuses",
+    "_apply_partner_outlooks",   # a league-mate's assumed outlook, an engine input
     # order and composition of the served deck (the F-layers, quality, ghosts)
     "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
     "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
@@ -4732,7 +4745,8 @@ DECK_PIPELINE_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
-    23: "6ac3c24db6f88f81",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
+    23: "68e072f20220238b",  # Partner outlook from the saved forecast (trade.partner_outlook_projection, default off): the job's one forecast read (request preload, else the worker's) gives a league-mate with no saved outlook an inferred_outlook from their playoff chance (45% cut, two bands) in the owner context, with outlook_source on every league-mate's preferences; the fit context tags those reads source projection; flag off: no read, no key, terms and order unchanged.
+    24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4751,6 +4765,7 @@ _ENGINE_CODE_MODULES = (
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "partner_outlook.py",         # a league-mate's assumed outlook (trade.partner_outlook_projection)
     "calibration_native_lineup.py",  # Optional exact range assignment consumed by both owner engines.
     "negmem.py", "trade_breaker.py", "deck_quality.py",
     # composition and order of the served deck
@@ -12622,6 +12637,9 @@ class _TradeExecutionContext:
     players: tuple
     league_user_id: str
     prepared_roster_snapshot: tuple | None = None
+    # trade.partner_outlook_projection: the session's roster→owner index, for a
+    # worker that reads the forecast itself (no request-thread preload).
+    sleeper_roster_index: dict | None = None
 
 
 def _capture_trade_execution(sess, user_id, league_id, scoring_format):
@@ -12651,6 +12669,7 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
         user_id, league_id, scoring_format, service, trade_service, league,
         tuple(sess.get("user_roster") or ()), tuple(sess.get("players") or ()),
         _league_user_id(sess),
+        sleeper_roster_index=copy.deepcopy(sess.get("sleeper_roster_index")),
     )
 
 
@@ -13081,6 +13100,19 @@ def _run_trade_job(
             if seeded:
                 outlook_value = seeded
 
+        # trade.partner_outlook_projection — the job's one forecast read: the
+        # request thread's (it is in the request signature), else read once here.
+        partner_projection = None
+        partner_on = _partner_outlook.enabled(is_enabled)
+        if partner_on:
+            if prefs_preload is not None and "partner_projection" in prefs_preload:
+                partner_projection = prefs_preload["partner_projection"]
+            else:
+                partner_projection = _partner_outlook.session_reads(
+                    {"sleeper_roster_index": ctx.sleeper_roster_index}, g_user_id, league_id,
+                    [m.user_id for m in g_league.members],
+                    platform=getattr(g_league, "platform", "sleeper"))
+
         # G6 presentment rules — R-5b bypass (server-derived, never
         # client-passable) + the R4 #336 windowless exclusion set, both
         # built once per job. Flag off ⇒ neither is consulted downstream.
@@ -13393,6 +13425,7 @@ def _run_trade_job(
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
                     captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
                     job_draft_context=_owner_job_draft_context,
+                    **({"partner_projection": partner_projection} if partner_on else {}),
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -21285,10 +21318,15 @@ def _fit_league_context(owner_context, service):
                     read = ts.infer_team_outlook(list(roster), players,
                                                  num_teams=len(rosters))[0]
                 reads[uid] = read
+        # trade.partner_outlook_projection: a read taken from the saved
+        # forecast is tagged as such (the tag's words are unchanged).
+        sources = {uid: "projection" for uid in reads if uid != viewer
+                   and (prefs.get(uid) or {}).get("outlook_source") == "projection"}
         return FitLeagueContext(viewer_id=viewer, teams=teams,
                                 medians=_position_medians(teams) if position_ranks else {},
                                 rosters=player_ids, reads=reads,
-                                position_ranks=position_ranks)
+                                position_ranks=position_ranks,
+                                **({"sources": sources} if sources else {}))
     except Exception:
         log.exception("fit block: league context unavailable (cards carry no block)")
         return None
@@ -22138,12 +22176,40 @@ def _owner_enabled(league_id):
             and any(arm in _bakeoff.OWNER_ARMS for arm in _bakeoff.arm_roster(exclusive=False)))
 
 
+_PARTNER_UNREAD = object()   # _owner_generation_context: no forecast read was passed
+
+
+def _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection):
+    """trade.partner_outlook_projection: each league-mate's assumed outlook and
+    its source (`partner_outlook.assumed`). A league-mate with no saved outlook
+    and a projection read gets it as `inferred_outlook`, the engine's input for
+    an undeclared team (the owner generators and the fit block's roster read
+    both take it from there). Every league-mate's preferences record
+    `outlook_source` (declared / projection / roster), which the request
+    evidence captures. The viewer is not touched (D-230)."""
+    if partner_projection is _PARTNER_UNREAD:
+        partner_projection = _partner_outlook.session_reads(
+            sess, user_id, league.league_id, [m.user_id for m in league.members],
+            platform=getattr(league, "platform", "sleeper"))
+    reads = (partner_projection or {}).get("reads") or {}
+    for uid, prefs in manager_preferences.items():
+        if uid == user_id:
+            continue
+        outlook, source = _partner_outlook.assumed(
+            uid, declared={uid: prefs.get("team_outlook")}, projection=reads,
+            roster=prefs.get("inferred_outlook"))
+        if source == "projection":
+            prefs["inferred_outlook"] = outlook
+        prefs["outlook_source"] = source
+
+
 def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
                               captured_config=None, job_draft_picks=None,
-                              job_draft_context=None, **selection):
+                              job_draft_context=None, partner_projection=_PARTNER_UNREAD,
+                              **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
@@ -22152,6 +22218,9 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
     each, the ones its roster stamp is checked against (#486 QA P3-1); other
     entrances read their own.
+    `partner_projection`: the job's one forecast read
+    (`partner_outlook.session_reads`); an entrance that passes none reads its
+    own once here. Only with trade.partner_outlook_projection on.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -22193,6 +22262,8 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         prefs["lineup_source"] = "observed" if roster_slots else "estimated"
         prefs["roster_capacity"] = sum(s not in ("IR", "TAXI") for s in roster_slots) if roster_slots else None
         manager_preferences[uid] = prefs
+    if _partner_outlook.enabled(is_enabled):
+        _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection)
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
@@ -30171,6 +30242,14 @@ def session_init():
                                   league_user_id, league_display_name,
                                   user_player_ids, opponent_rosters)]
                              if _s0_raw.get("fetch_started_at") else None),
+        # trade.partner_outlook_projection: which Sleeper roster each league
+        # member owns or co-owns, from this init's read, so a league-mate's
+        # forecast probability (keyed by roster_id) maps to the member without
+        # another Sleeper call. Always set: `update` must not keep an older
+        # init's (or another league's) rosters.
+        "sleeper_roster_index": ({"league_id": str(league_id),
+                                  "rosters": _partner_outlook.roster_index(_s0_raw.get("rosters"))}
+                                 if _s0_raw.get("rosters") else None),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -39311,6 +39390,25 @@ def league_team_review_route():
             except Exception:
                 member_windows[uid] = "not_sure"
 
+        # trade.partner_outlook_projection — the same assumed outlook the trade
+        # engine and the card's fit tag use (partner_outlook.assumed): a
+        # league-mate with no saved outlook takes their read from the saved
+        # forecast when it is usable. A saved outlook is never shown here
+        # (this beat has only ever used reads), so a declared league-mate
+        # keeps the roster read. One forecast read for the request.
+        member_outlook_sources = None
+        if _partner_outlook.enabled(is_enabled):
+            member_outlook_sources = {}
+            others = [uid for uid in member_windows if uid != str(me_league_id)]
+            projection = (_partner_outlook.session_reads(
+                sess, str(sess["user_id"]), str(league_id), others, platform=platform) or {}).get("reads") or {}
+            declared = ({uid: (row or {}).get("team_outlook") for uid, row in
+                         load_league_preferences_bulk(others, str(league_id)).items()}
+                        if projection else {})
+            for uid in others:
+                member_windows[uid], member_outlook_sources[uid] = _partner_outlook.public(
+                    uid, declared=declared, projection=projection, roster=member_windows[uid])
+
         my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
             my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
             firsts_ledgers.get(me_league_id),
@@ -39387,6 +39485,7 @@ def league_team_review_route():
             window_odds=window_odds,
             window_odds_reason=window_odds_reason,
             window_projection=window_projection,
+            member_outlook_sources=member_outlook_sources,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404

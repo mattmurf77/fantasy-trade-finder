@@ -58,7 +58,8 @@ FROZEN_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first); flag off: terms and order unchanged.
-    23: "6ac3c24db6f88f81",  # trade.fit_position_ranks (default off): no position-value walk and no league rank in the fit block; on: byte-identical to v22.
+    23: "68e072f20220238b",  # trade.partner_outlook_projection: projection-based partner outlooks in the owner context and fit tag sources; flag off: unchanged.
+    24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): no position-value walk and no league rank in the fit block; on: byte-identical to v22.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
