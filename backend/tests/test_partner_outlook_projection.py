@@ -370,7 +370,11 @@ def test_the_them_tag_follows_the_projection_read_and_installed_builds_keep_it(m
     from backend.tests import test_fit_block_v3 as fb
     from backend import trade_gen_bilateral_candidate as rev2
     monkeypatch.setattr(ts, "_cfg", dict(ts._DEFAULT_CFG))
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.DEFAULT_FLAGS, "trade.fit_first_copy": True})
+    # Rank content on: with it off (the shipped value) a team whose only lead
+    # is a rank fact is left out of the block, tag and all, and this test is
+    # about the tag's source.
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.DEFAULT_FLAGS, "trade.fit_first_copy": True,
+                                             "trade.fit_position_ranks": True})
     kwargs, context, seed_map = fb.owner_league()
     monkeypatch.setattr(server, "_get_universal_pool",
                         lambda fmt: (list(kwargs["players"].values()), dict(seed_map)))
