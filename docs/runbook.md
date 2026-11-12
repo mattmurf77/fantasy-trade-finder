@@ -1992,7 +1992,7 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 |---|---|---|
 | `player_team_changed` | Strict scoring only since D-231. In production (best-available scoring) a team-changed player is left unprojected instead. | None in production. If it appears, the scoring contract in `config/league_projections.json` has changed. |
 | `missing_weekly_projections` | The weekly projection feed has no usable projection for anyone in an upcoming week (empty or not yet published). Since model v6 a team with no projected rostered player in an otherwise populated week is filled from free agents instead. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
-| `season_state_mismatch`, `unsupported_divisions_median_bestball_or_manual_seeding` | The league is outside what the model supports (another season; divisions, median games, best ball or manual seeding). | None. |
+| `season_state_mismatch`, `unsupported_divisions_bestball_or_manual_seeding`, `unsupported_median_setting` | The league is outside what the model supports (another season; divisions, best ball or manual seeding; a `league_average_match` other than 0 or 1). League-median leagues are supported since 2026-11-11 ([scope](plans/league-projections/median-leagues-scope.md)). Runs saved before then carry the old string `unsupported_divisions_median_bestball_or_manual_seeding`; a median league that failed with it gets a forecast at its next weekly slot. | None. |
 | `league_membership_changed` | The account no longer owns a team in that league. | None. |
 
 **Incomplete estimates (model v6, 2026-11-11).** An open starting slot takes the best projected free agent, or scores zero, so it no longer marks a forecast `incomplete`. The one remaining cause is a starter who has already played without a recorded score; it clears once Sleeper records the score and the league is re-run. `coverage.fa_filled_slots` / `zero_filled_slots` count the fills. Before v6, four of six production forecasts were incomplete for a single RB slot whose only rostered RB had an empty feed row.
@@ -2000,6 +2000,8 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **What happened on 2026-11-11:** five rostered players changed NFL teams the day model v5 shipped. Sleeper's projection rows for weeks 11 to 14 still carried the old teams, and a guard from 2026-11-07 stopped every affected league's run. All six targets that had a forecast the day before produced none. Fixed by D-231.
 
 **Re-running a baseline before its weekly slot.** `POST /api/cron/league-projections` with header `X-Cron-Secret` and body `{"retry_incomplete": true}` makes due now every target whose last attempt stopped `incomplete_projections` under the current model (and is not leased), then runs the normal weekly dispatch; the response's `retried` counts them. Other outcomes still wait for their weekly slot (or a model-version change). It queues at most the batch limit (4) a call and one pending run per account; the next 15-minute ticks pick up the rest. Never edit `next_due_at` by hand.
+
+**After a rules change that newly supports a league format** (e.g. league-median leagues, 2026-11-11), leagues refused before the deploy keep their `unsupported_policy` attempt until their weekly slot. Right after the deploy, call the same route with `{"retry_unsupported": true}` (it can be combined with `retry_incomplete`): every unleased target whose last attempt was `unsupported_policy` under the current model is made due now; `retried_unsupported` counts them. A league still outside the model is refused once more and waits for its slot; scheduled ticks never retry it.
 
 **Guardrail tests:** `backend/tests/test_league_projection_best_available.py::test_team_changed_player_is_unpriced_and_stale_row_scores_nothing`, `::test_team_changed_player_alone_for_a_slot_leaves_it_unknown`, `::test_team_changed_player_on_new_team_bye_is_a_bye`, `::test_strict_contract_still_refuses_a_team_changed_player`.
 
@@ -2035,3 +2037,19 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **Re-check offline (operator):** `PYTHONHASHSEED=0 python -m backend.eval.served_deck_replay --dir data/prod-requests [--latest] [--limit N]` replays recorded owner requests both ways in one process and prints aggregates only: served-set equality, first card the same, cards shared in the first 30, page = gated, served sizes, CPU per search for both paths, guard removals (must be 0) and fallbacks. Exit 0 when every request has the same served set and page = gated. It cannot replay decline-window suppression, dispositions, likes-you or revised-offer injection, so production serves fewer cards than it shows.
 
 **Guardrail tests:** `backend/tests/test_rules_first_deck.py` (served-deck acceptance, predicate equivalence, page = gated) and `backend/tests/test_trade_fast_deck.py` (worker wiring, flag-off identity, fallback logging).
+
+## Founders' review
+
+**What it is:** the founder-only label review in Calibration ([design](plans/founder-review/design.md)). Three conditions, all server-side; any one missing ⇒ every `/api/founder/*` route 404s and the app shows no "Grading | Founders' review" control.
+
+**Enable for an account (one-time):**
+
+1. Find the account id — never put it in the repo. It is the session's `user_id` (the account's working key): your **Sleeper user id** when your account is bound to Sleeper (the usual case: `users.sleeper_user_id` for your `username`, or `accounts.sleeper_user_id`), else `accounts.account_user_id(<account_id>)` for an Apple-only account. Look it up read-only against production (`DATABASE_URL_PROD` in `secrets.local.env`; `backend/tools/prod_analytics.py` forces a read-only session), e.g. `select sleeper_user_id from users where username = '<your Sleeper username>'`. Then sign in on your device and make sure the session is **verified** (Sleeper link or Apple sign-in).
+2. In the Render dashboard (web service → Environment), set `FOUNDER_ACCOUNTS=<account id>` (comma-separate several). Save; Render restarts the service. The value is read on every request.
+3. Turn the flag on: `"founder.review": true` in `config/features.json` and deploy (or an `FTF_FLAGS` override plus `POST /api/feature-flags/reload`).
+4. Open the app, Calibration tab: the control appears (the app asks `GET /api/founder/capability` each launch; force-quit if it was open).
+
+**Symptoms:** no control → check all three (flag, env var spelled exactly, session verified; a username-only Sleeper sign-in is never a founder). Empty page "No saved season forecast…" → the league has no current saved forecast (run it from Standings › Projected); only Sleeper leagues have one.
+
+**Undo an override:** move the player back to the band showing "engine: …" and Save (clears the row), or Reset to engine + Save for a position. Overrides reach users only once bilateral revision 5 serves (`owner_bilateral_revision_5_enabled` = 1).
+

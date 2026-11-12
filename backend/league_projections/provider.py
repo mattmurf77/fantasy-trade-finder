@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from ..sleeper_roster import owns_roster
-from .core import SLOTS, IDP, Unavailable, decimal, digest, free_agent_fill, idp_bye_fill, optimize, score, split_points, semantic_facts
+from .core import SLOTS, IDP, Unavailable, decimal, digest, free_agent_fill, idp_bye_fill, league_format, median_outcomes, optimize, score, split_points, semantic_facts
 
 API = "https://api.sleeper.app/v1"
 # Finite adapter-owned expected-event contract. New provider fields do not
@@ -238,8 +238,14 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     playoff_seed_type = settings.get("playoff_seed_type", 0)
     if type(playoff_seed_type) is not int or playoff_seed_type not in (0, 1):
         raise Unavailable("unsupported_playoff_reseeding_policy")
-    if any(settings.get(k, 0) for k in ("divisions", "league_average_match", "best_ball")) or league.get("bracket_overrides_id"):
-        raise Unavailable("unsupported_divisions_median_bestball_or_manual_seeding")
+    if any(settings.get(k, 0) for k in ("divisions", "best_ball")) or league.get("bracket_overrides_id"):
+        raise Unavailable("unsupported_divisions_bestball_or_manual_seeding")
+    # League median: each week also books a result against the week's median
+    # score (core.median_outcomes). Read live at capture; never from the DB.
+    median_game = settings.get("league_average_match")
+    median_game = 0 if median_game is None else median_game
+    if type(median_game) is not int or median_game not in (0, 1):
+        raise Unavailable("unsupported_median_setting")
     if settings.get("start_week", 1) != 1:
         raise Unavailable("nonstandard_start_week")
     season = int(league["season"])
@@ -292,6 +298,10 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             actual_records[b][1 - outcome if outcome < 2 else 2] += 1
             historical_pa[a] += bv
             historical_pa[b] += av
+        if median_game:
+            # The median game adds a result only; points against stay head-to-head.
+            for rid, outcome in zip(sorted(ids), median_outcomes([decimal(by_id[rid].get("points")) for rid in sorted(ids)])):
+                actual_records[rid][outcome] += 1
     # Only slot-specific occupied starts contribute; zero performances count.
     replacement = {} if incomplete_idp_history else {slot: str(sum(values) / len(values)) for slot, values in occupied.items() if values}
     best = cfg.get("scoring_contract") == BEST_AVAILABLE
@@ -627,6 +637,7 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
         for key, value in entry["input"].get("stat_provenance", {}).items():
             provenance_counts[key][value["basis"]] += 1
     return {"league_id": str(league_id), "viewer_roster_id": mine[0]["roster_id"], "league_name": str(league.get("name") or "League")[:150], "season": season, "completed_weeks": completed, "playoff_spots": playoff, "playoff_byes": byes,
+            "league_format": league_format(median_game),
             "player_week_inputs": normalized_inputs, "slots": slots, "scoring": league["scoring_settings"], "scoring_hash": digest(league["scoring_settings"]),
             "teams": teams, "weeks": result_weeks, "pick_ownership": ownership, "captured_at": captured_at, "capture_completed_at": finished,
             "source": weekly["source"], "source_captured_at": weekly["captured_at"], "league_revision": revision,
@@ -653,6 +664,7 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                          "Provider forecasts are conditional scenarios; current injury labels do not establish future availability.",
                          "IR eligibility and tie treatment are configured scenarios, not verified league policy.",
                          "Historical weekly Max PF is unavailable; official aggregate Max PF is preserved."] +
+                        (["This league plays the league median: every week counts two results, head-to-head and against the median score, so records cover two games a week."] if median_game else []) +
                         (["Missing common offense events are modeled as zero after aggregate reconciliation; rare events remain unknown and this is not predictive accuracy evidence."] if cfg.get("scoring_contract") == "sleeper_sparse_offense_v1" else []) +
                         (["Best-available estimates use known contributions; missing bonuses or penalties can raise or lower complete scores. Unpriced players are not confirmed zero. An open starting slot takes the best projected free agent for it, or scores zero when none is projected; only a starter who has already played without a recorded score marks the forecast incomplete. Completed team scoring never stands in for a missing projection."] if best else []) +
                         (["Completed games use recorded player actuals and locked lineups. The weekly standard deviation is a full-week value, not a calibrated live remaining-game distribution."] if any(t["projection_coverage"]["completed_actual_players"] for week in result_weeks for t in week["teams"].values()) else [])}

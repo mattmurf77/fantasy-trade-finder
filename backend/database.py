@@ -646,6 +646,13 @@ leagues_table = Table("leagues", metadata,
     # Season-stamped, so a future season resolves nothing (#273).
     # NULL = unresolved → owned picks keep today's generic round label.
     Column("draft_slot_order", Text),
+    # ── League median (Sleeper `settings.league_average_match`) ──────────
+    # 1 = every week also books a result against the league median score,
+    # 0 = head-to-head only, NULL = unknown (not a Sleeper league, or not
+    # synced since this column arrived). Written by upsert_league from the
+    # league payload session init already fetched; refreshed on every sync.
+    # Descriptive only: the playoff forecast reads the live setting.
+    Column("median_game", Integer),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -3548,6 +3555,59 @@ deletion_scrub_jobs_table = Table("deletion_scrub_jobs", metadata,
     Index("ix_deletion_scrub_jobs_deleted", "deleted_at"),
 )
 
+# Founders' review (docs/plans/founder-review/design.md §3): the founder's label
+# override per player for the win-now season signal. One row per (player, scope):
+# scope is `all` for RB / WR / TE (global per player) and the league QB format for a
+# QB (`superflex` or `single_qb`, operator ruling 2026-11-12); any position can take
+# a narrower scope later (e.g. TE premium) without a migration. The label is a VALUE
+# in a closed vocabulary (season_value.OVERRIDE_LABELS), never per-label booleans, so
+# a multi-label model widens the key to (player_id, scope, label). Deleting the row
+# returns the player to the engine's label in that scope. Read by
+# server._season_evidence (every row, once per usable season-evidence build); written
+# only by POST /api/founder/labels. New table: metadata.create_all creates it.
+# Account deletion anonymizes set_by and keeps the judgment (accounts.py).
+founder_label_overrides_table = Table("founder_label_overrides", metadata,
+    Column("player_id", String, primary_key=True),   # Sleeper player id (QB/RB/WR/TE)
+    Column("scope",     String, primary_key=True),   # all | superflex | single_qb
+    Column("label",     String, nullable=False),     # cornerstone | win_now | rebuild | depth
+    Column("set_by",    String, nullable=False),     # the founder's account id (sess["user_id"])
+    Column("set_at",    String, nullable=False),     # ISO UTC; moves only when the label changes
+)
+
+
+def load_founder_label_overrides() -> list:
+    """[(player_id, scope, label)] for every stored founder override."""
+    t = founder_label_overrides_table
+    with engine.connect() as conn:
+        return [(str(r.player_id), r.scope, r.label)
+                for r in conn.execute(select(t.c.player_id, t.c.scope, t.c.label))]
+
+
+def save_founder_label_overrides(to_set: dict, to_clear, *, set_by: str) -> dict:
+    """Upsert `to_set` ({(player_id, scope): label}) and delete `to_clear`
+    ([(player_id, scope)]) in ONE transaction. Idempotent: an unchanged label keeps
+    its row (and set_at) untouched. Returns {"set": rows written, "cleared": rows deleted}."""
+    t = founder_label_overrides_table
+    now = datetime.now(timezone.utc).isoformat()
+    written = cleared = 0
+    with engine.begin() as conn:
+        current = {(str(r.player_id), r.scope): r.label for r in conn.execute(
+            select(t.c.player_id, t.c.scope, t.c.label).where(
+                t.c.player_id.in_(sorted({pid for pid, _ in to_set}) or [""])))}
+        for (pid, scope), label in sorted(to_set.items()):
+            if current.get((pid, scope)) == label:
+                continue
+            if (pid, scope) in current:
+                conn.execute(update(t).where(t.c.player_id == pid, t.c.scope == scope)
+                             .values(label=label, set_by=set_by, set_at=now))
+            else:
+                conn.execute(insert(t).values(player_id=pid, scope=scope, label=label,
+                                              set_by=set_by, set_at=now))
+            written += 1
+        for pid, scope in sorted(set(to_clear)):
+            cleared += conn.execute(delete(t).where(t.c.player_id == pid, t.c.scope == scope)).rowcount or 0
+    return {"set": written, "cleared": cleared}
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -4335,6 +4395,9 @@ def _migrate_db() -> None:
         ("leagues",            "draft_status",          "VARCHAR"),
         ("leagues",            "draft_status_confidence", "VARCHAR"),
         ("leagues",            "draft_status_checked_at", "VARCHAR"),
+        # League median setting (docs/plans/league-projections/median-leagues-scope.md).
+        # NULL on every existing row until that league's next sync; no backfill.
+        ("leagues",            "median_game",           "INTEGER"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -6985,6 +7048,14 @@ def get_unlocked_formats(user_id: str) -> list[str]:
 # League operations
 # ---------------------------------------------------------------------------
 
+def league_median_setting(meta) -> int | None:
+    """1/0 from a Sleeper league payload's `settings.league_average_match`;
+    None when the payload or the key is absent or not 0/1 (never guessed)."""
+    settings = meta.get("settings") if isinstance(meta, dict) else None
+    value = settings.get("league_average_match") if isinstance(settings, dict) else None
+    return value if type(value) is int and value in (0, 1) else None
+
+
 def upsert_league(
     league_id: str,
     user_id: str,
@@ -6996,6 +7067,7 @@ def upsert_league(
     platform: str | None = None,
     require_user: bool = False,
     only_if_exists: bool = False,
+    median_game: int | None = None,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -7020,6 +7092,9 @@ def upsert_league(
     raises AccountGone when that row is gone) and, for a row it found at its
     start or a platform league's, `only_if_exists`: update only, so a row an
     account deletion removed in between is never re-created.
+
+    `median_game` (1/0, see `league_median_setting`) is written on insert and
+    refreshed on every update that knows it; None leaves the stored value.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -7035,7 +7110,9 @@ def upsert_league(
         "created_at":        now,
         "updated_at":        now,
         "platform":          platform,
+        "median_game":       median_game,
     }
+    refresh = {"median_game": median_game} if median_game is not None else {}
 
     with engine.begin() as conn:
         if require_user:
@@ -7043,7 +7120,7 @@ def upsert_league(
         if only_if_exists:
             conn.execute(update(leagues_table)
                          .where(leagues_table.c.sleeper_league_id == league_id)
-                         .values(name=name, updated_at=now))
+                         .values(name=name, updated_at=now, **refresh))
             return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
@@ -7058,6 +7135,7 @@ def upsert_league(
             set_={
                 "name":       stmt.excluded.name,
                 "updated_at": stmt.excluded.updated_at,
+                **({"median_game": stmt.excluded.median_game} if refresh else {}),
             },
         )
         conn.execute(stmt)

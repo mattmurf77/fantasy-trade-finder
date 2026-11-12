@@ -1,3 +1,23 @@
+## 2026-11-12 — Founders' review label page (D-242), branch `feat/founder-label-review`
+
+- **Full backend suite (Opus subagent, before merging main):** 14,995 passed, 42 skipped, 0 failed. **Main session after merging main:** `test_founder_review.py`, the pipeline digest, the paywall table and the median-setting file: 93 passed. CI is the full re-run.
+- **App (subagent):** `tsc --noEmit` clean; 176 of 176 `check-*.js`; testid-lint OK. `check-founder-review.js` is new (49 checks; re-run by the main session).
+- **What is pinned:** access (flag off, allow-list unset, unlisted account, unverified session, device id never grants); the (engine label, override) table case by case; a QB override applies only in leagues of its QB format; no overrides is byte-identical; overrides reach plan fit, the conflict rule, the card labels and the admin route; the digest moves only for a league the override can affect; `DECK_PIPELINE_VERSION` 28.
+- **Sabotages, red then restored (18, subagent):** in the PR body.
+- **Main session change:** the flag ships true (inert without `FOUNDER_ACCOUNTS`); the test that pinned it false now pins code default false and shipped true.
+- **Not verified:** anything on a device; the runbook's account-id lookup against production.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Combined release branch (D-237 to D-241), branch `release/2026-11-12-train`
+
+- **Full backend suite (main session) on the combination of league-mate outlooks, rank removal, win-now, pick pricing and the Keep rule, with `picks.projected_slot_value` and `trade.season_signal` on:** **14,934 passed, 42 skipped, 0 failed.** Run before main's median-league merge and two test-only app edits; after that merge the projection, pick, season, fit, digest, untouchable and paywall files were re-run green. CI is the full re-run on the final head.
+- **App (main session):** `tsc --noEmit` clean; **175 of 175** `check-*.js`; testid-lint OK. Two checks were updated for the combined card: the season check accepts `displayName` on the player name line (projected picks), and the fit-block check's sandbox defines an absent season block.
+- **Pipeline pins:** 23 league-mate outlooks, 24 rank removal, 25 season signal, 26 projected slot value, 27 Keep rule. Each branch pinned 23 on its own; the combined digests were recomputed at each merge.
+- **One cross-feature finding:** with rank content off, a team with only a rank fact is left out of the fit block, so the league-mate outlook tag test now turns rank content on explicitly.
+- **Per-feature evidence:** pick pricing (builder's full suite 14,628 passed; 34 sabotages; replay of 23 recorded requests on invented forecasts: totals conserved, 1 to 2 decks over the 20% size bar, smallest deck 78 cards); rank removal (builder's full suite 14,543 passed; 14 sabotages); Keep rule (builder's full suite 14,555 passed; 6 sabotages; knob 0 byte-identical); entries above for D-237 and D-238.
+- **Not verified:** real forecasts priced by the new pick rule (a local read of production forecast data was refused by the permission system); anything on a device; production behaviour.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — League-mate outlooks from the saved forecast (D-237), branch `feat/partner-outlook-from-projection`
 
 - **Full suite (main session, after merging main):** **14,573 passed, 42 skipped, 0 failed.** `test_partner_outlook_projection.py` is new, 41 cases.
@@ -15,6 +35,15 @@
 - **Rules-first join:** exhaustive admissibility audits on 7 small worlds; page equals gated, proof for proof, on 16 worlds (fixture league with real captured evidence, synthetic 12, 14 and 16 teams), and the first 5 and 30 cards equal the gated deck's. Three bound sabotages red then restored. Replay of 40 recorded requests under revisions 1 and 2: served set equal 40 of 40, 0 fallbacks.
 - **Not verified:** production; anything on a device; the `season-signal:` log line through a real job. `league.projections_provider_approved` is false in the repo config, so stage A records `no_forecast` unless production has it on.
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — League-median forecasts and the stored league setting (D-236), branch `feat/projection-median-leagues`
+
+- **New: `test_league_projection_median.py` (32) and `test_league_median_setting.py` (16); `test_league_projection_batch.py` now 40.** Main session re-run of the three files: 88 passed. `-k "league_projection or cron"`: 640 passed (subagent). Full suite before the retry option was added: **14,556 passed, 42 skipped, 0 failed**; CI on the PR head covers the final tree.
+- **What they pin:** the median rule for even and odd team counts and a tie at the cutoff; a median league is admitted and each completed week books two results per team; with zero score SD every team's record is exactly head-to-head plus median; with noise, games per team equal twice the weeks and playoff chances sum to the playoff spots; a team that misses on head-to-head alone but gets in with median wins is seeded; a non-median league's result is byte-identical to main's (golden digests); scenarios and the outlook suggestion on a median league; the column exists after `_migrate_db`; first link, re-sync and NULL-fill; non-Sleeper leagues stay NULL; `retry_unsupported` mirrors `retry_incomplete`.
+- **Sabotages, red then restored (26, Opus subagent; one re-run in the main session):** bottom half wins; median over the wrong set; cutoff tie as a win; completed-week median skipped; median not added, added twice, or added for a non-median league in simulated weeks; marker ignored; record-scale check ignoring games per week; an extra random draw; value written only on insert (two paths); missing setting coerced to 0; migration entry dropped; session init not passing the setting; and ten on the retry option.
+- **Checked against one real median league (local, nothing committed):** rebuilt W-L-T matched the official records for all 12 teams over 9 weeks; head-to-head alone matched none. **Dry run against live feeds (main session, nothing written):** that league completes on v6 with `games_per_week` 2, 18 games per team so far, 28 expected, playoff chances summing to 6.
+- **CI fix (main session):** the "non-median result is unchanged" test pinned a sha256 of float results, which matched on macOS and not on the Linux runner (1 failed, 14,594 passed). Captures hold no floats and keep their pinned hash; results are now compared to the saved pre-change values (`fixtures/league_projection_h2h_golden.json`, verified against the old hashes before saving), exact for everything but floats and to 1e-9 for floats. Sabotage (median game applied to every league): red, then restored.
+- **Not verified:** a tie exactly at the median; anything on a device.
 
 ## 2026-11-11 — Why-pass frame opens from the ✕, branch `fix/pass-button-on-asking-card`
 

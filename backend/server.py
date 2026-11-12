@@ -88,7 +88,8 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league, AccountGone,
+    load_founder_label_overrides, save_founder_label_overrides,
+    upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
@@ -811,10 +812,8 @@ def _detect_scoring_format_from_meta(meta: dict) -> str:
         return "1qb_ppr"
 
     roster_positions = meta.get("roster_positions") or []
-    is_superflex = "SUPER_FLEX" in roster_positions
-    if not is_superflex:
-        qb_count = sum(1 for p in roster_positions if p == "QB")
-        is_superflex = qb_count >= 2
+    from .season_value import is_superflex as _is_superflex   # the one superflex test
+    is_superflex = _is_superflex(roster_positions)
 
     scoring = meta.get("scoring_settings") or {}
     try:
@@ -4596,7 +4595,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 28
+DECK_PIPELINE_VERSION = 29
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4758,7 +4757,8 @@ DECK_PIPELINE_PINS = {
     25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector owner_bilateral_revision_5_enabled, default 0): one read-only forecast read per organic owner job, recorded on the request record (digest in the hash), passed only to revision 5; the five revision-5 knobs leave the request hash unless revision 5 is selected; presentment reads owner_presentment_version; trade_card_to_dict adds season_block; flag off and selector 0: context, hash, terms, order and payload unchanged.
     26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
     27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
-    28: "88322edc6a469414",  # Viewer label fit (model_config season_viewer_label_fit, default 1; revision 5 only): _owner_selected_assignment pops it with the other season knobs when revision 5 is not selected, and keeps it in the request hash only while exactly 1, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_bilateral_season / trade_first_page (engine code hash); knob 0 or revision 5 not selected: hash, terms and order unchanged.
+    28: "f9dc5f829bcd9a92",  # Founders' review (docs/plans/founder-review/): _season_evidence attaches the founder's label overrides that reach this league (season_value.with_label_overrides: players projected here, scope `all` or the league's QB format) and recomputes the evidence digest over them, so the request hash moves with them; league_profile applies them to the future axis only; no override that reaches the league: the same evidence object, digest, hash, terms and order.
+    29: "6a7d3e2f2fc9b0af",  # Viewer label fit (model_config season_viewer_label_fit, default 1; revision 5 only): _owner_selected_assignment pops it with the other season knobs when revision 5 is not selected, and keeps it in the request hash only while exactly 1, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_bilateral_season / trade_first_page (engine code hash); knob 0 or revision 5 not selected: hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -22409,9 +22409,13 @@ def _season_evidence(user_id, league_id, platform, slots, *, as_of=None):
         if snapshot is not None and slots is None:
             snapshot = json.loads(snapshot) if isinstance(snapshot, (str, bytes)) else snapshot
             slots = snapshot.get("slots")
-        return season_value.build_evidence(
+        evidence = season_value.build_evidence(
             snapshot, as_of=as_of or datetime.now(timezone.utc), league_id=league_id, slots=slots,
             platform="sleeper", run_id=run["run_id"], model_version=model_version, current=True)
+        # Founders' review: the founder's label overrides that reach this league join
+        # the evidence and its digest (none: the same object, byte-identical).
+        return season_value.with_label_overrides(
+            evidence, load_founder_label_overrides() if season_value.usable(evidence) else None)
     except Exception as exc:
         log.warning("season signal: forecast read failed (%s)", type(exc).__name__)
         return season_value.unavailable("read_failed")
@@ -22674,7 +22678,9 @@ def _owner_request_snapshot(assignment, card, *, detach=True):
             **({"players": {pid: row for pid, row in season["players"].items() if pid in assets}}
                if isinstance(season.get("players"), dict) else {}),
             **({"unprojected": [pid for pid in season["unprojected"] if pid in assets]}
-               if isinstance(season.get("unprojected"), list) else {})}
+               if isinstance(season.get("unprojected"), list) else {}),
+            **({"label_overrides": {pid: row for pid, row in season["label_overrides"].items() if pid in assets}}
+               if isinstance(season.get("label_overrides"), dict) else {})}
     # Impression assembly serializes this frozen request immediately without
     # mutating it. Other consumers retain the detached-copy contract.
     return copy.deepcopy(snapshot) if detach else snapshot
@@ -30069,46 +30075,56 @@ def admin_config_update(key: str):
         return jsonify({"error": "internal_error"}), 500
 
 
-def _season_label_rows(user_id: str, league_id: str) -> dict:
-    """One league's label-review rows (`season-label-review-1`, lld §8) for an
-    account and league, from stored state only: the league's stored rosters,
-    the consensus pool, and the account's saved forecast (read only, no
-    provider call). The viewer is the account's team; boards are consensus, so
-    no private board is read. Raises LookupError for an unknown league or an
-    account with no team in it."""
+def _season_label_search(user_id: str, league_id: str, viewer_id: str | None = None):
+    """(search, evidence, players) for one account's league, from stored state only: the
+    league's stored rosters, the consensus pool, and the account's saved forecast (read
+    only, no provider call). `search` is a revision 5 search over consensus boards (no
+    private board is read), None without usable evidence. The viewer's team is
+    `viewer_id` (the caller's LEAGUE identity), else `user_id`. Raises LookupError for an
+    unknown league or an account with no team in it."""
     from . import trade_gen_bilateral_season as r5
-    from .eval.season_label_review import SCHEMA, rows_from_search
     from . import season_value
     from .database import get_league_platform
+    viewer_id = viewer_id or user_id
     platform = get_league_platform(league_id)
     members_rows = load_league_members(league_id)
     if platform is None or not members_rows:
         raise LookupError("league_not_found")
-    viewer_row = next((m for m in members_rows if str(m.get("user_id")) == user_id), None)
-    if viewer_row is None:
+    if not any(str(m.get("user_id")) == viewer_id for m in members_rows):
         raise LookupError("not_a_member")
     pool, seed = _get_universal_pool(get_league_scoring(league_id))
     players = {p.id: p for p in pool}
     rosters = {str(m["user_id"]): [str(x) for x in m.get("player_ids") or [] if str(x) in players]
                for m in members_rows}
     evidence = _season_evidence(user_id, league_id, platform, None)
-    key = "league-" + hashlib.sha256(str(league_id).encode()).hexdigest()[:10]
-    out = {"schema": SCHEMA, "league_key": key, "label_rules_version": r5.LABEL_RULES_VERSION,
-           "evidence": {"state": evidence.get("state"), "reason": evidence.get("reason"),
-                        "weeks": evidence.get("weeks") or [], "captured_at": evidence.get("captured_at")},
-           "line": {}, "players": [], "own": []}
     if not season_value.usable(evidence):
-        return out
+        return None, evidence, players
     members = [_trade_service_mod.LeagueMember(uid, uid, roster, {}, False)
-               for uid, roster in sorted(rosters.items()) if uid != user_id and roster]
+               for uid, roster in sorted(rosters.items()) if uid != viewer_id and roster]
     slots = list(evidence["slots"])
     search = r5._Search(
         players=players, league=_trade_service_mod.League(str(league_id), "League", platform, members),
-        user_id=user_id, user_roster=rosters[user_id], seed_elo=dict(seed), user_elo=dict(seed),
+        user_id=viewer_id, user_roster=rosters[viewer_id], seed_elo=dict(seed), user_elo=dict(seed),
         outlook="championship", fairness_threshold=0.75,
         manager_preferences={uid: {"starter_slots": slots, "lineup_source": "observed"} for uid in rosters},
         season_evidence=evidence)
-    return {**rows_from_search(search, key), "evidence": out["evidence"]}
+    return search, evidence, players
+
+
+def _season_label_rows(user_id: str, league_id: str) -> dict:
+    """One league's label-review rows (`season-label-review-1`, lld §8) for an
+    account and league (`_season_label_search`). Raises LookupError for an unknown
+    league or an account with no team in it."""
+    from . import trade_gen_bilateral_season as r5
+    from .eval.season_label_review import SCHEMA, rows_from_search
+    search, evidence, _ = _season_label_search(user_id, league_id)
+    key = "league-" + hashlib.sha256(str(league_id).encode()).hexdigest()[:10]
+    shown = {"state": evidence.get("state"), "reason": evidence.get("reason"),
+             "weeks": evidence.get("weeks") or [], "captured_at": evidence.get("captured_at")}
+    if search is None:
+        return {"schema": SCHEMA, "league_key": key, "label_rules_version": r5.LABEL_RULES_VERSION,
+                "evidence": shown, "line": {}, "players": [], "own": []}
+    return {**rows_from_search(search, key), "evidence": shown}
 
 
 @app.route("/api/admin/season-signal/labels", methods=["GET"])
@@ -30131,6 +30147,78 @@ def admin_season_signal_labels():
         return jsonify(_season_label_rows(user_id, league_id))
     except LookupError as exc:
         return jsonify(error=str(exc)), 404
+
+
+# ─── Founders' review (docs/plans/founder-review/design.md) ─────────────────
+# Founder-only player label review for the win-now season signal. Access is
+# server-enforced on every route: flag founder.review AND the account id of a
+# VERIFIED, non-demo session in FOUNDER_ACCOUNTS (comma-separated env var; unset
+# or empty => nobody). Never a device id, never anything in the request body.
+# Anything else is 404 with no state change (no existence signal).
+
+def _founder_accounts() -> frozenset:
+    return frozenset(x.strip() for x in os.environ.get("FOUNDER_ACCOUNTS", "").split(",") if x.strip())
+
+
+def _founder_session():
+    """The caller's session when it is a founder's, else None."""
+    if not is_enabled("founder.review"):
+        return None
+    allowed = _founder_accounts()
+    if not allowed:
+        return None
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
+    if sess is None or not sess.get("verified") or _synthetic_demo_session(sess):
+        return None
+    return sess if str(sess.get("user_id") or "") in allowed else None
+
+
+def _founder_not_found():
+    return jsonify({"error": "not_found"}), 404
+
+
+@app.route("/api/founder/capability", methods=["GET"])
+def founder_capability():
+    """GET /api/founder/capability — 200 {"founder_review": true} for a founder
+    session, else 404. The app shows the Founders' review section only on this."""
+    if _founder_session() is None:
+        return _founder_not_found()
+    return jsonify({"founder_review": True})
+
+
+@app.route("/api/founder/labels", methods=["GET", "POST"])
+def founder_labels():
+    """GET ?league_id= — the label review page for one league (founder_review.page).
+    POST {league_id, set: {player_id: label}, clear: [player_id]} — set / clear the
+    founder's overrides in one transaction; idempotent. A QB's override is written
+    under the league's QB format, any other position's under `all`."""
+    from . import founder_review, season_value
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    body = request.get_json(silent=True) if request.method == "POST" else None
+    league_id = str((request.args.get("league_id") if body is None else (body or {}).get("league_id")) or "").strip()
+    if not league_id:
+        return jsonify(error="league_id_required"), 400
+    try:
+        search, evidence, players = _season_label_search(
+            str(sess["user_id"]), league_id, viewer_id=_league_user_id(sess))
+    except LookupError as exc:
+        return jsonify(error=str(exc)), 404
+    stored = {(pid, scope): label for pid, scope, label in load_founder_label_overrides()}
+    if request.method == "GET":
+        return jsonify(founder_review.page(search, evidence, stored))
+    if not season_value.usable(evidence):
+        return jsonify(error="no_usable_forecast", reason=evidence.get("reason")), 409
+    try:
+        to_set, to_clear = founder_review.parse_write(
+            body, known={pid: getattr(p, "position", None) for pid, p in players.items()},
+            stored=set(stored), slots=evidence.get("slots") or [])
+    except founder_review.InvalidRequest as exc:
+        return jsonify(error=exc.code, ids=exc.ids), 400
+    result = save_founder_label_overrides(to_set, to_clear, set_by=str(sess["user_id"]))
+    log.info("founder-review: set=%d cleared=%d", result["set"], result["cleared"])
+    return jsonify({**result, "overrides_total": len(load_founder_label_overrides())})
 
 
 @app.route("/api/admin/engine-metrics", methods=["GET"])
@@ -30757,6 +30845,9 @@ def session_init():
                     platform         = authoritative["platform"],
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
+                    # League median, from the league payload S0 already
+                    # read (no extra call); None for a platform league.
+                    median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
                 )
                 if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
                     try:
@@ -45091,7 +45182,7 @@ def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
     data = request.get_json(silent=True) if request.content_length else {}
-    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete"}:
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete", "retry_unsupported"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
         return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))

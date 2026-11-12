@@ -6,7 +6,7 @@ import math
 import random
 import statistics
 
-from .core import Unavailable, VERSION, decimal, digest
+from .core import Unavailable, VERSION, decimal, digest, league_format, median_outcomes
 from . import joint
 
 POLICIES = {
@@ -95,6 +95,10 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
     actual_history = [[float(decimal(v)) for v in t["actual_history"]] for t in teams]
     max_history = [[float(decimal(v)) for v in t["maxpf_history"]] for t in teams]
     completed = snapshot["completed_weeks"]
+    # A snapshot saved before the marker existed is a head-to-head league:
+    # median leagues were refused at capture until then.
+    fmt = league_format((snapshot.get("league_format") or {}).get("median_game"))
+    median = fmt["median_game"]
     if any(len(h) != completed for h in actual_history):
         raise Unavailable("missing_actual_history", state="incomplete_projections")
     if any(len(h) not in (0, completed) for h in max_history):
@@ -145,9 +149,11 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
         max_means.append(mm)
         details.append(wd)
     base_records = [[int(t[k]) for k in ("wins", "losses", "ties")] for t in teams]
-    if any(sum(r) != completed or min(r) < 0 for r in base_records):
+    if any(sum(r) != completed * fmt["games_per_week"] or min(r) < 0 for r in base_records):
         raise Unavailable("unreconciled_records")
-    if sum(r[0] for r in base_records) != sum(r[1] for r in base_records):
+    # Median results balance only when no score ties the median; capture has
+    # already matched each median-league record against the weekly scores.
+    if not median and sum(r[0] for r in base_records) != sum(r[1] for r in base_records):
         raise Unavailable("unreconciled_league_records")
     base_pf = [float(decimal(t["points_for"])) for t in teams]
     base_pa = [float(decimal(t["points_against"])) for t in teams]
@@ -160,6 +166,7 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
     playoff_counts, bye_counts = [0] * n, [0] * n
     max_totals = [[] for _ in teams]
     weekly_outcomes = [[[0, 0, 0] for _ in teams] for _ in weeks]
+    median_weekly = [[[0, 0, 0] for _ in teams] for _ in weeks]
     # Prepare the mean constraint once, outside the Monte Carlo loop.
     joint_policies = []
     for w in range(len(weeks)):
@@ -252,6 +259,12 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
                 records[b][opposite] += 1
                 weekly_outcomes[w][a][outcome] += 1
                 weekly_outcomes[w][b][opposite] += 1
+            if median:
+                # Second game: every team against this week's league median.
+                # No draw is consumed, so the random stream is unchanged.
+                for i, outcome in enumerate(median_outcomes(scores)):
+                    records[i][outcome] += 1
+                    median_weekly[w][i][outcome] += 1
         # Fresh seeded tie lottery in each world, never provider roster ordering.
         lottery = [rng.random() for _ in teams]
         standings = sorted(range(n), key=lambda i: (2 * records[i][0] + records[i][2], round(pf[i], precision), round(pa[i], precision), lottery[i]), reverse=True)
@@ -305,10 +318,14 @@ def simulate(snapshot, raw_config, *, cancelled=lambda: False):
                                   "score_distribution": "observed_completed_lineup" if details[w][i].get("actual_score_observed") else "normal_scenario_rounded_to_league_precision",
                                   "win_equivalent_probability": (weekly_outcomes[w][i][0] + .5 * weekly_outcomes[w][i][2]) / iterations,
                                   "loss_probability": weekly_outcomes[w][i][1] / iterations, "tie_probability": weekly_outcomes[w][i][2] / iterations,
-                                  "opponent_roster_id": ids[next(b if a == i else a for a, b in games[w] if i in (a, b))]}
+                                  "opponent_roster_id": ids[next(b if a == i else a for a, b in games[w] if i in (a, b))],
+                                  **({"median_win_probability": median_weekly[w][i][0] / iterations,
+                                      "median_loss_probability": median_weekly[w][i][1] / iterations,
+                                      "median_tie_probability": median_weekly[w][i][2] / iterations} if median else {})}
                                  for w, week in enumerate(weeks)]})
     return {"schema": 1, "league_name": snapshot.get("league_name", "League"), "season": snapshot.get("season"),
             "completed_weeks": completed, "playoff_spots": playoff, "playoff_byes": byes, "scoring": snapshot.get("scoring", {}),
+            "league_format": fmt,
             "model_version": VERSION, "status": "complete", "provisional": iterations < 250000,
             "viewer_roster_id": snapshot.get("viewer_roster_id"), "score_sd": cfg["score_sd"],
             "score_model": {"mean": "projected_lineup_total", "distribution": "normal", "sd": cfg["score_sd"],

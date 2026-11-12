@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-242 — Founders' review: a founder-only page to correct player labels; a correction is about future value, never about who starts; QB corrections are per QB format
+
+**Date:** 2026-11-12 · **Who:** the operator: "Can we spin up a feature page just for me (it can be a new tab in calibration): for Founders' review… presenting all players split by position and a simple tagging via buttons (or better yet the same labeling progression of the tiers feature)", and "The labels should be settings specific for QBs. Cornerstone QBs in SF are not cornerstone in other leagues". One label per player, the future-value-only rule and global scope for RB/WR/TE are the builder's and the main session's calls. Plan: [`../docs/plans/founder-review/`](../docs/plans/founder-review/).
+**Context:** The win-now engine's labels (D-238) were waiting on a review before revision 5 serves. A player has exactly one label; Cornerstone is the label for "now and future".
+**Decision:** A section in Calibration shown only to accounts in the server's `FOUNDER_ACCOUNTS` allow-list on a verified session (flag `founder.review`, shipped true, inert without the allow-list). Players by position in label bands; tap players, then a band. An override is stored per (player, scope) in `founder_label_overrides` and applied in `season_value.league_profile`: it swaps Cornerstone and Win-now piece for a starter, or Rebuild piece and Depth for a bench player, and never changes whether a player starts in a league. RB/WR/TE scope is `all`; QB scope is `superflex` or `single_qb`, set by the server from the league's slots. Overrides enter the season evidence digest.
+**Consequences:**
+- A correction reaches users only once revision 5 serves; the page and the admin label route show it at once. Measure the engine's own label agreement before correcting, or read `engine_label`.
+- Stored overrides keep feeding the engine when the page flag is off.
+- Unlabelled players (borderline or unprojected) cannot be corrected. Tight-end premium has no scope yet; the scope column can take one without a migration.
+- The page lives in the Calibration tab, so it needs `grading.blind` on.
+- No analytics on the page (founder-only tooling); waived.
+
 ## D-241 — Keep / untouchable is a hard rule on generated owner cards
 
 **Date:** 2026-11-11 · **Who:** the operator reported it ("Untouchables were showing in trade cards. Is that expected?") and then "turn on all of the features we're pushing live". Evaluator-only (not pool removal) and no exception for a pinned get are the builder's and the main session's calls.
@@ -58,6 +70,17 @@
 - The app shows the season line, label tags and conflict sentence only inside the fit block; a card with no fit block shows the label tags alone.
 - Known limits: Sleeper leagues with a current forecast only; off-season has no signal; stage-2 partner matching (`season_partner_matching`, 0) failed its Not-sure bar and stays off; on the fixture Rebuilding moved more than Tanking in change, though Tanking sheds most in absolute terms.
 - `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
+
+## D-236 — League-median leagues are forecast with two results a week; the model version stays v6; the league's median setting is stored at link
+
+**Date:** 2026-11-11 · **Who:** the operator ("Let's make the model change to solve for median scoring leagues. Ensure we also include checking that when users link a new league and update the DB to store that setting"). The tie rule, keeping the version and the rename of the unsupported reason are this session's calls.
+**Context:** A Sleeper league with `league_average_match` gives every team a second result each week against the league's median score. `capture` refused those leagues, so one of the operator's two current-season unsupported leagues had no forecast.
+**Decision:** The median is taken over every team's score that week; above it wins, below it loses, equal ties. `capture` books the median result for completed weeks, so the current record equals Sleeper's; `simulate` books it for every simulated week from that week's scores, with no extra random draw; seeding and playoff odds use the combined record. Results and snapshots carry `league_format` (`median_game`, `games_per_week`). `core.VERSION` is not bumped, because a non-median league's result is byte-identical. `leagues.median_game` (nullable) is written at first link and refreshed on every sync from the league data already fetched; unknown never overwrites a known value. The forecast still reads the live Sleeper setting at capture. Divisions, best ball and manual seeding stay unsupported under the renamed reason `unsupported_divisions_bestball_or_manual_seeding`. Scope: `docs/plans/league-projections/median-leagues-scope.md`.
+**Consequences:**
+- The rule was checked against one real 12-team league: rebuilt records matched Sleeper's for all 12 teams over 9 weeks. A tie exactly at the median never occurred there, so that case is an assumption.
+- For a median league the record fields cover two games a week; the weekly win chance fields stay the head-to-head game and separate `median_*` fields carry the second.
+- `POST /api/cron/league-projections {"retry_unsupported": true}` re-attempts targets whose last attempt was unsupported, for use after a format becomes supported.
+- The column is not sent to clients yet.
 
 ## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
 
