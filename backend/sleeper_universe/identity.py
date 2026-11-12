@@ -39,6 +39,31 @@ USER_ID_KEYS = frozenset({"user_id", "owner_id", "creator", "picked_by"})
 USER_ID_LIST_KEYS = frozenset({"co_owners", "creators"})
 
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-]{0,40}$")
+MIN_KEY_CHARS = 32
+MIN_KEY_DISTINCT = 12
+
+
+class KeyProblem(SystemExit):
+    """A key that must not be used. Exits with the message."""
+
+    def __init__(self, msg):
+        super().__init__(f"HMAC key refused: {msg}")
+
+
+def default_key_path() -> Path:
+    return Path.home() / ".config" / "ftf-sleeper-universe" / KEY_FILE
+
+
+def check_key_text(key: bytes, where: str) -> None:
+    """Rule: at least 32 characters and at least 12 distinct characters (a
+    generated key, ``secrets.token_hex(32)``, is 64 hex characters). Refuses
+    empty, short and obviously low-entropy keys such as 'aaaa...' or '1212...'."""
+    if len(key) < MIN_KEY_CHARS:
+        raise KeyProblem(f"{where} is shorter than {MIN_KEY_CHARS} characters")
+    if len(set(key)) < MIN_KEY_DISTINCT:
+        raise KeyProblem(f"{where} has fewer than {MIN_KEY_DISTINCT} distinct characters "
+                         "(low entropy); generate one with: python3 -c "
+                         "'import secrets; print(secrets.token_hex(32))'")
 
 
 class KeyRing:
@@ -49,24 +74,51 @@ class KeyRing:
         self.source = source
 
     @classmethod
-    def load(cls, data_dir: Path, env=None) -> "KeyRing":
-        """Env ``SLEEPER_UNIVERSE_HMAC_KEY`` wins; else ``<data_dir>/hmac.key``,
-        created on first use with owner-only permissions."""
+    def load(cls, key_path: Path | None = None, env=None, data_dir: Path | None = None
+             ) -> "KeyRing":
+        """The key: env ``SLEEPER_UNIVERSE_HMAC_KEY``, else the key file
+        (default ``~/.config/ftf-sleeper-universe/hmac.key``), created on first
+        use (directory 0700, file 0600). Never inside the data folder, so a
+        copy of the data does not carry the key. Refuses, rather than fixes:
+        a key file readable by group or others; a key file inside the data
+        folder (or a legacy ``hmac.key`` left there); an env key set but empty
+        or failing ``check_key_text``; an env key and a key file that differ."""
         env = os.environ if env is None else env
-        val = env.get(KEY_ENV)
-        if val:
-            return cls(val.encode("utf-8"), "env")
-        data_dir = Path(data_dir)
-        data_dir.mkdir(parents=True, exist_ok=True)
-        path = data_dir / KEY_FILE
-        if not path.exists():
+        path = Path(key_path) if key_path is not None else default_key_path()
+        if data_dir is not None:
+            dd = Path(data_dir).resolve()
+            if (dd / KEY_FILE).exists():
+                raise KeyProblem(f"a key file '{KEY_FILE}' sits in the data folder; move it to "
+                                 f"{path} (or set {KEY_ENV}) so copies of the data do not "
+                                 "carry the key")
+            try:
+                path.resolve().relative_to(dd)
+                raise KeyProblem("the key file must be outside the data folder")
+            except ValueError:
+                pass
+        file_key = None
+        if path.exists():
+            mode = stat.S_IMODE(path.stat().st_mode)
+            if mode & 0o077:
+                raise KeyProblem(f"key file {path} is readable by group or others "
+                                 f"(mode {oct(mode)}); run: chmod 600 '{path}'")
+            file_key = path.read_bytes().strip()
+            check_key_text(file_key, f"key file {path}")
+        if KEY_ENV in env:
+            val = env[KEY_ENV].strip().encode("utf-8")
+            check_key_text(val, f"env {KEY_ENV}")
+            if file_key is not None and file_key != val:
+                raise KeyProblem(f"env {KEY_ENV} and key file {path} both exist and differ; "
+                                 "keep exactly one key")
+            return cls(val, "env")
+        if file_key is None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(path.parent, 0o700)
             fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w") as f:
                 f.write(secrets.token_hex(32) + "\n")
-        mode = stat.S_IMODE(path.stat().st_mode)
-        if mode & 0o077:
-            os.chmod(path, 0o600)
-        return cls(path.read_bytes().strip(), "file")
+            file_key = path.read_bytes().strip()
+        return cls(file_key, "file")
 
     def user_key(self, user_id) -> str | None:
         if user_id is None:

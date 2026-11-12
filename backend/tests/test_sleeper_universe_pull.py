@@ -19,7 +19,7 @@ import pytest
 
 from backend.sleeper_universe import identity, report
 from backend.tests.support.sleeper_universe_world import (
-    TEST_KEY, L, U, WorldKilled, connect, run_cli, standard_world)
+    OTHER_KEY, TEST_KEY, L, U, WorldKilled, connect, run_cli, standard_world)
 
 CONTENT_TABLES = ("leagues", "league_members", "rosters", "roster_weeks", "matchups",
                   "transactions", "drafts", "draft_picks", "traded_picks", "brackets",
@@ -103,21 +103,23 @@ def test_same_user_same_key_across_leagues_and_key_dependence(tmp_path):
     k_b = c.execute("SELECT owner_key FROM rosters WHERE league_id=? AND roster_id=1",
                     (L(201),)).fetchone()[0]
     assert k_a == k_b == identity.KeyRing(TEST_KEY.encode()).user_key(U(3))
-    other = identity.KeyRing(b"another-key-0123456789abcdef")
+    other = identity.KeyRing(OTHER_KEY.encode())
     assert other.user_key(U(3)) != k_a
     assert run_cli(standard_world(), tmp_path / "b", "run",
-                   key="another-key-0123456789abcdef")[0] == 0
+                   key=OTHER_KEY)[0] == 0
     c2 = connect(tmp_path / "b")
     assert c2.execute("SELECT owner_key FROM rosters WHERE league_id=? AND roster_id=3",
                       (L(103),)).fetchone()[0] == other.user_key(U(3))
     with pytest.raises(SystemExit, match="HMAC key differs"):
-        run_cli(standard_world(), tmp_path / "a", "pull", key="another-key-0123456789abcdef")
+        run_cli(standard_world(), tmp_path / "a", "pull", key=OTHER_KEY)
 
 
 def test_key_file_created_owner_only(tmp_path):
-    ring = identity.KeyRing.load(tmp_path, env={})
-    assert (tmp_path / "hmac.key").stat().st_mode & 0o777 == 0o600
-    assert identity.KeyRing.load(tmp_path, env={}).user_key("1") == ring.user_key("1")
+    kp = tmp_path / "cfg" / "hmac.key"
+    ring = identity.KeyRing.load(kp, env={})
+    assert kp.stat().st_mode & 0o777 == 0o600
+    assert kp.parent.stat().st_mode & 0o777 == 0o700
+    assert identity.KeyRing.load(kp, env={}).user_key("1") == ring.user_key("1")
 
 
 def test_users_payload_never_stored_raw(tmp_path):

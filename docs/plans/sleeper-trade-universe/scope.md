@@ -15,7 +15,8 @@ A research program, not app code. `scripts/sleeper_universe.py` (logic `backend/
 
 **Identity rules (operator decision 2, 2026-11-12):**
 - No username, display name, team name, league or draft name, avatar, nickname, description or free-text note is written anywhere. `/league/<id>/users` is never stored raw.
-- Every Sleeper user id (owner, co-owner, transaction creator, draft `picked_by`, draft-order keys, league members) is stored only as HMAC-SHA256 of the id under a secret key (env `SLEEPER_UNIVERSE_HMAC_KEY`, else `data/sleeper-universe/hmac.key`, created 0600). Losing the key breaks linkage across pulls; the store refuses a different key.
+- Every Sleeper user id (owner, co-owner, transaction creator, draft `picked_by`, draft-order keys, league members) is stored only as HMAC-SHA256 of the id under a secret key (env `SLEEPER_UNIVERSE_HMAC_KEY`, else `~/.config/ftf-sleeper-universe/hmac.key`, created 0700/0600, never inside the data folder). Weak, readable or conflicting keys are refused. Losing the key breaks linkage across pulls; the store refuses a different key.
+- **The dataset is pseudonymous, not anonymous.** It keeps league ids and roster ids, so anyone holding it can look owners up through Sleeper's public API. The keyed hash keeps identity out of the store itself; it does not make the data shareable. The data folder is treated as personal data.
 - Stripping is an allow-list per payload type (`backend/sleeper_universe/identity.py`, documented in the README).
 - Seeds live only in `data/sleeper-universe/seeds.txt` (git-ignored), never in the repo, a test, a log or the store. Skipped leagues are recorded as league id, season and reason only.
 - A leak scan after every run (and in `report`) reads every written file and fails on a dropped field name, a raw user id (found by hashing digit runs against the stored keys), or a name value seen during the run.

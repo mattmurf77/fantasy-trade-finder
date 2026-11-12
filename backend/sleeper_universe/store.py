@@ -177,12 +177,17 @@ class Store:
             self.conn.execute("INSERT INTO meta VALUES ('key_fingerprint', ?)", (fingerprint,))
             self.conn.commit()
         elif row[0] != fingerprint:
-            if not allow_new:
-                raise SystemExit(
-                    "HMAC key differs from the one this store was built with. "
-                    "Owner keys would not link across pulls. Restore the key "
-                    "(env SLEEPER_UNIVERSE_HMAC_KEY or hmac.key) or start a new "
-                    "--data-dir.")
+            if allow_new:
+                self.conn.execute("UPDATE meta SET value=? WHERE key='key_fingerprint'",
+                                  (fingerprint,))
+                self.conn.execute("INSERT OR REPLACE INTO meta VALUES ('key_changed', ?)",
+                                  ("owner keys before this point were made under another key",))
+                return
+            raise SystemExit(
+                "HMAC key differs from the one this store was built with. "
+                "Owner keys would not link across pulls. Restore the key "
+                "(env SLEEPER_UNIVERSE_HMAC_KEY or the key file) or start a new "
+                "--data-dir.")
 
     # -- runs --------------------------------------------------------------
     def start_run(self, command, started_at, params, code_version) -> int:
@@ -253,12 +258,14 @@ class Store:
         return self.conn.execute(
             "SELECT COUNT(DISTINCT lineage_id) FROM league_index WHERE kept=1").fetchone()[0]
 
-    def next_league_to_expand(self, max_hops, seasons):
+    def next_league_to_expand(self, max_hops, seasons, skip=()):
         q = ",".join("?" * len(seasons))
+        k = ",".join("?" * len(skip)) or "''"
         return self.conn.execute(
             f"SELECT league_id, hop FROM league_index WHERE kept=1 AND expanded=0"
-            f" AND hop < ? AND season IN ({q}) ORDER BY hop, season DESC, league_id LIMIT 1",
-            (max_hops, *seasons)).fetchone()
+            f" AND hop < ? AND season IN ({q}) AND league_id NOT IN ({k})"
+            f" ORDER BY hop, season DESC, league_id LIMIT 1",
+            (max_hops, *seasons, *sorted(skip))).fetchone()
 
     def mark_expanded(self, league_id):
         self.conn.execute("UPDATE league_index SET expanded=1 WHERE league_id=?", (league_id,))
@@ -300,13 +307,16 @@ class Store:
     def raw_path(self, season, league_id) -> Path:
         return self.data_dir / "raw" / str(season) / f"{league_id}.json.gz"
 
-    def save_league_season(self, bundle: dict, rows: dict, *, run_id, requests,
-                           seconds, completed_at, user_keys) -> None:
+    def save_league_season(self, bundle: dict, rows: dict, *, league_id, season, run_id,
+                           requests, seconds, completed_at, user_keys) -> None:
         """One transaction: replace this league-season's base rows, write the
         raw file, record the checkpoint. A kill before COMMIT leaves no
         checkpoint, so the next run redoes the league-season whole."""
-        league_id = rows["leagues"][0]["league_id"]
-        season = rows["leagues"][0]["season"]
+        # Keyed by the index's id and season, never by a value from the
+        # response; the caller has already checked the response's league_id.
+        league_id = str(league_id)
+        if str(rows["leagues"][0]["league_id"]) != league_id:
+            raise ValueError("league_id of the rows differs from the league pulled")
         path = self.raw_path(season, league_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")

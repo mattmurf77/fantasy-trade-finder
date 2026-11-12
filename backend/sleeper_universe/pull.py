@@ -11,28 +11,43 @@ import time
 from datetime import datetime, timezone
 
 from . import identity as ident
-from .client import RequestFailed
+from .client import CircuitOpen, RequestFailed
 from .normalise import bundle_rows
 
 LEGS = range(1, 19)
 WEEKS = range(1, 19)
 
 
+MAX_FAILED_LEAGUES_IN_A_ROW = 3
+
+
 class LeagueGone(Exception):
     pass
 
 
+class LeagueMismatch(Exception):
+    """``/league/<id>`` answered 200 with something that is not that league
+    (an error object, another league)."""
+
+
 def fetch_bundle(client, ring, col, league_id: str) -> dict:
-    def get(path):
-        obj = client.get(path)
+    """Every endpoint of one league-season. List endpoints must answer with a
+    JSON list (``expect=list``): a dict, null or empty body is a failed
+    request (retried, then RequestFailed), so a hole is never stored as zero
+    rows."""
+    def get(path, expect=list):
+        obj = client.get(path, expect=expect)
         ident.harvest(obj, col)
         return obj
 
     lid = str(league_id)
-    league = get(f"/league/{lid}")
-    if not isinstance(league, dict):
+    league = get(f"/league/{lid}", expect=None)
+    if league is None:
         raise LeagueGone(lid)
-    bundle = {"league": ident.strip_league(league, ring, col)}
+    stripped = ident.strip_league(league, ring, col) if isinstance(league, dict) else None
+    if not stripped or str(stripped.get("league_id")) != lid:
+        raise LeagueMismatch(lid)
+    bundle = {"league": stripped}
     bundle["rosters"] = ident.strip_rosters(get(f"/league/{lid}/rosters"), ring, col)
     bundle["users"] = ident.strip_users(get(f"/league/{lid}/users"), ring, col)
     bundle["transactions"] = {
@@ -69,8 +84,9 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
     if limit is not None:
         todo = todo[:limit]
     stats = {"pulled": 0, "failed": 0, "gone": 0, "queued": len(todo)}
+    failed_in_a_row = 0
     for i, row in enumerate(todo, 1):
-        lid, season = row["league_id"], row["season"]
+        lid, season = str(row["league_id"]), row["season"]
         before = client.total_requests
         t0 = clock()
         try:
@@ -79,11 +95,20 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
             store.record_failure(lid, season, run_id, "not_found")
             stats["gone"] += 1
             continue
-        except RequestFailed as e:
-            store.record_failure(lid, season, run_id, f"{e.endpoint}:{e.status}")
+        except (RequestFailed, LeagueMismatch) as e:
+            kind = (f"{e.endpoint}:{e.status}" if isinstance(e, RequestFailed)
+                    else "league_id_mismatch")
+            store.record_failure(lid, season, run_id, kind)
             stats["failed"] += 1
-            log(f"[{i}/{len(todo)}] league {lid}: failed ({e.endpoint} {e.status})")
+            failed_in_a_row += 1
+            log(f"[{i}/{len(todo)}] league {lid}: failed ({kind})")
+            if failed_in_a_row >= MAX_FAILED_LEAGUES_IN_A_ROW:
+                raise CircuitOpen(
+                    f"Stopped: {failed_in_a_row} league-seasons failed in a row (last: {kind}). "
+                    "Work so far is checkpointed; failures are in pull_failures. Re-run "
+                    "later to resume.") from None
             continue
+        failed_in_a_row = 0
         rows = bundle_rows(bundle, nfl_state)
         keys = set()
         for r in bundle["rosters"]:
@@ -97,7 +122,7 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
         for d in bundle["drafts"]:
             keys.update(d["draft_order"])
         store.save_league_season(
-            bundle, rows, run_id=run_id, requests=client.total_requests - before,
+            bundle, rows, league_id=lid, season=season, run_id=run_id, requests=client.total_requests - before,
             seconds=round(clock() - t0, 3),
             completed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             user_keys={k for k in keys if k})

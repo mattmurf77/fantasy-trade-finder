@@ -22,11 +22,9 @@ From the repo root, with the backend's Python (3.12, standard library only):
 #    Kept in the git-ignored data folder; never in the repo, a test or a log.
 $EDITOR data/sleeper-universe/seeds.txt
 
-# Pilot: about 150 leagues across 2024-2026 (cap counts lineages: one league over three seasons counts once)
+# Pilot: about 150 league lineages across 2024-2026 (one league over three
+# seasons counts once), about 21,000 requests, about 1.5 hours at 4 a second
 python3 scripts/sleeper_universe.py run --cap 150
-
-# Pilot by league-seasons instead: discover a little, pull at most 150 league-seasons
-python3 scripts/sleeper_universe.py run --cap 60 --limit 150
 
 # Full pull (defaults: seasons 2024 2025 2026, 2 hops, 3,000 lineages, 4 requests a second)
 python3 scripts/sleeper_universe.py run
@@ -41,15 +39,19 @@ python3 scripts/sleeper_universe.py report          # or --json
 
 Steps can run separately: `discover`, `pull` (also re-derives), `derive` (local only), `report`. Flags: `--seasons 2026` (any subset; a later, wider run adds to the same store and keeps lineage ids), `--hops`, `--cap`, `--limit`, `--rate` (max 10), `--max-429` (default 5), `--refresh-incomplete` (re-pull league-seasons that were not `complete` when pulled), `--data-dir` (tests use a temp dir).
 
-Exit codes: 0 ok, 3 stopped on repeated 429s (progress kept), 4 leak scan failed, 1 other error.
+Exit codes: 0 ok; 1 other error; 3 stopped on 429s; 4 leak scan failed; 5 blocked (a 403 or a Cloudflare block page); 6 a 200 whose body is not JSON; 7 circuit breaker (12 failed responses in a row, i.e. two requests' full retry cycles, or three failed league-seasons in a row); 8 another crawler process holds the machine-wide lock. Every stop keeps the checkpoints; re-run to resume.
 
-Expected requests: about 44 per league-season (league, rosters, users, 18 transaction legs, 18 matchup weeks, drafts plus one call per draft, traded picks, two brackets), plus `/state/nfl` once per run, plus discovery: 1 call per season listed per new user, 1 rosters call per expanded league, 1 call per predecessor league walked. At 4 requests a second: 150 league-seasons is about 6,600 pull requests (about 28 minutes).
+Request budget: about 44 per league-season (league, rosters, users, 18 transaction legs, 18 matchup weeks, drafts plus one call per draft, traded picks, two brackets), plus `/state/nfl` once per run, plus discovery (1 call per season listed per new user, 1 rosters call per expanded league, 1 per predecessor league walked; estimated at about 8 per lineage until the pilot measures it). The pilot, `--cap 150` over three seasons: 150 x 3 x 44 = 19,800 pull requests plus about 1,200 for discovery, about 21,000 in all. A `run` prints its planned budget at the start and the pull plan (league-seasons queued x 44) before pulling.
+
+One process only: `discover`, `pull` and `run` take an exclusive lock on `/tmp/ftf-sleeper-universe-crawler.lock`, machine-wide whatever the data folder, and refuse to start (exit 8) while another crawler holds it.
 
 ## The key
 
-Owners are stored only as `HMAC-SHA256(key, "user:" + user_id)` (first 32 hex characters). The key comes from env `SLEEPER_UNIVERSE_HMAC_KEY`, else `data/sleeper-universe/hmac.key`, created on first run with mode 0600. The store records a fingerprint of the key and refuses a pull with a different one (`--allow-new-key` overrides).
+Owners are stored only as `HMAC-SHA256(key, "user:" + user_id)` (first 32 hex characters). The key comes from env `SLEEPER_UNIVERSE_HMAC_KEY`, else the key file `~/.config/ftf-sleeper-universe/hmac.key` (`--key-file` overrides), created on first run (directory 0700, file 0600). The key is never kept in the data folder, so a copy of the data does not carry it. The crawler refuses, rather than repairs: a key file readable by group or others; a key file inside the data folder, or an `hmac.key` left there; an env key that is set but empty, shorter than 32 characters or with fewer than 12 distinct characters; an env key and a key file that both exist and differ. The store records a fingerprint of the key and refuses a pull with a different one; `--allow-new-key` accepts the new key and records its fingerprint (owner keys made before that point no longer link).
 
 **Losing the key breaks linkage across pulls**: the same manager pulled again under a new key gets a different owner key, and nothing can join the two. Back the key up somewhere private. Anyone holding the key and a candidate Sleeper user id can test whether that user is in the data; keep it as private as the data.
+
+**The dataset is pseudonymous, not anonymous.** It keeps league ids and roster ids, so anyone holding the data can look any owner up through Sleeper's public API (`/league/<id>/rosters` names the owner of each roster). The keyed hash keeps identity out of the store itself; it does not make the data safe to share. Treat the data folder as personal data.
 
 ## What it calls
 
@@ -57,7 +59,7 @@ Public Sleeper REST v1 only, through one throttled client (token bucket, default
 
 ## What is stored
 
-Data folder `data/sleeper-universe/` (git-ignored, mode 0700): `universe.sqlite` (0600), `raw/<season>/<league_id>.json.gz` (0600, one per league-season, written AFTER identity stripping), `hmac.key`, and the operator's `seeds.txt`. Kept indefinitely (operator decision 6, 2026-11-12).
+Data folder `data/sleeper-universe/` (git-ignored, mode 0700): `universe.sqlite` (0600), `raw/<season>/<league_id>.json.gz` (0600, one per league-season, written AFTER identity stripping), and the operator's `seeds.txt`. The key is elsewhere (see above). Kept indefinitely (operator decision 6, 2026-11-12).
 
 Identity stripping is an **allow-list per payload type** (`identity.py`); every other field is dropped, every kept value must have the expected shape (an id or enum token, a number, a list of those), and every user id becomes its keyed hash.
 

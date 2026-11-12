@@ -5,8 +5,8 @@ backend/tests/test_sleeper_universe_*.py). Usage and what is stored:
 backend/sleeper_universe/README.md. Public Sleeper REST v1 reads only, one
 throttled client; writes only data/sleeper-universe/ (git-ignored).
 
-    python3 scripts/sleeper_universe.py run --cap 50          # pilot, ~150 league-seasons
-    python3 scripts/sleeper_universe.py run                   # full pull / resume
+    python3 scripts/sleeper_universe.py run --cap 150   # pilot: ~150 lineages, 2024-2026, ~21,000 requests
+    python3 scripts/sleeper_universe.py run             # full pull / resume
     python3 scripts/sleeper_universe.py report
 """
 from __future__ import annotations

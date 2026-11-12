@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+from .client import RequestFailed
 from .identity import harvest
 
 KEPT_STATUSES = frozenset({"in_season", "post_season", "complete"})
@@ -70,13 +71,14 @@ class Discoverer:
         self.cap = cap
         self.emit = log
         self.stats = {"users_expanded": 0, "leagues_expanded": 0, "seeds_unresolved": 0,
-                      "lineage_merges": 0, "revived": 0}
+                      "lineage_merges": 0, "revived": 0, "failed_requests": 0}
+        self.failed_leagues: set[str] = set()   # not expanded this run; retried next run
 
     def cap_reached(self) -> bool:
         return self.store.kept_lineage_count() >= self.cap
 
-    def _get(self, path):
-        obj = self.client.get(path)
+    def _get(self, path, expect=None):
+        obj = self.client.get(path, expect=expect)
         harvest(obj, self.col)
         return obj
 
@@ -92,7 +94,8 @@ class Discoverer:
             if uid is not None:
                 self.expand_user(uid, 0)
         while not self.cap_reached():
-            row = self.store.next_league_to_expand(self.max_hops, self.seasons)
+            row = self.store.next_league_to_expand(self.max_hops, self.seasons,
+                                                   self.failed_leagues)
             if row is None:
                 break
             self.expand_league(row["league_id"], row["hop"])
@@ -116,7 +119,10 @@ class Discoverer:
         seed = seed.strip()
         if seed.isdigit():
             return seed
-        obj = self._get(f"/user/{quote(seed, safe='')}")
+        try:
+            obj = self._get(f"/user/{quote(seed, safe='')}")
+        except RequestFailed:
+            obj = None
         uid = obj.get("user_id") if isinstance(obj, dict) else None
         if not uid:
             self.stats["seeds_unresolved"] += 1
@@ -131,17 +137,31 @@ class Discoverer:
         todo = [s for s in self.seasons if s not in self.store.user_seasons_done(key)]
         if not todo:
             return
+        done = []
         for season in todo:  # newest first: keeps lineage ids stable
-            leagues = self._get(f"/user/{uid}/leagues/nfl/{season}") or []
-            for obj in leagues if isinstance(leagues, list) else []:
+            try:
+                leagues = self._get(f"/user/{uid}/leagues/nfl/{season}", expect=list)
+            except RequestFailed:
+                # Not marked done for that season: a later run lists it again.
+                self.stats["failed_requests"] += 1
+                continue
+            for obj in leagues:
                 if isinstance(obj, dict):
                     self.consider(obj, hop)
-        self.store.mark_user(key, hop, todo)
+            done.append(season)
+        if not done:
+            return
+        self.store.mark_user(key, hop, done)
         self.store.add_user_keys([key])
         self.stats["users_expanded"] += 1
 
     def expand_league(self, league_id: str, hop: int) -> None:
-        rosters = self._get(f"/league/{league_id}/rosters") or []
+        try:
+            rosters = self._get(f"/league/{league_id}/rosters", expect=list)
+        except RequestFailed:
+            self.stats["failed_requests"] += 1
+            self.failed_leagues.add(league_id)
+            return
         uids: list[str] = []
         for r in rosters if isinstance(rosters, list) else []:
             if not isinstance(r, dict):
@@ -189,7 +209,11 @@ class Discoverer:
             prev = _prev(cur)
             if prev is None or self.store.league_row(prev) is not None:
                 break
-            pobj = self._get(f"/league/{prev}")
+            try:
+                pobj = self._get(f"/league/{prev}")
+            except RequestFailed:   # chain ends here this time; a later merge relinks it
+                self.stats["failed_requests"] += 1
+                break
             ps = _season(pobj) if isinstance(pobj, dict) else None
             if ps is None or ps < self.min_season or ps not in self.seasons:
                 break
@@ -227,7 +251,11 @@ class Discoverer:
             for _ in range(len(self.seasons)):
                 if not cur_prev or self.store.league_row(cur_prev) is not None:
                     break
-                pobj = self._get(f"/league/{cur_prev}")
+                try:
+                    pobj = self._get(f"/league/{cur_prev}")
+                except RequestFailed:
+                    self.stats["failed_requests"] += 1
+                    break
                 ps = _season(pobj) if isinstance(pobj, dict) else None
                 if ps is None or ps not in self.seasons:
                     break
@@ -242,7 +270,11 @@ class Discoverer:
         for row in self.store.deferred_leagues():
             if self.cap_reached():
                 return
-            obj = self._get(f"/league/{row['league_id']}")
+            try:
+                obj = self._get(f"/league/{row['league_id']}")
+            except RequestFailed:
+                self.stats["failed_requests"] += 1
+                continue
             self.store.drop_league(row["league_id"])
             if not isinstance(obj, dict):
                 self.store.add_league(row["league_id"], None, row["hop"], None, None,

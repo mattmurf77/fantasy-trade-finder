@@ -72,7 +72,13 @@ class World:
             if st != 200:
                 return st, {}, b""
         if path not in self.routes:
-            return 200, {}, b"null"
+            # Like Sleeper: an unknown league or user is null; a list endpoint
+            # with nothing in it (an empty leg, a user with no leagues that
+            # season, a week after the season) is an empty list.
+            parts = path.split("/")
+            is_list = (parts[0] == "user" and len(parts) > 2) or \
+                      (parts[0] in ("league", "draft") and len(parts) > 2)
+            return 200, {}, b"[]" if is_list else b"null"
         return 200, {}, json.dumps(self.routes[path]).encode()
 
     # -- helpers -----------------------------------------------------------
@@ -580,7 +586,8 @@ SEEDS = ["secretusername001"]
 # Running the crawler against a world
 # ---------------------------------------------------------------------------
 
-TEST_KEY = "test-hmac-key-0123456789abcdef"
+TEST_KEY = "test-hmac-key-0123456789abcdefghijklmnop"
+OTHER_KEY = "another-hmac-key-9876543210zyxwvutsrqpo"
 
 
 class FakeClock:
@@ -596,7 +603,10 @@ class FakeClock:
         self.t += s
 
 
-def run_cli(world, data_dir, *args, key=TEST_KEY, seeds=SEEDS, log=None):
+def run_cli(world, data_dir, *args, key=TEST_KEY, seeds=SEEDS, log=None, lock_path=None):
+    """Runs the CLI against the world. The key comes from env; the key file
+    and the lock live in a temp folder beside the data folder, never the
+    operator's real ones."""
     from pathlib import Path
     from backend.sleeper_universe.cli import main
     data_dir = Path(data_dir)
@@ -605,9 +615,12 @@ def run_cli(world, data_dir, *args, key=TEST_KEY, seeds=SEEDS, log=None):
         (data_dir / "seeds.txt").write_text("\n".join(seeds) + "\n")
     clock = FakeClock()
     lines = []
-    code = main([args[0], "--data-dir", str(data_dir), *args[1:]], transport=world.transport,
+    side = data_dir.parent / f".{data_dir.name}-test-side"
+    side.mkdir(exist_ok=True)
+    code = main([args[0], "--data-dir", str(data_dir),
+                 "--key-file", str(side / "hmac.key"), *args[1:]], transport=world.transport,
                 sleep=clock.sleep, clock=clock, env={"SLEEPER_UNIVERSE_HMAC_KEY": key},
-                log=log or lines.append)
+                log=log or lines.append, lock_path=lock_path or side / "crawler.lock")
     return code, lines
 
 

@@ -53,7 +53,7 @@ def test_stops_after_consecutive_429s():
     calls = []
     c = cl.SleeperClient(_transport([429] * 20, calls), rate=4, max_consecutive_429=5,
                          clock=clock, sleep=clock.sleep)
-    with pytest.raises(cl.RateLimitStop, match="5 consecutive HTTP 429"):
+    with pytest.raises(cl.RateLimitStop, match="5 429s in a row"):
         c.get("/league/1/rosters")
     assert len(calls) == 5
 
