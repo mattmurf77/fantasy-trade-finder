@@ -127,7 +127,9 @@ function makeHarness(initial=null) {
     // Founders' review (docs/plans/founder-review/): a non-founder session — the
     // capability probe answers false, so the screen is the grading page only.
     '../api/founder':{getFounderCapability:async()=>false},
-    '../components/founder/FounderLabelReview':{},
+    '../components/founder/FounderReview':{},
+    // Trade rules' leave guard: no unsaved notes on the grading page.
+    '../components/founder/RuleWaterfallReview':{confirmLeaveNotes:(go)=>go()},
   };
   const out={};
   vm.runInNewContext(js,{exports:out,require:id=>{assert.ok(id in stubs,id);return stubs[id];},AbortController,

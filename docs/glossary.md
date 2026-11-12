@@ -695,6 +695,24 @@ only) is built by the page search, or by the **gated full solve** (the generator
 search with failing packages skipped and failing survivors dropped before ranking) when the
 page cannot be proven. `backend/deck_rules.py`, `backend/trade_fast_deck.py`.
 
+## Decline waterfall and rule catalog
+
+**Rule catalog** (`backend/rule_catalog.py`): the ordered list of every yes/no rule that can
+stop a candidate trade before it reaches a served owner deck, each with a plain name and
+description, its stage (candidate building, both-sides check, deck rules, after the deck is
+built), who it protects, the user setting that controls it, its source and whether it is
+counted today. `test_rule_catalog` fails when the engine records a reason the catalog does not
+list.
+
+**Decline waterfall** (`backend/rule_waterfall.py`, Founders' review): for one deck request,
+how many **candidate trades** the engine started with (every 1-for-1, 2-for-1 and 1-for-2 that
+can be built from the up-to-16 players per side the search considers) and how many each rule
+removed, in order, down to the cards served. Each candidate is counted once, at the first rule
+it fails, so started minus the removals equals served; cards added after the deck is built
+(liked trades) are shown separately. Built from a **diagnostic full solve**: the generator's
+own evaluator on every candidate, which the served page search skips for candidates it can
+prove would fail. Founders can attach notes to each rule (`founder_rule_notes`).
+
 ## Window evidence and dynasty roster proxy
 
 **Window evidence** records the selected/inferred outlook, provisional horizon and

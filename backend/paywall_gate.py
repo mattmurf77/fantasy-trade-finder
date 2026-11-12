@@ -137,6 +137,7 @@ ROUTES = {
     ("POST", "/api/admin/experiments/<key>/transition"): NEVER_GATE,
     ("POST", "/api/admin/experiments/preview"): NEVER_GATE,
     ("POST", "/api/admin/experiments/reseed-layers"): NEVER_GATE,
+    ("GET", "/api/admin/founder/rule-notes"): NEVER_GATE,   # founders' rule notes (cron secret)
     ("POST", "/api/admin/grading/add-fit-arms"): NEVER_GATE,
     ("POST", "/api/admin/grading/pregenerate"): NEVER_GATE,
     ("GET", "/api/admin/grading/report"): NEVER_GATE,
@@ -206,6 +207,10 @@ ROUTES = {
     ("GET", "/api/founder/capability"): FREE,     # founder-only (docs/plans/founder-review/)
     ("GET", "/api/founder/labels"): FREE,
     ("POST", "/api/founder/labels"): FREE,
+    ("GET", "/api/founder/rule-notes/<rule_key>"): FREE,
+    ("PUT", "/api/founder/rule-notes/<rule_key>"): FREE,
+    ("GET", "/api/founder/rule-waterfall"): FREE,
+    ("POST", "/api/founder/rule-waterfall"): FREE,
     ("POST", "/api/grading/cards/<card_id>"): FREE,
     ("POST", "/api/grading/sessions"): FREE,
     ("GET", "/api/grading/sessions/<session_id>/next"): FREE,
