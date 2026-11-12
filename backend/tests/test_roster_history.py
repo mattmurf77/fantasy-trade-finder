@@ -491,6 +491,9 @@ def _espn_sweep(eng, *, stored_swid, bound_owner_swid, bound_co_owners=None):
                         owner_swid="{CCCCCCCC-0000-0000-0000-0000000000CC}"),
     ]}
     mapped = {"rosters": {3: ["p1"], 4: ["p2"]}}
+    # u1's own binding to team 3 (per-user since platform-league-binding).
+    with eng.begin() as conn:
+        db_module._upsert_platform_binding(conn, "u1", "777", "espn", 3)
     with patch.object(db_module, "engine", eng), \
          patch.object(db_module, "get_espn_credential", return_value=cred), \
          patch.object(server._sleeper_write, "decrypt_token",
