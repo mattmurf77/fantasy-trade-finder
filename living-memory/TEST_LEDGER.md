@@ -1,3 +1,13 @@
+## 2026-11-12 — League rankings playoff tile; roster-changed card wording and count (D-253, G-078), branch `feat/league-rankings-playoff-tile`
+
+- **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 183 of 183 `check-*.js`, including the new `check-league-rankings-playoff-tile.js` and `check-roster-setup.js` at 166 passed; testid-lint OK. Backend: the digest test, the home-hub taxonomy test and every backend test that reads `mobile/src`: 483 passed (on the tile commit; later commits change no file those read). No backend code changed.
+- **What is pinned (tile):** League rankings mounts the tile and not the section; Standings still mounts the section; the tile's links (both handlers executed for both mounts); the shared query key; Home's mount verbatim; the strip path unchanged; the event shape.
+- **What is pinned (card):** the six title wordings, executed; kickers, defenses, IDP and unvalued players raise no card after setup or on arrival; one real arrival gives "1 new player on your roster" and the list is exactly him; a pre-fix stored record gives 0 where it gave 4, and a real arrival still gives 1; every write path records the set the card diffs.
+- **Sabotages, red then restored (32, subagent; checksums unchanged):** 15 on the tile, 6 on the wording, 11 on the count fix. Two assertions did not go red at first and were tightened.
+- **Main session:** read the League rankings diff; merged the note-removal branch in (no conflicts) and re-ran the tile, roster-setup, league-projection and header suites, `tsc` and testid-lint.
+- **Not verified:** anything on a device, in particular "Review outlook" from the legacy League summary push, and the cost of the card's extra board reads on Find a Trade.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Projected standings: free-agent summary line removed, branch `fix/projection-drop-fa-fill-line`
 
 - **App and web (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 182 of 182 `check-*.js`; testid-lint OK. Backend: the digest test, every backend test that reads `mobile/src` or `web/js`, and the league-projection tests: 636 passed. Full backend suite: CI on the PR.

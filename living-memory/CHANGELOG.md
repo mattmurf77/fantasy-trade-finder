@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — League rankings shows the playoff tile; the roster-changed card counts correctly (D-253, G-078)
+
+- **League rankings:** the full Projected standings section is replaced by the same playoff tile Home shows, linking to the Standings page.
+- **Roster-changed card:** the title names what is new ("15 new players on your roster"; picks are named separately). A bug that counted kickers, defenses and IDP players as permanently new, and brought the card back every session, is fixed.
+- **Projected standings:** the free-agent summary line is removed (same release).
+- **Needs the next app build.** Not verified on a device.
+
 ## 2026-11-12 — Projected standings: the free-agent summary line is removed
 
 - **What changed:** the sentence under the status line ("12 open lineup slots use the best available free agent; 1 has none and counts as 0", and its variants) is gone from the app and the web page. Operator: "we can remove the copy underneath".
