@@ -115,3 +115,86 @@ current saved season forecast selected in the app, signed in on a **verified** s
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry is for the main session to write.
 - **TestFlight verification:** the checklist above, by the operator, after the next build.
 - Express lane declared by the operator? no.
+
+---
+
+## Addendum 2026-11-12 — any label for any player
+
+**Ask (operator):** "For founder's review player labels, remove the controls limiting which label I can
+assign." **Branch:** `fix/founder-labels-any-label` (from `origin/main` `12ac0f1d`). Express lane: no.
+
+### What changed
+
+- **The rule.** Any of the four labels for any rostered QB / RB / WR / TE on the page: a starter may be made
+  Rebuild piece or Depth, a bench player Cornerstone or Win-now piece, a borderline or unprojected player (No
+  label) any label; mixed selections move together. The stored label **is** the label the engine uses
+  (`season_value.overridden_label`), replacing D-242's future-axis swap (design.md §2.1 is superseded, kept as
+  record). `startable`, `future`, the starter line and the lineup never move, so a label may disagree with
+  whether the player starts.
+- **Server.** `season_value.with_label_overrides` also keeps overrides for players rostered here without a
+  projection (`evidence["unprojected"]`), so their digest moves with them; `league_profile` applies an override
+  to a borderline, unprojected or no-line player too (it used to `continue` past them). `founder_review.rows`:
+  `movable_to` is all four on every row (kept for builds up to 1.22.0 (187), which enable chips from it);
+  `why_unlabelled` says why the **engine** has no label (set even when an override labels him); the summary's
+  `corrections` use `"none"` for an unlabelled side (a None side used to make no sense to the app and could not
+  be sorted against a label). The write route needed no change: `parse_write` never consulted `movable_to`.
+- **App.** `utils/founderReview`: no longer reads `movable_to`; `targetsFor` is all four once anyone is
+  selected; a draft may hold `'none'` (back to the engine's no label); Reset returns an unlabelled player to No
+  label and Save clears his override; "engine: No label" note. `LabelBandBoard`: no read-only chip; every chip
+  has a VoiceOver action per other label; a chip in No label says why the engine has none.
+- **Unchanged.** Scope (QB per QB format, RB / WR / TE `all`), founder-only access (404 for everyone else), the
+  table, the flag, `DECK_PIPELINE_VERSION` (the digest test did not fail: no listed `server.py` function
+  changed). `season_value.py` is in the engine code hash, so stored pages cold once on deploy.
+
+### Consumers when the label and `startable` disagree, or a labelled player has no projection
+
+| Consumer | Label disagrees with `startable` | Labelled, no projection |
+|---|---|---|
+| `_season_lean` (All-in / Contending viewer, revision 5) | Reads the label only for a player who starts for the team: a starter labelled Rebuild / Depth gets `LEAN_STARTS` (.25) not .40; a bench player is `LEAN_BENCH` whatever his label | Returns None before reading the label: revision 2's age rule (unchanged; open question 2) |
+| `_mirror_parts` / `_shed_plan_asset` (Rebuilding / Tanking label fit) | Label read as given (board-led refinements keep precedence) | Label read as given; `young` from age |
+| `_older_producer` / `_sell_share` (D-244 sell bonus) | Win-now piece or older Cornerstone counts as an older producer, starting or not | Same |
+| `plan_conflict` (label rule) | Label read as given | `future` None counts as market value (existing rule) |
+| `_season_signal` assets / `trade_narrative.season_block` | Founder's label printed; "starts for you" independent | No tag (`_season_projected` guard), no crash |
+| Founder page, admin label route (`rows_from_search`) | Shows the founder's label | Shows the founder's label |
+
+### Evidence
+
+- `backend/tests/test_founder_review.py`: any label for a starter, a bench, a borderline and an unprojected
+  player (pure rule, 24 cases); an unprojected player's override joins the evidence and digest; the route test
+  sets all four kinds, reads them back from the page and the admin route, checks the summary adds up and
+  `why_unlabelled`, then clears (move back / Reset) and gets the engine's labels back; consumers on the fixture
+  league with every label set against `startable` (3 outlooks); a whole revision 5 deck (label fit, sell bonus,
+  partner matching) prints the founder's labels. Access tests unchanged (404 for non-founders).
+- `mobile/tests/check-founder-review.js`: 3b / 3c / 3e and 4a–4c, 4f, 4h, 6e–6g replace the old restriction
+  checks. Each new or changed check sabotaged red, then green with the file's checksum unchanged (build report).
+- Runs and counts: build report.
+
+### Manual TestFlight checklist (replaces items 4–6, 8–9 above)
+
+Works on build 187 with the server deploy alone except where marked **(new build)**.
+
+4. Tap a starter, then **Depth**. Expected: he moves to Depth with "engine: Win-now piece" (or Cornerstone);
+   Save; leave and return: he stays in Depth.
+5. Tap a bench player and a starter together. Expected: all four Move-to chips are lit; tap **Cornerstone**:
+   both move.
+6. In No label, tap a borderline player and an unprojected one, then **Win-now piece**. Expected: both move;
+   Save; they stay; the summary reads "No label → Win-now piece: 2" (on 187 the moved chips show no "engine"
+   note; **(new build)** "engine: No label").
+7. Move a labelled player back to the band of his "engine: …" note, Save. Expected: the note goes, the summary
+   count drops.
+8. **(new build)** Reset to engine on that position. Expected: the two players from step 6 return to No label,
+   each saying "near the starter line" / "no projection"; Save; they stay there. On 187 Reset leaves them where
+   they are (see the build report).
+9. VoiceOver on a No-label chip: "Move to …" actions for all four labels.
+
+### Docs
+
+| Doc | Updated? |
+|---|---|
+| `docs/api-reference.md` | updated (`/api/founder/labels` GET `movable_to`, `why_unlabelled`, summary `"none"`; POST: any label) |
+| `docs/cross-client-invariants.md` | updated (Founders' review: Moves) |
+| `docs/glossary.md` | updated (Label override) |
+| design.md | updated (§2.1 superseded note, §2.2 rewritten, §4 seam) |
+| `docs/architecture.md`, `living-memory/HLD.md` | n/a because no module was re-wired |
+| `living-memory/*` (DECISIONS: amends D-242; TEST_LEDGER) | n/a here: the main session writes living-memory |
+| `docs/data-dictionary.md`, `docs/config-reference.md` | n/a because no schema, flag or knob changed |

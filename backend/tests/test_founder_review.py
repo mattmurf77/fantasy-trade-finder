@@ -15,7 +15,7 @@ from backend import database as db, feature_flags as ff, founder_review, season_
 from backend import server, trade_gen_bilateral_season as r5, trade_service as ts
 from backend.eval.season_replay import fixture_evidence, fixture_world
 from backend.tests.test_season_signal_worker import (  # noqa: F401
-    FLAG, Forecast, evidence, harness, owner_harness, revision_5, run_record, stored_league, world)
+    FLAG, PPG, Forecast, evidence, harness, owner_harness, revision_5, run_record, stored_league, world)
 from backend.tests.test_owner_generator_routes import ME, LEAGUE, rows, worker
 from backend.tests.test_fair_packages import TOKEN
 
@@ -51,15 +51,10 @@ def rb_profile(ev):
 
 ENGINE = {"kid": "cornerstone", "old": "win_now", "x": None, "y": None, "by": "rebuild", "bo": "depth",
           "gone": None, "pick1": "rebuild"}
-# (engine label here, override) -> the label the engine uses (design.md §2.1).
-TABLE = {
-    "kid": {"cornerstone": "cornerstone", "win_now": "win_now", "rebuild": "cornerstone", "depth": "win_now"},
-    "old": {"cornerstone": "cornerstone", "win_now": "win_now", "rebuild": "cornerstone", "depth": "win_now"},
-    "by": {"cornerstone": "rebuild", "win_now": "depth", "rebuild": "rebuild", "depth": "depth"},
-    "bo": {"cornerstone": "rebuild", "win_now": "depth", "rebuild": "rebuild", "depth": "depth"},
-    "x": dict.fromkeys(LABELS),       # borderline: the override says nothing about starting
-    "gone": dict.fromkeys(LABELS),    # unprojected
-}
+# The rule (design.md §2.1, amended 2026-11-12): the override IS the label the engine
+# uses, for a starter (kid, old), a bench player (by, bo), a borderline player (x) and an
+# unprojected one (gone). Whether he starts, and his future value, never move.
+CASES = ("kid", "old", "by", "bo", "x", "gone")
 
 
 def test_the_synthetic_league_has_every_engine_case():
@@ -69,19 +64,28 @@ def test_the_synthetic_league_has_every_engine_case():
     assert all("engine_label" not in item for item in prof["players"].values())
 
 
-@pytest.mark.parametrize("pid", sorted(TABLE))
+@pytest.mark.parametrize("pid", CASES)
 @pytest.mark.parametrize("override", LABELS)
-def test_the_rule_table_case_by_case(pid, override):
-    """Sabotage: apply the stored label verbatim (ignore the starts axis)."""
+def test_any_label_for_any_player(pid, override):
+    """Sabotage: D-242's future-axis swap (`overridden_label` keeping the starts axis), or
+    the `continue` that skipped overrides for an unprojected player."""
     ev = sv.with_label_overrides(rb_evidence(), [(pid, "all", override)])
     base, prof = rb_profile(rb_evidence())["players"][pid], rb_profile(ev)["players"][pid]
-    expected = TABLE[pid][override]
-    assert prof["label"] == expected
+    assert prof["label"] == override
     assert prof["startable"] == base["startable"] and prof["future"] == base["future"]
-    if expected != ENGINE[pid]:
+    if override != ENGINE[pid]:
         assert prof["engine_label"] == ENGINE[pid]
     else:
         assert "engine_label" not in prof
+
+
+def test_an_unprojected_players_override_joins_the_evidence():
+    """Sabotage: keep only projected players in with_label_overrides (the old filter)."""
+    ev = sv.with_label_overrides(rb_evidence(), [("gone", "all", "win_now")])
+    assert ev["label_overrides"] == {"gone": {"label": "win_now", "scope": "all"}}
+    assert ev["digest"] != rb_evidence()["digest"]
+    prof = rb_profile(ev)["players"]["gone"]
+    assert prof == {"label": "win_now", "future": None, "startable": None, "engine_label": None}
 
 
 def test_a_pick_is_never_overridden():
@@ -175,8 +179,7 @@ def test_no_override_rows_is_the_same_object_and_the_same_profile(fixture_ev):
     """Sabotage: always attach `label_overrides` (even empty) and re-digest."""
     assert sv.with_label_overrides(fixture_ev, []) is fixture_ev
     assert sv.with_label_overrides(fixture_ev, None) is fixture_ev
-    unprojected = fixture_ev["unprojected"][0]
-    elsewhere = [("not-in-this-league", "all", "win_now"), (unprojected, "all", "win_now")]
+    elsewhere = [("not-in-this-league", "all", "win_now")]
     assert sv.with_label_overrides(fixture_ev, elsewhere) is fixture_ev
     before = json.dumps(_fixture_profile(fixture_ev), sort_keys=True)
     after = json.dumps(_fixture_profile(sv.with_label_overrides(fixture_ev, elsewhere)), sort_keys=True)
@@ -186,6 +189,8 @@ def test_no_override_rows_is_the_same_object_and_the_same_profile(fixture_ev):
 
 
 def test_the_digest_moves_with_an_override_that_can_matter(fixture_ev):
+    unprojected = fixture_ev["unprojected"][0]
+    assert sv.with_label_overrides(fixture_ev, [(unprojected, "all", "win_now")])["digest"] != fixture_ev["digest"]
     projected = sorted(fixture_ev["players"])[0]
     one = sv.with_label_overrides(fixture_ev, [(projected, "all", "win_now")])
     two = sv.with_label_overrides(fixture_ev, [(projected, "all", "cornerstone")])
@@ -326,11 +331,12 @@ def test_the_page_lists_every_rostered_player_with_what_to_judge_by(founder):
                                "override", "startable", "movable_to", "why_unlabelled")} == {
         "name": "B1", "position": "RB", "team": "AAA", "age": 25, "ppg": 16.0, "line": 7.5,
         "label": "win_now", "engine_label": "win_now", "override": None, "startable": True,
-        "movable_to": ["cornerstone", "win_now"], "why_unlabelled": None}
+        "movable_to": list(LABELS), "why_unlabelled": None}
     assert b1["value"] > 0
     assert by_id["b4"]["label"] is None and by_id["b4"]["why_unlabelled"] == "borderline"
-    assert by_id["b4"]["movable_to"] == []
-    assert by_id["a3"]["label"] == "depth" and by_id["a3"]["movable_to"] == ["rebuild", "depth"]
+    # Any label for any player (amended 2026-11-12): build 187 enables its chips from this.
+    assert all(r["movable_to"] == list(LABELS) for r in body["players"])
+    assert by_id["a3"]["label"] == "depth"
     assert body["summary"]["positions"]["RB"] == {"moved": 0, "corrections": []}
     for private in (ME, "user_opp", LEAGUE):
         assert f'"{private}"' not in json.dumps(body["summary"])
@@ -410,6 +416,149 @@ def test_the_admin_route_reads_the_same_label(founder):
     admin_labels = {p["id"]: p["label"] for p in admin["players"]}
     assert admin_labels["b1"] == "cornerstone"
     assert admin_labels == {r["id"]: r["label"] for r in page["players"]}
+
+
+def test_any_label_for_a_starter_a_bench_borderline_and_unprojected_player(founder, monkeypatch):
+    """Amended 2026-11-12 (the operator: "remove the controls limiting which label I can
+    assign"). Starter b1 (win_now) -> depth, bench a3 (depth) -> cornerstone, borderline
+    b4 -> win_now, unprojected c2 -> rebuild: stored, read back, honoured by the label the
+    engine uses (the page and the admin route both read the profile), summary counts add
+    up; moving each back to the engine's label (a clear) restores the engine's labels.
+    Sabotages: the old future-axis swap; the projected-only filter in with_label_overrides;
+    `why_unlabelled` from the effective label; the summary's None -> "none"."""
+    Forecast(monkeypatch, built=evidence({k: v for k, v in PPG.items() if k != "c2"}, unprojected=["c2"]))
+    engine = _engine()
+    url = f"/api/founder/labels?league_id={LEAGUE}"
+    before = {r["id"]: r for r in founder.get(url, headers=H()).json["players"]}
+    assert (before["b1"]["label"], before["b1"]["startable"]) == ("win_now", True)
+    assert (before["a3"]["label"], before["a3"]["startable"]) == ("depth", False)
+    assert (before["b4"]["label"], before["b4"]["why_unlabelled"]) == (None, "borderline")
+    assert (before["c2"]["label"], before["c2"]["why_unlabelled"], before["c2"]["ppg"]) == (None, "unprojected", None)
+    calls = {"b1": "depth", "a3": "cornerstone", "b4": "win_now", "c2": "rebuild"}
+    response = founder.post("/api/founder/labels", json={"league_id": LEAGUE, "set": calls}, headers=H())
+    assert response.status_code == 200 and response.json["set"] == 4
+    assert stored(engine) == sorted((pid, "all", label) for pid, label in calls.items())
+    page = founder.get(url, headers=H()).json
+    after = {r["id"]: r for r in page["players"]}
+    for pid, label in calls.items():
+        row = after[pid]
+        assert (row["label"], row["override"], row["engine_label"]) == (label, label, before[pid]["label"])
+        assert row["startable"] == before[pid]["startable"] and row["future"] == before[pid]["future"]
+        assert row["why_unlabelled"] == before[pid]["why_unlabelled"]   # still why the ENGINE has none
+    assert {pid: r["label"] for pid, r in after.items() if pid not in calls} == {
+        pid: r["label"] for pid, r in before.items() if pid not in calls}
+    moved = {pos: v["moved"] for pos, v in page["summary"]["positions"].items()}
+    assert sum(moved.values()) == 4 and page["summary"]["overrides_here"] == 4
+    for pos, block in page["summary"]["positions"].items():
+        assert sum(c["count"] for c in block["corrections"]) == block["moved"]
+        assert all(c["from"] in founder_review.BANDS and c["to"] in founder_review.BANDS
+                   for c in block["corrections"])
+    pairs = {(c["from"], c["to"]) for block in page["summary"]["positions"].values() for c in block["corrections"]}
+    assert {("win_now", "depth"), ("depth", "cornerstone"), ("none", "win_now"), ("none", "rebuild")} == pairs
+    admin = founder.get(f"/api/admin/season-signal/labels?user_id={ME}&league_id={LEAGUE}",
+                        headers={"X-Cron-Secret": "s3cret"}).json
+    assert {p["id"]: p["label"] for p in admin["players"]} == {pid: r["label"] for pid, r in after.items()}
+    # Back to the engine's label (for b4 / c2: no label) = clear: the engine's labels return.
+    cleared = founder.post("/api/founder/labels", json={"league_id": LEAGUE, "clear": sorted(calls)}, headers=H())
+    assert cleared.json == {"set": 0, "cleared": 4, "overrides_total": 0}
+    page = founder.get(url, headers=H()).json
+    assert {r["id"]: (r["label"], r["engine_label"], r["override"]) for r in page["players"]} == {
+        pid: (r["label"], r["engine_label"], None) for pid, r in before.items()}
+    assert all(v["moved"] == 0 for v in page["summary"]["positions"].values())
+
+
+# ── downstream consumers when a label disagrees with `startable` (2026-11-12) ──
+#
+# On the fixture league: every rostered QB/RB/WR/TE gets a label that disagrees with
+# whether he starts (a starter -> rebuild / depth, a bench player -> cornerstone /
+# win_now), borderline players and unprojected players get labels too. Each consumer
+# must read the founder's label without raising, and nothing about who starts moves.
+
+def _adversarial(ev, world_kwargs):
+    plain = r5._Search(**world_kwargs, season_evidence=ev)
+    calls = []
+    for i, (pid, info) in enumerate(sorted(plain._profile["players"].items())):
+        if plain._position(pid) not in sv.POSITIONS:
+            continue
+        pick = (("rebuild", "depth") if info["startable"] is True else
+                ("cornerstone", "win_now") if info["startable"] is False else LABELS)[i % (2 if info["startable"] is not None else 4)]
+        calls.append((pid, sv.override_scope(plain._position(pid), ev["slots"]), pick))
+    return plain, dict((pid, label) for pid, _, label in calls), sv.with_label_overrides(ev, calls)
+
+
+@pytest.mark.parametrize("outlook", ["championship", "rebuilder", "jets"])
+def test_consumers_read_a_label_that_disagrees_with_startable(fixture_ev, outlook):
+    """`_season_lean` (win-now team), `_mirror_parts` / `_shed_plan_asset` (the label fit),
+    `_older_producer` / `_sell_share` (the sell bonus), `plan_conflict`. Sabotage: make
+    `SeasonLayer._label` (what they all read) return the engine's label (`engine_label`)."""
+    world_kwargs = fixture_world(outlook)
+    plain, calls, ev = _adversarial(fixture_ev, world_kwargs)
+    moved = r5._Search(**world_kwargs, season_evidence=ev)
+    unprojected = [p for p in calls if p not in moved._season_ppg]
+    disagree = [p for p in calls if p in moved._season_ppg and plain._profile["players"][p]["startable"] is not None]
+    assert unprojected and disagree
+    for pid, label in calls.items():
+        info, base = moved._profile["players"][pid], plain._profile["players"][pid]
+        assert info["label"] == label
+        assert (info["startable"], info["future"]) == (base["startable"], base["future"])
+    me = moved.teams[moved.user_id]
+    team = {**me, "outlook": outlook if outlook != "championship" else "rebuilder"}
+    for pid in calls:
+        assert moved.starts_for(me, pid) == plain.starts_for(me, pid)   # who starts never moves
+        lean = moved._season_lean(me, pid)
+        if pid not in moved._season_ppg:
+            assert lean is None             # unprojected: today's age rule, the label claims nothing
+        elif not moved.starts_for(me, pid):
+            assert lean == r5.LEAN_BENCH
+        else:
+            assert lean == (r5.LEAN_STARTS_LABELLED if calls[pid] in ("win_now", "cornerstone") else r5.LEAN_STARTS)
+        fit, how = moved._mirror_parts(team, pid)
+        if how not in ("board", "pick"):
+            expected_how = {"rebuild": "rebuild", "win_now": "win_now", "depth": None,
+                            "cornerstone": "cornerstone_young" if sv.young(moved._position(pid),
+                                                                          moved.players[pid].age)
+                            else "cornerstone_old"}[calls[pid]]
+            assert how == expected_how and (fit is None) == (expected_how is None)
+        assert moved._older_producer(team, pid) == (how in r5.NEVER_MILDER)
+    give = sorted(p for p in me["roster"] if p in calls)[:2]
+    receive = [p for p in unprojected if p not in me["roster"]][:1] or unprojected[:1]
+    share = moved._sell_share(team, give, receive)
+    assert -1.0 <= share <= 1.0
+    # plan_conflict: an unprojected incoming player's future counts as his market value.
+    players, top = moved._profile["players"], receive[0]
+    expect = (calls[top] == "win_now" and any(calls[p] in ("rebuild", "cornerstone") for p in give)
+              and moved.market[top] < sum(players[p]["future"] if players[p]["future"] is not None
+                                          else moved.market[p] for p in give))
+    got = sv.plan_conflict(plan="rebuilder", declared=True, usable_evidence=True,
+                           receive=receive, give=give, profile=moved._profile, market=moved.market)
+    assert got == ("label" if expect else False)
+
+
+@pytest.mark.parametrize("outlook,matching", [("championship", None), ("rebuilder", None), ("jets", None),
+                                              ("contender", 1.0)])
+def test_a_whole_deck_with_disagreeing_labels_runs_and_prints_the_founders_labels(fixture_ev, outlook, matching):
+    """Revision 5 end to end (label fit, sell bonus, partner matching in stage 2, the card's
+    season block) on the adversarial overrides: no exception; every proof's asset label is
+    the founder's; the season block prints a label only for a projected asset, and prints
+    the founder's. Sabotage: print `engine_label` in `_season_signal`'s assets."""
+    from backend import trade_narrative as tn
+    world_kwargs = fixture_world(outlook)
+    _, calls, ev = _adversarial(fixture_ev, world_kwargs)
+    config = {} if matching is None else {r5.MATCHING_KEY: matching}
+    cards, _ = r5.generate_bilateral_trades(**world_kwargs, season_evidence=ev, config=config)
+    assert cards
+    printed = 0
+    for card in cards:
+        proof = card.owner_evaluation.as_dict()
+        for asset in proof["season_signal"]["assets"]:
+            if asset["id"] in calls:
+                assert asset["label"] == calls[asset["id"]]
+        block = tn.season_block(proof, card, world_kwargs["players"])
+        for tag in (block or {}).get("labels", ()):
+            printed += 1
+            assert tag["label"] == calls[tag["id"]] and tag["id"] in ev["players"]
+    if outlook != "contender":
+        assert printed     # the block was built (season_block swallows errors into None)
 
 
 # ── pins ───────────────────────────────────────────────────────────────────────

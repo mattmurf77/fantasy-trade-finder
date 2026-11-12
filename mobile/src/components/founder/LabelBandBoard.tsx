@@ -6,6 +6,7 @@ import { Icon, Text, TickLabel } from '../chalkline';
 import {
   BANDS,
   BAND_LABEL,
+  LABELS,
   bandCounts,
   bandOf,
   engineNote,
@@ -25,7 +26,8 @@ import {
 // signals), each band a TickLabel header with its count, empty bands still
 // rendered. RosterTierBoard itself is typed on the eight-tier ladder and its
 // tier colour encodings, so it is not widened for this: label bands carry no
-// colour encoding (neutral ticks). A "No label" chip is read-only.
+// colour encoding (neutral ticks). Every chip can be moved to any label
+// (amended 2026-11-12); a chip in "No label" says why the engine has none.
 
 const COLUMNS = 3;
 
@@ -57,11 +59,10 @@ export default function LabelBandBoard({ rows, draft, selected, onToggle, onMove
   const renderChip = (row: FounderRow) => {
     const band = bandOf(row, draft);
     const note = engineNote(row, draft);
-    const readOnly = row.movable_to.length === 0;
-    const isSel = !readOnly && sel.has(row.id);
+    const why = band === 'none' ? unlabelledWhy(row) : null;
+    const isSel = sel.has(row.id);
     const facts = `${row.team ?? 'FA'} · ${row.age ?? '—'} · ${num(row.ppg)} pts · ${num(row.value, 0)}`;
-    const a11y = [row.name, row.position, BAND_LABEL[band], facts, note,
-      readOnly ? unlabelledWhy(row) : null].filter(Boolean).join(', ');
+    const a11y = [row.name, row.position, BAND_LABEL[band], facts, note, why].filter(Boolean).join(', ');
     const body = (
       <>
         <View style={[styles.rail, { backgroundColor: posColor(row.position) }]} />
@@ -70,8 +71,8 @@ export default function LabelBandBoard({ rows, draft, selected, onToggle, onMove
           {isSel ? <View style={styles.check}><Icon name="check" size={12} color={ice.base} /></View> : null}
         </View>
         <Text scale="dense" style={styles.meta} numberOfLines={1}>{facts}</Text>
-        {readOnly ? (
-          <Text scale="dense" style={styles.meta} numberOfLines={1}>{unlabelledWhy(row)}</Text>
+        {why ? (
+          <Text scale="dense" style={styles.meta} numberOfLines={1}>{why}</Text>
         ) : note ? (
           <Text scale="dense" style={styles.note} numberOfLines={1} testID={`founder-review.engine-note.${row.id}`}>
             {note}
@@ -79,20 +80,6 @@ export default function LabelBandBoard({ rows, draft, selected, onToggle, onMove
         ) : null}
       </>
     );
-    if (readOnly) {
-      return (
-        <View
-          key={row.id}
-          testID={`founder-review.chip.${row.id}`}
-          accessible
-          accessibilityLabel={a11y}
-          accessibilityState={{ disabled: true }}
-          style={[styles.cell, styles.chip, styles.chipOff]}
-        >
-          {body}
-        </View>
-      );
-    }
     return (
       <Pressable
         key={row.id}
@@ -100,13 +87,13 @@ export default function LabelBandBoard({ rows, draft, selected, onToggle, onMove
         accessibilityRole="button"
         accessibilityState={{ selected: isSel }}
         accessibilityLabel={a11y}
-        accessibilityActions={row.movable_to.filter((l) => l !== band).map((l) => ({
+        accessibilityActions={LABELS.filter((l) => l !== band).map((l) => ({
           name: `band:${l}`,
           label: `Move to ${BAND_LABEL[l]}`,
         }))}
         onAccessibilityAction={({ nativeEvent }: AccessibilityActionEvent) => {
           const l = nativeEvent.actionName.replace(/^band:/, '') as FounderLabel;
-          if (row.movable_to.includes(l)) onMove([row.id], l);
+          if (LABELS.includes(l)) onMove([row.id], l);
         }}
         onPress={() => onToggle(row.id)}
         style={({ pressed }) => [
@@ -172,7 +159,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chipSelected: { borderColor: ice.base },
-  chipOff: { opacity: 0.5 },
   // 3px position rail (dense-tile construction) — a data encoding.
   rail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   chipTop: { flexDirection: 'row', alignItems: 'center', gap: 4 },
