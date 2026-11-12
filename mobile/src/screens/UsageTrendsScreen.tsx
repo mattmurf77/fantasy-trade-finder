@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, Icon, Text, TickLabel } from '../components/chalkline';
 import ClaimSheet, { explainNoAdd, resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
@@ -174,9 +174,22 @@ export default function UsageTrendsScreen() {
     queryFn: () => getUsageTrends(focusId as string, otherIds, selectedWeeks, periodParam),
     enabled: enabled && !!focusId,
     staleTime: 10 * 60_000,
-    // A new week selection keeps the current list on screen while it loads.
-    placeholderData: keepPreviousData,
+    // A new week selection keeps the current list on screen while it loads —
+    // within the same league only. A league switch in the header (a new
+    // focusId) never shows the old league's players under the new name.
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[1] === focusId ? prev : undefined),
   });
+  // League switch (the header's selector): drop what belonged to the old
+  // league — an expanded row, the availability sheet, and a claim opened in
+  // another league. A claim for the NEW league is kept: a cross-league Add
+  // switches first and then opens its sheet. A trade hand-off's dismissing
+  // sheet is left to finish (doTrade awaits its dismissal). Filters, weeks,
+  // view, order and period are the user's choices and stay.
+  useEffect(() => {
+    setExpanded(null);
+    setClaim((c) => (c && c.leagueId !== focusId ? null : c));
+    if (!sheetDismissal.current) setSheetPlayer(null);
+  }, [focusId]);
   // D1: the focused league's capability, prefetched once in the background
   // on mount and when the focused league changes, so the card's own Add can
   // route by it. A real Sleeper league session only (never demo or local, and
@@ -589,6 +602,8 @@ export default function UsageTrendsScreen() {
   } else {
     const list = (
       <FlatList
+        // Keyed by league: a switch to a cached league starts at the top.
+        key={focusId}
         testID="usage-trends.list"
         data={items}
         keyExtractor={(it) => it.key}
@@ -711,11 +726,9 @@ export default function UsageTrendsScreen() {
       {showControls ? (
         <View style={styles.controls}>
           <View style={styles.subRow}>
-            {/* Two lines so "Weeks 1–4" never truncates beside the pill
-                (the canvas preview cut it at 390pt); a long league name
-                ellipsizes alone. */}
+            {/* The weeks beside the pill. No league-name line: the header's
+                league selector (TopBar) names the league directly above. */}
             <View style={styles.subText}>
-              <Text style={styles.subLeague} numberOfLines={1}>{leagueName ?? 'Your league'}</Text>
               {weeks.length ? (
                 <Text style={styles.sub} numberOfLines={1} testID="usage-trends.weeks-label">
                   {weeksLabel(weeks)}
@@ -1037,7 +1050,6 @@ const styles = StyleSheet.create({
   controls: { paddingTop: space.sm, gap: space.sm, borderBottomWidth: 1, borderBottomColor: ink.line },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg },
   subText: { flex: 1, minWidth: 0 },
-  subLeague: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
   sub: { ...type.bodySm },
   viewPill: {
     flexDirection: 'row',

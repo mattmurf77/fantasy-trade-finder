@@ -289,11 +289,14 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
         .includes(p.operatorToken.kind))),
     '5c. the route is registered UNCONDITIONALLY (no flag ternary or && around it)');
   const opts = s ? attrText(nav, s, 'options') : '';
-  assert(/headerShown: true/.test(opts) && /headerBackVisible: false/.test(opts) &&
-      /<HeaderTitle>Standings<\/HeaderTitle>/.test(opts) &&
-      /<HeaderBack testID="standings\.back-btn"/.test(opts) &&
-      /navigation\.canGoBack\(\) \? navigation\.goBack\(\) : navigation\.navigate\('Main'\)/.test(opts),
-    '5d. FreeAgents-style options: explicit HeaderBack standings.back-btn, canGoBack ? goBack : Main');
+  // Since 2026-11-12 the FreeAgents header itself: the league selector stays
+  // as the header (LeagueTopBarHeader), no native headerLeft at all.
+  assert(/headerShown: true/.test(opts) &&
+      /header: \(\) => \(\s*<LeagueTopBarHeader\s+title="Standings"/.test(opts) &&
+      /<HeaderBack\s+testID="standings\.back-btn"/.test(opts) &&
+      /navigation\.canGoBack\(\)\s*\?\s*navigation\.goBack\(\)\s*:\s*navigation\.navigate\('Main'\)/.test(opts) &&
+      !/headerLeft\s*:/.test(opts),
+    '5d. FreeAgents-style header: LeagueTopBarHeader with HeaderBack standings.back-btn, canGoBack ? goBack : Main');
   assert(/Standings: \{ segment\?: 'projected' \} \| undefined;/.test(read(NAV_REL)),
     "5e. RootStackParamList declares Standings with only the optional segment: 'projected' param");
   const fabs = findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'FeedbackFAB');

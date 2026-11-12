@@ -201,3 +201,170 @@ row), `mobile/src/components/CLAUDE.md` (TopBar row), `mobile/tests/README.md`.
 - **Evidence recorded:** for the operator to log in `living-memory/TEST_LEDGER.md`.
 - **TestFlight verification:** checklist above, unrun.
 - Express lane declared by the operator? no.
+
+---
+
+## Addendum 2026-11-12b — the league selector on four more pushed pages
+
+**Entry point:** operator reply to the builder's list of league-scoped pushes without the
+selector: "Yes add the selector to the recommended pages". **Builder:** branch
+`feat/league-selector-pushed-pages`, stacked on `fbc8cdc2` (needs `LeagueTopBarHeader` from this
+plan's branch). **Scope:** Standings, Usage Trends, Track record (`Receipts`) and Win Now. Not
+changed, on purpose: League summary (legacy push), Draft room, Mock draft, Pick assignment, Record
+picks, Shop asset (they take a league from route params, so a selector there needs a decision
+first; D-249 consequence 5).
+
+Same posture as the parent scope: no flag, no new analytics event (there is no league-switch event
+anywhere; `TopBar` is reused unchanged), no schema, no route, no backend change.
+
+### What changed, per screen
+
+| Screen | Change (file:line) |
+|---|---|
+| all four | `RootNav.tsx` registrations now use `header: () => <LeagueTopBarHeader …/>` with the screen's existing title, literal back testID and `canGoBack ? goBack : navigate('Main')` fallback: WinNow `:886`, Standings `:948`, UsageTrends `:979`, Receipts `:1015`. The native `headerTitle` / `headerStyle` / `headerTintColor` / `headerBackVisible` / `headerLeft` options are gone because no native header renders under a custom `header` (the #151 / RNS#3294 workaround is preserved: the JS `HeaderBack` is the only back control). None of the four had modal presentation or gesture options. |
+| header | `LeagueTopBarHeader` (`RootNav.tsx:291`) gains an optional `right` slot rendered after the centred title layer (`:312`, style `leagueSubHeaderRight :1356`), so it is tappable above it. |
+| Usage Trends | The registration passes `right={options.headerRight?.({ canGoBack })}` (`RootNav.tsx:997`), so the screen's own `setOptions({ headerRight })` info button (`UsageTrendsScreen.tsx:232`, testID `usage-trends.info`) renders in the slot unchanged. League-switch fixes below. The league-name line above "Weeks 6–9" is removed (`UsageTrendsScreen.tsx` controls row, ~`:730`): the header's league cluster names the league directly above it. The weeks label and the Simple \| Raw stats pill stay. |
+| Standings | `LeagueProjectionSection` is keyed by league (`StandingsScreen.tsx:204`). |
+| Track record, Win Now | Registration only. |
+
+### League-switch walk
+
+What the header's switch changes: `useSession.league` (TopBar → `LeagueSwitcherSheet` →
+`switchLeague`). Each screen reads it directly; none of the four takes a league route param
+(`RootNav.tsx` param list: `WinNow: undefined`, `UsageTrends: { ownership? }`, `Standings:
+{ segment? }`, `Receipts: undefined`), so there is no param/header conflict to resolve.
+
+**Standings.** `leagueId` from the session (`StandingsScreen.tsx:50`); every query is keyed by it —
+`['league-rosters', leagueId]` `:67`, `['league-users', leagueId]` `:73`, `['league-outlook',
+leagueId, 'consensus']` `:81` — so a switch renders the new league's table (spinner while uncached).
+The platform follows the switched league (`:54`), so switching to ESPN/MFL shows the honest
+unavailable card / `OutlookUnsupportedRow`. The selected Current \| Projected segment is a lens and
+stays; if Projected is selected, the new league's outlook loads (a Projected choice was made).
+**Fixed:** under `league.projections` the Projected body is `LeagueProjectionSection`, whose
+`ProjectionTables` holds `selected` (an expanded team row) as a roster id; Sleeper roster ids repeat
+across leagues (1…N), so a switch would have opened the same-numbered team in the new league. It is
+now keyed by league (`:204`), remounting on a switch. `standings_segment_changed` carries no
+`league_id` (unchanged; it never did).
+
+**Usage Trends.** `focusId` is the session league (`UsageTrendsScreen.tsx:163`) and keys the list
+(`:172`). **Fixed:** the query used `placeholderData: keepPreviousData`, so after a switch the OLD
+league's players, statuses and Add/Trade actions stayed on screen under the new league's name until
+the fetch landed (and `statusIn(focus, …)` read the old league's rosters while `onAdd` targeted the
+new `focusId`). The placeholder is now kept only when the previous query had the same league
+(`:180`): week and period changes keep the list up as before; a league switch shows the spinner.
+**Fixed:** league-bound local state is dropped on a switch (`:188–192`): the expanded Raw-stats row,
+the availability sheet, and a claim opened in another league. A claim for the NEW league is kept,
+because a cross-league Add (`doAdd`) switches first and then opens its sheet; a trade hand-off's
+sheet that is mid-dismissal is left alone (`doTrade` awaits its dismissal promise). The list is
+keyed by league (`:606`), so a switch to an already-cached league starts at the top. Kept, as the
+user's choices: metric, ownership, position, unit, weeks, view, order, period, column sort.
+Analytics: `usage_trends_view_changed` and `usage_trends_availability_opened` read `focusId`;
+`usage_trends_action` reads the acted league — all current after a switch. Empty/error states for the
+new league: flag off → `usage-trends.unavailable`; off-season → `usage-trends.off-season`; error →
+`usage-trends.error` with retry; no matches → `usage-trends.empty` (all unchanged).
+
+**Track record.** `leagueId` from the session (`ReceiptsScreen.tsx:200`) keys and fetches the one
+payload (`:204`); no placeholder, so an uncached league shows the loading branch, then its own
+ledger (a league with nothing tracked gets the designed "0 suggestions on record" ledger state, not
+an error). The selected window chip (14/28/56) is a lens and stays. `receipts_opened` (`:222`) fires
+again for the new league's resolved payload with its `league_id`; `receipts_window_changed` (`:236`)
+reads the current `leagueId`.
+
+**Win Now.** `WinNowScreen` renders `<WinNowContent key={`${userId}:${leagueId}`} />`
+(`WinNowScreen.tsx:66`): a switch remounts the content, dropping baseline, results, editor,
+evaluation, decisions, protected assets, budget/fairness inputs and the post-verify search, and
+the unmount cleanups abort in-flight loads and searches (`:122`, `:127`). Flag off or no league →
+`win-now.disabled`; an unsupported league → `win-now.unavailable`. Nothing to change.
+
+### Safe area and FAB
+
+All four already pad only the bottom (`edges={['bottom']}`) and mount their root-stack
+`FeedbackFAB` (`aboveTabBar={false}`; three branch mounts on Track record, one on the others);
+`TopBar` owns the top inset. Unchanged.
+
+### Height on a 375×667 pt screen (iPhone SE: 20 pt status bar, 0 pt home indicator)
+
+| | Before | After |
+|---|---|---|
+| Header | 64 (20 + 44 native bar) | 116 (20 + 52 `TOP_BAR_HEIGHT` + 44 sub-header) |
+| Standings / Track record / Win Now body | 603 | 551 |
+| Usage Trends fixed controls (8 top pad + 38 sub row + 8 + 46 metric + 8 + 44 ownership + 1 rule) | 153 | 153 |
+| Usage Trends list area | 450 (67 %) | 398 (60 %) |
+
+Removing the league-name line does not shorten the Usage Trends sub row at default text size: the
+row is as tall as the 38 pt view pill, and the two text lines it held were 36 pt. It does at larger
+Dynamic Type sizes. In Simple view the order and period pills (wrapped onto two lines on a 375 pt
+phone, ~96 pt) are the list header and scroll away. **Flag:** 398 pt is tight but usable; not
+restructured, per the brief.
+
+### Evidence
+
+- `mobile/tests/check-league-header-pages.js` (new, `npm run test:league-header-pages`): 43
+  assertions — 1a–1e per screen (registration, `LeagueTopBarHeader` + title, literal back testID,
+  fallback, no native `headerLeft`); 2a–2c the right slot and Usage Trends' info button; 3a–3b per
+  screen (FAB count/props, bottom-only inset); 4a–4j + 4b2 the league-switch fixes and keys; 5a the removed
+  league-name line.
+- Updated to the new truth: `check-home-destinations.js` 5d (Standings registers through
+  `LeagueTopBarHeader`, no `headerLeft`), `check-usage-trends.js` 2p2 (placeholder same-league
+  only). `check-receipts.js`, `check-win-now.js`, `check-home-hub.js` pass unchanged.
+- Sabotage: all 45 new or changed assertions (47 mutations; 4h three ways) broken in place, run red on that assertion, restored,
+  run green, file hash equal before and after (table in the hand-off report; runner in the builder's
+  scratch directory, not committed).
+- Code walk: above.
+
+### Docs
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | n/a | no route changed |
+| `living-memory/LLD.md` / `HLD.md` / `DECISIONS.md` | n/a here | living-memory is the operator's to write (brief) |
+| `docs/architecture.md` | n/a | no module wiring changed |
+| `docs/cross-client-invariants.md` | n/a | nothing shared across clients |
+| `docs/glossary.md` | n/a | no new term |
+| `docs/plans/README.md` | updated | this plan's row |
+| `mobile/src/screens/CLAUDE.md` | updated | Standings and Usage Trends rows; new Receipts and Win Now rows; the HeaderBack sharp edge |
+| `mobile/src/navigation/CLAUDE.md` | updated | root pushes list; new "League selector as the header" bullet |
+| `mobile/tests/README.md` | updated | the new suite; the Standings route and week-selection notes |
+
+### TestFlight checklist (needs a build from this branch; have two leagues, one Sleeper)
+
+**Standings**
+1. Home → Standings. Expected: the same top bar as the tabs (league name, format tile, bell, gear),
+   and under it a back chevron and "STANDINGS". Nothing under the status bar.
+2. Back chevron → Home. Re-open; edge-swipe back → Home.
+3. Tap the league name, pick the other league. Expected: the table reloads for that league (its
+   team names); an ESPN/MFL league shows "ESPN standings coming".
+4. Select Projected, then switch league. Expected: Projected stays selected and shows the new
+   league's outlook. With batch projections on: expand a team row, switch league; expected: no row
+   is expanded in the new league.
+
+**Usage Trends**
+5. Open from the Home hub's Usage Rates tile. Expected: top bar, then back chevron, "USAGE TRENDS"
+   and the info (i) button at the right. Tap (i): the "How Usage Trends works" alert.
+6. Under the header: "Weeks N–M" beside the Simple | Raw stats pill; no league-name line.
+7. Scroll down the list, then switch league in the header. Expected: a spinner (not the old
+   league's players), then the new league's list from the top. Your metric, ownership, filters and
+   Simple/Raw choice are unchanged.
+8. Raw stats: expand a row (chevron), switch league. Expected: no row is expanded after the switch.
+9. Switch back to the first league (now cached). Expected: its list shows at once, from the top.
+10. Change weeks in Filters (same league). Expected: the current list stays up while the new weeks
+    load (unchanged behaviour).
+11. Open a player's league pips, tap Add in the OTHER league (Sleeper). Expected: the app switches
+    league (header name changes) and the claim sheet opens for that league — not dropped.
+12. Same from Trade. Expected: switches league and lands in Find a Trade with that player pinned.
+13. Free agents → "See usage trends". Expected: opens on Free agents ownership, same header.
+
+**Track record**
+14. Trades → Track record. Expected: top bar, back chevron, "TRACK RECORD".
+15. Pick the 56D chip, switch league. Expected: the new league's ledger (spinner first if not
+    loaded); the 56D chip stays selected.
+
+**Win Now**
+16. League summary or Trades → Win Now. Expected: top bar, back chevron, "WIN NOW".
+17. Run a search (or tick a protected asset), then switch league. Expected: results, editor and
+    protected chips are cleared; the new league's projections load.
+
+**All four**
+18. The feedback button floats bottom-right with no tab bar, and opens with the page's route name.
+19. Bell and gear in the top bar open the inbox sheet / Settings; back returns to the page.
+20. Back to the tabs after a switch: the tab top bar shows the league you switched to.
