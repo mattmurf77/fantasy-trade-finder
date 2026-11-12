@@ -1,6 +1,6 @@
 # Research and test plan — a wider universe of completed Sleeper trades
 
-**Date:** 2026-11-12 · **Status:** plan, nothing built · **Entry point:** direct ask (operator)
+**Date:** 2026-11-12 · **Status:** plan approved, decisions in §11; build starting · **Entry point:** direct ask (operator)
 
 > "The goal of this is to expand the universe of completed trades so that we can use it to train our trade card generation models, identify additional details or inputs (or maybe prioritize league specific context on valuations)."
 > "We should store rosters and trades tied to those rosters to better understand outlook's role in our model."
@@ -19,7 +19,7 @@ This is a plan. A plan is not evidence anything shipped (see [`../CLAUDE.md`](..
 8. [Test plan and gates](#8-test-plan-and-gates)
 9. [Team](#9-team)
 10. [Risks and limits](#10-risks-and-limits)
-11. [Decisions needed](#11-decisions-needed)
+11. [Decisions](#11-decisions)
 
 ---
 
@@ -112,7 +112,7 @@ Stored: league id and format, lineage, roster ids, weekly rosters and starters, 
 
 **Not stored: usernames, display names, team names, avatars.** They are dropped in memory before anything is written.
 
-One choice for the operator (§11): to study whether the *same manager* behaves the same way across leagues, an owner needs a stable key. The plan stores a keyed hash of the Sleeper owner id (the key is kept outside the repo), never the id itself. Without it, hypotheses M1 to M3 cannot be tested. Rosters and trades stay tied together either way.
+To study whether the *same manager* behaves the same way across leagues, an owner needs a stable key. The store holds a keyed hash of the Sleeper owner id (the key is kept outside the repo), never the id itself (decision 2). Rosters and trades stay tied together.
 
 ### 5.4 Where it lives
 
@@ -229,7 +229,7 @@ A caution that belongs in every result: a trade that happened is not a trade tha
 
 | Phase | What | Gate to pass |
 |---|---|---|
-| 0 | Decisions in §11 | Operator answers |
+| 0 | Decisions in §11 | Done 2026-11-12 |
 | 1 | Build the crawler and schema | Tests on fixtures only (no live calls in tests); an independent review confirms no name field can reach disk; the throttle is tested |
 | 2 | Pilot: 150 league-seasons | Pilot report (§8.2) |
 | 3 | Full pull | Completes inside the request budget with no 429 stop; resumes cleanly from a forced interruption |
@@ -302,12 +302,16 @@ The five analysts start together once the dataset is frozen. That is where runni
 
 Access is covered by the operator's agreement with Sleeper for this app's development, as stated by the operator on 2026-11-12. The plan stores no names regardless.
 
-## 11. Decisions needed
+## 11. Decisions
 
-1. **Seeds.** How many usernames, and from how varied a set of leagues? Variety matters more than count.
-2. **Hashed owner key.** Keep a keyed hash of the owner id so one manager can be followed across leagues (recommended; needed for M1 to M3), or store nothing about owners.
-3. **Seasons.** 2024 to 2026 (recommended), or further back.
-4. **Cap.** 3,000 leagues (recommended), about 28 hours of pulling.
-5. **Historical values.** Does the KeepTradeCut agreement cover historical values? If not, use DynastyProcess's public history.
-6. **Retention.** Does the Sleeper agreement set any limit on how long this data is kept or where? If so, the store will encode it.
-7. **Order of work.** Outlook first (recommended, since it is the operator's main question and the win-now engine is waiting on evidence), then league context, then the ranker.
+Answered by the operator on 2026-11-12.
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Seeds | Every owner in the operator's own leagues, plus six usernames the operator supplied. The seed list is kept in the git-ignored data folder, never in the repo |
+| 2 | Owner key | Keyed hash of the owner id. No names stored |
+| 3 | Seasons | 2024 to 2026 |
+| 4 | Cap | 3,000 leagues |
+| 5 | Historical values | Both: KeepTradeCut (the operator confirms the agreement covers it) and DynastyProcess. How KeepTradeCut's history is delivered is still to be settled |
+| 6 | Retention | No limit. The data is kept for further analysis |
+| 7 | Order | The analysts work in parallel, one per focus, once the data is pulled and frozen. Outlook is reported first |
