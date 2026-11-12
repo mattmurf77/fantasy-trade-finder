@@ -41356,7 +41356,9 @@ def league_free_agents_route():
                                     # SAME raw board Elo `value` was priced
                                     # from (RankingService.tier_for_elo;
                                     # never derived from `value`)
-           "pos_rank": int,         # 1-based rank within position among FAs
+           "pos_rank": int,         # 1-based OVERALL rank at the position
+                                    # on the caller's board, rostered
+                                    # players counted (picks never)
            "drop_suggestion": {"player_id", "name", "position",
                                "value", "delta", "tier"} | null}, ...
         ],  # top 50 after the position filter
