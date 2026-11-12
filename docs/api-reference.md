@@ -1159,7 +1159,7 @@ The MFL analogue of Send in Sleeper — but riding MFL's **documented, sanctione
 | 404 | `feature_disabled` | Flag off |
 | 403 | `verification_required` | Session not verified (P1 hard gate) |
 | 404 | `mfl_not_linked` | League isn't a linked MFL league, or is linked by a different FTF user (only the linker has a franchise binding) |
-| 409 | `mfl_franchise_unknown` | League row has no `platform_my_team` → re-link. Since I-2, also returned when a successful live `rosters` export doesn't list the caller's franchise |
+| 409 | `mfl_franchise_unknown` | The caller has no binding for the league (`platform_league_bindings`, D-246) → re-link. Since I-2, also returned when a successful live `rosters` export doesn't list the caller's franchise |
 | 409 | `mfl_not_connected` | No stored/session MFL cookie → prompt MFL sign-in (#177 flow) |
 | 409 | `mfl_auth_expired` | MFL rejected the cookie (HTTP 401/403 or auth-flavored error body) — stored credential dropped → prompt re-sign-in. Carries `detail` == `message` ("Your MFL sign-in expired — sign in again."). **C10 (2026-10-27):** MFL's raw body is logged only, never returned |
 | 422 | `mfl_asset_unmapped` | ≥1 asset failed to map (player crosswalk miss, pick absent from the futureDraftPicks snapshot, or a generic pick rung) — hard block, carries `unmapped[]`. Reported before the I-2 ownership check below |
@@ -1187,7 +1187,7 @@ The ESPN analogue of Send in Sleeper/MFL, riding ESPN's **undocumented** `lm-api
 | 404 | `feature_disabled` | Flag off (today: everywhere — `espn.send` is absent from features.json) |
 | 403 | `verification_required` | Session not verified (P1 hard gate) |
 | 404 | `espn_not_linked` | League isn't a linked ESPN league, or is linked by a different FTF user (only the linker has a team binding) |
-| 409 | `espn_team_unknown` | League row has no `espn_my_team_id`, or that team vanished from the live league → re-link |
+| 409 | `espn_team_unknown` | The caller has no binding for the league (`platform_league_bindings`, D-246), or that team vanished from the live league → re-link |
 | 409 | `espn_not_connected` | No stored/decryptable ESPN cookie pair → prompt the ESPN connect flow |
 | 409 | `espn_auth_expired` | ESPN rejected the cookies (401/403 on the pre-flight read OR the write) — stored credential dropped → reconnect. **TODO(live-verify):** until the auth probe clears, this can also mean cookies alone never authorize a server-side write. **C10 (2026-10-27):** a write-side 401/403 carries `detail` == `message` == "Your ESPN sign-in has expired. Connect ESPN again to send." (addendum 10's optional line); ESPN's raw body is logged only, never returned |
 | 422 | `espn_pick_unsupported` | ≥1 pick asset in the arrays — hard block (ESPN pick encoding unverified), carries `picks[]` |
