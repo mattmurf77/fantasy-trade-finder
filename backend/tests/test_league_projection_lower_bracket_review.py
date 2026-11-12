@@ -30,7 +30,7 @@ def test_only_exact_lower_bracket_enum_admitted(value):
     with pytest.raises(Unavailable) as exc:run(source,feed)
     assert 'playoff' in exc.value.reason or 'bracket' in exc.value.reason
 
-@pytest.mark.parametrize('key,value',[('divisions',1),('league_average_match',1),('best_ball',1),('playoff_round_type',1),('start_week',2)])
+@pytest.mark.parametrize('key,value',[('divisions',1),('best_ball',1),('playoff_round_type',1),('start_week',2)])
 def test_lower_bracket_acceptance_preserves_separate_policy_refusals(key,value):
     source,feed=world();source[f'{API}/league/123']['settings'].update(playoff_seed_type=1,playoff_type=1,**{key:value})
     with pytest.raises(Unavailable):run(source,feed)

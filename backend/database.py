@@ -646,6 +646,13 @@ leagues_table = Table("leagues", metadata,
     # Season-stamped, so a future season resolves nothing (#273).
     # NULL = unresolved → owned picks keep today's generic round label.
     Column("draft_slot_order", Text),
+    # ── League median (Sleeper `settings.league_average_match`) ──────────
+    # 1 = every week also books a result against the league median score,
+    # 0 = head-to-head only, NULL = unknown (not a Sleeper league, or not
+    # synced since this column arrived). Written by upsert_league from the
+    # league payload session init already fetched; refreshed on every sync.
+    # Descriptive only: the playoff forecast reads the live setting.
+    Column("median_game", Integer),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -4325,6 +4332,9 @@ def _migrate_db() -> None:
         ("leagues",            "draft_status",          "VARCHAR"),
         ("leagues",            "draft_status_confidence", "VARCHAR"),
         ("leagues",            "draft_status_checked_at", "VARCHAR"),
+        # League median setting (docs/plans/league-projections/median-leagues-scope.md).
+        # NULL on every existing row until that league's next sync; no backfill.
+        ("leagues",            "median_game",           "INTEGER"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -6975,6 +6985,14 @@ def get_unlocked_formats(user_id: str) -> list[str]:
 # League operations
 # ---------------------------------------------------------------------------
 
+def league_median_setting(meta) -> int | None:
+    """1/0 from a Sleeper league payload's `settings.league_average_match`;
+    None when the payload or the key is absent or not 0/1 (never guessed)."""
+    settings = meta.get("settings") if isinstance(meta, dict) else None
+    value = settings.get("league_average_match") if isinstance(settings, dict) else None
+    return value if type(value) is int and value in (0, 1) else None
+
+
 def upsert_league(
     league_id: str,
     user_id: str,
@@ -6986,6 +7004,7 @@ def upsert_league(
     platform: str | None = None,
     require_user: bool = False,
     only_if_exists: bool = False,
+    median_game: int | None = None,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -7010,6 +7029,9 @@ def upsert_league(
     raises AccountGone when that row is gone) and, for a row it found at its
     start or a platform league's, `only_if_exists`: update only, so a row an
     account deletion removed in between is never re-created.
+
+    `median_game` (1/0, see `league_median_setting`) is written on insert and
+    refreshed on every update that knows it; None leaves the stored value.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -7025,7 +7047,9 @@ def upsert_league(
         "created_at":        now,
         "updated_at":        now,
         "platform":          platform,
+        "median_game":       median_game,
     }
+    refresh = {"median_game": median_game} if median_game is not None else {}
 
     with engine.begin() as conn:
         if require_user:
@@ -7033,7 +7057,7 @@ def upsert_league(
         if only_if_exists:
             conn.execute(update(leagues_table)
                          .where(leagues_table.c.sleeper_league_id == league_id)
-                         .values(name=name, updated_at=now))
+                         .values(name=name, updated_at=now, **refresh))
             return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
@@ -7048,6 +7072,7 @@ def upsert_league(
             set_={
                 "name":       stmt.excluded.name,
                 "updated_at": stmt.excluded.updated_at,
+                **({"median_game": stmt.excluded.median_game} if refresh else {}),
             },
         )
         conn.execute(stmt)
