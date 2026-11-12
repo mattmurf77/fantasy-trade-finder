@@ -23,6 +23,8 @@ import { Badge, PositionBadge, TierChalkBadge, RookieBadge, InjuryBadge, Text } 
 import { TIER_LABEL } from '../utils/tierBands'; // tier name in the composed a11y label
 import { colors } from '../theme/colors'; // medal tokens (gold/silver) for rank accents
 import { useFlag } from '../state/useFeatureFlags';
+import ProjectedPickTag from './ProjectedPickTag';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 import type { Player, Tier } from '../shared/types';
 
 export interface PlayerCardProps {
@@ -174,6 +176,11 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   // which is "no experience", not "rookie season": never badge a pick RK.
   const isRookie =
     player.years_experience === 0 && String(player.position) !== 'PICK';
+  // Projected draft slot (utils/projectedPick): a valid pair prints the
+  // server's `proj_name` verbatim and adds the flare tag; anything else
+  // (absent, malformed, one field only) prints `player.name` as before.
+  const proj = projectedPick(player);
+  const displayName = proj ? proj.name : player.name;
 
   // Position rail + badge — position hexes are cross-client invariants,
   // rendered only via the chalkline re-export.
@@ -205,7 +212,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   const composedLabel =
     accessibilityLabel ??
     [
-      player.name,
+      displayName,
       String(player.position),
       teamStr,
       rank != null ? `ranked ${rank} of 3` : null,
@@ -213,6 +220,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
       posRank ?? null,
       isRookie ? 'rookie' : null,
       injury ? `injury ${injCode ?? injury}` : null,
+      proj ? projectedPickA11y(proj) : null,
     ]
       .filter(Boolean)
       .join(', ');
@@ -258,7 +266,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
         <View style={styles.denseMain}>
           <View style={styles.denseLine1}>
             <Text scale="dense" style={styles.denseName} numberOfLines={1}>
-              {player.name}
+              {displayName}
             </Text>
             <Text scale="dense" style={styles.denseTeam}>{teamStr}</Text>
             {isRookie && denseMicroTags && (
@@ -287,6 +295,7 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
                 {injCode ?? injury}
               </Text>
             ) : null}
+            {proj ? <ProjectedPickTag short /> : null}
           </View>
           {/* #299 — line 2 exists to hold the tier badge + `statsSlot`. In
               single-line mode the badge moves to the right cluster below and
@@ -375,11 +384,25 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
                 <Badge label={injury} color={semantic.neg} colorText />
               )
             ) : null}
+            {/* Projected draft slot — in the wrapping badge row, after the
+                fact badges and before the host's badgeSlot. `compact` rows
+                (the two-column trade card) are ~84pt wide beside their
+                controls, under the full word's ~90pt, so they print PROJ. */}
+            {proj ? <ProjectedPickTag short={compact} /> : null}
             {badgeSlot}
           </View>
 
-          <Text scale="body" style={[type.title, styles.name]} numberOfLines={1}>
-            {player.name}
+          {/* A projected pick in a compact (two-column trade card) row may
+              take a second line: at ~84pt the 16pt name "2027 1.02 (from
+              dondags)" would ellipsize to "2027 1.0…" and cut the very slot
+              the tag explains. Two lines break after "2027 1.02"; only the
+              "(from …)" tail can truncate. Every other row stays one line. */}
+          <Text
+            scale="body"
+            style={[type.title, styles.name]}
+            numberOfLines={proj && compact ? 2 : 1}
+          >
+            {displayName}
           </Text>
           {belowNameSlot}
 

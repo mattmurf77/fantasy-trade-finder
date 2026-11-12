@@ -893,6 +893,7 @@ from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
     priced_pool_value,          # read-time market pricing seam (D-144)
+    projected_pick_slot,        # projected slot value: the slot shown
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -1159,15 +1160,17 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     # such row carries its provenance, and so does a combo containing one.
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)          # D-090, once per call
+    projection = _league_pick_projection(league_id)     # projected slot value, once per call
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
-        val = _priced_pick_value(pk, slot_order, scoring_format)
+        val = _priced_pick_value(pk, slot_order, scoring_format, projection)
         if pid in skip or val <= 0:
             continue
         assets.append({
             "id":       pid,
-            "name":     _owned_pick_label(pk, slot_order),
+            "name":     _owned_pick_label(pk, slot_order, projection, scoring_format),
+            **_owned_pick_projection_fields(pk, slot_order, projection, scoring_format),
             "position": "PICK",
             "team":     None,
             "value":    round(val, 1),
@@ -4593,7 +4596,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 25
+DECK_PIPELINE_VERSION = 26
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4643,6 +4646,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_league_pick_projection", "_load_pick_projection_summary",  # projected slot value
     "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
@@ -4651,7 +4655,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
     "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
     "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
-    "_value_core_live", "_slot_labels_enabled",
+    "_value_core_live", "_slot_labels_enabled", "_pick_projection_enabled",
     # the stored card's content
     "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
     "_owner_public_selection", "player_to_dict",
@@ -4710,11 +4714,13 @@ DECK_PIPELINE_IGNORED = {
     "_iso_age_days": "a date utility",
     "_FA_LEAGUE_META_TTL": "a cache TTL",
     "_SLOT_ORDER_TTL_SECONDS": "a cache TTL",
+    "_PICK_PROJECTION_TTL_SECONDS": "a cache TTL",
     "_THOMPSON_PRIOR_CACHE_TTL_S": "a cache TTL",
     "_thompson_prior_cache": "a mutable cache, not a constant",
     # copy and label formatting on stored cards (copy churn; models-eng's call: out)
     "_standing_offer_reason": "label copy only",
     "_owned_pick_label": "label copy only",
+    "_owned_pick_projection_fields": "label copy only (projected slot value's proj_slot / proj_name)",
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
     "_aggregate_pick_label": "label copy only (the medians' value_label; the fit block reads only value)",
@@ -4750,6 +4756,7 @@ DECK_PIPELINE_PINS = {
     23: "68e072f20220238b",  # Partner outlook from the saved forecast (trade.partner_outlook_projection, default off): the job's one forecast read (request preload, else the worker's) gives a league-mate with no saved outlook an inferred_outlook from their playoff chance (45% cut, two bands) in the owner context, with outlook_source on every league-mate's preferences; the fit context tags those reads source projection; flag off: no read, no key, terms and order unchanged.
     24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
     25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector owner_bilateral_revision_5_enabled, default 0): one read-only forecast read per organic owner job, recorded on the request record (digest in the hash), passed only to revision 5; the five revision-5 knobs leave the request hash unless revision 5 is selected; presentment reads owner_presentment_version; trade_card_to_dict adds season_block; flag off and selector 0: context, hash, terms, order and payload unchanged.
+    26: "73c9401b97056485",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4764,6 +4771,7 @@ _ENGINE_CODE_MODULES = (
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "pick_projection.py",         # projected slot value: next-draft firsts by projected order
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
@@ -7471,10 +7479,12 @@ def _trade_current_snapshot(league_id: str, scoring_format: str):
     from .database import engine as _engine
     try:
         snap = _trade_roster_snapshot(league_id)
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -8516,10 +8526,12 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
     from .database import engine as _engine
     extra = {"parts": parts} if parts is not None else {}
     try:
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key, **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -11071,10 +11083,11 @@ def _build_trade_roster_context(*, sess, league, players, seed_map,
     missing = [pk for pk in picks if str(pk["pick_id"]) not in ctx.assets]
     if missing:
         slot_order = _league_slot_order(league_id)
+        projection = _league_pick_projection(league_id)
         for pk in missing:
             pid = str(pk["pick_id"])
             ctx.assets[pid] = Asset(pid, frozenset(),
-                float(_priced_pick_value(pk, slot_order, scoring_format)), is_pick=True)
+                float(_priced_pick_value(pk, slot_order, scoring_format, projection)), is_pick=True)
     # Explicit intent and inferred defaults are different evidence. No live
     # point provider exists yet: leave projections absent and retain that
     # uncertainty in the frozen benefit snapshot.
@@ -15394,7 +15407,7 @@ def player_to_dict(p) -> dict:
         "injury_status",        "injury_body_part",
         "birth_date",           "height",  "weight",
         "college",              "search_rank", "adp",
-        "pick_value",
+        "pick_value",           "proj_slot", "proj_name",
     ):
         val = getattr(p, attr, None)
         if val is not None:
@@ -19670,10 +19683,11 @@ def _consensus_pricing(fmt: str, league_id: str | None = None):
             # 60s cache), never per pick — same discipline as the deck
             # lane's lookup in `_owned_pick_assets`.
             _slot_order = _league_slot_order(league_id)
+            _projection = _league_pick_projection(league_id)
             for _p in load_draft_picks(league_id=league_id,
                                        source=_pick_read_source()):
                 league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                    _p, _slot_order, fmt)
+                    _p, _slot_order, fmt, _projection)
                 league_pick_rows.append(_p)
         except Exception as _lp_err:
             log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
@@ -20360,13 +20374,15 @@ def get_league_picks():
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
         slot_order = _league_slot_order(league_id)      # D-090, once per request
+        projection = _league_pick_projection(league_id) # projected slot value, once per request
         def _serialize(p: dict) -> dict:
-            priced = _priced_pick_value(p, slot_order, fmt)
+            priced = _priced_pick_value(p, slot_order, fmt, projection)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
                     "original_username": pick_team_name(p, "original"),
                     "owner_username": pick_team_name(p, "owner", raw),
-                    "label": _owned_pick_label(p, slot_order),
+                    "label": _owned_pick_label(p, slot_order, projection, fmt),
+                    **_owned_pick_projection_fields(p, slot_order, projection, fmt),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
         all_picks = [_serialize(p) for p in raw]
@@ -20381,7 +20397,8 @@ def get_league_picks():
         return jsonify({"error": "internal_error"}), 500
 
 
-def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
+def _owned_pick_label(p: dict, slot_order: dict | None = None, projection=None,
+                      scoring_format: str = DEFAULT_SCORING) -> str:
     """Display label for an owned pick, e.g. "2027 1st" or
     "2026 2nd (from Jared)" when the pick was acquired via trade.
 
@@ -20399,18 +20416,56 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
 
     `slot_order` is passed in, never looked up here: this runs once per pick and
     the lookup is once per league (see `_league_slot_order`).
+
+    Projected slot value (operator ruling 2026-11-11) — with `projection`
+    (`_league_pick_projection`, the one the price came from) a pick whose
+    price the projection set names its projected slot in place of the round
+    and ends in the plain-text marker: "2027 1.02 (from dondags) · projected".
+    `_owned_pick_projection_fields` carries the same name without the marker
+    for clients that render their own tag. `projection=None` changes nothing.
     """
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return f"{name}{_PROJECTED_PICK_MARKER}" if projected else name
+
+
+#: The plain-text marker an adjusted pick's `name`/`label` ends with, so a
+#: client build that predates `proj_name` still says it is a projection.
+_PROJECTED_PICK_MARKER = " \u00b7 projected"
+
+
+def _owned_pick_name(p: dict, slot_order: dict | None, projection,
+                     scoring_format: str) -> tuple[str, str | None]:
+    """`(name without marker, projected slot or None)` — the one composition
+    behind `_owned_pick_label` and `_owned_pick_projection_fields`. A real
+    D-090 slot wins; else a pick the projection priced shows its projected
+    slot (`pick_values.projected_pick_slot`); else the round ordinal."""
     season = p.get("season")
     rnd = int(p.get("round") or 0)
     slot = pick_slots.slot_for(slot_order, season, rnd,
                                p.get("original_roster_id"))
+    projected = None
+    if not slot and projection is not None:
+        guess = projected_pick_slot(p, projection, scoring_format)
+        projected = pick_slots.slot_suffix(rnd, guess) if guess else None
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
-            else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
+            else projected or _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
     original = pick_team_name(p, "original")
     if p.get("is_traded") and original:
-        return f"{base} (from {original})"
-    return base
+        return f"{base} (from {original})", projected
+    return base, projected
+
+
+def _owned_pick_projection_fields(p: dict, slot_order: dict | None, projection,
+                                  scoring_format: str = DEFAULT_SCORING) -> dict:
+    """`{"proj_slot": "1.02", "proj_name": "2027 1.02 (from dondags)"}` for a
+    pick the projection priced, else `{}` — so an unadjusted pick's payload is
+    byte-identical. Clients print `proj_name` plus their own PROJECTED tag and
+    never compose or parse these strings (docs/cross-client-invariants.md)."""
+    if projection is None:
+        return {}
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return {"proj_slot": projected, "proj_name": name} if projected else {}
 
 
 def _pick_labels_by_id(asset_ids) -> dict[str, str]:
@@ -20482,11 +20537,13 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
+        projections: dict[str, object] = {}
         for r in rows:
             m = r._mapping
             lg = str(m["league_id"] or "")
             if lg not in orders:
                 orders[lg] = _league_slot_order(lg)
+                projections[lg] = _league_pick_projection(lg)
             labels[m["pick_id"]] = _owned_pick_label({
                 "season":             m["season"],
                 "round":              m["round"],
@@ -20495,7 +20552,7 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "original_roster_id": m["original_roster_id"],
                 "source":             m["source"],
                 "original_user_id":   m["original_user_id"],
-            }, orders[lg])
+            }, orders[lg], projections[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
         # route; the caller falls back to the raw id exactly as before.
@@ -20721,6 +20778,99 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
+# ── Projected slot value — next-draft firsts by projected draft order ─────
+# docs/plans/pick-value-projected-slot/design.md. The twin of
+# `_league_slot_order`: one read per LEAGUE, cached, passed down to every
+# pick. The cache holds the knob-free run summary; the gates and knobs are
+# applied on every call (a dict of floats), so a knob write takes effect at
+# the next reload without waiting out the TTL.
+
+_PICK_PROJECTION_TTL_SECONDS = 300
+_pick_projection_cache: dict[str, tuple[float, object]] = {}
+_pick_projection_lock = threading.Lock()
+
+
+def _pick_projection_enabled() -> bool:
+    """Read live (not off the FLAGS snapshot), like `_slot_labels_enabled`."""
+    return is_enabled("picks.projected_slot_value")
+
+
+def _load_pick_projection_summary(league_id: str):
+    """The newest complete baseline forecast for the league from ANY user
+    whose model is current, compacted, or None. Baselines are the targets'
+    `last_success_id` rows (scenario runs are user what-ifs and never are).
+    Reads `result_json` one row at a time, newest first, so a valid newest
+    run costs one parse."""
+    from sqlalchemy import select as _sa_select
+    from .database import (engine as _engine, get_league_platform,
+                           league_projection_runs_table as _runs,
+                           league_projection_targets_table as _targets)
+    from .league_projections.core import VERSION as _forecast_version
+    from . import pick_projection as _pp
+    if get_league_platform(league_id) != "sleeper":
+        return None
+    with _engine.connect() as conn:
+        baselines = _sa_select(_targets.c.last_success_id).where(
+            _targets.c.league_id == str(league_id),
+            _targets.c.last_success_id.is_not(None))
+        ids = conn.execute(_sa_select(_runs.c.run_id, _runs.c.created_at).where(
+            _runs.c.league_id == str(league_id), _runs.c.status == "complete",
+            _runs.c.run_id.in_(baselines)).order_by(_runs.c.created_at.desc())).fetchall()
+        for run_id, created_at in ids:
+            text = conn.execute(_sa_select(_runs.c.result_json).where(
+                _runs.c.run_id == run_id)).scalar()
+            summary = _pp.compact(text, run_id=run_id, created_at=created_at)
+            if summary is not None and summary.model_version == _forecast_version:
+                return summary
+    return None
+
+
+def _league_pick_projection(league_id: str):
+    """The league's usable `pick_projection.PickProjection`, or None.
+
+    None — flag off, the demo league, a non-Sleeper league, no qualifying run,
+    any gate failing, or weight 0 — makes every pick price and label exactly
+    as without the feature. Never raises: a failed read logs and prices
+    generic."""
+    if not league_id or league_id == "league_demo" or not _pick_projection_enabled():
+        return None
+    from . import pick_projection as _pp
+    from .league_projections.core import VERSION as _forecast_version
+    now = time.time()
+    with _pick_projection_lock:
+        hit = _pick_projection_cache.get(league_id)
+    if hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS:
+        summary = hit[1]
+    else:
+        try:
+            summary = _load_pick_projection_summary(league_id)
+        except Exception as e:
+            log.warning("pick-projection read failed for %s: %s", league_id, e)
+            summary = None
+        with _pick_projection_lock:
+            if len(_pick_projection_cache) > 500:
+                _pick_projection_cache.clear()
+            _pick_projection_cache[league_id] = (now, summary)
+    c = _trade_service_mod._c
+    projection = _pp.usable(
+        summary, model_version=_forecast_version, now=datetime.now(timezone.utc),
+        weight=c("pick_projection_weight"), min_weeks=c("pick_projection_min_weeks"),
+        max_age_days=c("pick_projection_max_age_days"),
+        max_round=c("pick_projection_max_round"),
+        season_scaling=c("pick_projection_season_scaling"))
+    if not (hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS):
+        log.info("pick-projection: league=%s applied=%s w=%s", league_id,
+                 projection is not None,
+                 round(projection.weight, 3) if projection is not None else None)
+    return projection
+
+
+def _pick_projection_key(league_id: str) -> str | None:
+    """The projection's cache key for `roster_snapshot`'s vsn1, or None."""
+    projection = _league_pick_projection(league_id)
+    return projection.key if projection is not None else None
+
+
 # ── D-148 — ONE priced value for an owned pick, engine and league alike ───
 #
 # D-146 shipped the per-slot waterfall into the ENGINE only and left the two
@@ -20740,7 +20890,7 @@ def _invalidate_slot_order(league_id: str) -> None:
 # DB read plus a cache lookup once per LEAGUE. Every caller hoists it.
 
 def _priced_pick_value(p: dict, slot_order: dict | None,
-                       scoring_format: str) -> float:
+                       scoring_format: str, projection=None) -> float:
     """The engine value of ONE owned-pick row `p` — THE only pricing call.
 
     `pick_slots.slot_for` is pure and refuses everything it should (a future
@@ -20753,11 +20903,16 @@ def _priced_pick_value(p: dict, slot_order: dict | None,
     Returns a number in the stored `draft_picks.pool_value` scale
     (elo_to_value units). It NEVER writes: pricing is read-time in every mode
     and the stored column stays the sync-written ladder value (D-146).
+
+    `projection` is `_league_pick_projection(league_id)`, hoisted once per
+    league beside `slot_order` by every caller (projected slot value; None =
+    today's price exactly). Passed POSITIONALLY at every site.
     """
     return priced_pool_value(
         p, scoring_format=scoring_format,
         slot=pick_slots.slot_for(slot_order, p.get("season"), p.get("round"),
-                                 p.get("original_roster_id")))
+                                 p.get("original_roster_id")),
+        projection=projection)
 
 
 def _owned_picks_available(league_id: str, league) -> bool:
@@ -20838,6 +20993,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     # `picks`, when supplied, is the SAME read this line would issue, already
     # done once for this job (see `_run_trade_job`'s `_job_draft_picks`).
     if picks is None:
@@ -20855,7 +21011,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             # `_owned_pick_label` would mean changing all five of its call
             # sites, four of which have no price to keep in step.
             _priced[p["pick_id"]] = _priced_pick_value(p, slot_order,
-                                                       scoring_format)
+                                                       scoring_format, projection)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -20870,13 +21026,15 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             inv_pick_value = (v2e(pool_v) - 1200.0) / 6.0
             assets.append(Player(
                 id               = p["pick_id"],
-                name             = _owned_pick_label(p, slot_order),
+                name             = _owned_pick_label(p, slot_order, projection,
+                                                     scoring_format),
                 position         = "PICK",
                 team             = "PICK",
                 age              = 0,
                 years_experience = 0,
                 pick_value       = round(inv_pick_value, 3),
                 search_rank      = _OWNED_PICK_SEARCH_RANK.get(int(p.get("round") or 4), 200),
+                **_owned_pick_projection_fields(p, slot_order, projection, scoring_format),
             ))
         if assets:
             out[owner] = assets
@@ -33714,10 +33872,12 @@ def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None
                             / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
         from . import roster_snapshot
         from .database import engine as _engine
+        projection_key = _pick_projection_key(league_id or "")
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
         pick = v["gap"].get("pick_equivalent")
         snapshot = {
             "v":                1,
@@ -38849,6 +39009,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     cur_season = min(seasons) if seasons else 0
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     out: dict[str, list[dict]] = {}
     for p in rows:
         owner = str(p.get("owner_user_id") or "")
@@ -38868,9 +39029,10 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
             p = {**p, "pool_value": pick_pool_value(
                 int(p.get("round") or 4), years_out, fmt)}
-        val = _priced_pick_value(p, slot_order, fmt)
+        val = _priced_pick_value(p, slot_order, fmt, projection)
         out.setdefault(owner, []).append({
-            "label": _owned_pick_label(p, slot_order),
+            "label": _owned_pick_label(p, slot_order, projection, fmt),
+            **_owned_pick_projection_fields(p, slot_order, projection, fmt),
             "value": round(float(val), 1),
             # #285 — round for _pick_firsts_equivalent's literal pick-count
             # label math; never serialized on its own (see docstring above).
@@ -45021,6 +45183,8 @@ _install_overhaul(app, require_session=_require_initialized_session,
                   is_pick_asset=_is_ftf_pick_asset, owned_picks_available=_owned_picks_available,
                   inject_owned_picks=_inject_owned_picks, pick_label=_owned_pick_label,
                   slot_order=_league_slot_order, priced_pick_value=_priced_pick_value,
+                  pick_projection=_league_pick_projection,
+                  pick_projection_fields=_owned_pick_projection_fields,
                   elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
                   sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
 

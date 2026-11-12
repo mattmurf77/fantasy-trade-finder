@@ -1025,6 +1025,20 @@ _DEFAULT_CFG: dict[str, float] = {
     "market_r1_yoy_floor":        1.00,
 
     # ------------------------------------------------------------------
+    # Projected slot value (flag `picks.projected_slot_value`,
+    # docs/plans/pick-value-projected-slot/design.md). Read ONLY by
+    # `server._league_pick_projection` through _c(); trade_service itself
+    # never uses them. Weight 0 = no projection anywhere (deploy-free off).
+    # Season scaling 0 = full strength once min_weeks passes (operator
+    # ruling 2026-11-11); 1 = the weeks-played ramp.
+    # ------------------------------------------------------------------
+    "pick_projection_weight":        1.00,
+    "pick_projection_season_scaling": 0.0,
+    "pick_projection_min_weeks":     3.0,
+    "pick_projection_max_age_days":  8.0,
+    "pick_projection_max_round":     1.0,
+
+    # ------------------------------------------------------------------
     # D-095 (2026-08-19) — LANDABILITY CHALLENGER (bake-off arm D,
     # docs/plans/landability-challenger/PRD.md §4). Three knobs, every one
     # defaulting to the **live identity**, so the live engine — arm B, what

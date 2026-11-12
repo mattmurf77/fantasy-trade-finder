@@ -2,6 +2,7 @@
   "policy_approved": true,
   "batch_limit": 4,
   "retention_days": 7,
+  "baseline_retention_days": 90,
   "model": {
     "iterations": 250000,
     "score_sd": 25.0,

@@ -3816,6 +3816,14 @@ _MODEL_CONFIG_DEFAULTS = [
     # / 2028 1st 1459 vs a 2184.6 current-year mid, measured on prod
     # 2026-08-24). 0 = pure market, the deploy-free revert to pre-D-161.
     ("market_r1_yoy_floor", 1.00, "D-161: a FUTURE-season 1st-round pick never prices below this fraction of the CURRENT class's round-1 market price (1.0 = firsts hold value YoY, operator re-ruling 2026-08-24). 0 = pure DynastyProcess curve, byte-identical to pre-D-161. Rounds 2-4 untouched"),
+    # ── Projected slot value (flag picks.projected_slot_value) ───────────
+    # docs/plans/pick-value-projected-slot/design.md. A next-draft 1st priced
+    # by its ORIGINAL team's projected slot from the saved league forecast.
+    ("pick_projection_weight",        1.00, "picks.projected_slot_value: strength of the adjustment, value = generic x (1 + weight x (ratio - 1)). 1 = full strength (matches DP's Early/Late 1st spread). 0 = every pick prices exactly as without the feature (deploy-free rollback)"),
+    ("pick_projection_season_scaling", 0.0, "picks.projected_slot_value: 0 (operator ruling 2026-11-11) = full weight once min_weeks passes; 1 = also multiply by completed / regular-season weeks (the original weeks-played ramp); between blends the two"),
+    ("pick_projection_min_weeks",     3.0,  "picks.projected_slot_value: no adjustment before this many completed regular-season weeks"),
+    ("pick_projection_max_age_days",  8.0,  "picks.projected_slot_value: a forecast run older than this is ignored, unless it had at most one regular-season week left"),
+    ("pick_projection_max_round",     1.0,  "picks.projected_slot_value: rounds above this stay generic"),
     # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
     # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
     # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.

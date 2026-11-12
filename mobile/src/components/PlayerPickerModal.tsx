@@ -17,6 +17,8 @@ import MemberEnteredMarker, {
   usePicksTradeable,
 } from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
+import ProjectedPickTag from './ProjectedPickTag';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 import TierBadge from './TierBadge';
 import { Badge, Button, TickLabel } from './chalkline';
 import { TIER_LABEL } from '../utils/tierBands'; // tier name in the composed a11y label
@@ -180,13 +182,16 @@ export default function PlayerPickerModal({
     const valuePhrase = itemTier
       ? `tier ${TIER_LABEL[itemTier]}`
       : `value ${ownerBoardValue(item).toLocaleString()}`;
+    // Projected draft slot (utils/projectedPick): valid pair ⇒ print
+    // `proj_name` + the flare tag; otherwise the row is unchanged.
+    const proj = projectedPick(item);
     return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${item.name}, ${posLabel}, ${
+      accessibilityLabel={`${proj ? proj.name : item.name}, ${posLabel}, ${
         isPick ? 'draft capital' : `${item.nflTeam}, ${item.age} years`
-      }, ${valuePhrase}${
+      }, ${valuePhrase}${proj ? `, ${projectedPickA11y(proj)}` : ''}${
         need ? ', fills a roster need for the receiving team' : ''
       }${marked ? `. ${MEMBER_ENTERED_COPY}` : ''}`}
       accessibilityHint="Adds this player to the trade"
@@ -216,12 +221,15 @@ export default function PlayerPickerModal({
       </View>
       <View style={styles.info}>
         <View style={styles.nameRow}>
-          <Text style={type.title}>{item.name}</Text>
+          <Text style={type.title}>{proj ? proj.name : item.name}</Text>
           {need ? <Badge label="NEED" color={flare.base} colorText /> : null}
           {badgeFor?.(item) ? (
             <Badge label={badgeFor(item)!.label} color={badgeFor(item)!.color} colorText />
           ) : null}
         </View>
+        {/* Own line, not the name row: that row does not wrap, and the full
+            word (~90pt) beside a long pick name would push the name out. */}
+        {proj ? <ProjectedPickTag /> : null}
         <Text style={type.bodySm}>
           {isPick ? 'Draft capital' : `${item.nflTeam} · ${item.age} yrs`}
         </Text>
