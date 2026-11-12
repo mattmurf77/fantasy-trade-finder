@@ -608,6 +608,15 @@ def _sleeper_record(url: str, data) -> None:
     log.info("sleeper-record WROTE %s", path)
 
 
+def _tp_url_names_test_id(url: str) -> bool:
+    """A path segment of `url` is an exact test-world id (review L1: never a
+    substring, so a real username or league containing the text is fine)."""
+    if "qa_tp" not in url:          # cheap pre-filter; the decision is structural
+        return False
+    path = urllib.parse.urlsplit(url).path
+    return any(_tp.is_test_world_id(urllib.parse.unquote(seg)) for seg in path.split("/"))
+
+
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
 
@@ -615,9 +624,9 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     (a URLError) without touching the network; a 429 opens it. Fixture mode
     goes through the circuit too, so cassette 429s exercise the real path.
     """
-    if "qa_tp" in url:
+    if _tp_url_names_test_id(url):
         # Test-profile ids (backend/test_profile.py) are never real Sleeper
-        # ids: a snapshot league or profile must not reach the network.
+        # ids: a namespaced league or profile must not reach the network.
         raise urllib.error.HTTPError(url, 404, "test-profile id", None, None)
     league = _api_obs.sleeper_endpoint_class(url)[1]
     with _sleeper_http.guard(league):
@@ -2750,9 +2759,41 @@ def _get_session(token: str) -> dict | None:
         if not is_enabled("auth.persistent_sessions"):
             return None
         sess = _restore_persisted_session(token)
-    if sess is not None and not _test_profile_session_allowed(sess):
+    if sess is not None and _tp.is_test_profile_id(sess.get("user_id")) and (
+            not token.startswith(_TP_TOKEN_PREFIX) or not _test_profile_session_allowed(sess)):
+        _tp_drop_session(token, sess)      # review L2: no direct _sessions reader sees it again
         return None
     return sess
+
+
+_TP_TOKEN_PREFIX = "tp."
+
+
+def _tp_drop_session(token: str, sess: dict | None = None) -> None:
+    """Remove one test-profile session from memory and the durable store."""
+    with _sessions_lock:
+        if sess is None or _sessions.get(token) is sess:
+            _sessions.pop(token, None)
+        if sess is not None:
+            sess["_revoked"] = True
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+
+
+def _tp_evict_closed_sessions() -> int:
+    """Review L2: evict every in-memory test-profile session whose gate is
+    closed (flag off, account removed from TEST_PROFILE_ACCOUNTS), so the
+    many direct `_sessions` readers never see one. Run by the flag reload and
+    the cleanup loop; `_get_session` evicts on sight too."""
+    with _sessions_lock:
+        dead = [(t, s) for t, s in _sessions.items()
+                if _tp.is_test_profile_id(s.get("user_id"))
+                and not _test_profile_session_allowed(s)]
+    for t, s in dead:
+        _tp_drop_session(t, s)
+    return len(dead)
 
 
 def _test_profile_session_allowed(sess: dict) -> bool:
@@ -3205,6 +3246,11 @@ def _cleanup_loop() -> None:
         _sweep_orphaned_overhauls_once()
 
         try:
+            _tp_evict_closed_sessions()
+        except Exception:
+            log.exception("test-profile session sweep failed")
+
+        try:
             _prune_deleted_partner_ids()
         except Exception as err:      # the class only: its text may quote ids
             log.error("cleanup: deleted-id prune failed: %s", type(err).__name__)
@@ -3449,8 +3495,8 @@ from . import user_data_lifecycle as _user_data_lifecycle
 @app.before_request
 def _acquire_user_data_lease():
     g._user_data_started = _user_data_lifecycle.snapshot()
-    if request.endpoint == "delete_account_route":
-        return  # deletion acquires all account aliases in sorted order
+    if request.endpoint in ("delete_account_route", "test_profile_reset"):
+        return  # deletion (and the test-profile reset's drain) acquires the aliases itself
     token = request.headers.get("X-Session-Token", "")
     if not token:
         return
@@ -28900,6 +28946,15 @@ def submit_rankings():
     body      = request.get_json(force=True) or {}
     user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
+    # Review M1 (2026-11-12): publishing into a league marks every member's
+    # stored decks stale and feeds their trade generation, so the caller must
+    # be IN it: the session's own league, or a stored league_members row. No
+    # client sends another league today (mobile, web and extension never call
+    # this route), so this changes nothing for a real flow.
+    if str(league_id) != str(getattr(g_league, "league_id", "")):
+        member_ids = {str(m.get("user_id")) for m in (load_league_members(str(league_id)) or [])}
+        if str(g_user_id) not in member_ids:
+            return jsonify({"error": "league_membership_required"}), 403
 
     with service._lock:
         all_rankings = service.get_rankings(position=None)
@@ -31805,7 +31860,7 @@ def _send_typed_push(
          and exit. The 8am cron drains and bundles.
       5. Otherwise: load device tokens, send via Expo, log + record_event.
     """
-    if _tp.outbound_blocked(user_id, payload=json.dumps(data or {}, default=str), kind=f"push:{kind}"):
+    if _tp.outbound_blocked(user_id, payload=data, kind=f"push:{kind}"):
         log.info("push dropped (test profile): kind=%s", kind)
         return
     started = g.get("_user_data_started") if has_request_context() else None
@@ -32379,6 +32434,10 @@ def _do_league_history_snapshot(league_id: str, platform: str,
     two can never disagree about a team. `live_user`: both writes run under
     that account's users-row lock (AccountGone when it's gone)."""
     from . import roster_history as _rh
+    if _tp.is_test_league_id(league_id):
+        # Onboarding test profile (review M2): every trigger's shared tail
+        # refuses a namespaced league — no history row, no platform read.
+        return {"rosters": {"skipped": "test_profile"}, "boards": {}}
     fmt = get_league_scoring(league_id) or "1qb_ppr"
     pool_players, seed = _get_universal_pool(fmt)
     players_meta = {p.id: p for p in pool_players}
@@ -32515,6 +32574,8 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
     one."""
     platform = lg.get("platform") or "sleeper"
     lid = str(lg["league_id"])
+    if _tp.is_test_league_id(lid):
+        return None, "test_profile"   # never read a platform with a test profile's cookies
 
     if platform == "sleeper":
         rows = _fetch_league_rosters(lid)
@@ -34734,7 +34795,11 @@ def _extension_build_session(user_id: str, username: str,
     if not load_history:
         payload["_history_pending"] = True
         payload["_history_lock"] = threading.Lock()   # hydrate single-flight
-    token = token or secrets.token_urlsafe(32)
+    # Test-profile tokens carry `_TP_TOKEN_PREFIX` ('.' is outside
+    # token_urlsafe's alphabet, so no real token can start with it): the
+    # request fence and extension_auth tell a test token from a real one
+    # without a lookup (review L7, M3).
+    token = token or ((_TP_TOKEN_PREFIX if test_profile else "") + secrets.token_urlsafe(32))
     with _sessions_lock:
         _sessions[token] = payload
     return token, payload
@@ -34799,7 +34864,16 @@ def extension_auth():
     # the league list in its own namespace. Only the real account's own
     # Sleeper user is accepted (a test session is already verified, so it may
     # not borrow another person's Sleeper identity).
-    _tp_caller = _get_session(request.headers.get("X-Session-Token", ""))
+    _tp_token = request.headers.get("X-Session-Token", "")
+    _tp_caller = _get_session(_tp_token)
+    if _tp_token.startswith(_TP_TOKEN_PREFIX) and not (
+            _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id"))):
+        # Review M3: a test-profile token that no longer resolves (reset or
+        # exit elsewhere, the gate closed, a restart without durable
+        # sessions) must never fall through to minting a REAL session that a
+        # phone still showing TEST PROFILE would store.
+        return jsonify({"error": "test_profile_ended",
+                        "message": "The test profile has ended. Tap “Back to my profile”."}), 401
     if _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id")):
         if str(user_id) != _sleeper_identity(_tp_caller):
             return jsonify({"error": "not_your_sleeper_account",
@@ -36279,6 +36353,7 @@ def feature_flags_reload_route():
     """
     _require_cron_auth()
     flags = reload_flags()
+    _tp_evict_closed_sessions()      # a flag turned off ends test-profile sessions now
     return jsonify({"ok": True, "flags": flags})
 
 
@@ -36961,14 +37036,67 @@ _TP_BLOCKED_ENDPOINTS = frozenset({
 })
 
 
-def _tp_request_league_ids() -> list[str]:
-    """Every league id this request names: path args, ?league_id, JSON body."""
-    ids = [v for k, v in (request.view_args or {}).items() if "league" in k]
-    ids.append(request.args.get("league_id"))
-    body = request.get_json(silent=True) if request.is_json else None
-    if isinstance(body, dict):
-        ids.append(body.get("league_id"))
-    return [str(x) for x in ids if x not in (None, "")]
+_TP_LEAGUE_KEY = re.compile(r"(?:^|_)league_?ids?$", re.I)
+
+# Platform-native league inputs of the real LINKING routes (design.md §11):
+# they name a league on ESPN/MFL by its own id, and the route stores it under
+# the namespace through `_tp.storage_league_id`. Exempt only on these routes.
+_TP_LINK_INPUT_KEYS = {
+    "espn_link": {"espn_league_id"},
+    "mfl_link": {"mfl_league_id", "mfl_league_url"},
+    "mfl_auth_import": {"league_ids"},
+}
+
+# The fence never reads a body larger than the smallest route cap
+# (FEEDBACK_MAX_BODY_BYTES): capped routes answer 413 before ANY read, and a
+# read here would break that contract. Larger bodies are left to the route
+# (and, for a test session, to the database write fence).
+_TP_BODY_SCAN_LIMIT = 64 * 1024
+
+
+def _tp_collect_league_ids(obj, out: list, exempt=frozenset()) -> None:
+    """Every value under a league-id key (`league_id`, `league_ids`,
+    `*_league_id(s)`, camelCase too) at any depth of a dict/list body."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if _TP_LEAGUE_KEY.search(str(k)) and str(k) not in exempt:
+                many = str(k).lower().endswith("ids")
+                for x in (v if isinstance(v, (list, tuple)) else [v]):
+                    # `league_ids` also arrives comma-joined (?league_ids=a,b).
+                    out.extend(x.split(",") if many and isinstance(x, str) else [x])
+            if isinstance(v, (dict, list, tuple)):
+                _tp_collect_league_ids(v, out, exempt)
+    elif isinstance(obj, (list, tuple)):
+        for x in obj:
+            _tp_collect_league_ids(x, out, exempt)
+
+
+def _tp_request_league_ids(exempt=frozenset()) -> list[str]:
+    """Every league id this request names, from EVERY request source: path
+    args, the query string, form fields and the body parsed the way the
+    routes parse it (`get_json(force=True)`: any content type). Review M1."""
+    ids: list = [v for k, v in (request.view_args or {}).items() if "league" in k]
+    args = {k: request.args.getlist(k) for k in request.args.keys()}
+    _tp_collect_league_ids(args, ids, exempt)
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT:
+        if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):
+            form = {k: request.form.getlist(k) for k in request.form.keys()}
+            _tp_collect_league_ids(form, ids, exempt)
+        else:
+            _tp_collect_league_ids(request.get_json(force=True, silent=True), ids, exempt)
+    return [str(x).strip() for x in ids if x not in (None, "") and str(x).strip()]
+
+
+def _tp_request_mentions_namespace() -> bool:
+    """Cheap pre-filter for a real or anonymous request: could it name a
+    `qa_tp:` league at all? Raw bytes only; the decision is structural."""
+    if "qa_tp" in request.path or b"qa_tp" in (request.query_string or b""):
+        return True
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT and request.mimetype != "multipart/form-data":
+        return b"qa_tp" in request.get_data(cache=True)
+    return False                    # never read past the smallest route cap
 
 
 @app.teardown_request
@@ -36980,25 +37108,34 @@ def _test_profile_actor_reset(exc):
 
 @app.before_request
 def _test_profile_request_guard():
-    """Fences every request a test-profile session makes: blocked endpoints
-    refuse with a message the app shows, the push-token registration is
-    skipped (the token must stay on the real account), and any league id other
-    than the profile's own `qa_tp:` copies is refused."""
+    """Fences every request against the onboarding test profile.
+
+    A real or anonymous request may never name a `qa_tp:` league (review L6:
+    nobody but its owner reads or writes a test league). A test-profile
+    session (its token carries `_TP_TOKEN_PREFIX`, review L7: real tokens are
+    decided without a lookup): blocked endpoints refuse with a message the
+    app shows, the push-token registration is skipped, and any league id from
+    any request source outside its own namespace is refused (default-deny;
+    the database write fence in test_profile.check_write backs it)."""
     token = request.headers.get("X-Session-Token", "")
-    if not token:
+    if not token.startswith(_TP_TOKEN_PREFIX):
+        if _tp_request_mentions_namespace() and any(
+                _tp.is_test_league_id(x) for x in _tp_request_league_ids()):
+            return _tp_not_found()
         return None
     sess = _get_session(token)
     uid = (sess or {}).get("user_id")
     if not _tp.is_test_profile_id(uid):
-        return None
-    g._tp_actor_token = _tp.ACTOR.set(uid)   # read by the outbound chokepoint
+        return None                       # a dead test token: routes see no session
+    g._tp_actor_token = _tp.ACTOR.set(uid)   # read by the outbound chokepoint + write fence
     endpoint = request.endpoint or ""
     if endpoint == "register_device_for_push":
         return jsonify({"ok": True, "skipped": "test_profile"})
     if endpoint in _TP_BLOCKED_ENDPOINTS and request.method != "GET":
         return jsonify({"error": "test_profile_blocked",
                         "message": _TP_BLOCKED_MESSAGE}), 403
-    for lid in _tp_request_league_ids():
+    exempt = frozenset(_TP_LINK_INPUT_KEYS.get(endpoint, ()))
+    for lid in _tp_request_league_ids(exempt):
         if lid != "no_league" and not _tp.owns_test_league(uid, lid):
             return jsonify({"error": "test_profile_league",
                             "message": "The test profile only uses its own "
@@ -37035,10 +37172,47 @@ def _tp_session_body(token: str, profile_uid: str) -> dict:
             "username": profile_uid, "display_name": _tp.DISPLAY_NAME}
 
 
+# Module caches keyed by a league id or a user id (alone or inside a tuple
+# key). Reset drops the profile's entries so a fresh onboarding never reads a
+# cached answer from before it (review L4).
+_TP_KEYED_CACHES = (
+    "_OUTLOOK_IMPACT_CACHE", "_DRAFT_CONTEXT_CACHE", "_LEADERBOARD_CACHE",
+    "_LEAGUE_MEMBERS_CACHE", "_slot_order_cache", "_pick_projection_cache",
+    "_trade_block_cache", "_SUGGESTED_ORDER_CACHE", "_ROS_CACHE", "_rank_chip_cache",
+    "_OUTLOOK_WEEK_SETTLED", "_OUTLOOK_WEEK_LIVE", "_OUTLOOK_WEEK_HIGHWATER",
+    "_OUTLOOK_SEASON_BY_LEAGUE", "_FA_LEAGUE_META_CACHE", "_usage_cache",
+    "_gate_miss_tests", "_roster_moved_reads", "_trade_jobs_by_key",
+    "_session_init_inflight",
+)
+
+
+def _tp_purge_caches(profile_uid: str) -> int:
+    prefix = _tp.league_prefix(profile_uid)
+
+    def names(key):
+        parts = key if isinstance(key, tuple) else (key,)
+        return any(str(p) == profile_uid or str(p).startswith(prefix) for p in parts)
+    n = 0
+    for name in _TP_KEYED_CACHES:
+        cache = globals().get(name)
+        if not isinstance(cache, dict):
+            continue
+        for k in [k for k in list(cache.keys()) if names(k)]:
+            cache.pop(k, None)
+            n += 1
+    try:
+        from .outlook_result_cache import OUTLOOK_RESULTS
+        OUTLOOK_RESULTS.purge_callers({profile_uid})
+    except Exception:
+        pass
+    return n
+
+
 def _tp_revoke_sessions(profile_uid: str) -> int:
     with _sessions_lock:
         stale = [t for t, s in _sessions.items() if s.get("user_id") == profile_uid]
         for t in stale:
+            _sessions[t]["_revoked"] = True
             _sessions.pop(t, None)
     try:
         delete_persisted_sessions_for_user(profile_uid)
@@ -37057,7 +37231,9 @@ def test_profile_status():
     if _tp.is_test_profile_id(uid):   # _get_session already enforced the gate
         return jsonify({"available": True, "active": True,
                         "user_id": uid, "display_name": _tp.DISPLAY_NAME})
-    if _tp.enabled_for(uid, is_enabled):
+    # Review L3: an unverified session never learns whether its id is the
+    # operator's — the same 404 as everyone else.
+    if sess.get("verified") and _tp.enabled_for(uid, is_enabled):
         return jsonify({"available": True, "active": False})
     return _tp_not_found()
 
@@ -37068,10 +37244,9 @@ def test_profile_enter():
     session for that account's own test profile. The real session is left
     untouched; the app keeps its token to switch back."""
     sess, uid = _tp_caller()
-    if sess is None or _tp.is_test_profile_id(uid) or not _tp.enabled_for(uid, is_enabled):
-        return _tp_not_found()
-    if not sess.get("verified"):
-        return jsonify({"error": "verification_required"}), 403
+    if (sess is None or _tp.is_test_profile_id(uid) or not sess.get("verified")
+            or not _tp.enabled_for(uid, is_enabled)):
+        return _tp_not_found()          # review L3: unverified ⇒ 404, never 403
     profile_uid = _tp.profile_id(uid)
     token, _ = _tp_mint_session(profile_uid)
     log.info("test-profile: entered (account %s)", uid)
@@ -37103,8 +37278,30 @@ def test_profile_reset():
     sess, uid = _tp_caller()
     if sess is None or not _tp.is_test_profile_id(uid):
         return _tp_not_found()
-    evicted = _tp_revoke_sessions(uid)
-    deleted = _tp.reset_profile(uid)
+    # Review L4: the account-deletion drain. `deletion_scope` stops new work for
+    # the profile and waits for in-flight work holding its user-data lease
+    # (session-init daemons, trade jobs); `invalidate` then fails any queued
+    # work captured before the reset, so nothing finishes into the new
+    # incarnation. Caches keyed by the profile or its leagues are purged.
+    known = {lid for s2 in list(_sessions.values()) if s2.get("user_id") == uid
+             for lid in [getattr(s2.get("league"), "league_id", None)] if lid}
+    try:
+        with _accounts.deletion_scope(uid, None) as (user_ids, _acct_ids):
+            leagues = _tp.profile_league_ids(uid, known)
+            evicted = _tp_revoke_sessions(uid)
+            deleted = _tp.reset_profile(uid, leagues)
+            _user_data_lifecycle.invalidate(user_ids)
+    except _user_data_lifecycle.UserDataBusy:
+        return jsonify({"error": "test_profile_busy",
+                        "message": "Still finishing the last step. Try Reset again in a moment."}), 409
+    try:
+        _revoke_trade_jobs_naming({uid}, leagues)
+    except Exception as err:
+        log.error("test-profile reset: trade job revoke failed: %s", type(err).__name__)
+    _tp_purge_caches(uid)
+    # The fresh incarnation's work starts after the invalidation, not at the
+    # request's start (its lease would otherwise read as pre-reset work).
+    g._user_data_started = _user_data_lifecycle.snapshot()
     token, _ = _tp_mint_session(uid)
     log.info("test-profile: reset %s — %s", uid, deleted)
     return jsonify({**_tp_session_body(token, uid),

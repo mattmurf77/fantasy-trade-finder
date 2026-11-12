@@ -81,6 +81,29 @@ metadata = MetaData()
 
 from . import test_profile as _tp   # onboarding test profile: storage re-key + outbound chokepoint
 
+
+from sqlalchemy.engine import Engine as _SAEngine
+
+
+@sa_event.listens_for(_SAEngine, "before_execute")
+def _tp_write_fence(conn, clauseelement, multiparams, params, execution_options):
+    """Onboarding test profile, review M1: default-deny any write a test-profile
+    request makes under a league outside its namespace (test_profile.check_write).
+    Registered on the Engine CLASS so every engine — the three here and any a
+    test builds — carries it; a real request pays one contextvar read."""
+    _tp.check_write(clauseelement, multiparams, params)
+
+
+def _not_test_league(col):
+    """Background loaders over leagues never return an onboarding test
+    profile's `qa_tp:` league unless a caller asks for it by id (review M2)."""
+    return ~col.startswith(_tp.LEAGUE_PREFIX, autoescape=True)
+
+
+def _not_test_user(col):
+    """…nor a synthetic `qa_` user (Test Stages and the test profile)."""
+    return ~col.startswith("qa_", autoescape=True)
+
 # Silent prepared offers are private artifacts, not shown impressions. The
 # participant index covers every consumed manager, including non-app members.
 # Store operations live in prepared_trade_store; these additive tables are
@@ -7999,7 +8022,9 @@ def load_active_deck_user_leagues(days: int = 30) -> list[dict]:
             rows = conn.execute(
                 select(tbl.c.user_id, tbl.c.league_id)
                 .where(and_(ts_col >= cutoff,
-                            tbl.c.league_id != "league_demo"))
+                            tbl.c.league_id != "league_demo",
+                            _not_test_league(tbl.c.league_id),
+                            _not_test_user(tbl.c.user_id)))
                 .distinct()
             ).fetchall()
             for r in rows:
@@ -13822,7 +13847,8 @@ def load_league_ids_for_draft_status_refresh(
     ACTIVE_LEAGUE_WINDOW_DAYS); pass `active_within_days=None` for all of them.
     """
     cutoff = _active_league_cutoff(active_within_days)
-    q = select(leagues_table.c.sleeper_league_id)
+    q = select(leagues_table.c.sleeper_league_id).where(
+        _not_test_league(leagues_table.c.sleeper_league_id))
     if cutoff is not None:
         q = q.where(leagues_table.c.updated_at >= cutoff)
     with engine.connect() as conn:
@@ -14952,7 +14978,7 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
-    if _tp.outbound_blocked(user_id, payload=json.dumps(metadata or {}), kind=type_):
+    if _tp.outbound_blocked(user_id, payload=metadata, kind=type_):
         return {"id": None, "user_id": user_id, "type": type_, "blocked": True}
     supplied_conn = conn
     row = {
@@ -16132,6 +16158,7 @@ def load_history_sweep_leagues(
                     lt.c.platform_host, lt.c.platform_my_team)
         if cutoff is not None:
             lq = lq.where(lt.c.updated_at >= cutoff)
+        lq = lq.where(_not_test_league(lt.c.sleeper_league_id))
         with engine.connect() as conn:
             leagues = conn.execute(lq).fetchall()
             done = {
@@ -17581,7 +17608,7 @@ def queue_notification(
     `dedup_key` is the original key from _send_typed_push; it gets
     threaded through the bundle drain so frequency caps remain accurate.
     """
-    if _tp.outbound_blocked(user_id, payload=json.dumps(data or {}), kind=kind):
+    if _tp.outbound_blocked(user_id, payload=data, kind=kind):
         return
     if not user_id or not kind or not deliver_after:
         return
@@ -17659,6 +17686,7 @@ def load_pending_matches_older_than(cutoff_iso: str) -> list[dict]:
                 )
                 .where(trade_matches_table.c.status == "pending")
                 .where(trade_matches_table.c.matched_at < cutoff_iso)
+                .where(_not_test_league(trade_matches_table.c.league_id))
             ).fetchall()
         for r in rows:
             out.append(dict(r._mapping))

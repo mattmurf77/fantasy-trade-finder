@@ -47,16 +47,15 @@ MAP, not a changelog — present behavior only. History: `git log -- <this file>
 - `teamReviewCompletion.ts` — which leagues' Team Review has been gone through (#423). `{ byLeague, hydrated, hydrate(), mark(leagueId) }`. Exists because the writer (`TeamReviewScreen`, on reaching the `plan` beat) and the reader (`TeamReviewEntryCard` on TradesHome) sit in one stack with TradesHome MOUNTED beneath the pushed review, so a once-per-mount AsyncStorage read could never show "done" until relaunch; a focus re-read would race the fire-and-forget write. `mark` updates memory **synchronously**, then mirrors to the SAME device key and sparse map the card used before (`ftf_team_review_completed` → `{[leagueId]: true}`, no migration) by read-merge-write; `hydrate` is idempotent and merges disk under memory so an early `mark` wins. Persisted (unlike `presentationDismissed`) because no server row records this fact. `markTeamReviewCompleted` in `TeamReviewEntryCard` is a thin wrapper over `mark`. Pinned by `tests/check-outlook-row-source.js` 6a–c.
 
 - `testProfile.ts` — the operator's onboarding test profile, device half (`docs/plans/onboarding-test-profile/`).
-  - `enterTestProfile` gets a test session from `/api/test-profile/enter`.
-    - It first reads the real ESPN/MFL link status with the real token.
-    - It stashes EVERY AsyncStorage key except `KEEP_KEYS` (the flag cache, `ACTIVE_KEY`, `REAL_LINKS_KEY`) under `ftf_tp_stash:`. The real token, last username and Sleeper-JWT slot go to device-only SecureStore slots.
-    - It then re-reads every store from the empty storage and resets navigation to SignIn: a true first launch, no force-quit.
-  - `exitTestProfile` restores all of it, then re-reads the real link status. A link that broke fills `relink`, and `components/TestProfileRelinkPrompt` raises the normal re-link prompt.
-  - `resetTestProfile` wipes only the test profile.
+  - The storage swap is `utils/testProfileSwap.ts`, a crash-safe phased state machine. This module wires it to AsyncStorage, SecureStore and the session token (`SWAP_STORE`).
+  - `hydrateTestProfile` runs FIRST in App.tsx's boot gate. `reconcileSwap` finishes or undoes an interrupted swap, so the device is always fully real or fully test.
+  - `enterTestProfile` gets a test session from `/api/test-profile/enter`, reads the real ESPN/MFL link status with the real token, then runs `enterSwap`: a complete stash of every non-`KEEP_KEYS` key and the real token, username and Sleeper-JWT slot, then the test token, then `ACTIVE_KEY`. It re-reads every store and resets navigation to SignIn.
+  - `exitTestProfile` runs `exitSwap` (rolls forward), then re-reads the real link status. A link that broke fills `relink`, and `components/TestProfileRelinkPrompt` raises the normal re-link prompt.
+  - `resetTestProfile` runs `resetSwap`; the stash is untouched.
+  - `ended` (review M3): the server no longer accepts the test session. Set by any 401 while active (`api/client` listener) and by `verifyTestProfileWithServer` after boot. The banner then offers only "Back to my profile".
   - `pinTestAccountForLinking` lets the SignIn ESPN/MFL tiles continue as a new account inside the test profile.
-  - `ACTIVE_KEY` is read in App.tsx's boot gate, so the app reopens in whichever profile it was closed in.
   - `available` (from `GET /api/test-profile`) gates the Settings row.
-  - Pinned by `tests/check-test-profile.js`.
+  - Pinned by `tests/check-test-profile.js`; the swap is executed by `tests/check-test-profile-swap.js`.
 - `rosterSetup.ts` — roster-first setup's per-league device record (flag `trades.roster_setup`; prd §3.4, Q6): `ftf_roster_setup_v1` → `{[leagueId]: {status:'done'|'skipped', seenAssetIds, at, rankedPositions, prompt?}}`. Same construction and reason as `teamReviewCompletion` (writer = the pushed `RosterSetupScreen`, readers = the first-pass trigger `hooks/useRosterSetupPassTrigger` + `RosterSetupEntryCard`'s return card, TradesHome mounted beneath): `write` merges into memory synchronously, then persists read-merge-write; `hydrate` is idempotent and merges disk under memory. `prompt` is the return card's snooze ladder; the decisions over it are pure in `utils/rosterSetup.ts`.
 
 - `tradeSearchHandoff.ts` — one user tap's exact model/fair promise across a stack push, keyed by search ID, complete request and account/league/format/token/input identity. Consumed once, process-local, no cross-tap result cache. Ranking/format/preference invalidation and account clearing revoke it; late responses check identity again. `devicePageStore` keeps only complete strict-current v2 organic pages; old v1 values cannot be read and are removed on account clearing.

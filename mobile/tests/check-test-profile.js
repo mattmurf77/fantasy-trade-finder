@@ -38,6 +38,10 @@ function check(cond, msg) {
 }
 
 const state = read('src/state/testProfile.ts');
+// The swap's storage steps live in the pure, crash-safe module (review M4);
+// tests/check-test-profile-swap.js EXECUTES them at every kill point. Here we
+// pin that the device half uses it and in which order.
+const swap = read('src/utils/testProfileSwap.ts');
 const api = read('src/api/testProfile.ts');
 const client = read('src/api/client.ts');
 const signInScreen = read('src/screens/SignInScreen.tsx');
@@ -78,17 +82,31 @@ check(/testID="test-profile\.banner\.reset"[\s\S]*?onPress=\{confirmReset\}/.tes
   && /onPress: \(\) => resetTestProfile\(\)/.test(banner), '2e Reset (confirmed) → resetTestProfile');
 check(/Back to my profile/.test(banner) && /TEST PROFILE/.test(banner), '2f banner copy names the profile + the way back');
 
+// ── 2b a dead test session never leads to a real one (review M3) ────────────
+const clientSrc = read('src/api/client.ts');
+const authHeaders = (clientSrc.match(/export async function testProfileAuthHeaders[\s\S]*?\n}\n/) || [''])[0];
+check(/apiRequest<\{ active\?: boolean \}>\('\/api\/test-profile'/.test(authHeaders)
+  && /if \(!status\?\.active\) throw testProfileEnded\(\)/.test(authHeaders)
+  && /if \(!tok\) throw testProfileEnded\(\)/.test(authHeaders),
+  '2b1 sign-in inside the test profile is refused unless the server says the session is active');
+check(/res!\.status === 401 && _testProfileActive\)[\s\S]{0,80}_onTestProfileEnded/.test(clientSrc),
+  '2b2 any 401 while in the test profile marks it ended');
+check(/ended \? 'TEST PROFILE ENDED' : 'TEST PROFILE'/.test(banner) && /ended \? null : <Pressable\s+testID="test-profile\.banner\.reset"/.test(banner),
+  '2b3 an ended test profile offers only "Back to my profile"');
+check(/verifyTestProfileWithServer\(\)/.test(app), '2b4 boot asks the server whether the test session is still live');
+
 // ── 3 survives restarts ────────────────────────────────────────────────────
 const enter = fnBody(state, 'enterTestProfile');
 const exit = fnBody(state, 'exitTestProfile');
 const reset = fnBody(state, 'resetTestProfile');
-check(/export const ACTIVE_KEY = 'ftf_tp_active_v1'/.test(state), '3a ACTIVE_KEY defined');
-check(/AsyncStorage\.setItem\(ACTIVE_KEY, '1'\)/.test(enter), '3b enter persists ACTIVE_KEY');
-check(/AsyncStorage\.removeItem\(ACTIVE_KEY\)/.test(exit), '3c exit removes ACTIVE_KEY');
-check(/AsyncStorage\.getItem\(ACTIVE_KEY\)/.test(fnBody(state, 'hydrateTestProfile')),
-  '3d hydrateTestProfile reads ACTIVE_KEY');
-const bootGate = (app.match(/Promise\.all\(\[([\s\S]*?)\]\)/) || [])[1] || '';
-check(/hydrateTestProfile\(\)/.test(bootGate), '3e hydrateTestProfile is a leg of the boot gate');
+check(/export const ACTIVE_KEY = 'ftf_tp_active_v1'/.test(swap), '3a ACTIVE_KEY defined');
+check(/enterSwap\(SWAP_STORE, session\.session_token\)/.test(enter)
+  && /multiSet\(\[\[ACTIVE_KEY, '1'\]\]\)/.test(fnBody(swap, 'enterSwap')), '3b enter persists ACTIVE_KEY (inside the swap)');
+check(/exitSwap\(SWAP_STORE\)/.test(exit) && /multiRemove\(\[ACTIVE_KEY\]\)/.test(swap), '3c exit removes ACTIVE_KEY (inside the swap)');
+check(/reconcileSwap\(SWAP_STORE\)/.test(fnBody(state, 'hydrateTestProfile')),
+  '3d hydrateTestProfile reconciles an interrupted swap, then reads ACTIVE_KEY');
+check(/hydrateTestProfile\(\)\.catch\(\(\) => \{\}\)\.then\(\(\) => Promise\.all\(\[/.test(app),
+  '3e hydrateTestProfile runs FIRST in the boot gate, before every other storage read');
 
 // ── 4 no client-supplied target id ─────────────────────────────────────────
 const bodies = [...api.matchAll(/api\.(?:post|get)(?:<[^>]*>)?\(\s*('[^']*'|`[^`]*`)\s*(?:,\s*(\{[\s\S]*?\}))?/g)];
@@ -99,8 +117,8 @@ for (const [, url, body] of bodies) {
 }
 
 // ── 5 entering clears ALL first-run state ──────────────────────────────────
-check(/export const KEEP_KEYS: readonly string\[\] = \['feature_flags_v1', ACTIVE_KEY, REAL_LINKS_KEY\];/.test(state),
-  '5a only the flag cache, the marker and the real-link record survive a switch');
+check(/export const KEEP_KEYS: readonly string\[\] = \[\s*'feature_flags_v1', ACTIVE_KEY, SWAP_KEY, STASH_DONE_KEY, REAL_LINKS_KEY,\s*\];/.test(swap),
+  '5a only the flag cache, the swap markers and the real-link record survive a switch');
 const FIRST_RUN_KEYS = [
   'ftf_onboarding_state_v1', 'ftf_tiers_saved_cache_v1', 'REACT_QUERY_OFFLINE_CACHE',
   'ftf_rank_method_pref', 'sleeper_user', 'sleeper_league', 'sleeper_leagues', 'ftf_invite_intent',
@@ -110,35 +128,38 @@ const FIRST_RUN_KEYS = [
   'ftf.premium_import.v1', 'ftf.rating.anchor_ts.v1', 'ftf_inapp_feedback_v1', 'ftf.entitlements.v1',
   'ftf.events.queue.v1', 'ftf.recpicks.queue.v1', 'ftf_trade_queue_123', 'ftf_founder_welcome_shown_123',
 ];
-const keep = ['feature_flags_v1', 'ftf_tp_active_v1', 'ftf_tp_real_links_v1'];
+const keep = ['feature_flags_v1', 'ftf_tp_active_v1', 'ftf_tp_swap_v1', 'ftf_tp_stash_done_v1', 'ftf_tp_real_links_v1'];
 for (const k of FIRST_RUN_KEYS) check(!keep.includes(k) && !k.startsWith('ftf_tp_stash:'), `5b ${k} is moved by the stash`);
-check(/function isProfileKey\(key: string\): boolean \{\s*return !KEEP_KEYS\.includes\(key\) && !key\.startsWith\(STASH_PREFIX\);/.test(state),
+check(/function isProfileKey\(key: string\): boolean \{\s*return !KEEP_KEYS\.includes\(key\) && !key\.startsWith\(STASH_PREFIX\);/.test(swap),
   '5c every key that is not kept is profile state');
-check(/stashRealDeviceState\(\)/.test(enter) && /rehydrateMemory\(\)/.test(enter) && /restartNavigation\(\)/.test(enter),
-  '5d enter: stash, re-read memory, restart navigation (no force-quit)');
+check(/enterSwap\(/.test(enter) && /rehydrateMemory\(\)/.test(enter) && /restartNavigation\(\)/.test(enter),
+  '5d enter: swap, re-read memory, restart navigation (no force-quit)');
 check(/queryClient\.clear\(\)/.test(state) && /useOnboardingState\.getInitialState\(\)/.test(state)
   && /hydrateQuicksetProgress\(\)/.test(state) && /resetSessionMemoryForProfileSwitch\(\)/.test(state),
   '5e in-memory stores are reset and re-read');
 check(/navigationRef\.reset\(/.test(state), '5f navigation restarts via navigationRef.reset');
 
 // ── 6 switch-back restores the real token; ordering; analytics ─────────────
-const stash = (state.match(/async function stashRealDeviceState[\s\S]*?\n}\n/) || [''])[0];
-const restore = (state.match(/async function restoreRealDeviceState[\s\S]*?\n}\n/) || [''])[0];
-check(/setItemAsync\(SECURE_REAL_TOKEN, token, SECURE_OPTS\)/.test(stash), '6a enter stashes the real token');
-check(/getItemAsync\(SECURE_REAL_TOKEN\)[\s\S]*?setSessionToken\(token\)/.test(restore), '6b exit restores the real token');
-check(/WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(state), '6c stashed token is device-only');
-check(/setItemAsync\(SECURE_REAL_SLEEPER_JWT, jwt, SECURE_OPTS\)/.test(stash)
-  && /getItemAsync\(SECURE_REAL_SLEEPER_JWT\)[\s\S]*?setItemAsync\(SECURE_SLEEPER_JWT, jwt\)/.test(restore),
+const stash = fnBody(swap, 'enterSwap');
+const restore = (swap.match(/async function restoreFromStash[\s\S]*?\n}\n/) || [''])[0];
+check(/setSecure\(SECURE_REAL_TOKEN, real\)/.test(stash), '6a enter stashes the real token');
+check(/getSecure\(SECURE_REAL_TOKEN\)[\s\S]*?setToken\(real\)/.test(restore), '6b exit restores the real token');
+check(/WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(state) && /key\.startsWith\('ftf\.tp\.'\) \? SECURE_OPTS/.test(state),
+  '6c stashed token is device-only');
+check(/\['sleeper\.link\.jwt', 'ftf\.tp\.realSleeperJwt'\]/.test(swap) && /SECURE_PROFILE_SLOTS/.test(stash)
+  && /SECURE_PROFILE_SLOTS/.test(restore),
   '6c2 the device\'s single Sleeper JWT slot is stashed and restored');
 const order = (s, a, b) => s.indexOf(a) >= 0 && s.indexOf(b) > s.indexOf(a);
-check(order(enter, 'enterTestProfileRemote()', 'stashRealDeviceState()')
-  && order(enter, 'stashRealDeviceState()', 'setSessionToken(session.session_token)'),
-  '6d enter: server first, then stash, then the test token');
+check(order(enter, 'enterTestProfileRemote()', 'enterSwap(')
+  && order(stash, "STASH_DONE_KEY, '1'", 'setToken(testToken)')
+  && order(stash, 'setToken(testToken)', "[[ACTIVE_KEY, '1']]"),
+  '6d enter: server first, then the complete stash, then the test token, then ACTIVE');
 check(/settleQueueForProfileSwitch\(true\)/.test(enter), '6e enter sends queued REAL events first');
 check(/settleQueueForProfileSwitch\(false\)/.test(exit) && /settleQueueForProfileSwitch\(false\)/.test(reset),
   '6f exit/reset drop test events, never send them under the real token');
-check(/restoreRealDeviceState\(\)/.test(exit) && /dropTestDeviceState\(\)/.test(reset)
-  && !/stashRealDeviceState|restoreRealDeviceState/.test(reset), '6g reset never touches the real stash');
+check(/resetSwap\(SWAP_STORE, session\.session_token\)/.test(reset)
+  && !/restoreFromStash|removeStash|STASH_PREFIX/.test((swap.match(/export async function resetSwap[\s\S]*?\n}\n/) || ['x'])[0]),
+  '6g reset never touches the real stash');
 
 // ── 7 identity-minting refused; Sleeper step resolves inside ───────────────
 for (const p of ['/api/extension/auth', '/api/auth/apple', '/api/auth/google', '/api/entry/platform', '/api/session/demo']) {
@@ -171,11 +192,11 @@ check(!/setUser\(/.test(enter) && !/setUser\(/.test(reset) && /restartNavigation
 check(/user_id: status\.user_id, username: status\.user_id, display_name: TEST_USER_DISPLAY,\s*avatar_id: null, account_only: true/.test(state)
   && /if \(isTestProfileActive\(\)\) \{[\s\S]*?pinTestAccountForLinking\(\)[\s\S]*?\(onAccountSignedIn \?\? onSignedIn\)\(intent\)/.test(signInScreen),
   '9b the landing ESPN/MFL tiles continue to the real post-sign-in linking flow as a new account');
-check(order(enter, 'enterTestProfileRemote()', 'readLinks()') && order(enter, 'readLinks()', 'stashRealDeviceState()'),
+check(order(enter, 'enterTestProfileRemote()', 'readLinks()') && order(enter, 'readLinks()', 'enterSwap('),
   '9c the real ESPN/MFL link status is read with the REAL token, before the swap');
 check(/AsyncStorage\.setItem\(REAL_LINKS_KEY, JSON\.stringify\(realLinks\)\)/.test(enter),
   '9d the real link status is recorded for the exit check');
-check(order(exit, 'restoreRealDeviceState()', 'readLinks()') && /brokenLinks\(before, await readLinks\(\)\)/.test(exit)
+check(order(exit, 'exitSwap(', 'readLinks()') && /brokenLinks\(before, await readLinks\(\)\)/.test(exit)
   && /useTestProfile\.setState\(\{ relink \}\)/.test(exit), '9e exit re-reads the real links and flags broken ones');
 check(/before\[p\] && !after\[p\]/.test(state), '9f a link is "broken" only if it was connected at enter and is not now');
 check(/<\/TestProfileBanner>\s*<TestProfileRelinkPrompt \/>/.test(app), '9g the re-link prompt is mounted outside the banner');

@@ -198,13 +198,52 @@ class OutboundBlocked(Exception):
     """Raised by a writer that must not create a cross-user record."""
 
 
+_OPPONENT_ID = re.compile(r"^qa_tpo_[0-9a-f]{16}$")
+
+
+def is_test_world_id(value) -> bool:
+    """An exact test-world id: a test profile `qa_tp_<real key>`, a namespaced
+    league `qa_tp:<real key>:<id>` or a re-keyed opponent `qa_tpo_<16 hex>`.
+    Structural, never a substring match, so a real league name or username
+    that happens to contain the text is not one (review L1)."""
+    v = str(value or "")
+    return (real_id_of(v) is not None or profile_of_league(v) is not None
+            or bool(_OPPONENT_ID.match(v)))
+
+
+def _id_field(key) -> bool:
+    k = str(key).lower()
+    return k == "id" or k.endswith("_id") or k.endswith("_ids") or k in ("user", "league")
+
+
+def names_test_id(obj) -> bool:
+    """Does an id FIELD of this payload (a bare id, or a dict/list holding
+    `*_id` / `*_ids` fields at any depth) carry a test-world id? Free text —
+    titles, bodies, names — is never inspected."""
+    if isinstance(obj, dict):
+        return any((_id_field(k) and _value_names_test_id(v))
+                   or (isinstance(v, (dict, list, tuple)) and names_test_id(v))
+                   for k, v in obj.items())
+    if isinstance(obj, (list, tuple, set)):
+        return any(names_test_id(x) for x in obj)
+    return is_test_world_id(obj)
+
+
+def _value_names_test_id(v) -> bool:
+    if isinstance(v, (list, tuple, set)):
+        return any(is_test_world_id(x) for x in v)
+    return is_test_world_id(v)
+
+
 def outbound_blocked(recipient, *, league_id=None, payload=None, kind="") -> bool:
+    """`payload`: a bare id or a structured dict/list (never pre-serialized
+    JSON); only its id fields are inspected."""
     actor = ACTOR.get()
     rec = str(recipient or "")
     touched_by_test = (
         is_test_profile_id(actor)
         or is_test_league_id(league_id)
-        or "qa_tp" in str(payload or "")
+        or names_test_id(payload)
         or is_test_profile_id(rec) or rec.startswith(OPPONENT_PREFIX)
     )
     if not touched_by_test:
@@ -215,6 +254,56 @@ def outbound_blocked(recipient, *, league_id=None, payload=None, kind="") -> boo
     if len(BLOCKED) < 1000:
         BLOCKED.append({"kind": kind, "recipient": rec})
     return True
+
+
+# ── write fence (default-deny at the database) ─────────────────────────────
+# Review M1: request-shape scanning alone cannot be complete, so every
+# INSERT/UPDATE/DELETE executed while a test profile is the request's ACTOR is
+# checked where league ids finally land — the bound values of the statement's
+# own `*league_id` columns. Any league id outside the actor's namespace is
+# refused. Real requests (ACTOR not a test profile) pay one contextvar read.
+
+class TestProfileWriteRefused(Exception):
+    """A test-profile request tried to write under a league it does not own."""
+
+
+def _bound_values(stmt, multiparams, params) -> list[tuple[str, object]]:
+    out = []
+    try:
+        out += list(stmt.compile().params.items())
+    except Exception:
+        pass
+
+    def walk(x):
+        if isinstance(x, dict):
+            out.extend(x.items())
+        elif isinstance(x, (list, tuple)):
+            for y in x:
+                walk(y)
+    walk(multiparams)
+    walk(params)
+    return out
+
+
+def check_write(stmt, multiparams=(), params=None) -> None:
+    actor = ACTOR.get()
+    if not is_test_profile_id(actor):
+        return
+    from sqlalchemy.sql.dml import UpdateBase
+    if not isinstance(stmt, UpdateBase):
+        return
+    table = getattr(stmt, "table", None)
+    names = {c.name for c in getattr(table, "columns", ()) if c.name.endswith("league_id")}
+    if not names:
+        return
+    for key, value in _bound_values(stmt, multiparams, params):
+        if re.sub(r"_\d+$", "", str(key)) not in names:
+            continue
+        for v in (value if isinstance(value, (list, tuple, set)) else [value]):
+            if v in (None, "", "no_league"):
+                continue
+            if not owns_test_league(actor, v) and not str(v) == league_prefix(actor):
+                raise TestProfileWriteRefused(f"{getattr(table, 'name', '?')}.{key}")
 
 
 # ── gate ───────────────────────────────────────────────────────────────────
@@ -234,8 +323,13 @@ def enabled_for(real_id, is_enabled) -> bool:
 # ── reset ──────────────────────────────────────────────────────────────────
 
 # Column names that hold an app-user id. Derived from database.py: every
-# column whose name ends in `user_id`, plus these.
-_EXTRA_USER_COLUMNS = frozenset({"owner_id", "actor"})
+# column whose name ends in `user_id`, plus these (review 2026-11-12 found the
+# last six missing). tests/test_test_profile.py enumerates the schema
+# independently and fails on any identity-like column that is neither here
+# nor listed there as not user-keyed.
+_EXTRA_USER_COLUMNS = frozenset({"owner_id", "actor", "user_a_id", "user_b_id",
+                                 "created_by", "recorded_by", "assigned_by",
+                                 "creator", "username"})
 
 
 def _is_user_column(name: str) -> bool:
@@ -255,26 +349,52 @@ def reset_scope() -> list[tuple[str, list[str], list[str]]]:
     return scope
 
 
-def reset_profile(profile_uid: str) -> dict[str, int]:
+def profile_league_ids(profile_uid: str, extra=()) -> set[str]:
+    """Every namespaced league the profile has: a namespaced id only comes
+    into existence as a `leagues` row (linking writes one, a first Sleeper
+    session init upserts one) or a `league_members` row. Both tables are
+    small; this is the reset's only prefix scan."""
+    from sqlalchemy import select
+
+    from . import database as db
+    prefix = league_prefix(profile_uid)
+    ids = {str(x) for x in extra if owns_test_league(profile_uid, x)}
+    with db.engine.connect() as conn:
+        for col in (db.leagues_table.c.sleeper_league_id, db.league_members_table.c.league_id):
+            ids.update(str(x) for x in conn.execute(
+                select(col).where(col.startswith(prefix, autoescape=True)).distinct()).scalars())
+    return ids
+
+
+def reset_profile(profile_uid: str, extra_league_ids=()) -> dict[str, int]:
     """Delete every row the test profile can have written: any row whose
-    user-id column equals `profile_uid`, or whose league-id column is inside
-    the profile's own `qa_tp:X:` namespace. Refuses any id that is not a
-    test profile id. One transaction."""
+    user-id column equals `profile_uid`, or whose league-id column is one of
+    the profile's own namespaced leagues. Refuses any id that is not a test
+    profile id.
+
+    Cost on Postgres (review L4): every predicate is an equality or an IN
+    list, so indexed user/league columns are used; unindexed ones are scanned
+    once. Each table is its own short transaction, so no lock outlives one
+    table's DELETE and only the deleted rows are ever locked. Re-running is
+    harmless."""
     from sqlalchemy import delete, or_
 
     from . import database as db
     real = real_id_of(profile_uid)
     if real is None or profile_id(real) != profile_uid:
         raise ValueError("reset refused: not a test profile id")
-    prefix = league_prefix(profile_uid)
+    leagues = sorted(profile_league_ids(profile_uid, extra_league_ids))
     counts: dict[str, int] = {}
     tables = {t.name: t for t in db.metadata.sorted_tables}
-    with db.engine.begin() as conn:
-        for name, ucols, lcols in reversed(reset_scope()):
-            t = tables[name]
-            preds = [t.c[c] == profile_uid for c in ucols]
-            preds += [t.c[c].startswith(prefix, autoescape=True) for c in lcols]
+    for name, ucols, lcols in reversed(reset_scope()):
+        t = tables[name]
+        preds = [t.c[c] == profile_uid for c in ucols]
+        if leagues:
+            preds += [t.c[c].in_(leagues) for c in lcols]
+        if not preds:
+            continue
+        with db.engine.begin() as conn:
             n = conn.execute(delete(t).where(or_(*preds))).rowcount or 0
-            if n:
-                counts[name] = n
+        if n:
+            counts[name] = n
     return counts

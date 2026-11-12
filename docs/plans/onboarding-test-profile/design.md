@@ -5,6 +5,7 @@
 - §10: the 2026-11-11 ruling — linking must be the real production flows.
 - §11: option A, real ESPN/MFL linking.
 - §12: the 2026-11-12 ruling — Sleeper too, built with three defences.
+- §13: the independent review's findings and their fixes.
 
 Line numbers are from `fa83f57b`. `server.py` is 44.7k lines, so every claim here cites a line.
 
@@ -22,6 +23,7 @@ Line numbers are from `fa83f57b`. `server.py` is 44.7k lines, so every claim her
 10. [Operator ruling 2026-11-11: real linking flows](#10-operator-ruling-2026-11-11-real-linking-flows)
 11. [Option A: real ESPN / MFL linking](#11-option-a-real-espn--mfl-linking)
 12. [Operator ruling 2026-11-12: real Sleeper linking](#12-operator-ruling-2026-11-12-real-sleeper-linking)
+13. [Review findings and fixes (2026-11-12)](#13-review-findings-and-fixes-2026-11-12)
 
 ---
 
@@ -543,3 +545,134 @@ The request actor is set in `_test_profile_request_guard` and reset at teardown.
 - The test session is pre-verified, so Sleeper's JWT capture (`/api/sleeper/link`) is not part of the test and stays fenced. That is a gap: the "Verify Sleeper account" step a new user meets is not exercised.
 
 **Requirement 8 — sites that could not run unchanged:** none blocked the build. Every changed site is a branch on `_tp.is_test_profile_id` / `_tp.is_test_league_id`, or a call through the accessor or a seam that is the identity for real users. The full suite plus the identity test cover them.
+
+## 13. Review findings and fixes (2026-11-12)
+
+An independent read-only review found four medium and seven low gaps. In each, a guard covered the normal client path but not an edge path, or a test was stronger than production. Every fix has a test, and every test was sabotage-proven (red on the break, green on restore, checksum verified).
+
+Tests are in `backend/tests/test_test_profile_review.py` (R) unless named otherwise.
+
+### M1 — the request fence was bypassable with a non-JSON body
+
+**Fix 1: the fence reads every request source.**
+- `server._tp_request_league_ids` (`:37070`) reads path args, the query string, form fields, and the body parsed the way routes parse it (`get_json(force=True, silent=True)`, so any content type).
+- `_tp_collect_league_ids` (`:37053`) collects every `league_id` / `league_ids` / `*_league_id(s)` / camelCase key at any depth. Comma-joined lists are split.
+- Platform-native link inputs are exempt only on the three linking routes (`_TP_LINK_INPUT_KEYS`, `:37044`).
+
+**Fix 2: default-deny at the database.**
+- `database._tp_write_fence` (`database.py:89`) is registered on the SQLAlchemy `Engine` class, so it covers every engine, including test engines.
+- It calls `test_profile.check_write` (`test_profile.py:288`). That function refuses any INSERT/UPDATE/DELETE made while a test profile is the request's ACTOR if a bound value of one of the statement's own `*league_id` columns is outside the actor's namespace.
+- It catches writes no request-shape scan can foresee. A real request pays one contextvar read.
+
+**Pre-existing gap, fixed:** `submit_rankings` (`:28957`) now requires membership for every caller: the session's own league, or a stored `league_members` row.
+- Safe for real flows: no client calls the route (mobile, web and the extension were grepped). The default is the session league, which always passes.
+
+**Tests:**
+- `test_fence_reads_every_request_source`: text/plain, no content type, nested, list, camelCase, `league_ids` body and query, form.
+- `test_linking_inputs_stay_open_only_on_the_linking_routes`.
+- `test_database_write_fence_denies_a_test_request_under_a_real_league`: insert, executemany, and an UPDATE of a real league.
+- `test_submit_rankings_requires_league_membership_for_every_caller`.
+
+**Not covered by the DB fence:** raw `text()` SQL. The request fence is the guard there.
+
+### M2 — background sweeps over `leagues` were not all guarded
+
+**Fix:**
+- Loader-level exclusion via `database._not_test_league` / `_not_test_user` (`database.py:97`) in:
+  - `load_history_sweep_leagues` (`:16161`);
+  - `load_league_ids_for_draft_status_refresh` (`:13851`);
+  - `load_active_deck_user_leagues` (`:8026`);
+  - `load_pending_matches_older_than` (`:17689`).
+- Belt and braces at the two places the history sweep could still be reached:
+  - `_sweep_fetch_teams` returns `(None, "test_profile")` (`:32578`) and never reads a platform with the test profile's cookies;
+  - `_do_league_history_snapshot`, the shared tail of all three history triggers, refuses a namespaced league (`:32437`).
+- `_do_league_history_snapshot` wrote two tables: `league_roster_history` (`snapshot_league_rosters`) and the board history (`snapshot_league_boards`). Both are now unreachable for a test league.
+
+**Test:** `test_background_loaders_and_the_history_sweep_skip_test_leagues`.
+
+**Audit of every background reader:**
+
+| Path | Walks | Verdict |
+|---|---|---|
+| Roster-history sweep (daily tick, `/api/cron/roster-snapshot`) | `leagues` | **fixed now**: loader exclusion, adapter and writer refusal |
+| Draft-status sweep (hourly tick) | `leagues` | **fixed now**: loader exclusion; `_refresh_league_draft_status` also returns early |
+| Weekly replenishment (daily tick) | `trade_decisions`, `trade_impressions` | **fixed now**: loader excludes `qa_` users and `qa_tp:` leagues |
+| Pending-match reminders (realtime tick) | `trade_matches` | **fixed now**: loader exclusion; matches cannot be created anyway (`create_trade_match` raises) |
+| Digests, reviews, re-engagement (hourly and daily ticks) | `users` | skips: `load_all_signed_up_users` excludes `qa_` |
+| Quiet-hours queue drain | `notification_queue` | cannot see: `queue_notification` refuses test rows |
+| Device-token loads | `device_tokens` | cannot see: push registration is skipped for a test session |
+| Sleeper offer import (daily tick) | `offer_import_consents`, `trade_offer_outcomes` | cannot see: the consent and offer-import routes are fenced; sends are refused |
+| `load_member_sleeper_leagues` | `league_members` by a real member id | cannot see: test-league members are `qa_tp_` / `qa_tpo_` |
+| Trade outcomes (daily tick) | `trade_offer_outcomes` | cannot see: written only by sends, which are refused |
+| Receipts grading | captured completed trades | cannot see: capture reads Sleeper, which refuses namespaced ids |
+| League projections dispatch | `league_projection_targets` | cannot see: `register` refuses a non-numeric league id; the server also skips |
+| Prepared-trade cohort | users | skips `qa_` (`prepared_trade_cohort`) |
+| Eval nightly, value-model refit | impression spine | skips `qa_` (`eval/data.load_decks`) |
+| Outlook calibration | connected targets | skips `qa_` |
+| Leaderboard (incl. streak board) | users | skips `qa_` after over-fetch |
+| Global like-rate, archetype counts | decisions | skip `qa_` |
+| Community diff, risers/fallers, consensus gap, market movers | consensus pool, per-user elo history, per-league community Elo, value snapshots | cannot see: none aggregates other users' boards across leagues; per-league reads only reach a test league for its owner (L6) |
+| Usage-trends refresh, players guard, rookie monitor | nflverse / players | no user or league data |
+| Deletion scrub | scrub jobs from real deletions | cannot see: a test profile cannot delete an account (fenced) |
+| Boot backfills (`_backfill_*`) | users / leagues | reshape rows in place; reach no other user |
+| Cleanup loop | sessions, durable sessions | now also evicts closed-gate test sessions (L2) |
+
+### M3 — a dead test token minted a REAL session
+
+**Server:**
+- Every test token now carries `_TP_TOKEN_PREFIX` (`"tp."`, `:2769`). `'.'` is outside `token_urlsafe`'s alphabet, so no real token can carry it.
+- `extension_auth` answers **401 `test_profile_ended`** to a prefixed token that does not resolve to a live test session (`:34875`). It never falls through to a mint.
+
+**Client:**
+- `api/client.testProfileAuthHeaders` refuses sign-in inside the test profile unless `GET /api/test-profile` says `active`.
+- Any 401 while in the test profile marks it ended.
+- `state/testProfile.verifyTestProfileWithServer` asks the server after boot.
+- The banner then reads "TEST PROFILE ENDED" and offers only "Back to my profile".
+
+**Tests:**
+- `test_test_profile_sleeper.py::test_a_dead_test_token_never_mints_a_real_session` (a real sign-in without the token is unchanged);
+- `check-test-profile.js` 2b1–2b4.
+
+### M4 — the device swap was not crash-safe
+
+**Fix:**
+- The swap is now the phased state machine in `mobile/src/utils/testProfileSwap.ts`, which has zero runtime imports.
+  - `SWAP_KEY` names the phase in progress.
+  - `STASH_DONE_KEY` marks a complete stash.
+  - `ACTIVE_KEY` is written only after the stash and the token swap complete.
+  - Originals are removed only after the stash is complete.
+- Exit always rolls forward and drops test keys only while the stash is complete. A restore never clears the current token unless it is a test token. Restore and drop are idempotent, and with no stash nothing is dropped.
+- `hydrateTestProfile` runs `reconcileSwap` **first** in App.tsx's boot gate, before any other storage read. It also repairs a mixed state: ACTIVE with a real token, or a stray test token.
+
+**Test:** `mobile/tests/check-test-profile-swap.js` (`npm run test:test-profile-swap`) executes the real module against an in-memory store.
+- It kills enter, exit and reset after every single operation. Then it kills the relaunch's reconcile at every point and reconciles again.
+- It asserts the outcome is always fully real or fully test, never mixed, and never with the real token lost.
+- It also replays the review's two concrete bugs. Total: 3,364 checks.
+
+### Low findings
+
+| Finding | Fix | Test |
+|---|---|---|
+| **L1** substring matches | `test_profile.is_test_world_id` / `names_test_id` (`:204`, `:219`) match exact `qa_tp_<real id>`, `qa_tp:<real id>:…`, `qa_tpo_<16 hex>` in id FIELDS only. Callers now pass structured payloads, not JSON strings. `_sleeper_get` checks URL path segments (`_tp_url_names_test_id`, `:611`). The bypass readers use the exact `qa_tp:` prefix | `test_real_names_that_contain_the_text_are_not_test_ids` |
+| **L2** direct `_sessions` readers after the kill switch | `_tp_evict_closed_sessions` (`:2785`) runs on flag reload and in the cleanup loop; `_get_session` evicts on sight | `test_closing_the_gate_evicts_test_sessions_from_memory`, `test_a_test_session_under_a_real_style_token_is_refused` |
+| **L3** existence signal | `GET /api/test-profile` and `/enter` are 404 unless the session is verified AND allow-listed | `test_test_profile.py::test_enter_requires_a_verified_real_session` |
+| **L4** reset races and cost | Reset runs inside `accounts.deletion_scope` (the account-deletion drain, `:37283`): it waits for in-flight leases and then `invalidate`s, so pre-reset work can never write. Trade jobs naming the profile are revoked; module caches are purged (`_TP_KEYED_CACHES`, `:37172`). **Postgres cost:** the old one-transaction, 60-table `LIKE` scan is gone. The profile's leagues are listed once from `leagues` + `league_members` (the only prefix scan, on two small tables); every table is then deleted by `=` / `IN`, which uses indexes such as `ix_user_events_user_occurred`, in its own short transaction, so no lock outlives one table's DELETE. Not measured on Postgres (no production access); reasoned from the predicates and indexes | `test_reset_invalidates_pre_reset_work_and_purges_caches`; `test_test_profile.py::test_reset_deletes_only_test_rows_across_every_table` (look-alike ids survive) |
+| **L5** real identifiers in test rows | **Fixed:** history rows (`team_key` with the real league id, ESPN `espn:<SWID>` member keys) are no longer written for a test league (M2). **Acceptable, stated:** league-mates' usernames and display names (`mask_sleeper_users`, `league_members.username` / `display_name`, ESPN `owner_display`, usage-trends owner rows) stay in the test profile's own rows and responses. They are the operator's own league-mates, the same names the operator sees in the real profile, and no one else can reach them: every read of a `qa_tp:` league by anyone but its owner is now refused (L6) | — |
+| **L6** unauthenticated proxies | The fence refuses any real or anonymous request that names a `qa_tp:` league (404) in its path, query, or a body of at most 64 KB. A raw-bytes pre-filter keeps it free for every other request. The fence never reads a larger body, because capped routes (feedback 64 KB, events 128 KB) must answer 413 before any read. A larger body naming a test league from a real caller is not refused here; `session_input` refuses entering it and `submit_rankings` requires membership | `test_real_and_anonymous_callers_cannot_name_a_test_league` |
+| **L7** per-request cost | A non-prefixed token is decided without a lookup. **Cost now:** a real request's fence is one `startswith`, a substring check on the path and query, and, for a body ≤512 KB, one substring check on the cached body bytes (Werkzeug reuses them for the route's own parse), and only for a body of at most 64 KB (`_TP_BODY_SCAN_LIMIT`, the smallest route cap); a larger body is never read by the fence. The pre-existing `_acquire_user_data_lease` hook still does its own `_get_session`, as before this feature | `test_the_fence_never_looks_up_a_real_token`, `test_the_fence_never_reads_a_body_past_the_smallest_route_cap` |
+
+### Tests now match production
+
+- **Real threads:** `test_test_profile_sleeper.py::test_background_threads_hold_isolation_without_the_request_actor` runs the session-init daemon and the trade jobs on real threads against a file database. It asserts ACTOR is `None` inside both, and that the full decisive scan still holds. Isolation rests on the namespace and the re-key, not on the contextvar.
+- **Lowest sender:** `init_harness` now patches only the Expo transport (`_send_expo_push`), and league-mates have device tokens, so the `_send_typed_push` chokepoint runs as in production.
+- **Reset coverage:** `test_reset_scope_covers_every_identity_column_in_the_schema` enumerates the schema with a broad identity pattern. Each match is either covered or listed with a reason.
+  - It found these columns missing and the reset now covers them: `user_a_id`, `user_b_id`, `created_by`, `recorded_by`, `assigned_by`, `creator`, `username`.
+  - The delete test classifies rows independently of the code and seeds look-alike ids (a profile id with one more digit, a namespace without the colon) that must survive.
+- **ACTOR reset on exception:** `test_actor_is_reset_when_the_request_raises`.
+
+### Layered guards the sabotage table shows as backstops
+
+Three removals leave their test green because another layer still holds. They are recorded as expected:
+- **Chokepoint alone** (P2a): the outer guards and the re-key hold.
+- **Join fan-out outer guard alone** (S12): the inbox and push chokepoints drop the delivery. S12b removes both and goes red.
+- **Exit's "dropped" phase marker** (M17): the stash outlives the restore, so a replayed drop is re-restored.

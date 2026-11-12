@@ -70,7 +70,8 @@ ESPN_LG = "987654321"       # the id inside the ESPN fixture
 MFL_LG = "10005"
 OWNER1 = "{A1111111-1111-1111-1111-111111111111}"   # owns ESPN team 1
 OWNER2 = "{B2222222-2222-2222-2222-222222222222}"
-TOK = {REAL: "tpl-real", NEWU: "tpl-newu", PID: "tpl-test"}
+# The test token carries server._TP_TOKEN_PREFIX, as every switch-minted one does.
+TOK = {REAL: "tpl-real", NEWU: "tpl-newu", PID: "tp.tpl-test"}
 COOKIE = "MFL_USER_ID=user_0123abc"
 MY_MFL = [{"league_id": MFL_LG, "name": "Masters Copper Dynasty League",
            "host": "www48.myfantasyleague.com", "franchise_id": "0001",

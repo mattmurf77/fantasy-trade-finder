@@ -68,7 +68,7 @@ def fetch_league_players(league_id: str, *, _opener=None, timeout: int = 15) -> 
     Public read — no authorization header. `_opener` injects a fake
     urlopen in tests (same pattern as sleeper_write / espn_service).
     """
-    if "qa_tp" in str(league_id):   # onboarding test profile: never reach Sleeper by a namespaced id
+    if str(league_id).startswith("qa_tp:"):   # onboarding test profile: never reach Sleeper by a namespaced id
         raise ValueError("test-profile league id")
     op = "league_players"
     query = (
@@ -102,7 +102,7 @@ def fetch_league_players(league_id: str, *, _opener=None, timeout: int = 15) -> 
 
 def _fetch_rosters(league_id: str, *, _opener=None, timeout: int = 15) -> list[dict]:
     """Fetch v1 rosters (roster_id → owner_id + players) for validation."""
-    if "qa_tp" in str(league_id):   # onboarding test profile: never reach Sleeper by a namespaced id
+    if str(league_id).startswith("qa_tp:"):   # onboarding test profile: never reach Sleeper by a namespaced id
         raise ValueError("test-profile league id")
     request = urllib.request.Request(
         f"{SLEEPER_API_BASE}/league/{league_id}/rosters",

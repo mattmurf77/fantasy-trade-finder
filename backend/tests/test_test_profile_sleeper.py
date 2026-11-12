@@ -126,9 +126,26 @@ def _leaks(dump):
 
 @pytest.fixture()
 def world(monkeypatch):
+    yield from _world(monkeypatch)
+
+
+@pytest.fixture()
+def world_threads(monkeypatch, tmp_path):
+    """The same world with PRODUCTION threading: the session-init daemon and
+    the trade jobs run on their own threads, where the request's ACTOR
+    contextvar is not inherited (Python 3.12). A file database, so the
+    threads each get their own connection."""
+    yield from _world(monkeypatch, real_threads=tmp_path / "tp.db")
+
+
+def _world(monkeypatch, real_threads=None):
     monkeypatch.setenv(tp.ENV_VAR, REAL)
-    engine = create_engine("sqlite://", poolclass=StaticPool,
-                           connect_args={"check_same_thread": False})
+    if real_threads is None:
+        engine = create_engine("sqlite://", poolclass=StaticPool,
+                               connect_args={"check_same_thread": False})
+    else:
+        engine = create_engine(f"sqlite:///{real_threads}",
+                               connect_args={"check_same_thread": False, "timeout": 30})
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
     flags = {"dev.test_profile", "league.projections", "auth.persistent_sessions"}
@@ -169,24 +186,35 @@ def world(monkeypatch):
     monkeypatch.setattr(server, "g_universal_players", pool)
     monkeypatch.setattr(server, "g_players", pool, raising=False)
     monkeypatch.setattr(server, "_refresh_league_draft_status", lambda *a, **k: None)
-    # Trade jobs (the session-init pre-gen and the first deck request) run
-    # on the request thread here, so nothing outlives the test's database.
-    _real_kickoff = server._kickoff_trade_job
-    monkeypatch.setattr(server, "_kickoff_trade_job",
-                        lambda *a, **k: _real_kickoff(*a, **{**k, "synchronous": True}))
     sends = []
     monkeypatch.setattr(server, "_send_expo_push", lambda msgs: sends.append(msgs))
+    started = []
+    if real_threads is None:
+        # Trade jobs (the session-init pre-gen and the first deck request)
+        # run on the request thread here, so nothing outlives the database.
+        _real_kickoff = server._kickoff_trade_job
+        monkeypatch.setattr(server, "_kickoff_trade_job",
+                            lambda *a, **k: _real_kickoff(*a, **{**k, "synchronous": True}))
 
-    real_thread = server.threading.Thread
+        real_thread = server.threading.Thread
 
-    class _Inline(real_thread):
-        def start(self):
-            if self.name == "session-init-bg-writes":
-                self.run()
-                return
-            super().start()
+        class _Inline(real_thread):
+            def start(self):
+                if self.name == "session-init-bg-writes":
+                    self.run()
+                    return
+                super().start()
 
-    monkeypatch.setattr(server.threading, "Thread", _Inline)
+        monkeypatch.setattr(server.threading, "Thread", _Inline)
+    else:
+        real_thread = server.threading.Thread
+
+        class _Tracked(real_thread):
+            def start(self):
+                started.append(self)
+                super().start()
+
+        monkeypatch.setattr(server.threading, "Thread", _Tracked)
 
     # The REAL world: the operator and every league-mate are app users; the
     # operator already synced this league, ranked and set preferences.
@@ -217,8 +245,10 @@ def world(monkeypatch):
     server.app.config["TESTING"] = True
     try:
         yield {"client": server.app.test_client(), "engine": engine, "calls": calls,
-               "sends": sends}
+               "sends": sends, "threads": started}
     finally:
+        for t in started:
+            t.join(timeout=60)
         with server._sessions_lock:
             for t in [t for t, s in server._sessions.items()
                       if s.get("user_id") in (PID, REAL)]:
@@ -323,6 +353,67 @@ def test_full_sleeper_onboarding_reaches_nobody_and_writes_nothing_real(world):
     assert PID not in tok_owner.values()
     with w["engine"].connect() as conn:                           # projections never registered
         assert conn.execute(select(db.league_projection_targets_table)).fetchall() == []
+
+
+def test_background_threads_hold_isolation_without_the_request_actor(world_threads, monkeypatch):
+    """Review: production threads do not inherit the request's ACTOR. Run the
+    session-init daemon and the trade jobs on REAL threads, prove ACTOR is
+    None there, and prove the decisive scan still holds — isolation rests on
+    the namespace and the re-key alone, not on the contextvar."""
+    w = world_threads
+    seen = {}
+    real_members = server.write_session_init_members
+    real_start = server._start_trade_job_thread
+
+    def _members(*a, **k):
+        seen.setdefault("daemon", []).append(tp.ACTOR.get())
+        return real_members(*a, **k)
+
+    def _start(*, target, args, kwargs):
+        def _job(*a, **k):
+            seen.setdefault("job", []).append(tp.ACTOR.get())
+            return target(*a, **k)
+        return real_start(target=_job, args=args, kwargs=kwargs)
+
+    monkeypatch.setattr(server, "write_session_init_members", _members)
+    monkeypatch.setattr(server, "_start_trade_job_thread", _start)
+    before = _real_rows(_dump(w["engine"]))
+    tok = _onboard(w)
+    for t in list(w["threads"]):
+        t.join(timeout=60)
+    _first_deck(w, tok)
+    for t in list(w["threads"]):
+        t.join(timeout=60)
+    assert seen.get("daemon") and set(seen["daemon"]) == {None}
+    assert seen.get("job") and set(seen["job"]) == {None}
+    after = _dump(w["engine"])
+    assert _leaks(after) == []
+    assert _real_rows(after) == before
+    assert w["sends"] == []
+    with w["engine"].connect() as conn:
+        assert conn.execute(select(db.notifications_table)).fetchall() == []
+        assert conn.execute(select(db.trade_matches_table)).fetchall() == []
+
+
+def test_a_dead_test_token_never_mints_a_real_session(world):
+    """Review M3: a test token that no longer resolves (exit or reset on
+    another device, the gate closed) must get 401, never a fresh REAL session
+    a phone still showing TEST PROFILE would store."""
+    w = world
+    tok = _post(w, REAL_TOK, "/api/test-profile/enter", {}).get_json()["session_token"]
+    assert _post(w, tok, "/api/test-profile/exit", {}).status_code == 200
+
+    def real_sessions():
+        with server._sessions_lock:
+            return sorted(t for t, s in server._sessions.items() if s.get("user_id") == REAL)
+    before = real_sessions()
+    r = _post(w, tok, "/api/extension/auth", {"username": OPS_USERNAME})
+    assert r.status_code == 401 and r.get_json()["error"] == "test_profile_ended"
+    assert real_sessions() == before
+    # A real sign-in (no test token) is unchanged.
+    r = w["client"].post("/api/extension/auth", headers={"Content-Type": "application/json"},
+                         data=json.dumps({"username": OPS_USERNAME}))
+    assert r.status_code == 200 and r.get_json()["user_id"] == REAL
 
 
 def test_the_username_step_refuses_another_persons_sleeper_account(world):

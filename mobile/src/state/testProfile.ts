@@ -26,8 +26,11 @@
 //            fresh test session; the device drops the test profile's keys and
 //            restarts onboarding from zero. The stash is untouched.
 //
-// "Active" is the presence of ACTIVE_KEY, read in App.tsx's boot gate, so the
-// banner and the profile survive restarts in whichever profile the app was.
+// The storage swap itself is the crash-safe phased state machine in
+// utils/testProfileSwap.ts (review M4): App.tsx's boot gate runs
+// `hydrateTestProfile`, which reconciles an interrupted swap before anything
+// reads storage, so the device is always fully real or fully test. "Active"
+// is then ACTIVE_KEY, written only after the stash and token swap complete.
 // No target user id is ever sent: the server derives everything from the
 // token (pinned by tests/check-test-profile.js).
 
@@ -37,8 +40,8 @@ import { create } from 'zustand';
 
 import {
   clearSessionToken,
-  getLastUsername,
   getSessionToken,
+  setOnTestProfileEnded,
   setSessionToken,
   setTestProfileActive,
 } from '../api/client';
@@ -62,21 +65,34 @@ import { useFeedback } from './useFeedback';
 import { useOnboardingState } from './useOnboardingState';
 import { resetSessionMemoryForProfileSwitch, useSession } from './useSession';
 import { useTradeQueue } from './useTradeQueue';
+import {
+  ACTIVE_KEY,
+  REAL_LINKS_KEY,
+  enterSwap,
+  exitSwap,
+  reconcileSwap,
+  resetSwap,
+  type SwapStore,
+} from '../utils/testProfileSwap';
 
-export const ACTIVE_KEY = 'ftf_tp_active_v1';
-export const STASH_PREFIX = 'ftf_tp_stash:';
-/** Device-level keys that are not profile state: kept across a switch. */
-/** The real profile's ESPN / MFL link status at enter, for the exit check. */
-export const REAL_LINKS_KEY = 'ftf_tp_real_links_v1';
-export const KEEP_KEYS: readonly string[] = ['feature_flags_v1', ACTIVE_KEY, REAL_LINKS_KEY];
-const SECURE_REAL_TOKEN = 'ftf.tp.realSessionToken';
-const SECURE_REAL_USERNAME = 'ftf.tp.realLastUsername';
-const SECURE_LAST_USERNAME = 'ftf.lastUsername';
-// One device slot holds the captured Sleeper JWT (api/sendInSleeper.ts). A
-// Sleeper sign-in inside the test profile must never overwrite the real one.
-const SECURE_SLEEPER_JWT = 'sleeper.link.jwt';
-const SECURE_REAL_SLEEPER_JWT = 'ftf.tp.realSleeperJwt';
+export { ACTIVE_KEY, KEEP_KEYS, REAL_LINKS_KEY, STASH_PREFIX } from '../utils/testProfileSwap';
 const SECURE_OPTS = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+
+/** The device storage the swap runs over (AsyncStorage + SecureStore + the
+ *  session token). The real-token / parked slots are device-only. */
+const SWAP_STORE: SwapStore = {
+  getAllKeys: () => AsyncStorage.getAllKeys(),
+  multiGet: (keys) => AsyncStorage.multiGet(keys as string[]),
+  multiSet: (rows) => AsyncStorage.multiSet(rows),
+  multiRemove: (keys) => AsyncStorage.multiRemove(keys as string[]),
+  getSecure: (key) => SecureStore.getItemAsync(key).catch(() => null),
+  // Parked copies are device-only; restored originals keep their default.
+  setSecure: (key, value) => SecureStore.setItemAsync(key, value, key.startsWith('ftf.tp.') ? SECURE_OPTS : undefined),
+  deleteSecure: (key) => SecureStore.deleteItemAsync(key).catch(() => {}),
+  getToken: () => getSessionToken(),
+  setToken: (token) => setSessionToken(token),
+  clearToken: () => clearSessionToken(),
+};
 
 interface TestProfileState {
   /** The device is in the test profile (ACTIVE_KEY present). */
@@ -85,13 +101,17 @@ interface TestProfileState {
    *  (GET /api/test-profile answered, not 404). Gates the Settings row. */
   available: boolean;
   busy: boolean;
+  /** The server no longer accepts this test session (reset or exit on
+   *  another device, the gate closed): the banner offers only "Back to my
+   *  profile" (review M3). */
+  ended: boolean;
   /** Real-profile links found broken after "Back to my profile" (drives
    *  components/TestProfileRelinkPrompt). */
   relink: Array<'espn' | 'mfl'>;
 }
 
 export const useTestProfile = create<TestProfileState>(() => ({
-  active: false, available: false, busy: false, relink: [],
+  active: false, available: false, busy: false, ended: false, relink: [],
 }));
 
 export type RealLinks = { espn: boolean; mfl: boolean };
@@ -144,70 +164,32 @@ export async function refreshTestProfileAvailability(): Promise<void> {
 
 function setActive(active: boolean): void {
   setTestProfileActive(active);
-  useTestProfile.setState({ active });
+  useTestProfile.setState({ active, ...(active ? {} : { ended: false }) });
 }
 
-/** Boot-gate leg (App.tsx): local read only. */
+// A 401 `test_profile_ended` anywhere (api/client.ts) marks the profile ended.
+setOnTestProfileEnded(() => useTestProfile.setState({ ended: true }));
+
+/** Boot-gate leg (App.tsx): local storage only. Finishes or undoes a swap a
+ *  kill interrupted, then reports which profile the device is in. */
 export async function hydrateTestProfile(): Promise<void> {
   try {
-    setActive((await AsyncStorage.getItem(ACTIVE_KEY)) === '1');
+    setActive((await reconcileSwap(SWAP_STORE)) === 'test');
   } catch {
-    setActive(false);
+    setActive((await AsyncStorage.getItem(ACTIVE_KEY).catch(() => null)) === '1');
   }
 }
 
-function isProfileKey(key: string): boolean {
-  return !KEEP_KEYS.includes(key) && !key.startsWith(STASH_PREFIX);
-}
-
-async function profileKeys(): Promise<string[]> {
-  return (await AsyncStorage.getAllKeys()).filter(isProfileKey);
-}
-
-async function stashRealDeviceState(): Promise<void> {
-  const keys = await profileKeys();
-  const rows = (await AsyncStorage.multiGet(keys)).filter(
-    (r): r is [string, string] => r[1] !== null,
-  );
-  if (rows.length) await AsyncStorage.multiSet(rows.map(([k, v]) => [STASH_PREFIX + k, v]));
-  if (keys.length) await AsyncStorage.multiRemove(keys);
-  const token = await getSessionToken();
-  if (token) await SecureStore.setItemAsync(SECURE_REAL_TOKEN, token, SECURE_OPTS);
-  const username = await getLastUsername();
-  if (username) await SecureStore.setItemAsync(SECURE_REAL_USERNAME, username, SECURE_OPTS);
-  await SecureStore.deleteItemAsync(SECURE_LAST_USERNAME).catch(() => {});
-  const jwt = await SecureStore.getItemAsync(SECURE_SLEEPER_JWT).catch(() => null);
-  if (jwt) await SecureStore.setItemAsync(SECURE_REAL_SLEEPER_JWT, jwt, SECURE_OPTS);
-  await SecureStore.deleteItemAsync(SECURE_SLEEPER_JWT).catch(() => {});
-}
-
-async function dropTestDeviceState(): Promise<void> {
-  const keys = await profileKeys();
-  if (keys.length) await AsyncStorage.multiRemove(keys);
-  await SecureStore.deleteItemAsync(SECURE_LAST_USERNAME).catch(() => {});
-  await SecureStore.deleteItemAsync(SECURE_SLEEPER_JWT).catch(() => {});
-}
-
-async function restoreRealDeviceState(): Promise<void> {
-  await dropTestDeviceState();
-  const stashKeys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(STASH_PREFIX));
-  const rows = (await AsyncStorage.multiGet(stashKeys)).filter(
-    (r): r is [string, string] => r[1] !== null,
-  );
-  if (rows.length) {
-    await AsyncStorage.multiSet(rows.map(([k, v]) => [k.slice(STASH_PREFIX.length), v]));
+/** Detached, after boot: while the device is in the test profile, ask the
+ *  server whether the session still is one. A 401/404 means it ended. */
+export async function verifyTestProfileWithServer(): Promise<void> {
+  if (!useTestProfile.getState().active) return;
+  try {
+    const status = await getTestProfileStatus();
+    if (!status?.active) useTestProfile.setState({ ended: true });
+  } catch (e: any) {
+    if (e?.status === 401 || e?.status === 404) useTestProfile.setState({ ended: true });
   }
-  if (stashKeys.length) await AsyncStorage.multiRemove(stashKeys);
-  const token = await SecureStore.getItemAsync(SECURE_REAL_TOKEN).catch(() => null);
-  if (token) await setSessionToken(token);
-  else await clearSessionToken();
-  const username = await SecureStore.getItemAsync(SECURE_REAL_USERNAME).catch(() => null);
-  if (username) await SecureStore.setItemAsync(SECURE_LAST_USERNAME, username);
-  const jwt = await SecureStore.getItemAsync(SECURE_REAL_SLEEPER_JWT).catch(() => null);
-  if (jwt) await SecureStore.setItemAsync(SECURE_SLEEPER_JWT, jwt);
-  await SecureStore.deleteItemAsync(SECURE_REAL_TOKEN).catch(() => {});
-  await SecureStore.deleteItemAsync(SECURE_REAL_USERNAME).catch(() => {});
-  await SecureStore.deleteItemAsync(SECURE_REAL_SLEEPER_JWT).catch(() => {});
 }
 
 /** Re-read every in-memory store from the (just swapped) storage. */
@@ -257,11 +239,11 @@ export function enterTestProfile(): Promise<void> {
     const realLinks = await readLinks();                       // read with the REAL token
     await settleQueueForProfileSwitch(true);                  // real events go out as real
     await clearDevicePages();                                 // per-account trade cache
-    await AsyncStorage.setItem(ACTIVE_KEY, '1');              // first: a crash mid-swap still shows the banner
     await AsyncStorage.setItem(REAL_LINKS_KEY, JSON.stringify(realLinks));
+    // Phased and crash-safe: ACTIVE is written only after the stash and the
+    // token swap complete (utils/testProfileSwap.ts).
+    await enterSwap(SWAP_STORE, session.session_token);
     setActive(true);
-    await stashRealDeviceState();
-    await setSessionToken(session.session_token);
     await rehydrateMemory();
     void useFeatureFlags.getState().revalidateFlags().catch(() => {});
     restartNavigation();
@@ -275,8 +257,7 @@ export function exitTestProfile(): Promise<void> {
     await exitTestProfileRemote().catch(() => {});
     await settleQueueForProfileSwitch(false);                 // test events never go out as real
     await clearDevicePages();
-    await restoreRealDeviceState();
-    await AsyncStorage.removeItem(ACTIVE_KEY);
+    await exitSwap(SWAP_STORE);                               // rolls forward if killed
     setActive(false);
     await rehydrateMemory();
     void useFeatureFlags.getState().revalidateFlags().catch(() => {});
@@ -303,8 +284,8 @@ export function resetTestProfile(): Promise<void> {
     const session = await resetTestProfileRemote();
     await settleQueueForProfileSwitch(false);
     await clearDevicePages();
-    await dropTestDeviceState();
-    await setSessionToken(session.session_token);
+    await resetSwap(SWAP_STORE, session.session_token);
+    useTestProfile.setState({ ended: false });
     await rehydrateMemory();
     restartNavigation();
   });

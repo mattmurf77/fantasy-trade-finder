@@ -1179,7 +1179,10 @@ Operator tool: run onboarding as a brand-new user, then return to your real prof
    - If your real ESPN or MFL link stopped working while you tested, the normal re-link prompt appears.
    - Signing in to ESPN/MFL again can end the platform's older session. You accepted that cost, and the prompt is the fix.
 4. **Reset** wipes only the test profile's rows, including its platform credential rows and namespaced leagues, and starts onboarding again.
+   - It first waits for the profile's in-flight work to finish, like account deletion. If that takes over 10 s it answers "Still finishing the last step"; tap Reset again.
 5. The app reopens in whichever profile it was closed in.
+   - The switch is crash-safe: a kill mid-switch is finished or undone at the next launch, so the phone is always fully in one profile.
+6. **"TEST PROFILE ENDED"** on the bar means the server no longer accepts the test session: reset or exit on another device, the account removed from `TEST_PROFILE_ACCOUNTS`, or the flag turned off. Only "Back to my profile" is offered, and it restores the real profile from the device.
 
 **What it cannot test:**
 - Sending trades, free-agent moves, offer import and Sleeper JWT capture are refused by design. The "Verify Sleeper account" step a new user meets is therefore not exercised.

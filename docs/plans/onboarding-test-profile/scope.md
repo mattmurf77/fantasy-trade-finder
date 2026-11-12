@@ -73,6 +73,9 @@ The build sits beside Test Stages and does not change it. Its leagues live in a 
   - A missed re-key is caught at the writer, and `session_input` re-keys everything it hands on.
   - Every outbound chokepoint and platform-write core.
   - Background readers and global learning signals skip the profile.
+  - Production threading: the daemon and trade jobs on real threads, ACTOR None, isolation held.
+  - A dead test token never mints a real session.
+- [x] **Review findings (2026-11-12, design.md §13):** `backend/tests/test_test_profile_review.py` (fence over every request source, database write fence, submit membership, sweeps, structured ids, eviction, reset drain and caches, cross-caller denial, fence cost, ACTOR reset) and `mobile/tests/check-test-profile-swap.js` (every crash point of the device swap).
 - [x] **Code-walk proof:** [design.md §9.2](design.md#92-code-walk), §11, §12.
 - [x] **Manual TestFlight checklist:** [design.md §9.3](design.md#93-manual-testflight-checklist). This is the only runtime evidence for the stash/restore, the banner, the live platform sign-ins and the re-link prompt.
 - `testID`s added: `settings.testing.test-profile`, `test-profile.banner`, `test-profile.banner.back`, `test-profile.banner.reset`. testid-lint passes.

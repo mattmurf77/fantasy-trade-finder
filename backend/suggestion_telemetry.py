@@ -297,7 +297,7 @@ def fetch_league_roster_map(
 ) -> dict[str, str]:
     """{roster_id(str): owner user_id(str)} from Sleeper's public rosters
     endpoint. `_opener` injects a fake urlopen in tests (house pattern)."""
-    if "qa_tp" in str(league_id):   # onboarding test profile: never reach Sleeper by a namespaced id
+    if str(league_id).startswith("qa_tp:"):   # onboarding test profile: never reach Sleeper by a namespaced id
         raise ValueError("test-profile league id")
     url = f"{SLEEPER_API_BASE}/league/{league_id}/rosters"
     request = urllib.request.Request(url)

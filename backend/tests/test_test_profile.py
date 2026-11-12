@@ -35,6 +35,7 @@ flag set, server._sleeper_get stubbed (any league read fails the test),
 sessions injected and popped per test (backend/tests/CLAUDE.md patterns 1-3).
 """
 import json
+import re
 import time
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -236,7 +237,9 @@ def test_enter_requires_a_verified_real_session(world):
     with server._sessions_lock:
         server._sessions[REAL_TOKEN]["verified"] = False
     r = _call(world["client"], "POST", "/api/test-profile/enter", REAL_TOKEN, {})
-    assert r.status_code == 403
+    assert r.status_code == 404           # review L3: no existence signal when unverified
+    r = _call(world["client"], "GET", "/api/test-profile", REAL_TOKEN)
+    assert r.status_code == 404           # nor from the status route
     tok = None
     with server._sessions_lock:
         server._sessions[REAL_TOKEN]["verified"] = True
@@ -356,7 +359,11 @@ def init_harness(world, monkeypatch):
     kick = MagicMock()
     monkeypatch.setattr(server, "_kickoff_trade_job", kick)
     pushes = []
-    monkeypatch.setattr(server, "_send_typed_push", lambda *a, **k: pushes.append((a, k)))
+    # The LOWEST sender is patched (the Expo transport), so every guard above
+    # it — including the _send_typed_push chokepoint — runs as in production.
+    monkeypatch.setattr(server, "_send_expo_push", lambda msgs: pushes.append(msgs))
+    for uid in (MATE, OTHER):
+        db.save_device_token(uid, f"ExponentPushToken[{uid}]", "ios")
     real_thread = server.threading.Thread
 
     class _Inline(real_thread):
@@ -513,14 +520,61 @@ def test_analytics_hand_filters_exclude_qa_ids(world):
 
 # ── reset ──────────────────────────────────────────────────────────────────
 
-def test_reset_scope_covers_every_user_and_league_keyed_table():
-    scope = {name: (u, l) for name, u, l in tp.reset_scope()}
+# Review 2026-11-12: the coverage check must not reuse the code's own
+# column predicate. This enumerates the SCHEMA with a deliberately broad
+# identity pattern; every match is either in the reset's reach or listed here
+# with the reason it is not a user/league key the test profile can own.
+_IDENTITY_COL = re.compile(
+    r"user|owner|actor|_by$|creator|league|partner|member|account|subject|recipient"
+    r"|referr|invit|target|counterparty", re.I)
+_NOT_IDENTITY = re.compile(
+    r"_at$|_count$|_json$|^targets$|_fit$|_version$|decision|dismissed|_give$|_receive$"
+    r"|impression_id$|_scope$|team_outlook|_kind$", re.I)
+NOT_KEYED = {
+    "accounts.account_id": "a test profile is minted without an account",
+    "entitlements.account_id": "no account, so no entitlement",
+    "identity_links.account_id": "no account (its user_id column is covered)",
+    "linked_identities.account_id": "no account: Apple/Google are fenced",
+    "linked_identities.provider_subject": "a provider subject, never an app id",
+    "sessions.account_id": "no account (sessions.user_id is covered)",
+    "sessions.account_only": "a boolean",
+    "subscription_events.account_id": "no account, no purchase",
+    "entitlements.granted_by": "the operator's admin key on a manual grant",
+    "affiliate_clicks.partner": "an affiliate partner name, not a user",
+    "bad_trade_flags.target_username": "a league-mate's name; the row's user_id is covered",
+    "draft_picks.owner_username": "a display name inside a league row (league_id covered)",
+    "draft_picks.original_username": "same",
+    "overhaul_offers.counterparty_username": "same; overhaul sends are fenced",
+    "mfl_credentials.mfl_username": "the MFL login name; the row's user_id is covered",
+    "users.invited_by": "a referrer's username, dropped for a test profile",
+    "referrals.invite_token": "a token; referral credit is refused for a test profile",
+    "standing_offers.team_user_ids": "a JSON list inside a row whose user_id is covered",
+    "rank_sets.owner_type": "an enum",
+    "swipe_decisions.k_factor": "a number",
+    "league_projection_targets.target_id": "a uuid; registration refuses a namespaced league",
+    "prepared_trade_manifests_v2.target_id": "a uuid; the prepared cohort skips qa_ users",
+    "prepared_trade_targets.target_id": "same",
+    "prepared_trade_worker.target_id": "same",
+    "prepared_trade_participants.subject_id": "written only by the prepared cohort, which skips qa_",
+}
+
+
+def test_reset_scope_covers_every_identity_column_in_the_schema():
+    covered = {(name, c) for name, u, l in tp.reset_scope() for c in u + l}
+    missing = []
     for t in db.metadata.sorted_tables:
-        cols = {c.name for c in t.columns}
-        if any(c.endswith("user_id") for c in cols) or cols & {"league_id", "sleeper_league_id"}:
-            assert t.name in scope, t.name
-    assert "users" in scope and "sleeper_user_id" in scope["users"][0]
-    assert len(scope) >= 60
+        for c in t.columns:
+            if not _IDENTITY_COL.search(c.name) or _NOT_IDENTITY.search(c.name):
+                continue
+            if (t.name, c.name) not in covered and f"{t.name}.{c.name}" not in NOT_KEYED:
+                missing.append(f"{t.name}.{c.name}")
+    assert missing == [], f"identity columns the reset does not cover: {missing}"
+    stale = [k for k in NOT_KEYED if tuple(k.split(".")) in covered]
+    assert stale == [], f"listed as not keyed but covered: {stale}"
+    for must in (("trade_matches", "user_a_id"), ("trade_matches", "user_b_id"),
+                 ("recorded_picks", "recorded_by"), ("trade_share_tokens", "created_by"),
+                 ("draft_picks", "assigned_by"), ("users", "sleeper_user_id")):
+        assert must in covered, must
 
 
 def test_reset_refuses_any_non_test_id(world):
@@ -537,8 +591,12 @@ def test_reset_deletes_only_test_rows_across_every_table(world):
     seeded = 0
     for name, ucols, lcols in tp.reset_scope():
         t = db.metadata.tables[name]
+        # Look-alikes share a PREFIX with the profile's ids and must survive.
         for tag, uid, lid in (("test", PID, prefix + "1"), ("real", REAL, "1"),
-                              ("other", "qa_tp_123", "qa_tp:123:1")):
+                              ("other", "qa_tp_123", "qa_tp:123:1"),
+                              ("lookalike", PID + "9", f"qa_tp:{REAL}9:1"),
+                              ("lookalike2", REAL + "9", f"qa_tp:{REAL}"),
+                              ("lookalike3", "qa_tp_" , prefix[:-1])):
             vals = _row(t, f"{name}-{tag}", **{c: uid for c in ucols}, **{c: lid for c in lcols})
             try:
                 with eng.begin() as conn:
@@ -553,11 +611,12 @@ def test_reset_deletes_only_test_rows_across_every_table(world):
     assert sum(counts.values()) >= seeded
 
     def _is_test(table, r):
-        name = table.name
-        _, ucols, lcols = next(s for s in tp.reset_scope() if s[0] == name)
+        # Independent of the code's predicate: any identity-like column of the
+        # schema holding exactly PID, or any league column in the namespace.
         m = dict(zip([c.name for c in table.columns], r))
-        return any(m[c] == PID for c in ucols) or any(
-            str(m[c] or "").startswith(prefix) for c in lcols)
+        return any(v == PID for k, v in m.items()
+                   if _IDENTITY_COL.search(k) and not _NOT_IDENTITY.search(k)) or any(
+            str(v or "").startswith(prefix) for k, v in m.items() if k.endswith("league_id"))
 
     for t in db.metadata.sorted_tables:
         kept = [r for r in before[t.name] if not _is_test(t, r)]

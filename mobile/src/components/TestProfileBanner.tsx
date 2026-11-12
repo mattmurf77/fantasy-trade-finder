@@ -24,6 +24,9 @@ import {
 export default function TestProfileBanner({ children }: { children: React.ReactNode }) {
   const active = useTestProfile((s) => s.active);
   const busy = useTestProfile((s) => s.busy);
+  // Review M3: the server no longer accepts this test session. Only "Back to
+  // my profile" is offered (it restores the real token held on the device).
+  const ended = useTestProfile((s) => s.ended);
   const insets = useSafeAreaInsets();
   if (!active) return <>{children}</>;
 
@@ -44,10 +47,10 @@ export default function TestProfileBanner({ children }: { children: React.ReactN
     <View style={styles.root}>
       <View testID="test-profile.banner" style={[styles.bar, { paddingTop: insets.top + space.xs }]}>
         <Text variant="bodySm" style={styles.label} numberOfLines={1}>
-          TEST PROFILE
+          {ended ? 'TEST PROFILE ENDED' : 'TEST PROFILE'}
         </Text>
         <View style={styles.actions}>
-          <Pressable
+          {ended ? null : <Pressable
             testID="test-profile.banner.reset"
             accessibilityRole="button"
             accessibilityLabel="Reset test profile"
@@ -56,7 +59,7 @@ export default function TestProfileBanner({ children }: { children: React.ReactN
             style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
           >
             <Text style={styles.btnText}>Reset</Text>
-          </Pressable>
+          </Pressable>}
           <Pressable
             testID="test-profile.banner.back"
             accessibilityRole="button"
