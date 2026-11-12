@@ -381,7 +381,7 @@ class GitReader:
     def head(self) -> str:
         return self._git("rev-parse", "HEAD").strip()
 
-    def log(self, path: str) -> list[tuple[str, _dt.datetime]]:
+    def commits(self, path: str) -> list[tuple[str, _dt.datetime]]:
         """[(sha, committed_at UTC)] oldest first, commits touching `path`."""
         out = []
         for line in self._git("log", "--format=%H %cI", "--", path).splitlines():
@@ -445,7 +445,7 @@ def build_dp_boards(reader: GitReader, xw: DPCrosswalk, *, start: _dt.date,
     every unknown header or pick label; returns (boards, summary) otherwise."""
     problems: list[str] = []
     boards: list[Board] = []
-    selected = select_board_commits(reader.log(PLAYERS_PATH), start, end)
+    selected = select_board_commits(reader.commits(PLAYERS_PATH), start, end)
     for day, sha, ts in selected:
         text = reader.read(sha, PLAYERS_PATH)
         fields, rows = _read_csv(text or "")
@@ -539,7 +539,7 @@ def inspect_dp(repo: str, *, start: _dt.date = DEFAULT_START) -> list[dict]:
     reader = GitReader(repo)
     try:
         out: dict[tuple[str, str], dict] = {}
-        for day, sha, _ts in select_board_commits(reader.log(PLAYERS_PATH), start):
+        for day, sha, _ts in select_board_commits(reader.commits(PLAYERS_PATH), start):
             for path in (PLAYERS_PATH, COMBINED_PATH, PICKS_PATH):
                 text = reader.read(sha, path)
                 header = "(absent)" if text is None else ",".join(_read_csv(text)[0] or [])

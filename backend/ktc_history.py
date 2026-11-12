@@ -200,7 +200,7 @@ class PoliteFetcher:
         self.max_retries = max_retries
         self.backoff = tuple(backoff)
         self.hard_stop_after = hard_stop_after
-        self.sleep, self.clock, self.log = sleep, clock, log
+        self.sleep, self.clock, self.say = sleep, clock, log
         self._last = None
         self._blocked = 0
         self.requests = 0
@@ -222,7 +222,7 @@ class PoliteFetcher:
                 resp = self.transport(url, HEADERS)
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 resp = None
-                self.log("  network error %s (attempt %d): %s" % (url, attempt + 1, e))
+                self.say("  network error %s (attempt %d): %s" % (url, attempt + 1, e))
             self._last = self.clock()
             if resp is not None and resp.status == 200:
                 self._blocked = 0
@@ -239,7 +239,7 @@ class PoliteFetcher:
             ra = resp and {k.lower(): v for k, v in resp.headers.items()}.get("retry-after")
             if ra and str(ra).isdigit():
                 delay = max(delay, int(ra))
-            self.log("  %s on %s, retry in %ss" % (resp.status if resp else "error", url, delay))
+            self.say("  %s on %s, retry in %ss" % (resp.status if resp else "error", url, delay))
             self.sleep(delay)
         return resp
 
