@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Projected standings: the free-agent summary line is removed
+
+- **What changed:** the sentence under the status line ("12 open lineup slots use the best available free agent; 1 has none and counts as 0", and its variants) is gone from the app and the web page. Operator: "we can remove the copy underneath".
+- **What stays:** the status line, the note shown when a forecast is incomplete, and the "(free agent)" marker beside a player in a team's lineup. The server still sends the counts.
+- **App side needs the next build;** the web page changes on deploy.
+
 ## 2026-11-12 — League selector header on Standings, Usage Trends, Track record and Win Now (D-252)
 
 - **What changed:** these four pages carry the same top bar as the tab screens, with the back button and title under it. Switching league reloads the page for that league.

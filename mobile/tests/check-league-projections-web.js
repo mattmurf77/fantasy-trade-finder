@@ -197,20 +197,21 @@ const noPrompt=label=>{
   await load(withResult({estimate_status:'incomplete',missing_lineup_slots:undefined},{outlook_recommendation:undefined}));
   assert.match(host.visibleText,/Some lineup slots had a starter whose score is not recorded yet/,'incomplete estimate without a count');
 
-  /* League-level free-agent line: only when a count is above zero, pluralised, absent on older runs. */
-  const faLine=/open lineup slots? (use|uses|has|have) /;
-  await load(withResult({fa_filled_slots:12,zero_filled_slots:1},{outlook_recommendation:undefined}));
-  assert.equal(count(host,'12 open lineup slots use the best available free agent; 1 has none and counts as 0.'),1,'both clauses');
-  await load(withResult({fa_filled_slots:1,zero_filled_slots:0},{outlook_recommendation:undefined}));
-  assert.equal(count(host,'1 open lineup slot uses the best available free agent.'),1,'fill clause only, singular');
-  await load(withResult({fa_filled_slots:0,zero_filled_slots:3},{outlook_recommendation:undefined}));
-  assert.equal(count(host,'3 open lineup slots have no free agent available and count as 0.'),1,'zero clause only, plural');
-  await load(withResult({zero_filled_slots:1},{outlook_recommendation:undefined}));
-  assert.equal(count(host,'1 open lineup slot has no free agent available and counts as 0.'),1,'zero clause only, singular');
-  await load(withResult({fa_filled_slots:0,zero_filled_slots:0},{outlook_recommendation:undefined}));
-  assert.doesNotMatch(host.allText,faLine,'both counts zero: no line');
-  await load(withResult({},{outlook_recommendation:undefined}));
-  assert.doesNotMatch(host.allText,faLine,'older saved run without the keys: no line');
+  /* The league-level free-agent / counts-as-0 summary line is gone (operator, 2026-11-12):
+     never rendered, whatever the counts; the status line, the incomplete sentence and the
+     per-row "(free agent)" marker stay. */
+  const faLine=/open lineup slots? (use|uses|has|have) |best available free agent|counts? as 0/;
+  assert.doesNotMatch(source,/freeAgentFillSentence|freeAgentLine|best available free agent|counts? as 0/,'the free-agent summary helper is gone');
+  for (const counts of [{fa_filled_slots:12,zero_filled_slots:1},{fa_filled_slots:1,zero_filled_slots:0},{fa_filled_slots:0,zero_filled_slots:3},{zero_filled_slots:1}]) {
+    await load(withResult(counts,{outlook_recommendation:undefined}));
+    assert.doesNotMatch(host.allText,faLine,`no free-agent line for ${JSON.stringify(counts)}`);
+    assert.match(host.visibleText,/Weekly estimate · Partial Sleeper data/,'the status line stays');
+  }
+  await load(withResult({estimate_status:'incomplete',missing_lineup_slots:2,fa_filled_slots:12,zero_filled_slots:1},{outlook_recommendation:undefined}));
+  assert.match(host.visibleText,/Weekly estimate · Partial Sleeper data · Incomplete\s+2 lineup slots had a starter whose score is not recorded yet, so these odds are incomplete\.\s/,'the incomplete sentence stays, with nothing after it');
+  assert.doesNotMatch(host.allText,faLine,'no free-agent line beside an incomplete estimate');
+  find(host,'Synthetic team').onclick();
+  assert.equal(count(host,'WR: Free Guy (free agent) · 11.2'),1,'the per-row free-agent marker stays');
 
   /* Every request this section made was a read of the saved run. */
   assert.ok(calls.length>8);

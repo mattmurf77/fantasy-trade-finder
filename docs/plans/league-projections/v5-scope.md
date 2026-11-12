@@ -132,3 +132,10 @@
 - CI green on the pushed sha; evidence in `living-memory/TEST_LEDGER.md`.
 - TestFlight verification: checklist above, operator.
 - Express lane declared by the operator? No.
+
+## Addendum — 2026-11-12: league-level free-agent line removed
+
+Model v6 (D-234, commit `cf0a7552`, no scope file of its own, so it is recorded here) added a line under the Projected standings status line saying how many open lineup slots use the best available free agent and how many count as 0 (for example "12 open lineup slots use the best available free agent; 1 has none and counts as 0."). The operator asked for it to be removed: "For projected standings, we can remove the copy underneath the 'Weekly estimate - partial sleeper data' line."
+
+- **What changed:** the app (`mobile/src/components/LeagueProjectionSection.tsx`) and web (`web/js/league-projections.js`) no longer render it in any of its three wordings, and the `freeAgentFillSentence` helper is gone from both clients. The status line, the incomplete sentence (a played starter with no recorded score) and the per-row "(free agent)" marker in a team's lineup detail are unchanged. No backend change: `coverage.fa_filled_slots` / `zero_filled_slots` and `projection_coverage.free_agent_fills` stay in the payload.
+- **Evidence:** `mobile/tests/check-league-projections.js` and `check-league-projections-web.js` now require the line and helper to be absent (web: rendered with free-agent counts of 12/1, 1/0, 0/3 and 0/1, alone and beside an incomplete estimate) while the status line, the incomplete sentence and the row marker stay. Each new or changed assertion was sabotaged red and restored green with an unchanged checksum. TestFlight check for the operator: on a Sleeper league whose forecast has open slots, Projected standings shows the "Weekly estimate · Partial Sleeper data" line with no free-agent sentence under it; opening a team's week still marks a free-agent starter "(free agent)".

@@ -12,15 +12,8 @@
   const date = iso => new Date(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const disclosure = label => {const d=el('details');d.append(el('summary',label));return d;};
   const button = (label,action) => {const b=el('button',label);b.type='button';b.onclick=action;return b;};
-  /* Model v6 coverage copy; mobile/src/utils/projectionCoverage.ts carries the same sentences. */
+  /* Model v6 coverage copy; mobile/src/utils/projectionCoverage.ts carries the same incomplete sentence and lineup-row marker. */
   const incompleteSentence = n => `${n===1?'1 lineup slot':`${n ?? 'Some'} lineup slots`} had a starter whose score is not recorded yet, so these odds are incomplete.`;
-  const freeAgentFillSentence = c => {
-    const filled=c?.fa_filled_slots ?? 0, zero=c?.zero_filled_slots ?? 0;
-    if (filled>0 && zero>0) return `${filled} open lineup ${filled===1?'slot uses':'slots use'} the best available free agent; ${zero} ${zero===1?'has none and counts':'have none and count'} as 0.`;
-    if (filled>0) return `${filled} open lineup ${filled===1?'slot uses':'slots use'} the best available free agent.`;
-    if (zero>0) return `${zero} open lineup ${zero===1?'slot has':'slots have'} no free agent available and ${zero===1?'counts':'count'} as 0.`;
-    return null;
-  };
 
   function renderTeams(host, result) {
     const names = new Map(result.teams.map(t => [t.roster_id,t.name]));
@@ -167,8 +160,6 @@
       host.append(el('p',[data.state==='current' && data.model_current!==false?'Weekly estimate':`Last saved: ${date(result.captured_at)}`,
         result.coverage?.estimated?'Partial Sleeper data':null,result.provisional?'Provisional':null,incomplete?'Incomplete':null].filter(Boolean).join(' · ')));
       if (incomplete) host.append(el('p',incompleteSentence(result.coverage.missing_lineup_slots)));
-      const freeAgentLine = freeAgentFillSentence(result.coverage);
-      if (freeAgentLine) host.append(el('p',freeAgentLine));
       renderOutlook(host,data);
       renderTeams(host,result);
     } catch (_) {
