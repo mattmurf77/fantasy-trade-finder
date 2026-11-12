@@ -35,6 +35,10 @@ After (`mobile/src/screens/TeamReviewScreen.tsx`, `mobile/src/screens/TradesScre
 4. **Nothing saved:** no note was posted (`noteTeamReviewSave` runs only after the awaited write resolves), so focus changes nothing.
 5. A note for another league is discarded on consume (a league switch resets the deck anyway).
 
+### #681 — the one-tap outlook Confirm no longer clears positions (D-256)
+
+Fix 5 made Chasing / Shopping saved without an outlook reachable, and the inferred-outlook banner on Find a Trade (shown only when no outlook is saved) confirmed with all three position lists set to `[]`, so its Confirm wiped them. The operator reversed Q-033 on 2026-11-12 ("#681. Yes. Stop clearing"). The banner's `confirmOutlookMutation` (`mobile/src/screens/TradesScreen.tsx`) now calls `saveLeagueOutlook` (`mobile/src/api/league.ts`), whose body is `{league_id, team_outlook}` only. App-only: the route already leaves any list it is not sent untouched (`set_league_preferences` reads each list with `body.get(...)`, so an absent list is `None`, and `upsert_league_preference` writes a list only when it is not `None`). A body that sends `[]` still clears. Other outlook saves checked: Team Review's Window Confirm sends `team_outlook` only; the Plan step's outlook chips and the Trade DNA sheet's outlook cards re-send the saved lists; Home's prompts open the Trade DNA sheet. Left as they are and listed in D-256: the web app's "Skip for now" (sends `[]` for Chasing and Shopping), the legacy `OutlookSheet` (mounted only with the full sheet off; its chips start empty), and the unrouted `TradeFinderHubScreen`. Evidence: two backend tests, `check-team-review.js` §21 (executes `saveLeagueOutlook`), 7 sabotages.
+
 ---
 
 ## 1. Analytics scope
@@ -49,8 +53,8 @@ After (`mobile/src/screens/TeamReviewScreen.tsx`, `mobile/src/screens/TradesScre
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_team_review_current_data.py` (new, 23 tests): fixes 1 (round count with "2027 1st", "2026 1.08", "2027 1.02 · projected"; the route wiring by AST), 2 (`saved_chance` against Home's showable rule, the route ships `playoff_chance` and never `standing.outlook`, nothing without a usable forecast: flag off, ESPN, no run, read failure), 3 (catalog names, route field), 5 (positions-only with and without a saved outlook, both loaders, every old body shape, the 400s, the database guard).
-- [x] **Structural guard:** `mobile/tests/check-team-review.js` — 10, 12b, 12e and 13a-c rewritten; 8 updated (Keep / Move, no "every dial"); 14-20 new (pure helpers `playoffChanceLine`, `outlookRuleLines`, `windowSaveLine` and the bus module are executed). `mobile/tests/check-no-beta-copy.js` p3: its positive control moved from the removed ribbon to the new "Playoff chance" card.
+- [x] **Unit tests:** `backend/tests/test_team_review_current_data.py` (new, 25 tests; the last two are #681's): fixes 1 (round count with "2027 1st", "2026 1.08", "2027 1.02 · projected"; the route wiring by AST), 2 (`saved_chance` against Home's showable rule, the route ships `playoff_chance` and never `standing.outlook`, nothing without a usable forecast: flag off, ESPN, no run, read failure), 3 (catalog names, route field), 5 (positions-only with and without a saved outlook, both loaders, every old body shape, the 400s, the database guard).
+- [x] **Structural guard:** `mobile/tests/check-team-review.js` — 10, 12b, 12e and 13a-c rewritten; 8 updated (Keep / Move, no "every dial"); 14-21 new (21 is #681's banner Confirm) (pure helpers `playoffChanceLine`, `outlookRuleLines`, `windowSaveLine` and the bus module are executed). `mobile/tests/check-no-beta-copy.js` p3: its positive control moved from the removed ribbon to the new "Playoff chance" card.
 - [x] **Code-walk proof:** fix 8, above.
 - [x] **Manual TestFlight checklist:** §6.
 - `testID`s added: `team-review.standing.playoff-chance`, `team-review.window.save-state`, `team-review.window.outlook-rules`, `team-review.plan.outlook-unsaved`, `team-review.plan.roster-setup`. Removed: `team-review.beat.standing.outlook`, `team-review.standing.coverage`. `testid-lint` green.
@@ -94,6 +98,7 @@ Use a Sleeper league. For steps 2-3 the flag `league.projections` must be on and
 8. **Plan card.** Player rules shows Keep, Move, Targeting, Not interested in, the Not interested line, and "Set Keep and Move in Roster setup". Tap it: Roster setup opens; back returns to the Plan beat.
 9. **Refresh strip.** With a deck on screen in Find a Trade, open Team Review, save something (Confirm or Save & continue), then (a) back out early, or (b) Finish without picking a partner. Find a Trade shows "Preferences changed — tap to refresh" and the old deck stays until you tap it. (c) Repeat but pick a partner on Partners and Finish: a search for that partner runs and no strip shows. (d) Open Team Review and leave without saving: no strip.
 10. **Trade DNA unchanged.** Change the outlook in the Trade DNA sheet and close it: the strip shows exactly as before.
+11. **One-tap Confirm keeps positions (#681).** In a league with no saved outlook, set Chase and Shop in Team Review (and Avoiding in the Trade DNA sheet if `trade.avoid_positions` is lit), without saving an outlook. Go to Find a Trade: the "Your roster reads as …" banner shows. Tap **Confirm**. Reopen Team Review → Plan (and the Trade DNA sheet): the outlook is now saved, and Chasing, Shopping and Avoiding are still exactly what you set.
 
 ## 7. Ship gate
 

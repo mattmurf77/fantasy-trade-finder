@@ -565,6 +565,46 @@ const planBody = planStart === -1
   }
 }
 
+// ── 21 — #681: the banner's one-tap Confirm saves the outlook ONLY ─────────
+// Operator 2026-11-12 ("Yes. Stop clearing"), reversing Q-033. The inferred-
+// outlook banner's Confirm used to send three empty position arrays, which
+// wiped Chasing / Shopping / Avoiding saved without an outlook (Team Review
+// can do that since fix 5). `saveLeagueOutlook` is EXECUTED with a stubbed
+// transport (its result lands before the report, which waits a macrotask);
+// the mutation is matched in TradesScreen's source.
+{
+  const ts = require('typescript');
+  const leagueSrc = read(path.join(ROOT, 'src/api/league.ts'));
+  const fn = (/\nexport async function saveLeagueOutlook\([\s\S]*?\n\}\n/.exec(leagueSrc) || [''])[0];
+  if (!fn) bad('21a. saveLeagueOutlook exists', 'no `export async function saveLeagueOutlook(` in api/league.ts');
+  else {
+    const calls = [], notes = [];
+    const lib = {};
+    new Function('exports', 'api', 'noteTradeInputChange', ts.transpileModule(
+      `${fn.replace('export async function', 'async function')}\nexports.f = saveLeagueOutlook;`,
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+    ).outputText)(lib, { post: async (url, body) => { calls.push([url, body]); return { ok: true }; } },
+      (why) => notes.push(why));
+    lib.f('L1', 'rebuilder').then(() => {
+      const want = JSON.stringify([['/api/league/preferences', { league_id: 'L1', team_outlook: 'rebuilder' }]]);
+      if (JSON.stringify(calls) !== want) {
+        bad('21a. saveLeagueOutlook posts league_id + team_outlook and nothing else (executed)', `got ${JSON.stringify(calls)}`);
+      } else if (JSON.stringify(notes) !== JSON.stringify(['after_preferences_change'])) {
+        bad('21a. saveLeagueOutlook notes the preference change like saveLeaguePreferences', `got ${JSON.stringify(notes)}`);
+      } else ok('21a. saveLeagueOutlook posts only league_id + team_outlook, and notes the change (executed)');
+    }, (e) => bad('21a. saveLeagueOutlook runs', String(e)));
+  }
+  const trades = strip(read(path.join(ROOT, 'src/screens/TradesScreen.tsx')));
+  const mut = (/const confirmOutlookMutation = useMutation\(\{[\s\S]*?\n  \}\);/.exec(trades) || [''])[0];
+  if (!mut) bad('21b. the banner Confirm mutation exists', 'no `const confirmOutlookMutation = useMutation({` in TradesScreen');
+  else if (!/mutationFn: \(outlook: NonNullable<Outlook>\) =>\s*saveLeagueOutlook\(leagueId!, outlook\),/.test(mut)
+    || /_positions|saveLeaguePreferences/.test(mut)) {
+    bad('21b. the banner Confirm sends no position lists',
+      'confirmOutlookMutation must call saveLeagueOutlook(leagueId!, outlook) and name no *_positions key (#681)');
+  } else ok('21b. the banner Confirm calls saveLeagueOutlook and sends no position list');
+}
+
+setImmediate(() => {
 console.log(`\ncheck-team-review: ${pass.length} passed, ${fail.length} failed`);
 for (const p of pass) console.log(`  ✓ ${p}`);
 if (fail.length) {
@@ -576,3 +616,4 @@ if (fail.length) {
   process.exit(1);
 }
 console.log('');
+});

@@ -174,6 +174,7 @@ import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWi
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
+  saveLeagueOutlook,
   getNewPartners,
   getLeagueCoverage,
   copyTiersFromFormat,
@@ -1666,21 +1667,15 @@ export default function TradesScreen({ navigation, route }: any) {
       prefsQuery.data?.inferred_outlook ?? null,
     );
 
-  // One-tap confirm: persist the inferred outlook with empty position
-  // arrays, then refetch prefs so the banner clears and the control card
-  // shows the saved value.
+  // One-tap confirm: persist the inferred outlook ONLY, then refetch prefs
+  // so the banner clears and the control card shows the saved value.
+  // #681 (operator 2026-11-12, reversing Q-033's 2026-08-19 ruling): it
+  // sends no position list, so saved Chasing / Shopping / Avoiding survive.
+  // It used to send three empty arrays, which wiped positions saved without
+  // an outlook (Team Review's Chase / Shop can do that now).
   const confirmOutlookMutation = useMutation({
     mutationFn: (outlook: NonNullable<Outlook>) =>
-      saveLeaguePreferences(leagueId!, {
-        team_outlook: outlook,
-        acquire_positions: [],
-        trade_away_positions: [],
-        // #360 — this one-tap confirm deliberately writes EMPTY position
-        // arrays (it is confirming an inferred outlook, not a positional
-        // edit), so Avoiding is cleared here exactly as Chasing and
-        // Shopping already are. Consistent with the two siblings above.
-        avoid_positions: [],
-      }),
+      saveLeagueOutlook(leagueId!, outlook),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
       setToast({ msg: 'Outlook saved', tone: 'success' });

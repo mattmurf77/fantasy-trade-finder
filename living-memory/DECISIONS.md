@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-256 — The one-tap outlook Confirm saves the outlook only; it no longer clears Chasing, Shopping or Avoiding (#681, reverses Q-033)
+
+**Date:** 2026-11-12 · **Who:** the operator: "#681. Yes. Stop clearing", reversing the 2026-08-19 ruling on [Q-033](OPEN_QUESTIONS.md) ("keep inherited behavior"). A separate outlook-only save in the app, rather than a server change, is the builder's and the main session's call.
+**Context:** The inferred-outlook banner on Find a Trade (shown only when no outlook is saved) confirmed with `acquire_positions`, `trade_away_positions` and `avoid_positions` all `[]`. Until [D-255](#d-255--team-review-is-brought-back-in-line-with-the-engine-a-positions-only-save-leaves-the-outlook-unsaved) no one could have positions saved without an outlook, so the banner never had anything to wipe. D-255 lets Team Review save Chase / Shop with no outlook; the next tap of the banner's Confirm wiped them.
+**Decision:** The banner's Confirm calls a new `saveLeagueOutlook(leagueId, outlook)` (`mobile/src/api/league.ts`), whose body is `{league_id, team_outlook}` and nothing else. The server already leaves any list it is not sent untouched (`set_league_preferences` passes `None`; `upsert_league_preference` writes a list only when it is not `None`), so no server change. Every save that edits positions keeps `saveLeaguePreferences`, which requires all four fields (#360 R-13).
+**Consequences:**
+- Confirm on the banner keeps saved Chasing, Shopping and Avoiding. A body that sends `[]` still clears, as before.
+- App-only: builds up to 1.22.0 (188) still clear all three lists on that tap.
+- Not changed: the web app's "Skip for now" outlook prompt (`web/js/app.js` `skipPositionalPrefs`) still sends `[]` for Chasing and Shopping; the legacy `OutlookSheet` (mounted only with the full sheet off) starts its position chips empty rather than from the saved lists; the unrouted `TradeFinderHubScreen` sends `avoid_positions: []`. The Trade DNA sheet's "Not sure" on a positions-only save is untouched by this.
+
 ## D-255 — Team Review is brought back in line with the engine; a positions-only save leaves the outlook unsaved
 
 **Date:** 2026-11-12 · **Who:** the operator, after an audit of Team Review: "Yes, fix them" (eight findings). How each fix is made, and storing "no outlook declared" as an empty string, are the builder's and the main session's calls. Plan: [`../docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md`](../docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md).

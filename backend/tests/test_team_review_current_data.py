@@ -280,3 +280,30 @@ def test_database_rejects_an_unknown_outlook_but_accepts_none():
         assert db.load_league_preference(user_id="u", league_id="l") == {
             "team_outlook": "contender", "acquire_positions": ["RB"],
             "trade_away_positions": [], "avoid_positions": ["QB"]}
+
+
+# ── #681: an outlook-only body leaves every stored position list alone ─────
+
+def test_outlook_only_body_leaves_all_three_position_lists_unchanged(prefs):
+    """The banner's one-tap Confirm (`saveLeagueOutlook`) sends only
+    `team_outlook`. Positions saved without an outlook (Team Review's Chase /
+    Shop, or Avoiding) must survive it."""
+    post, _get, _eng = prefs
+    assert post({"acquire_positions": ["WR"], "trade_away_positions": ["RB"],
+                 "avoid_positions": ["TE"]}).status_code == 200
+    assert _stored()["team_outlook"] is None
+    r = post({"team_outlook": "rebuilder"})
+    assert r.status_code == 200 and r.json["team_outlook"] == "rebuilder"
+    assert _stored() == {"team_outlook": "rebuilder", "acquire_positions": ["WR"],
+                         "trade_away_positions": ["RB"], "avoid_positions": ["TE"]}
+
+
+def test_explicit_empty_lists_still_clear_them(prefs):
+    """The old one-tap body (and any full save) sends `[]`: that still clears."""
+    post, _get, _eng = prefs
+    assert post({"team_outlook": "contender", "acquire_positions": ["WR"],
+                 "trade_away_positions": ["RB"], "avoid_positions": ["TE"]}).status_code == 200
+    assert post({"team_outlook": "jets", "acquire_positions": [], "trade_away_positions": [],
+                 "avoid_positions": []}).status_code == 200
+    assert _stored() == {"team_outlook": "jets", "acquire_positions": [],
+                         "trade_away_positions": [], "avoid_positions": []}

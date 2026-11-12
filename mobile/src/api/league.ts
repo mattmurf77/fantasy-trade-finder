@@ -77,6 +77,20 @@ export async function saveLeaguePreferences(leagueId: string, prefs: LeaguePrefe
   return result;
 }
 
+/** #681 — save ONLY the outlook. The body carries no position list, and the
+ *  backend leaves every list it is not sent exactly as stored, so Chasing,
+ *  Shopping and Avoiding survive an outlook-only action (the inferred-outlook
+ *  banner's one-tap Confirm). Use `saveLeaguePreferences`, which requires all
+ *  four fields, for any save that edits positions. */
+export async function saveLeagueOutlook(leagueId: string, outlook: NonNullable<Outlook>) {
+  const result = await api.post<any>('/api/league/preferences', {
+    league_id: leagueId,
+    team_outlook: outlook,
+  });
+  if (result?.ok !== false) noteTradeInputChange('after_preferences_change');
+  return result;
+}
+
 // ── Asset preferences (untouchables + targets + not-interested, #2/#163) ──
 // Backend: GET/POST /api/league/asset-prefs. `untouchable` = never offer
 // this player FROM the caller's roster in generated trades (feedback #95);
