@@ -309,7 +309,7 @@ const seasonJsx = lineStart >= 0 && conflictId > lineStart
   } else if (slots.length !== 2 || !(slotAt[0] > give && slotAt[0] < get && slotAt[1] > get)) {
     fail(name, 'YOU SEND and YOU GET PlayerCards must each pass belowNameSlot={seasonTag(p)}');
   } else if (renders.length !== 1
-             || !/\{player\.name\}\s*<\/Text>\s*\{belowNameSlot\}\s*<View style=\{styles\.meta\}>/.test(player)) {
+             || !/\{(?:player\.name|displayName)\}\s*<\/Text>\s*\{belowNameSlot\}\s*<View style=\{styles\.meta\}>/.test(player)) {
     fail(name, 'PlayerCard must render {belowNameSlot} once, directly under the name and above the meta line');
   } else if (!/p\.on_block \? 'on the block' : null,\s*seasonLabelFor\(seasonShown, p\.id\) \?\? null,/.test(rowA11y)) {
     fail(name, "rowA11y must add seasonLabelFor(seasonShown, p.id) to the row's accessibilityLabel");

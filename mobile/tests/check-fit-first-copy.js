@@ -401,7 +401,7 @@ const ordinalSrc = grabFn(read(CARD), 'export function fitRankOrdinal(').replace
     try {
       [norm] = run(normSrc, ['norm'], {});
       [render] = run(`${leadSrc}\nfunction render(fitThem: any, fitYou: any) {\n`
-        + `const fitTable = ${tableExpr};\nconst fitRanked = ${rankedExpr};\nreturn ${block};\n}`, ['render'],
+        + `const fitTable = ${tableExpr};\nconst fitRanked = ${rankedExpr};\nconst seasonShown: any = undefined;\nreturn ${block};\n}`, ['render'],
         { React, View: 'View', ChalklineText: 'ChalklineText', styles: styleProxy, type: styleProxy,
           FitRankRows: RowsMarker, fitRanksText: ranksMarker });
     } catch (e) { fail(name, `could not run the normalizer / block: ${e.message}`); }
