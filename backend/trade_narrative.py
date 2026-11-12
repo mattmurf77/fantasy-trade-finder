@@ -440,11 +440,15 @@ FIT_TEMPLATES: dict[str, str] = {
 #: "Rebuilding teams" / "Contending teams"), marked "Looks", the deck receipt's
 #: wording for an inferred outlook ("you look" rather than "you're"). The
 #: roster read never infers the extremes, and `not_sure` gets no tag (Team
-#: Review drops a read that declined to commit).
+#: Review drops a read that declined to commit). `projection`: a league-mate's
+#: assumed outlook taken from their playoff chance in the saved forecast
+#: (trade.partner_outlook_projection); same words as `roster`, since installed
+#: builds print the text verbatim, and never the extremes.
 FIT_TAGS: dict[str, dict[str, str]] = {
     "declared": {"championship": "All-in", "contender": "Contending",
                  "rebuilder": "Rebuilding", "jets": "Tanking"},
     "roster":   {"contender": "Looks contending", "rebuilder": "Looks rebuilding"},
+    "projection": {"contender": "Looks contending", "rebuilder": "Looks rebuilding"},
 }
 
 
@@ -456,14 +460,16 @@ class FitLeagueContext:
     (the numbers League rankings, Home and Team Review show); `medians` is
     `server._position_medians(teams)`; `rosters` maps each team id to its
     non-pick player ids (to check a card's assets sit where the card says);
-    `reads` maps each team id to the engine's roster read of its window.
+    `reads` maps each team id to the engine's roster read of its window;
+    `sources` names the teams whose read came from the saved forecast
+    (`projection`), every other read being the roster read.
     Immutable once built: copies return the same object.
     """
     __slots__ = ("viewer_id", "values", "medians", "player_value", "owner",
-                 "valued", "reads", "ranked")
+                 "valued", "reads", "ranked", "sources")
 
     def __init__(self, *, viewer_id: str, teams: list, medians: dict,
-                 rosters: dict, reads: dict):
+                 rosters: dict, reads: dict, sources: dict | None = None):
         self.viewer_id = viewer_id
         self.values = {t["user_id"]: {p: float(t["positions"][p]["value"])
                                       for p in _FIT_DEPTH_POSITIONS} for t in teams}
@@ -478,6 +484,7 @@ class FitLeagueContext:
         self.owner = {pid: uid for uid, ids in rosters.items() for pid in ids}
         self.valued = sum(1 for t in teams if t["positions_value"] > 0)
         self.reads = dict(reads)
+        self.sources = dict(sources or {})
 
     def __copy__(self):
         return self
@@ -611,9 +618,17 @@ def _fit_need(side: str, team: dict, incoming: list,
     return f"need.{side}", {"pos": best[1], "name": best[2]}
 
 
+#: What a tag's `source` reads on the wire. Installed app builds keep a tag
+#: only when its source is `declared` or `roster` (mobile/src/api/trades.ts),
+#: so a projection read is sent as `roster` ("assumed, not declared"); the
+#: request evidence and the owner proof record the true source.
+FIT_TAG_WIRE_SOURCE = {"projection": "roster"}
+
+
 def _fit_tag(source: str, outlook) -> Optional[dict]:
     text = FIT_TAGS[source].get(outlook)
-    return {"code": outlook, "source": source, "text": text} if text else None
+    wire = FIT_TAG_WIRE_SOURCE.get(source, source)
+    return {"code": outlook, "source": wire, "text": text} if text else None
 
 
 def _fit_ordinal(n: int) -> str:
@@ -758,7 +773,7 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
                 view = {"outlook": read, "outlook_source": "inferred",
                         "usable_depth_before": counterparty.get("usable_depth_before"),
                         "usable_depth_delta": counterparty.get("usable_depth_delta")}
-                tag = _fit_tag("roster", read)
+                tag = _fit_tag(context.sources.get(other, "roster"), read)
             else:
                 view = proof.get("viewer")
                 view = view if isinstance(view, dict) else {}

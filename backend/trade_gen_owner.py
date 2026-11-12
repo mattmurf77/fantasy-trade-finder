@@ -392,7 +392,13 @@ class _Search:
             benefit.append("usable_roster_improvement")
         return {"outgoing_personal": outgoing, "incoming_personal": incoming,
             "personal_gain_fraction": personal_gain, "outlook": team["outlook"],
-            "outlook_source": team["outlook_source"], "outlook_utility": outlook_utility,
+            "outlook_source": team["outlook_source"],
+            # trade.partner_outlook_projection: where an assumed outlook came
+            # from (declared / projection / roster). Present only when the flag
+            # put it on the team's preferences, so flag-off proofs are unchanged.
+            **({"outlook_read": team["preferences"]["outlook_source"]}
+               if "outlook_source" in team["preferences"] else {}),
+            "outlook_utility": outlook_utility,
             "need_utility": need_utility, "usable_depth_delta": deltas,
             "usable_depth_before": team["lineup_before"], "usable_depth_after": after,
             "roster_ids": sorted(team["roster"]), "inactive_ids": sorted(team["inactive"]),

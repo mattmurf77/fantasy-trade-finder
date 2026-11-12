@@ -309,7 +309,14 @@ preferences, rosters, available lineup settings and configuration before arm
 execution. It clones members instead of mutating the controls' inputs. The same
 constructor serves organic bakeoff, pinned/partner-targeted jobs, fair packages
 and asset ideas (including More Offers and league buy/sell entrances).
-Declared outlook wins; absent personal entries use consensus. Utility can admit
+Declared outlook wins; absent personal entries use consensus. A league-mate
+with no declared outlook is assumed from their playoff chance in the viewer's
+saved weekly forecast when it is usable (flag `trade.partner_outlook_projection`:
+`backend/partner_outlook.py`, read once per request by
+`server._trade_job_preferences` into the preload and applied by
+`server._apply_partner_outlooks` as that member's `inferred_outlook`), else from
+the roster read; the fit block's tag and Team Review's partner groups read the
+same value. Utility can admit
 an outlook/usable-roster benefit despite a bounded dynasty-value loss. This
 usable-roster model is a market-value proxy, not a points forecast.
 

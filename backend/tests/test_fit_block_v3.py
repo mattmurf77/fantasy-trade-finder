@@ -519,6 +519,8 @@ def test_template_table_tags_and_version_are_pinned():
         "declared": {"championship": "All-in", "contender": "Contending",
                      "rebuilder": "Rebuilding", "jets": "Tanking"},
         "roster": {"contender": "Looks contending", "rebuilder": "Looks rebuilding"},
+        # trade.partner_outlook_projection: same words, another source.
+        "projection": {"contender": "Looks contending", "rebuilder": "Looks rebuilding"},
     }
     for text in [*tn.FIT_TEMPLATES.values(), *tn.FIT_TAGS["declared"].values(),
                  *tn.FIT_TAGS["roster"].values()]:

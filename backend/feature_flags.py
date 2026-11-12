@@ -51,6 +51,10 @@ FLAG_KEYS: tuple[str, ...] = (
     # web standings). Off = no `outlook_recommendation` block and no prompt;
     # the projection surfaces and every saved outlook are untouched.
     "league.projection_outlook",
+    # A league-mate with no saved outlook is assumed Rebuilding / Contending
+    # from their playoff chance in the viewer's usable saved forecast
+    # (backend/partner_outlook.py). Off = the roster read for everyone.
+    "trade.partner_outlook_projection",
     # Separate seasonal model / search / calibrated championship graduation.
     "outlook.season_projections",
     "trades.win_now",

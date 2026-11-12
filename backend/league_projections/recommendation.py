@@ -80,29 +80,45 @@ def unavailable(reason, current_outlook):
     return _unavailable(reason, current_outlook)
 
 
-def build(state, result, current_outlook, cuts, *, failure_reason=None):
-    """`state` is `batch.view`'s; `result` is the saved run's parsed result;
-    `failure_reason` is the last attempt's reason."""
+def unusable_reason(state, result, *, failure_reason=None):
+    """Why the saved forecast may not be read for an outlook, or None when it
+    is current, complete and from the current model. The one definition of
+    "usable": `build` (the viewer's suggestion) and the assumed outlook of a
+    league-mate (`partner_outlook`) both go through it."""
     if state == "unsupported_policy":
-        return _unavailable("unsupported", current_outlook)
+        return "unsupported"
     missing = failure_reason == "missing_weekly_projections" and state not in {"current", "queued", "running"}
     if not result:
         if missing:
-            return _unavailable("missing_projections", current_outlook)
-        return _unavailable("update_pending" if state in {"queued", "running"} else "no_forecast", current_outlook)
+            return "missing_projections"
+        return "update_pending" if state in {"queued", "running"} else "no_forecast"
     if result.get("model_version") != VERSION:
-        return _unavailable("old_model", current_outlook, result)
+        return "old_model"
     if missing:
-        return _unavailable("missing_projections", current_outlook, result)
+        return "missing_projections"
     if state != "current":
-        reason = {"queued": "update_pending", "running": "update_pending", "stale": "stale"}.get(state, "refresh_failed")
-        return _unavailable(reason, current_outlook, result)
+        return {"queued": "update_pending", "running": "update_pending", "stale": "stale"}.get(state, "refresh_failed")
     if (result.get("coverage") or {}).get("estimate_status") != "complete":
-        return _unavailable("incomplete", current_outlook, result)
+        return "incomplete"
+    return None
+
+
+def valid_probability(probability):
+    return (not isinstance(probability, bool) and isinstance(probability, (int, float))
+            and math.isfinite(probability) and 0 <= probability <= 1)
+
+
+def build(state, result, current_outlook, cuts, *, failure_reason=None):
+    """`state` is `batch.view`'s; `result` is the saved run's parsed result;
+    `failure_reason` is the last attempt's reason."""
+    reason = unusable_reason(state, result, failure_reason=failure_reason)
+    if reason is not None:
+        # An unsupported policy, or no saved result, names no capture time.
+        return _unavailable(reason, current_outlook, None if reason == "unsupported" else result)
     roster_id = result.get("viewer_roster_id")
     team = next((t for t in result.get("teams") or [] if roster_id is not None and t.get("roster_id") == roster_id), None)
     probability = team.get("playoff_probability") if team else None
-    if isinstance(probability, bool) or not isinstance(probability, (int, float)) or not math.isfinite(probability) or not 0 <= probability <= 1:
+    if not valid_probability(probability):
         return _unavailable("team_not_found", current_outlook, result)
     outlook = classify(probability, cuts)
     return {"status": "available", "reason": None, "playoff_probability": probability, "recommended_outlook": outlook,
