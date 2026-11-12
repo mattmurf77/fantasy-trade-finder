@@ -12,6 +12,8 @@ from backend.tests.test_calibration_provider_parsers import mfl_raw,xwalk
 def setup(engine,monkeypatch,xwalk):
  with engine.begin() as conn:
   conn.execute(db.leagues_table.insert().values(sleeper_league_id='123',user_id='account',platform='mfl',platform_auth='cookie',platform_my_team='0001',platform_host='www1',platform_season=2026,default_scoring='ppr'))
+  # the importer's own binding (per-user since platform-league-binding)
+  db._upsert_platform_binding(conn,'account','123','mfl','0001')
  raw=mfl_raw();seen=[]
  def cred(uid):
   seen.append(uid);assert uid=='account-1','Borrowed importer credential'

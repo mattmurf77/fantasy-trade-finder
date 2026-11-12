@@ -46,6 +46,9 @@ export function subscriptionSessionState(s: SubscriptionSessionInput): Subscript
 
 /** The RevenueCat appUserID this session may use, or null for none. */
 export function purchasesIdentityTarget(s: SubscriptionSessionInput): string | null {
+  // The operator's onboarding test profile (`qa_tp_*`) never becomes a
+  // RevenueCat customer: purchases stay on the real account.
+  if (s.user?.user_id.startsWith('qa_tp_')) return null;
   return s.user && subscriptionSessionState(s) === 'verified' ? s.user.user_id : null;
 }
 

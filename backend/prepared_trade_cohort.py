@@ -159,7 +159,7 @@ def discover_targets(*, users: Iterable[Mapping], leagues: Iterable[Mapping],
             record("invalid_actor"); continue
         if row.get("deleted") or row.get("deleted_at"):
             record("deleted_actor", uid=uid); continue
-        if uid.startswith(("espn:", "mfl:", "flea:", "fleaflicker:", "demo_user_", "test_")):
+        if uid.startswith(("espn:", "mfl:", "flea:", "fleaflicker:", "demo_user_", "test_", "qa_")):
             record("opponent_only_actor", uid=uid); continue
         if aliases.get(uid) and aliases[uid] != uid:
             record("superseded_account_alias", uid=uid); continue

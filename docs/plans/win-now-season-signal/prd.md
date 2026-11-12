@@ -27,10 +27,10 @@ today's deck, unchanged.
 |---|---|
 | **All-in** | You are offered players who **start for you this season** and add the most projected points over who they replace, whatever their age. A player who would sit on your bench counts the same as a draft pick: future value, not help now. Giving up a starter whose points are not replaced counts against the trade. Cards that cost your lineup points are pushed down and say so. |
 | **Contending** | The same rules at 60% strength (the engine's existing Contending weight). A card is called out only when it costs your lineup at least a point a week. |
-| **Rebuilding** | Your deck is built as today. One addition: a card whose best incoming piece is a **win-now piece**, while more future value leaves than arrives, is pushed down and says so. |
-| **Tanking** | As Rebuilding. Today's hard Tanking rules stay (no outgoing own next-year pick, no RB without a long-term case). |
+| **Rebuilding** | *Amended 2026-11-11, operator direction.* The opposite curve to Contending: the same cards and terms as today, **ordered** so that trades which **give up lineup points a week** for future value rank higher and trades that add lineup points rank lower, at half the All-in strength (`season_shed_weight_rebuilding` 0.5). It changes the order only: no card is added or removed, nothing about fairness, the market floor or what you must be paid changes. A card that adds **1.0 point a week or more**, or whose best incoming piece is a **win-now piece** while more future value leaves than arrives, is pushed down and says so. *Amended 2026-11-12, operator direction:* the plan part of that ordering reads the labels (§4): giving up a win-now piece ranks a card higher and taking one on ranks it lower, a win-now RB most of all, while bringing back rebuild pieces, young cornerstones and picks ranks it higher, at 0.6 of Tanking's strength. Still the order only. |
+| **Tanking** | *Amended 2026-11-11, operator direction.* The opposite curve to All-in, at full strength (`season_shed_weight_tanking` 1.0): a point a week shed counts for the trade exactly as a point gained counts for an All-in team. Same cards and terms as today; only the order changes. The conflict threshold is **0.5 points a week added**, plus the win-now-piece rule. Today's hard Tanking rules stay (no outgoing own next-year pick, no RB without a long-term case). *Amended 2026-11-12, operator direction:* the plan part reads the labels as for Rebuilding, at full strength. |
 | **Not sure** | Nothing changes. Same cards, same order. |
-| **No outlook saved** | The engine already reads your roster as Contending, Rebuilding or Not sure. A roster read as Contending gets the season scoring. Nothing is ever called a conflict, because you saved no plan. |
+| **No outlook saved** | The engine already reads your roster as Contending, Rebuilding or Not sure. A roster read as Contending gets the season scoring; a roster read as Rebuilding gets the Rebuilding ordering (amended 2026-11-11). Nothing is ever called a conflict, because you saved no plan. |
 
 Stage 2, built in the same work but switched on separately: the same labels decide what your
 league-mates are willing to sell and buy, so a rebuilder's win-now pieces are matched with the
@@ -173,6 +173,7 @@ not start for you", which is the operator's RB case.
 | **Lineup gain** | Not a label: the trade's points per week (§2.4), the number on the card |
 | **Candidate seats** | Each league-mate's players who would start for you are guaranteed places among the candidates the search tries, best lineup gain first. Your own non-starters and picks are guaranteed places among what you might send |
 | **Plan conflict** | §5 |
+| **Plan fit** (Rebuilding, Tanking viewer; amended 2026-11-12, operator direction) | The plan part of the ordering reads a second table: a win-now piece out scores for the card and in against it (a win-now RB most of all); a rebuild piece, a cornerstone (most of all a young one) or a pick in scores for it and out against it; Tanking at full strength, Rebuilding at 0.6. It reorders the same cards (`season_viewer_label_fit`) |
 | **Seller–buyer matching** (stage 2) | A Rebuilding or Tanking team is treated as willing to sell its win-now pieces and wanting rebuild pieces, cornerstones and picks; a Contending or All-in team as wanting players who would start for it |
 
 The card prints the label the table was read with. They cannot differ: both come from one record
@@ -205,7 +206,8 @@ Only for a **saved** plan, and only when the forecast is usable.
 |---|---|
 | All-in | the trade lowers your season lineup by **0.5 points a week or more** |
 | Contending | the trade lowers your season lineup by **1.0 point a week or more** |
-| Rebuilding, Tanking | the most valuable piece you receive is a **win-now piece**, you give at least one rebuild piece, cornerstone or pick, **and** less future value comes back than goes out |
+| Tanking | *Amended 2026-11-11, operator direction:* the trade **adds 0.5 points a week or more** to your season lineup; or the most valuable piece you receive is a **win-now piece**, you give at least one rebuild piece, cornerstone or pick, **and** less future value comes back than goes out |
+| Rebuilding | *Amended 2026-11-11, operator direction:* the trade **adds 1.0 point a week or more**; or the win-now-piece rule above |
 | Not sure, or nothing saved | never |
 
 ### 5.2 How far it moves
@@ -239,7 +241,8 @@ One sentence on the You side, composed by the server:
 `{name}` is the player whose ranking made the card qualify. `{All-in}` is your saved plan's display
 name. The season line beside it carries the size ("Season −1.8 pts/wk"). On installed builds, which
 have one line for the You lead, the lead reads `Away from All-in: −1.8 pts/wk`; for Rebuilding and
-Tanking, `Away from Rebuilding: adds a win-now piece`.
+Tanking, `Away from Rebuilding: +2.1 pts/wk` when the points rule fired and `Away from Rebuilding:
+adds a win-now piece` when the win-now-piece rule did (amended 2026-11-11, operator direction).
 
 ## 6. Copy rules
 
@@ -254,6 +257,13 @@ from the card's frozen proof.
    `Win-now: {name} starts, +{x.x}/wk`; else `Starts for you: {name}, +{x.x}/wk` (a cornerstone or
    unlabelled starter); else today's rank facts. "Upgrades RB: adds X" is not used for a
    season-scored team: its test is in dynasty value.
+2a. *Amended 2026-11-11, operator direction.* **You lead, Rebuilding or Tanking**, in order: the
+   conflict line (§5.3); else, when the card sheds at least 0.5 points a week, `Rebuilding: −3.2
+   pts/wk, adds {asset}` / `Tanking: −3.2 pts/wk, adds {asset}` (`Rebuild-leaning: …` for a roster
+   read), `{asset}` being the most valuable incoming pick or projected rebuild piece / cornerstone,
+   as the engine labelled it (full name, then the short name, ≤ 44 characters, or no such lead);
+   else today's lead. The season line reads as for contenders (`Season −3.2 pts/wk · Dynasty gain
+   4%`).
 3. **Labels** print as a short tag beside the player on the card: `Win-now piece`, `Cornerstone`,
    `Rebuild piece`. Next app build.
 4. **No forecast:** today's copy, including today's age rule, with no season line or label.

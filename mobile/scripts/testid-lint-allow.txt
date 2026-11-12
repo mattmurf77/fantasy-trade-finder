@@ -130,3 +130,5 @@ roster-setup.tiers.header.*
 roster-setup.tiers.move.*
 # TradeCard.tsx FitRankRows  testID={`trade-card.fit-rank.${side}.${p.pos}`}
 trade-card.fit-rank.*
+# TradeCard.tsx seasonTag  testID={`trade-card.season-label.${p.id}`}
+trade-card.season-label.*

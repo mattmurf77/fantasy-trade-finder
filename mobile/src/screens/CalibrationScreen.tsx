@@ -22,6 +22,9 @@ import {
   type GradingTag,
 } from '../api/grading';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
+import { getFounderCapability } from '../api/founder';
+import FounderReview from '../components/founder/FounderReview';
+import { confirmLeaveNotes } from '../components/founder/RuleWaterfallReview';
 
 // Calibration — in-app blind grading of today's trade engine vs the value
 // core (docs/plans/blind-grading/, lld.md §10). Open to every app user since
@@ -35,6 +38,14 @@ import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 //   intro. Yes sends grade 5 and No grade 1 (operator, 2026-10-14: graders used
 //   the extremes almost exclusively); the server still accepts 1–5.
 //   `failed` renders a plain message per error code + Start over (POST again).
+//
+// Founders' review (docs/plans/founder-review/design.md §7): a second
+// section, "Grading | Founders' review", rendered ONLY when the server's
+// capability probe (GET /api/founder/capability) answers 200 for this
+// session. No flag or local list is read here; a 404 hides the control and
+// Grading renders exactly as before. Inside it, FounderReview offers "Player
+// labels | Trade rules" (the decline waterfall) when the server has that
+// route; leaving with unsaved rule notes asks first (confirmLeaveNotes).
 //
 // A TAB-stack screen: it mounts NO FeedbackFAB — RootNav's single global
 // mount already covers it (#188; a second one is the #196/#197 double-FAB
@@ -187,6 +198,18 @@ export default function CalibrationScreen() {
   const [buildSince, setBuildSince] = useState<number | null>(null);
   const [buildSlow, setBuildSlow] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [section, setSection] = useState<'grading' | 'founder'>('grading');
+
+  // The server decides who is a founder; 404 = not shown (no retry).
+  const founderQ = useQuery({
+    queryKey: ['founder', 'capability', userId, revision] as const,
+    queryFn: ({ signal }) => getFounderCapability({ signal }),
+    enabled: !!userId,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const founder = founderQ.data === true;
+  const showFounder = founder && section === 'founder';
 
   // The server's view of this league's session: newest building / open /
   // failed, never a completed one. Polls itself while building (§3.3).
@@ -644,9 +667,37 @@ export default function CalibrationScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
+      {founder ? (
+        <View style={styles.sectionRow}>
+          <Pressable
+            testID="calibration.segment.grading"
+            accessibilityRole="button"
+            accessibilityState={{ selected: !showFounder }}
+            onPress={() => confirmLeaveNotes(() => setSection('grading'))}
+            style={[styles.sectionBtn, !showFounder && styles.sectionBtnActive]}
+          >
+            <Text variant="label" style={!showFounder ? styles.sectionTextActive : undefined}>Grading</Text>
+          </Pressable>
+          <Pressable
+            testID="calibration.segment.founder"
+            accessibilityRole="button"
+            accessibilityState={{ selected: showFounder }}
+            onPress={() => setSection('founder')}
+            style={[styles.sectionBtn, showFounder && styles.sectionBtnActive]}
+          >
+            <Text variant="label" style={showFounder ? styles.sectionTextActive : undefined}>Founders’ review</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {showFounder ? (
+        hasLeague
+          ? <FounderReview leagueId={leagueId as string} leagueName={league?.league_name ?? null} />
+          : <View style={styles.content}><Text variant="body" testID="calibration.no-league">{COPY.noLeague}</Text></View>
+      ) : (
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {renderBody()}
       </ScrollView>
+      )}
       <Toast
         visible={!!toast}
         message={toast ?? ''}
@@ -696,4 +747,21 @@ const styles = StyleSheet.create({
   tagText: { color: chalk.base },
   tagTextSelected: { color: ice.base },
   actions: { gap: space.sm },
+  // Grading | Founders' review — the Standings segment construction (hairline
+  // group, active = ink-3 well + ice underline). Rendered for founders only.
+  sectionRow: {
+    flexDirection: 'row',
+    marginHorizontal: space.lg,
+    marginTop: space.md,
+    borderWidth: 1,
+    borderColor: ink.line,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+  },
+  sectionBtn: {
+    flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center',
+    borderBottomWidth: 2, borderBottomColor: 'transparent',
+  },
+  sectionBtnActive: { backgroundColor: ink.ink3, borderBottomColor: ice.base },
+  sectionTextActive: { color: chalk.base },
 });

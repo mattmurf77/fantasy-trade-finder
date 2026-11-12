@@ -28,6 +28,13 @@ import RootNav, { navigationRef } from './src/navigation/RootNav';
 import UpdateGateScreen, { APP_VERSION_INT } from './src/screens/UpdateGateScreen';
 import { shouldBlockForUpdate } from './src/utils/appVersion';
 import { useSession } from './src/state/useSession';
+import {
+  hydrateTestProfile,
+  refreshTestProfileAvailability,
+  verifyTestProfileWithServer,
+} from './src/state/testProfile';
+import TestProfileBanner from './src/components/TestProfileBanner';
+import TestProfileRelinkPrompt from './src/components/TestProfileRelinkPrompt';
 import { useFeatureFlags } from './src/state/useFeatureFlags';
 import {
   useOnboardingState,
@@ -105,7 +112,10 @@ function App() {
     // ms-fast like the other legs): TabNav's first-session initial-tab
     // decision (onboarding trades-first) reads it at mount and must not
     // race hydration.
-    Promise.all([
+    // Onboarding test profile FIRST (local storage only): it finishes or undoes
+    // a profile swap a kill interrupted (utils/testProfileSwap.ts, review M4),
+    // so every leg below reads a device that is fully real or fully test.
+    hydrateTestProfile().catch(() => {}).then(() => Promise.all([
       bootstrap(),
       loadCachedFlags(),
       useOnboardingState.getState().hydrateOnboarding(),
@@ -114,7 +124,7 @@ function App() {
       // reads per-position quick-tiers completion at mount and must not
       // race hydration.
       hydrateQuicksetProgress(),
-    ])
+    ]))
       .catch(() => { /* all legs are best-effort */ })
       .finally(() => {
         setBooted(true);
@@ -131,6 +141,12 @@ function App() {
           .revalidateSession()
           .then(() => {
             void refreshQuicksetProgress();
+            // Onboarding test profile: does the server offer it to this
+            // account? (404 for everyone not allow-listed.)
+            void refreshTestProfileAvailability();
+            // A device in the test profile asks whether the session still
+            // is one; if not, the banner offers only "Back" (review M3).
+            void verifyTestProfileWithServer();
           });
         // Analytics (tracking plan v2): restore the offline event queue,
         // then record the cold open. Fired AFTER loadCachedFlags so the
@@ -296,7 +312,12 @@ function App() {
           {updateRequired && fontsSettled ? (
             <UpdateGateScreen minVersion={appMinVersion} appVersionInt={APP_VERSION_INT as number} />
           ) : (
-            <RootNav booted={booted && fontsSettled} />
+            <>
+              <TestProfileBanner>
+                <RootNav booted={booted && fontsSettled} />
+              </TestProfileBanner>
+              <TestProfileRelinkPrompt />
+            </>
           )}
           <StatusBar style="light" />
         </PersistQueryClientProvider>

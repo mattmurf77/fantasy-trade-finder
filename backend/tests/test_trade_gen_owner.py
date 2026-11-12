@@ -360,12 +360,13 @@ def test_joint_outlook_need_target_pool_changes_before_market_checks():
                for c in now + future if len(c.receive_player_ids) == 1)
 
 
-def test_requested_get_cannot_override_other_owners_untouchable():
-    kwargs = favorable(pinned_receive_players=["r"],
+@pytest.mark.parametrize("hard,reason", [(1., "untouchable"), (0., "untouchable_return")])
+def test_requested_get_cannot_override_other_owners_untouchable(hard, reason):
+    kwargs = favorable(pinned_receive_players=["r"], config={"owner_untouchable_hard": hard},
         manager_preferences={"opp": {"untouchables": ["r"]}})
     cards, report = generate_owner_trades(**kwargs)
     assert cards == []
-    assert report.as_dict()["rejections"]["untouchable_return"]
+    assert report.as_dict()["rejections"][reason]
 
 
 def test_same_personal_tier_can_qualify_upgrade_and_lateral():

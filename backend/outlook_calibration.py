@@ -672,7 +672,9 @@ def connected_targets():
     """
     u, lg = db.users_table, db.leagues_table
     with db.engine.connect() as conn:
-        users = set(conn.execute(select(u.c.sleeper_user_id).where(u.c.verified_via.is_not(None))).scalars())
+        users = set(conn.execute(select(u.c.sleeper_user_id).where(
+            u.c.verified_via.is_not(None),
+            ~u.c.sleeper_user_id.startswith("qa_", autoescape=True))).scalars())   # never synthetic QA users
         league_platforms = dict(conn.execute(select(lg.c.sleeper_league_id, lg.c.platform)).tuples().all())
         leagues = set(league_platforms)
         pairs = set(conn.execute(select(lg.c.user_id, lg.c.sleeper_league_id)).tuples())

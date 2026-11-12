@@ -36,7 +36,8 @@ import {
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta, type InviteMeta } from '../api/league';
-import { getLastUsername, getSessionToken, setLastUsername } from '../api/client';
+import { getLastUsername, getSessionToken, isTestProfileActive, setLastUsername } from '../api/client';
+import { pinTestAccountForLinking } from '../state/testProfile';
 import { testLaunchArg } from '../utils/testRouteEntry';
 import { isInviteId } from '../utils/inviteId';
 import EspnLinkSheet from '../components/EspnLinkSheet';
@@ -790,6 +791,17 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                     pressed && styles.buttonPressed,
                   ]}
                   onPress={() => {
+                    if (isTestProfileActive()) {
+                      // Onboarding test profile: the sessionless platform
+                      // sign-in would land in the REAL account, so continue
+                      // to the real post-sign-in linking flow instead.
+                      advanceGuideIfActive('s0.2');
+                      const intent: EntryPlatformIntent = entryPlatform === 'espn' ? 'espn' : 'mfl';
+                      void pinTestAccountForLinking()
+                        .then(() => (onAccountSignedIn ?? onSignedIn)(intent))
+                        .catch((e) => setError(e?.message || 'Could not continue.'));
+                      return;
+                    }
                     // The real action s0.2 asks for on this path — the same
                     // contract handleSubmit carries for the username field.
                     advanceGuideIfActive('s0.2');

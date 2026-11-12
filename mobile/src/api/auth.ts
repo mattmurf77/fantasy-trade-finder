@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref, fairnessThresholdFor } from './tradePregen';
-import { api, apiRequest, ApiError, getSessionToken, requestAborted, setSessionToken } from './client';
+import { api, apiRequest, ApiError, getSessionToken, requestAborted, setSessionToken, testProfileAuthHeaders } from './client';
 import { getDeviceId } from './events';
 import { getPersistedSleeperToken, maybeReplaySleeperVerification } from './sendInSleeper';
 import {
@@ -45,7 +45,10 @@ export async function signIn(username: string): Promise<AuthResponse> {
     { username: username.trim().toLowerCase() },
     // X-Device-Id (analytics item 1): lets the backend write identity_links
     // stitching pre-signin device events to the user. Additive header only.
-    { skipAuth: true, headers: { 'X-Device-Id': await getDeviceId() } },
+    // Onboarding test profile: the test token rides along so the server runs
+    // this same step without replacing the test identity (empty otherwise).
+    { skipAuth: true, headers: { 'X-Device-Id': await getDeviceId(),
+                                 ...((await testProfileAuthHeaders?.()) ?? {}) } },
   );
   if (res?.session_token) {
     await setSessionToken(res.session_token);

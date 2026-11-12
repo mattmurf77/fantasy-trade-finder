@@ -138,9 +138,26 @@ def cohort_rows(league_id=None):
         leagues = _rows(conn, db.leagues_table,
             db.leagues_table.c.sleeper_league_id == league_id if league_id else None)
         lids = [r["sleeper_league_id"] for r in leagues]
-        return {"users": _rows(conn, db.users_table), "accounts": _rows(conn, db.accounts_table),
-                "leagues": leagues, "members": _rows(conn, db.league_members_table,
-                    db.league_members_table.c.league_id.in_(lids))}
+        plb = db.platform_league_bindings_table
+        bindings = _rows(conn, plb, plb.c.league_id.in_(lids))
+        members = _rows(conn, db.league_members_table,
+                        db.league_members_table.c.league_id.in_(lids))
+        users, accounts = _rows(conn, db.users_table), _rows(conn, db.accounts_table)
+    # Per-user platform bindings (docs/plans/platform-league-binding/): every
+    # user's own binding is an explicit one, and the leagues row's legacy
+    # "importer/my-team" fields are replaced by the row user's OWN binding —
+    # the shared columns hold whichever league-mate linked last.
+    own = {(b["user_id"], b["league_id"]): str(b["team_id"]) for b in bindings}
+    for lg in leagues:
+        if (lg.get("platform") or "sleeper") != "sleeper":
+            team = own.get((lg["user_id"], lg["sleeper_league_id"]))
+            lg["espn_my_team_id"] = (int(team) if team and team.isdigit() else None) \
+                if lg["platform"] == "espn" else None
+            lg["platform_my_team"] = team if lg["platform"] != "espn" else None
+    return {"users": users, "accounts": accounts, "leagues": leagues, "members": members,
+            "bindings": [{"user_id": b["user_id"], "league_id": b["league_id"],
+                          "platform": b["platform"], "team_id": str(b["team_id"]),
+                          "source": "verified_import"} for b in bindings]}
 
 
 def read_source(server, league):
@@ -205,7 +222,12 @@ def build_session(server, target):
     return {"user_id": uid, "league_user_id": target["league_user_id"],
         "league": league, "players": list(pool), "user_roster": roster,
         "services": {fmt: ranking}, "service": ranking,
-        "trade_svcs": {fmt: trades}, "trade_svc": trades, "active_format": fmt}
+        "trade_svcs": {fmt: trades}, "trade_svc": trades, "active_format": fmt,
+        # trade.partner_outlook_projection: the source's rosters map forecast
+        # roster ids to members, as session init's read does interactively.
+        "sleeper_roster_index": ({"league_id": str(target["league_id"]),
+            "rosters": server._partner_outlook.roster_index(_source_rosters(target["source"]))}
+            if target["platform"] == "sleeper" else None)}
 
 
 def _semantic_source(source):
@@ -327,6 +349,7 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None,
             for r in records["deck_suppressions"]},
         "pick_read_source": server._pick_read_source(),
         "slot_order": server._league_slot_order(lid),
+        **({"pick_projection": projection_key} if (projection_key := server._pick_projection_key(lid)) else {}),
         "preferences": server._trade_job_preferences(uid, lid, session, session["league"]),
         "config": dict(server._trade_service_mod._cfg), "flags": server.flags_dict()}
     # Hash each private component, not private values, in the lookup receipt.
@@ -523,11 +546,11 @@ def sync_source_picks(server, target):
             raise ValueError("source_pick_sync_unavailable")
     elif target["platform"] == "mfl":
         league = db.get_platform_league(target["league_id"], "mfl")
-        if not league or str(league.get("user_id")) != target["user_id"] or str(
-                league.get("platform_my_team")) != target["native_team_key"]:
+        binding = db.get_platform_binding(target["user_id"], target["league_id"], "mfl")
+        if not league or binding is None or binding["team_id"] != str(target["native_team_key"]):
             raise ValueError("source_binding_changed")
         server._sync_mfl_owned_picks(target["league_id"], source_picks=source["future_picks"],
-            expected_binding={k: league.get(k) for k in ("user_id", "platform_my_team", "platform_season")})
+            expected_binding={k: league.get(k) for k in ("platform_season",)})
 
 
 def _source_rosters(source):

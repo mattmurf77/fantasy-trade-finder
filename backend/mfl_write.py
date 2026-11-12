@@ -400,3 +400,125 @@ def respond_trade(cookie: str, host: str, year: int, league_id: str,
     url = import_url(host, year, params)
     return _issue_import("tradeResponse", cookie, url,
                          league_id=lid, host=host, _opener=_opener)
+
+
+# ---------------------------------------------------------------------------
+# D1 free-agent moves, MFL (docs/plans/in-app-claims/design.md §4): add,
+# add+drop, and a waiver claim, made on the user's behalf with the same
+# session cookie and transport as the trade send.
+#
+# The import types are MFL's DOCUMENTED ones
+# (api.myfantasyleague.com/2026/api_info?STATE=details, read 2026-11-11):
+#   * `fcfsWaiver`: L, ADD (one player id), DROP (comma-separated ids); "an
+#     add/drop move that will be executed immediately". Owners only.
+#   * `blindBidWaiverRequest`: L, PICKS = "<add>_<bid>_<drop>" per bid,
+#     "0000" for no drop; ROUND only for conditional blind bidding.
+#   * `waiverRequest`: L, ROUND (required), PICKS = "<add>_<drop>".
+#   * Both claim imports ADD to the round's existing requests unless REPLACE
+#     is set, in which case they REPLACE the user's other claims. This module
+#     never sends REPLACE (pinned by test_mfl_fa_move.py).
+# ⚠️ UNVERIFIED: no request of these types has ever been made or recorded by
+# FTF. Documentation fixes the parameter names, not the answer body (the
+# trade path's TODO(live-verify) 1 applies), not whether MFL accepts a drop of
+# an IR/taxi player, and not the claim's round. Until one supervised real
+# transaction is recorded (design.md §8), the two constants below stay False:
+# `fa_move` then refuses BEFORE building or sending anything, and the server's
+# `_fa_move_live("mfl")` is False, so the move route 404s and the capability
+# answers `unsupported` even with `mfl.send_add_drop` on.
+# ---------------------------------------------------------------------------
+
+FA_MOVE_SHAPES_VERIFIED = False   # fcfsWaiver: add / add+drop
+FA_CLAIM_SHAPE_VERIFIED = False   # blindBidWaiverRequest / waiverRequest
+
+# Per-call socket timeouts on the move's write path, in call order (one
+# import). server.FA_MOVE_SERVER_WORST_CASE_S assumes the sum is <= 46 s.
+FA_MOVE_WRITE_TIMEOUTS_S: tuple[int, ...] = (_HTTP_TIMEOUT,)
+
+#: MFL's documented "no drop" placeholder in a blind-bid PICKS entry.
+NO_DROP_PLAYER_ID = "0000"
+
+
+@dataclass
+class FaMoveRequest:
+    league_id: str
+    add_player_id: str              # MFL player id (crosswalked server-side)
+    drop_player_id: str | None      # MFL player id, or None (an open slot)
+    move_kind: str                  # 'add' | 'claim': exactly what the CTA named
+    faab_bid: int | None = None     # a claim in a blind-bidding league only
+    waiver_round: int | None = None  # a priority (non-blind) claim only
+
+
+def fa_move_verified(move_kind: str) -> bool:
+    """True when the shape this move needs has been verified for real."""
+    if move_kind == "claim":
+        return FA_MOVE_SHAPES_VERIFIED and FA_CLAIM_SHAPE_VERIFIED
+    return FA_MOVE_SHAPES_VERIFIED
+
+
+def build_fa_move_params(req: FaMoveRequest) -> tuple[str, dict]:
+    """(import TYPE, query params) for the move. Raises MflWriteError(kind
+    'input') on anything malformed: nothing invalid is ever sent.
+
+      add / add+drop     → fcfsWaiver (immediate)
+      claim with a bid   → blindBidWaiverRequest, PICKS "<add>_<bid>_<drop|0000>"
+      claim with no bid  → waiverRequest, ROUND + PICKS "<add>_<drop>"; MFL
+                           documents no no-drop form, so a drop is required
+    Never REPLACE (it would wipe the user's other claims in that round), never
+    FRANCHISE_ID (commissioner impersonation)."""
+    lid = str(req.league_id).strip()
+    if not lid.isdigit():
+        raise MflWriteError("league_id must be numeric", kind="input")
+    add = str(req.add_player_id or "").strip()
+    drop = str(req.drop_player_id or "").strip() or None
+    if not _PLAYER_ID_RE.match(add) or (drop is not None and not _PLAYER_ID_RE.match(drop)):
+        raise MflWriteError("invalid MFL player id", kind="input")
+    if drop == add:
+        raise MflWriteError("add and drop are the same player", kind="input")
+    if req.move_kind == "add":
+        if req.faab_bid is not None:
+            raise MflWriteError("an add carries no bid", kind="input")
+        params = {"TYPE": "fcfsWaiver", "L": lid, "ADD": add}
+        if drop:
+            params["DROP"] = drop
+        params["JSON"] = "1"
+        return "fcfsWaiver", params
+    if req.move_kind != "claim":
+        raise MflWriteError("move_kind must be add or claim", kind="input")
+    if req.faab_bid is not None:
+        bid = req.faab_bid
+        if isinstance(bid, bool) or not isinstance(bid, int) or bid < 0:
+            raise MflWriteError("bid must be a whole, non-negative amount", kind="input")
+        return "blindBidWaiverRequest", {
+            "TYPE": "blindBidWaiverRequest", "L": lid,
+            "PICKS": f"{add}_{bid}_{drop or NO_DROP_PLAYER_ID}", "JSON": "1"}
+    rnd = req.waiver_round
+    if isinstance(rnd, bool) or not isinstance(rnd, int) or rnd < 1:
+        raise MflWriteError("a priority waiver claim needs its round", kind="input")
+    if not drop:
+        raise MflWriteError("a priority waiver claim needs a drop", kind="input")
+    return "waiverRequest", {"TYPE": "waiverRequest", "L": lid, "ROUND": str(rnd),
+                             "PICKS": f"{add}_{drop}", "JSON": "1"}
+
+
+def fa_move(cookie: str, host: str, year: int, req: FaMoveRequest, *, _opener=None) -> dict:
+    """Make one free-agent move. Returns the platform-neutral result every
+    D1 adapter returns (sleeper_write.read_fa_move_result's shape):
+    {status: 'complete' | 'pending', result: 'accepted', transaction_id: None,
+     added: [], dropped: [], raw}. MFL's import answer names no transaction
+    and no players, so `added`/`dropped` are empty and the server falls back
+    to the request's own ids on an accepted move.
+
+    Raises MflWriteAuthError (cookie refused) or MflWriteError whose kind is
+    'config' (nothing sent: not verified), 'input' (nothing sent), 'network'
+    (nothing sent), 'error' (MFL refused it) or OUTCOME_UNKNOWN (it may have
+    landed; never retry). Until verified it refuses BEFORE building or
+    sending anything."""
+    if not fa_move_verified(req.move_kind):
+        raise MflWriteError("MFL free-agent move shapes are not verified", kind="config")
+    op, params = build_fa_move_params(req)
+    url = import_url(host, year, params)
+    answer = _issue_import(op, cookie, url, league_id=str(req.league_id), host=host,
+                           _opener=_opener)
+    return {"status": "complete" if op == "fcfsWaiver" else "pending",
+            "result": "accepted", "transaction_id": None, "added": [], "dropped": [],
+            "raw": answer.get("raw")}

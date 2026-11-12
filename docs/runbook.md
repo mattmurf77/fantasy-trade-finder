@@ -131,9 +131,11 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Quick Set unlock backfill (P0-1, 2026-08-11)](#quick-set-unlock-backfill-p0-1-2026-08-11)
 - [Mobile UI-test identity seam — `FTFTestAppleSub` (P0-5, 2026-08-11)](#mobile-ui-test-identity-seam-ftftestapplesub-p0-5-2026-08-11)
 - [Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)](#operator-only-onboarding-test-trades_first_operator_test-p0-9-2026-08-11)
+- [Onboarding test profile — become a new user, flip back (2026-11-11)](#onboarding-test-profile-become-a-new-user-flip-back-2026-11-11)
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
+- [Linked ESPN/MFL league missing for a user, or showing someone else's team (2026-11-11)](#linked-espnmfl-league-missing-for-a-user-or-showing-someone-elses-team-2026-11-11)
 - [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 - [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
 - [Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)](#playoff-forecasts-a-leagues-run-stops-or-needs-re-running-before-its-weekly-slot-2026-11-11)
@@ -547,6 +549,7 @@ The app makes Sleeper free-agent moves on the user's behalf only while `sleeper.
 - **What users see:** `POST /api/league/free-agents/move` answers 404 `feature_disabled`; the next `GET /api/league/free-agents` says `move.mode: 'handoff'`, so the claim sheet offers "Open in Sleeper to claim" (state 1). A sheet already open falls to the hand-off on its next tap (the 404). Nothing in flight is cancelled: a move already sent stays in Sleeper.
 - **What it doesn't touch:** consent and move records stay (append-only, R15.3); grants keep their own 7-day clocks. `/api/platform-write-consent` never follows the flag, so Settings › Leagues › Stop roster moves still works while moves are off (it needs a verified session, like the move itself). Trade sends (`trade.send_in_sleeper`) are unaffected.
 - **The flip on** is the operator's, under D6 for launch (`docs/plans/sleeper-fa-write/scope.md` §5): `FTF_FLAGS` with `true`, then the scope's TestFlight checklist straight after, and back to `false` on any failure.
+- **MFL (D1 Update 1):** the same lever with `"mfl.send_add_drop": false`. Off (or the shapes unverified), an MFL league's sheet goes back to its NO_ADD_REASON text (`move.mode: 'unsupported'`) — there is no MFL hand-off button. MFL returns no transaction id, so for a disputed MFL move read the league's transactions in MFL itself.
 - **Reading the records** (support, a disputed move): `platform_write_moves` by `attempt_id` (two rows: `sent`, then `result`; a `sent` row with no `result` or `result = 'unknown'` means the outcome was never confirmed, so check the user's Sleeper transactions), and `platform_write_consents` for the grant that covered it (`consent_id`). Neither holds a token.
 
 ---
@@ -590,6 +593,14 @@ curl -H "X-Cron-Secret: $CRON_SECRET" -X PUT .../api/admin/config/<key> # update
 ```
 See [config-reference.md](config-reference.md) for keys. All `/api/admin/*`
 endpoints, `/api/debug/log`, and `/api/feature-flags/reload` share this auth.
+
+**Keep / untouchable rule (`owner_untouchable_hard`).** 1 (default) = a generated owner card never
+sends a manager's Keep player (the viewer's own give pin excepted). To restore the older
+premium-return rule without a deploy: `PUT .../api/admin/config/owner_untouchable_hard` with
+`{"value": 0}`; back with `{"value": 1}`. Takes effect on the next deck request (the knob is in
+every job's and stored page's request signature, so nothing built under the other value is served).
+Expect thinner decks for users with many Keep marks; the roster-setup guard note past ~40% Keep
+is the user-facing warning.
 
 ---
 
@@ -1142,6 +1153,49 @@ A `ftf-test-apple:` token hitting a production server is rejected as a malformed
 
 **Why this is a runbook entry and not an api-reference row:** it adds no route and is unreachable in any deployed build.
 
+## Onboarding test profile — become a new user, flip back (2026-11-11)
+
+Operator tool: run onboarding as a brand-new user, then return to your real profile with no re-login.
+- Server: `backend/test_profile.py`, `/api/test-profile/*` in `docs/api-reference.md`.
+- Plan: `docs/plans/onboarding-test-profile/`.
+
+**Enable it for one account** (needs both settings, server-side):
+1. Find the account's real working key.
+   - In the app: Settings → Account, while signed in as the real profile. `GET /api/account` returns `sleeper_user_id` for a Sleeper-linked account, else the working key is `acct_<account_id>`.
+   - Without the app: run a read-only query in the production DB, `SELECT sleeper_user_id FROM users WHERE lower(username) = '<your sleeper username>'`.
+   - Never paste the id into the repo, a doc or a commit.
+2. Render → the web service → Environment: set `TEST_PROFILE_ACCOUNTS=<that key>` (comma-separate several). Save; Render redeploys.
+3. Turn the flag on: set `"dev.test_profile": true` in `config/features.json` and deploy, or set it through the `FTF_FLAGS` env override on Render.
+
+**Use it (TestFlight build that includes the client half):**
+1. Settings → Testing → **Test onboarding as a new user** → Start.
+   - The app stashes everything on the device under the real profile and swaps in a fresh test session.
+   - It restarts at the sign-in screen as a first launch.
+   - A **TEST PROFILE** bar stays at the top with **Reset** and **Back to my profile**.
+2. Onboard as a new user through the **real** flows:
+   - **Sleeper:** type your own Sleeper username. Another person's gets "Use your own Sleeper username".
+   - **ESPN / MFL:** pick the platform on the landing screen. The league picker opens that platform's link sheet, and you sign in as a new user would.
+   - **Apple / Google / demo:** "Not available in the test profile".
+   - Linked leagues are stored under `qa_tp:<id>:`. Every league-mate appears as an opaque `qa_tpo_…` team, and nothing the test profile does notifies, matches or messages anyone. See plan §11–§12.
+3. **Back to my profile** restores the real token, user, league and every device setting exactly as they were.
+   - If your real ESPN or MFL link stopped working while you tested, the normal re-link prompt appears.
+   - Signing in to ESPN/MFL again can end the platform's older session. You accepted that cost, and the prompt is the fix.
+4. **Reset** wipes only the test profile's rows, including its platform credential rows and namespaced leagues, and starts onboarding again.
+   - It first waits for the profile's in-flight work to finish, like account deletion. If that takes over 10 s it answers "Still finishing the last step"; tap Reset again.
+5. The app reopens in whichever profile it was closed in.
+   - The switch is crash-safe: a kill mid-switch is finished or undone at the next launch, so the phone is always fully in one profile.
+6. **"TEST PROFILE ENDED"** on the bar means the server no longer accepts the test session: reset or exit on another device, the account removed from `TEST_PROFILE_ACCOUNTS`, or the flag turned off. Only "Back to my profile" is offered, and it restores the real profile from the device.
+
+**What it cannot test:**
+- Sending trades, free-agent moves, offer import and Sleeper JWT capture are refused by design. The "Verify Sleeper account" step a new user meets is therefore not exercised.
+- Anything that needs a second real person: matches, league-mate notifications and the join fan-out are suppressed.
+- Live per-league reads that reach Sleeper with a stored league id degrade for a test league rather than call Sleeper: lineup slots, roster limit, outlook, draft board, free agents, standings and roster refresh.
+
+**Turn it off:** remove the key from `TEST_PROFILE_ACCOUNTS` (or the env var), or set the flag false.
+- Every test-profile token then reads as expired.
+- A phone still in the test profile keeps its banner. Tap **Back to my profile**: the real token is held on the device and is restored without the server.
+- Leftover test rows: they are keyed `qa_tp_<id>` / `qa_tp:<id>:…` and every report and cron already ignores them. To remove them, run the delete through `backend.test_profile.reset_profile('qa_tp_<id>')` from a shell with the production `DATABASE_URL`. It refuses any id that is not a test profile.
+
 ## Operator-only onboarding test — `trades_first_operator_test` (P0-9, 2026-08-11)
 
 **The full seven-step recipe — collision check, experiment body, the eight-key overlay, the pre-flight verification call and the one-call rollback — is in [`plans/audit-p0-remediation/prd-p0-8-9.md` §5](plans/audit-p0-remediation/prd-p0-8-9.md), with per-claim code citations in `lld-p0-8-9.md` §6.** It is reproduced there rather than here because it is a one-off operator procedure with a defined end state. The load-bearing points, so they are not lost if the plan folder is archived:
@@ -1608,6 +1662,31 @@ impression, 2026-08-16) somehow lack link rows; telemetry-era trades are deliber
 to the live matcher. First corpus report:
 `docs/business/analytics/2026-08-16-organic-trade-corpus.md`; scope addendum:
 `docs/plans/matchmaking-engine/backfill-scope.md`.
+## Linked ESPN/MFL league missing for a user, or showing someone else's team (2026-11-11)
+
+**Cause (before 2026-11-11):** "my team" in a linked ESPN / MFL / Fleaflicker league
+was a league-level column, so a league-mate's link took the league away from the
+first linker (unlisted, re-synced onto the other team, sends from the other team,
+`wrong_account` on a cookie re-sync). Fixed by per-user bindings
+(`platform_league_bindings`, [design](plans/platform-league-binding/design.md)).
+
+**Count the damage:** the read-only aggregate query in
+[design.md §7](plans/platform-league-binding/design.md#7-counting-the-damage-read-only-postgres)
+(run through `backend/tools/prod_analytics.py`, which forces a read-only session).
+After deploy, the boot log prints `[backfill] platform_league_bindings: {considered,
+bound, has_binding, no_team, not_exactly_one_member, swid_conflict}`;
+`not_exactly_one_member` + `swid_conflict` are leagues where someone may need to re-link.
+
+**Repairing one user:** the user re-links the league from the league picker and picks
+their team (ESPN sign-in re-proves the team for a cookie league). That writes their own
+binding and nothing else. There is no data fix to run: a first linker whose binding was
+overwritten before the fix left no record of their choice, and the backfill does not
+guess. A cookie-league user who got "wrong ESPN account" on a re-sync after a
+league-mate linked also signs in to ESPN again (their `verified_at` was nulled).
+
+**Never** write `platform_league_bindings` by hand from `leagues.espn_my_team_id` /
+`platform_my_team`: those hold whichever league-mate linked last.
+
 ## ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)
 
 The identity-binding release (feedback #321) verifies WHOSE ESPN account a
@@ -1984,7 +2063,7 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 |---|---|---|
 | `player_team_changed` | Strict scoring only since D-231. In production (best-available scoring) a team-changed player is left unprojected instead. | None in production. If it appears, the scoring contract in `config/league_projections.json` has changed. |
 | `missing_weekly_projections` | The weekly projection feed has no usable projection for anyone in an upcoming week (empty or not yet published). Since model v6 a team with no projected rostered player in an otherwise populated week is filled from free agents instead. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
-| `season_state_mismatch`, `unsupported_divisions_median_bestball_or_manual_seeding` | The league is outside what the model supports (another season; divisions, median games, best ball or manual seeding). | None. |
+| `season_state_mismatch`, `unsupported_divisions_bestball_or_manual_seeding`, `unsupported_median_setting` | The league is outside what the model supports (another season; divisions, best ball or manual seeding; a `league_average_match` other than 0 or 1). League-median leagues are supported since 2026-11-11 ([scope](plans/league-projections/median-leagues-scope.md)). Runs saved before then carry the old string `unsupported_divisions_median_bestball_or_manual_seeding`; a median league that failed with it gets a forecast at its next weekly slot. | None. |
 | `league_membership_changed` | The account no longer owns a team in that league. | None. |
 
 **Incomplete estimates (model v6, 2026-11-11).** An open starting slot takes the best projected free agent, or scores zero, so it no longer marks a forecast `incomplete`. The one remaining cause is a starter who has already played without a recorded score; it clears once Sleeper records the score and the league is re-run. `coverage.fa_filled_slots` / `zero_filled_slots` count the fills. Before v6, four of six production forecasts were incomplete for a single RB slot whose only rostered RB had an empty feed row.
@@ -1992,6 +2071,8 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **What happened on 2026-11-11:** five rostered players changed NFL teams the day model v5 shipped. Sleeper's projection rows for weeks 11 to 14 still carried the old teams, and a guard from 2026-11-07 stopped every affected league's run. All six targets that had a forecast the day before produced none. Fixed by D-231.
 
 **Re-running a baseline before its weekly slot.** `POST /api/cron/league-projections` with header `X-Cron-Secret` and body `{"retry_incomplete": true}` makes due now every target whose last attempt stopped `incomplete_projections` under the current model (and is not leased), then runs the normal weekly dispatch; the response's `retried` counts them. Other outcomes still wait for their weekly slot (or a model-version change). It queues at most the batch limit (4) a call and one pending run per account; the next 15-minute ticks pick up the rest. Never edit `next_due_at` by hand.
+
+**After a rules change that newly supports a league format** (e.g. league-median leagues, 2026-11-11), leagues refused before the deploy keep their `unsupported_policy` attempt until their weekly slot. Right after the deploy, call the same route with `{"retry_unsupported": true}` (it can be combined with `retry_incomplete`): every unleased target whose last attempt was `unsupported_policy` under the current model is made due now; `retried_unsupported` counts them. A league still outside the model is refused once more and waits for its slot; scheduled ticks never retry it.
 
 **Guardrail tests:** `backend/tests/test_league_projection_best_available.py::test_team_changed_player_is_unpriced_and_stale_row_scores_nothing`, `::test_team_changed_player_alone_for_a_slot_leaves_it_unknown`, `::test_team_changed_player_on_new_team_bye_is_a_bye`, `::test_strict_contract_still_refuses_a_team_changed_player`.
 
@@ -2027,3 +2108,21 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **Re-check offline (operator):** `PYTHONHASHSEED=0 python -m backend.eval.served_deck_replay --dir data/prod-requests [--latest] [--limit N]` replays recorded owner requests both ways in one process and prints aggregates only: served-set equality, first card the same, cards shared in the first 30, page = gated, served sizes, CPU per search for both paths, guard removals (must be 0) and fallbacks. Exit 0 when every request has the same served set and page = gated. It cannot replay decline-window suppression, dispositions, likes-you or revised-offer injection, so production serves fewer cards than it shows.
 
 **Guardrail tests:** `backend/tests/test_rules_first_deck.py` (served-deck acceptance, predicate equivalence, page = gated) and `backend/tests/test_trade_fast_deck.py` (worker wiring, flag-off identity, fallback logging).
+
+## Founders' review
+
+**What it is:** the founder-only label review in Calibration ([design](plans/founder-review/design.md)). Three conditions, all server-side; any one missing ⇒ every `/api/founder/*` route 404s and the app shows no "Grading | Founders' review" control.
+
+**Enable for an account (one-time):**
+
+1. Find the account id — never put it in the repo. It is the session's `user_id` (the account's working key): your **Sleeper user id** when your account is bound to Sleeper (the usual case: `users.sleeper_user_id` for your `username`, or `accounts.sleeper_user_id`), else `accounts.account_user_id(<account_id>)` for an Apple-only account. Look it up read-only against production (`DATABASE_URL_PROD` in `secrets.local.env`; `backend/tools/prod_analytics.py` forces a read-only session), e.g. `select sleeper_user_id from users where username = '<your Sleeper username>'`. Then sign in on your device and make sure the session is **verified** (Sleeper link or Apple sign-in).
+2. In the Render dashboard (web service → Environment), set `FOUNDER_ACCOUNTS=<account id>` (comma-separate several). Save; Render restarts the service. The value is read on every request.
+3. Turn the flag on: `"founder.review": true` in `config/features.json` and deploy (or an `FTF_FLAGS` override plus `POST /api/feature-flags/reload`).
+4. Open the app, Calibration tab: the control appears (the app asks `GET /api/founder/capability` each launch; force-quit if it was open).
+
+**Symptoms:** no control → check all three (flag, env var spelled exactly, session verified; a username-only Sleeper sign-in is never a founder). Empty page "No saved season forecast…" → the league has no current saved forecast (run it from Standings › Projected); only Sleeper leagues have one.
+
+**Undo an override:** move the player back to the band showing "engine: …" and Save (clears the row), or Reset to engine + Save for a position. Overrides reach users only once bilateral revision 5 serves (`owner_bilateral_revision_5_enabled` = 1).
+
+**Trade rules (use case 2, the decline waterfall):** same gate; the "Player labels | Trade rules" choice appears inside Founders' review. **Read the founder's notes and questions** (engineering sessions): `curl -s -H "X-Cron-Secret: $CRON_SECRET" https://<render host>/api/admin/founder/rule-notes` (secret from `secrets.local.env`): every rule ever noted, its current note and every version, author always "founder". A run ("Run for this league") is a 10–20 s CPU, ~300–420 MB background job on the web process; one at a time (a second gets 409), capped at 60 s, never started by anything but the button. Results are in memory only: after a deploy the page shows no counts until the founder runs it again (notes are in the database and stay). "This league can't be measured" means that deck is not built rules-first (owner-only serving and `deck.rules_first`); "inputs changed" means the founder's rankings, settings or roster changed mid-run.
+

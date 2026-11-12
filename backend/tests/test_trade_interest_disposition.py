@@ -29,6 +29,9 @@ def history(monkeypatch):
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
     monkeypatch.setattr(db, "datetime", Clock)
+    # server._project_trade_dispositions has its own 90-day cutoff from now();
+    # unpinned, the 2026-08-14 likes below aged out on 2026-11-12.
+    monkeypatch.setattr(server, "datetime", Clock)
     yield engine
     engine.dispose()
 

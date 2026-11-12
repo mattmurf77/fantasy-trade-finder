@@ -96,6 +96,54 @@ false. The argument is a proof given the same universe and that cost is a pure
 function of a card's terms (both pinned against the full solve in
 ``test_trade_first_page``).
 
+Revision 5 (``trade_gen_bilateral_season``, the season layer over revision 2;
+WI-8) is exact the same way, with the rest of revision 2's argument unchanged
+(its ranker, term precedence and pricing are revision 2's). Its per-asset
+inputs (``_plan_asset``, ``_pool``) are read from the search as before. What
+differs is read through its ``_page_bound_terms(team)`` hook, never
+``_lineup_assets``, and only for the teams the hook names; with no usable
+evidence it names none, and the bounds, screen and memo are revision 2's:
+
+* A season-scored team's lineup U (projected points x RATE, starters only, an
+  empty slot filled at the free-agent level) is neither monotone nor
+  submodular (giving a starter who scores below the free-agent level RAISES
+  it), so the depth argument above does not hold for it. Instead U(S) <=
+  U*(S), the best lineup of S's season assets plus unlimited free agents at
+  the fill level (``_Bounds.star``), which is monotone with single-asset gain
+  <= the asset's value; hence a package's change is <= U*(R + a) - U(R) (+ v_b
+  for a second received asset). Premise: every ppg and fill level >= 0.
+* A shed-scored (Rebuilding / Tanking) side's support moves AFTER eligibility:
+  its team plan becomes clip(.5 + .5 clip(plan fit + clip(w RATE (points
+  shed) / gross))), which can raise the support above revision 2's. Points
+  shed T(R) - T(R - G + Rc) <= F_R + sum of ppg over G's current starters
+  (F_R the free-agent points in R's lineup): T(R') >= its starters' points >=
+  the best weight of R - G's assets (adding assets never lowers a max-weight
+  independent set) >= R's starters minus G's. The support level computes the
+  re-scored team plan exactly (the generator's own ``_shed_parts``). Its plan
+  fit is a market-weighted sum over the assets like revision 2's; when it reads
+  a per-asset fit other than ``_plan_asset`` (the viewer's label fit, hook term
+  ``shed["plan"]``), the side's plan column reads that fit, so the bound's plan
+  term is that sum exactly and the argument is unchanged. A shed side's support
+  never reads ``_plan_asset`` after eligibility, so nothing else moves.
+* The conflict demotion only lowers both supports, so every bound stays an
+  upper bound (the support level is then above the exact score).
+* The sell bonus (hook term ``sell``, the viewer's): both supports move after
+  eligibility by b x share, share the card's market share of older producers sent
+  minus received, a pure function of the terms known before pricing, so ``pre``,
+  ``priced`` and the support level add it exactly (``_Bounds.sell_bonus``; each side
+  then clipped at 1, which only lowers the true score). A negative bonus is dropped
+  on a demoted card, so the bound floors it at minus the demotion knob; the level is
+  exact unless the demotion fired or b exceeds the demotion. Premise 0 <= b <= .15
+  (``_SELL_BONUS_MAX``): no side needs the clip at 0; otherwise ``Unsupported``.
+With any season term the screen bounds through ``_Member.pre`` (same entries
+as the inlined screen, which stays revisions 1 and 2's, bit-identical). A
+negative season input, or a ``_lineup`` override without the hook, is
+``Unsupported`` (the caller falls back). The lineup memo keys a season lineup
+apart from revision 2's (``_LineupMemo.install``). Taken to exhaustion
+(rules-first) the bounds only order work; for a finite page they prove the
+stop. Pinned by ``test_trade_first_page`` (exhaustive admissibility audit) and
+``test_rules_first_deck`` (I18).
+
 Leaf module: no server, database, flag reload, provider or network access.
 Scores are interpretable support, never acceptance probabilities.
 """
@@ -113,6 +161,7 @@ from dataclasses import dataclass, fields, replace
 from time import perf_counter
 
 from . import trade_gen_owner as owner
+from .trade_roster import Asset, assign
 
 
 PAGE_FIRST_VERSION = "page-first-4"
@@ -126,6 +175,22 @@ _ROUND = .05  # package_value_v2 rounds to one decimal
 _CURABLE = ("market_floor", "market_overpay", "viewer_no_benefit", "counterparty_no_benefit",
             "known_preference_harm", "tanking_rb_without_long_term_exception")
 _UNSUPPORTED = ("pinned_give_players", "pinned_receive_players", "exact_give", "require_all_give")
+
+
+_SEASON_KEY = "season_lineup_v1"  # lineup memo: tags a season-scored team's key (_LineupMemo.install)
+_SEASON_SLACK = 1e-6  # season points are rounded to 6 decimals; outward slack on season bounds
+# Revision 5's sell bonus (hook term "sell"): the bounds' premise is 0 <= b <= this, so a
+# moved support never needs the lower clip at 0 (an eligible side's support is above .35,
+# the shed re-score takes at most the team-plan weight .20, the bonus at most b).
+_SELL_BONUS_MAX = .15
+
+
+class Unsupported(ValueError):
+    """A request the page search cannot bound exactly; ``reason`` names the case."""
+
+    def __init__(self, reason):
+        super().__init__("unsupported page-first request: " + reason)
+        self.reason = reason
 
 
 def _clip(value, low=-1.0, high=1.0):
@@ -191,8 +256,19 @@ class _LineupMemo:
         return len(self._entries)
 
     def install(self, search):
-        """Shadow ``search._lineup`` with the memoised version (instance only)."""
-        if type(search)._lineup is not owner._Search._lineup:
+        """Shadow ``search._lineup`` with the memoised version (instance only).
+
+        A search whose class overrides ``_lineup`` is memoised only through its
+        ``_page_bound_terms`` hook (revision 5): a team the hook gives no season
+        lineup is served by ``owner._Search._lineup`` (the override defers to it),
+        under the content key above; a season-scored team's lineup is keyed by
+        ``_SEASON_KEY``, the slots, the free-agent fill per position and per
+        usable asset (id, positions, season value, position), what
+        ``SeasonLayer._season_total``'s units read. The tag and the key's
+        length keep the two families apart, so a revision 2 search can never be
+        served a season lineup (or the reverse). Without the hook, no memo."""
+        own = type(search)._lineup is owner._Search._lineup
+        if not own and getattr(search, "_page_bound_terms", None) is None:
             return
         # Weak: the shadow lives on the search, so a strong reference would
         # make a cycle and keep every finished search until a full GC.
@@ -205,8 +281,41 @@ class _LineupMemo:
         signatures = {pid: (asset.id, tuple(sorted(asset.positions)), asset.value, type(search)._position(search, pid))
                       for pid, asset in search._lineup_assets.items()}
         usable = {}
+        season = {}  # uid -> (key head, {id: signature}) or None, per team (own: never read)
+
+        def season_lineup(roster, team):
+            known = season.get(team["uid"], False)
+            if known is False:
+                current = owner_ref()  # never a strong reference from the shadow (see below)
+                terms = current._page_bound_terms(team)
+                lineup_assets = terms and terms["lineup"]
+                known = season[team["uid"]] = None if lineup_assets is None else (
+                    (_SEASON_KEY, team["slots"], tuple(terms["fill"][pos] for pos in owner._POSITIONS)),
+                    {pid: (asset.id, tuple(sorted(asset.positions)), asset.value,
+                           type(current)._position(current, pid)) for pid, asset in lineup_assets.items()})
+            if known is None:
+                return None
+            key = (*known[0], tuple(filter(None, map(known[1].get, roster))))
+            with self._lock:
+                values = self._entries.get(key)
+                if values is not None:
+                    self._entries.move_to_end(key)
+                    self.hits += 1
+            if values is None:
+                current = owner_ref()
+                values = tuple(type(current)._lineup(current, roster, team).values())
+                with self._lock:
+                    self.misses += 1
+                    self._entries[key] = values
+                    if len(self._entries) > self.cap:
+                        self._entries.popitem(last=False)
+            return dict(zip(owner._POSITIONS, values))
 
         def lineup(roster, team):
+            if not own:
+                result = season_lineup(roster, team)
+                if result is not None:
+                    return result
             inactive = team["inactive"]
             known = usable.get(team["uid"])
             if known is None or known[0] is not inactive:
@@ -266,6 +375,69 @@ class _Bounds:
         self.crown_rate, self.elite_ref = c("crown_rate_market"), c("crown_elite_value")
         self.gamma, self.trade_wide = c("package_adj_gamma_market"), c("package_bench_trade_wide") > 0
         self.floor_market, self.floor_cross = c("package_floor_market"), c("package_floor_cross")
+        self.season, self.shed_rate = self._season_terms(search)
+        # A shed-scored side whose re-scored team plan reads its own per-asset plan fit
+        # (revision 5's viewer label fit): the plan column reads that fit, not ``_plan_asset``.
+        self.shed_plan = {uid: terms["shed"]["plan"] for uid, terms in self.season.items()
+                          if terms["shed"] is not None and terms["shed"].get("plan") is not None}
+        # Revision 5's sell bonus on both supports (the viewer's hook term), or None.
+        self.sell = next((terms["sell"] for terms in self.season.values() if terms.get("sell")), None)
+        if self.sell is not None and not 0 <= self.sell["weight"] <= _SELL_BONUS_MAX:
+            raise Unsupported("sell_bonus_out_of_range")
+        self._older = {}
+        # Any season term: the screen bounds through ``_Member.pre`` (not the inlined
+        # copy, which is revisions 1 and 2's bound, kept bit-identical).
+        self.generic = bool(self.season)
+        self._free_agents, self._stars = {}, {}
+
+    @staticmethod
+    def _season_terms(search):
+        """({uid: hook terms}, {uid: shed rate}) from the search's ``_page_bound_terms``.
+
+        Bounds below read a team's lineup through these terms whenever its
+        ``_lineup`` is the season lineup, never ``_lineup_assets``. A search
+        that overrides ``_lineup`` without the hook, or a season input that is
+        negative (the bounds' premise), is ``Unsupported``."""
+        hook = getattr(search, "_page_bound_terms", None)
+        if hook is None:
+            if type(search)._lineup is not owner._Search._lineup:
+                raise Unsupported("lineup_override_without_bound_terms")
+            return {}, {}
+        season, shed = {}, {}
+        for uid, team in search.teams.items():
+            terms = hook(team)
+            if terms is None:
+                continue
+            if not terms["nonnegative"] or (terms["shed"] is not None and terms["shed"]["rate"] < 0):
+                raise Unsupported("negative_season_value")
+            season[uid] = terms
+            if terms["shed"] is not None:
+                shed[uid] = terms["shed"]["rate"]
+        return season, shed
+
+    def star(self, team, roster):
+        """U*(roster) for a season-lineup team: the best lineup of ``roster``'s season
+        assets plus free agents at the fill level, as many of each position as there
+        are slots (``assign`` fills every slot, then maximises value; values >= 0).
+
+        The season lineup U(S) (``SeasonLayer._season_total`` units) is one
+        configuration of that problem (assign's starters, a best-eligible free
+        agent per empty slot), so U(S) <= U*(S); U* is monotone in S, and adding
+        an asset b raises it by at most b's value (drop b from the optimum: its
+        slot takes a free agent >= 0). Hence for S within roster R plus received
+        Rc: U(S) <= U*(R + Rc) <= U*(R + a) + v_b for Rc = {a, b}."""
+        uid = team["uid"]
+        key = uid, frozenset(roster)
+        if key not in self._stars:
+            terms = self.season[uid]
+            if uid not in self._free_agents:
+                self._free_agents[uid] = [Asset("\x00free_agent:%s:%03d" % (pos, i), frozenset([pos]),
+                                                terms["fill"][pos])
+                                          for pos in owner._POSITIONS for i in range(len(team["slots"]))]
+            usable = [terms["lineup"][p] for p in roster if p in terms["lineup"]] + self._free_agents[uid]
+            value = {asset.id: asset.value for asset in usable}
+            self._stars[key] = sum(value[p] for p in assign(team["slots"], usable) if p)
+        return self._stars[key]
 
     def price_range(self, naive, count):
         """(lo, hi) of a side's market package price; see the module docstring."""
@@ -327,16 +499,21 @@ class _Bounds:
 
     def rows(self, viewer, other, pool, sent_by_viewer):
         s, sign = self.search, (-1 if sent_by_viewer else 1)
+        v_plan = self.shed_plan.get(viewer["uid"]) or (lambda pid: s._plan_asset(viewer, pid))
+        o_plan = self.shed_plan.get(other["uid"]) or (lambda pid: s._plan_asset(other, pid))
         out = {}
         for pid in pool:
             m = s.market[pid]
             out[pid] = (m, sign * m * (s._features[viewer["uid"], pid]["direction"] or 0),
-                        sign * m * s._plan_asset(viewer, pid),
+                        sign * m * v_plan(pid),
                         -sign * m * (s._features[other["uid"], pid]["direction"] or 0),
-                        -sign * m * s._plan_asset(other, pid))
+                        -sign * m * o_plan(pid))
         return out
 
     def _need(self, uid, usable_ratio):
+        if uid in self.shed_rate:
+            # A shed-scored side's lineup term (``_Member.gains`` bounds its ratio).
+            return _clip(self.shed_rate[uid] * usable_ratio)
         rate = self.need_rate[uid]
         if rate <= 0:
             return 0.0
@@ -367,20 +544,49 @@ class _Bounds:
         gain = (rv - gv) / max(rv, gv)
         return min(a[0] + self._market(gain), a[1] + self._market(-gain))
 
+    def sell_bonus(self, give, receive):
+        """The sell bonus both supports move by, computed as the generator computes it
+        (``_sell_share``: same sums, same order), except that a negative bonus is floored at
+        minus the demotion knob: the generator drops it on a demoted card, which no bound
+        can know, and a demoted card falls by the demotion instead. 0 without the bonus."""
+        if self.sell is None:
+            return 0.0
+        market, older = self.search.market, self._older
+        for pid in give + receive:
+            if pid not in older:
+                older[pid] = self.sell["older"](pid)
+        gross = sum(market[p] for p in give + receive)
+        share = (sum(market[p] for p in give if older[p]) - sum(market[p] for p in receive if older[p])) / gross
+        bonus = self.sell["weight"] * share
+        if bonus < 0 and self.sell["demotion"] > 0:
+            bonus = max(bonus, -self.sell["demotion"])
+        return bonus
+
     def support(self, viewer, other, give, receive, row, priced):
         """The exact two-sided support (up to float summation order)."""
         s, g = self.search, row[0]
         _, gv, rv = priced
         gain = (rv - gv) / max(rv, gv)
         out = []
-        for team, roster, pref, plan, market in (
-                (viewer, (viewer["roster"] - set(give)) | set(receive), row[1], row[2], gain),
-                (other, (other["roster"] - set(receive)) | set(give), row[3], row[4], -gain)):
+        for team, roster, pref, plan, market, outgoing, incoming in (
+                (viewer, (viewer["roster"] - set(give)) | set(receive), row[1], row[2], gain, give, receive),
+                (other, (other["roster"] - set(receive)) | set(give), row[3], row[4], -gain, receive, give)):
+            if team["uid"] in self.shed_rate:
+                # Exactly the team plan ``_season_signal`` re-scores this side to after
+                # eligibility (the demotion only lowers the support; not counted).
+                team_plan = self.season[team["uid"]]["shed"]["team_plan"](outgoing, incoming)
+                out.append(self.w_pref * _clip(.5 + pref / g, 0, 1) + self._market(market)
+                           + self.w_plan * team_plan)
+                continue
             after = s._lineup(roster, team)
             deltas = {pos: after[pos] - team["lineup_before"][pos] for pos in owner._POSITIONS}
             need = _clip(s._need_utility(team, deltas, g) * 4)
             out.append(self.w_pref * _clip(.5 + pref / g, 0, 1) + self._market(market)
                        + self.w_plan * _clip(.5 + .5 * _clip(plan / g + need), 0, 1))
+        bonus = self.sell_bonus(give, receive)
+        if bonus:
+            # Both sides move by it after eligibility (``_shift`` clips each to [0, 1]).
+            out = [_clip(side + bonus, 0, 1) for side in out]
         return min(out)
 
 
@@ -403,15 +609,38 @@ class _Member:
         for side, pool in (("give", self.give_pool), ("receive", self.receive_pool)):
             ordered = sorted(pool, key=lambda p: (search.market[p], p))
             self.by_market[side] = ([search.market[p] for p in ordered], ordered)
-        self.gain, self.usable = {}, {}
-        for team, pool in ((viewer, self.receive_pool), (other, self.give_pool)):
-            for pid in pool:
-                asset = search._lineup_assets.get(pid)
-                self.usable[pid] = asset.value if asset is not None and pid not in team["inactive"] else 0.0
-            if bounds.need_rate[team["uid"]] > 0 and team["uid"] not in bounds.native:
+        self.gain, self.usable, self.loss, self.shed = {}, {}, {}, {}
+        for team, pool, sent in ((viewer, self.receive_pool, self.give_pool),
+                                 (other, self.give_pool, self.receive_pool)):
+            terms = bounds.season.get(team["uid"])
+            lineup = terms["lineup"] if terms is not None else None
+            if lineup is not None:
+                # A season lineup: values and gains read through the hook (``_Bounds.star``),
+                # never ``_lineup_assets``. gain[a] = U*(R + a) - U(R) bounds the lineup
+                # change of every package receiving a (see ``star``), plus float slack.
                 for pid in pool:
-                    after = search._lineup(team["roster"] | {pid}, team)
-                    self.gain[pid] = sum(after[p] - team["lineup_before"][p] for p in owner._POSITIONS)
+                    self.usable[pid] = lineup[pid].value if pid in lineup else 0.0
+                if bounds.need_rate[team["uid"]] > 0 and team["uid"] not in bounds.native:
+                    before = sum(team["lineup_before"][p] for p in owner._POSITIONS)
+                    slack = _REL * (abs(before) + 1) + _SEASON_SLACK
+                    for pid in pool:
+                        self.gain[pid] = bounds.star(team, team["roster"] | {pid}) - before + slack
+            else:
+                for pid in pool:
+                    asset = search._lineup_assets.get(pid)
+                    self.usable[pid] = asset.value if asset is not None and pid not in team["inactive"] else 0.0
+                if bounds.need_rate[team["uid"]] > 0 and team["uid"] not in bounds.native:
+                    for pid in pool:
+                        after = search._lineup(team["roster"] | {pid}, team)
+                        self.gain[pid] = sum(after[p] - team["lineup_before"][p] for p in owner._POSITIONS)
+            if team["uid"] in bounds.shed_rate:
+                # Season points this side can shed: T(R) - T(R - G + Rc) <= F_R + sum of
+                # ppg over G's current starters (``_Member.gains``); loss per sent asset.
+                shed = terms["shed"]
+                for pid in sent:
+                    self.loss[pid] = shed["starters"].get(pid, 0.0)
+                fixed = shed["points"] - sum(shed["starters"].values())
+                self.shed[team["uid"]] = fixed + _REL * (abs(shed["points"]) + 1) + 4 * _SEASON_SLACK
 
     def potential(self):
         ng, nr = len(self.give_pool), len(self.receive_pool)
@@ -442,8 +671,10 @@ class _Member:
     def gains(self, give, receive):
         """Upper bounds on the (viewer, counterparty) usable-depth delta sums."""
         out = []
-        for received in (receive, give):
-            if received[0] not in self.gain:
+        for uid, received, sent in ((self.uids[0], receive, give), (self.uids[1], give, receive)):
+            if uid in self.shed:  # shed-scored: points it can lose, not gain (see __init__)
+                out.append(self.shed[uid] + sum(self.loss[p] for p in sent))
+            elif received[0] not in self.gain:
                 out.append(0.0)  # need rate 0, or native (bounded as 1 by _need)
             elif len(received) == 1:
                 out.append(self.gain[received[0]])
@@ -470,6 +701,12 @@ class _Member:
         r_lo, r_hi = b.side_price(rv, max(gv))
         q = (r_lo / g_hi if g_hi < math.inf else 0.0, r_hi / g_lo if g_lo > 0 else math.inf)
         bound, a = b.pre(self.uids, row, self.gains(give, receive), q)
+        if b.sell is not None:
+            # The sell bonus is known exactly before pricing: both sides (hence every
+            # term of the min) move by it; outward slack for summation order.
+            bonus = b.sell_bonus(give, receive) + _FLOOR_SLACK
+            a = (a[0] + bonus, a[1] + bonus)
+            bound += bonus
         return bound, (row, a)
 
     def screen(self, index, heap):
@@ -488,10 +725,14 @@ class _Member:
         """
         b, rows, gain, usable, market = self.bounds, self.rows, self.gain, self.usable, self.search.market
         append = heap.append
-        if not b.envelope:
+        if not b.envelope or b.generic:
+            # Season terms (``b.generic``): the same entries as the inlined screen
+            # below (windowed canonical expansions that ``can_clear``), bounded by ``pre``.
             for g in self.give_pool:
                 for r in self.receive_pool:
                     for give, receive in [((g,), (r,)), *self.expansions((g,), (r,), canonical=True)]:
+                        if b.generic and not self.can_clear(give, receive):
+                            continue
                         bound, (_, a) = self.pre(give, receive)
                         side, c = (("give", give[1]) if len(give) == 2 else ("receive", receive[1])
                                    if len(receive) == 2 else ("focal", None))

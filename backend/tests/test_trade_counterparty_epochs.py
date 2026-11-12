@@ -101,6 +101,13 @@ def mutate(w, actor, change):
         assert after["a1"] != (1700. if actor == "partner" else 1500.)
         if actor == "partner":
             assert after != before
+    elif change == "keep":
+        # Roster setup's Keep (D-213): the asset-prefs route, as the app posts it.
+        player = "a2" if actor == "viewer" else "b2"
+        response = w.client.post("/api/league/asset-prefs", json={"league_id": LEAGUE,
+            "player_id": player, "list": "untouchable"}, headers={"X-Session-Token": token})
+        assert response.status_code == 200, response.json
+        assert db.load_asset_preferences(user_id=uid, league_id=LEAGUE)["untouchables"] == [player]
     else:
         response = w.client.post("/api/league/preferences", json={"league_id": LEAGUE,
             "team_outlook": "jets"}, headers={"X-Session-Token": token})
@@ -165,7 +172,7 @@ def assert_freshness_at_real_boundary(w, job_id, phase, actor, change):
 
 @pytest.mark.parametrize("phase", ["complete", "running"])
 @pytest.mark.parametrize("actor", ["partner", "viewer"])
-@pytest.mark.parametrize("change", ["board", "outlook"])
+@pytest.mark.parametrize("change", ["board", "outlook", "keep"])
 def test_changed_consumed_input_revokes_public_inventory(world, monkeypatch, phase, actor, change):
     if phase == "running":
         finish = server._finish_trade_job
@@ -663,3 +670,14 @@ def test_only_seven_explicit_publish_sites_use_wrapper_not_init_or_replenishment
                 raw_writes.append(function.name)
     assert sorted(wrappers) == sorted(_PUBLICATION_CALLS)
     assert raw_writes == ["_publish_member_rankings_for_trade_refresh"]
+
+
+@pytest.mark.parametrize("actor", ["partner", "viewer"])
+def test_a_keep_mark_marks_the_leagues_stored_pages_stale(world, monkeypatch, actor):
+    """Stored first pages (P1) built before a Keep mark never serve after it:
+    the route's invalidation marks the whole league's pages stale."""
+    marked = []
+    monkeypatch.setattr(server, "_mark_trade_pages_stale",
+                        lambda at, **scope: marked.append(scope))
+    mutate(world, actor, "keep")
+    assert marked == [{"league_id": LEAGUE}]

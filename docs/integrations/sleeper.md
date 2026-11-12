@@ -181,6 +181,15 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   FTF derives `scoring_format` (`1qb_ppr` vs `sf_tep`) from `roster_positions`
   containing `SUPER_FLEX` (or ≥2 `QB` slots) OR `scoring_settings.bonus_rec_te > 0`
   (`backend/server.py:685-721`).
+  `settings.league_average_match` (0/1) is the **league median**: when 1, every
+  week each team also plays the median of the whole league's scores that week
+  (above wins, below loses; even team count = the top half wins). Official
+  `wins/losses/ties` on `/rosters` then count two results a week; `fpts_against`
+  stays head-to-head only (both verified 2026-11-11 against a real 12-team
+  league, all 12 records exact; a score exactly equal to the median is treated
+  as a tie, unobserved). Session init stores it on `leagues.median_game` from the
+  payload it already read; the playoff forecast reads it live at capture
+  (`league_projections/provider.py`, `core.median_outcomes`).
 - `GET /league/{id}/rosters` → `[{roster_id, owner_id, players:[...], starters:[...],
   settings:{wins, losses, ties, fpts, fpts_decimal, fpts_against, fpts_against_decimal, division}}]`.
   Null entries can appear inside `players` for empty slots — handled defensively

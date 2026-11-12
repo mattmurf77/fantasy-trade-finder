@@ -13,6 +13,7 @@ import {
 import { ink, chalk, flare, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Icon, Badge, Text as ChalklineText } from './chalkline';
 import PlayerCard from './PlayerCard';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 import StrengthBar from './StrengthBar';
 import TradeValueBar from './TradeValueBar';
 import CardImpactBlock from './CardImpactBlock';
@@ -27,7 +28,7 @@ import { LockGlyph } from './PlayerContextMenu';
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { consensusNote } from '../utils/consensusNote';
-import type { Player, TradeCard as TradeCardData, FitBlockTeam } from '../shared/types';
+import type { Player, TradeCard as TradeCardData, FitBlockTeam, SeasonBlock } from '../shared/types';
 
 // #362 — chip copy helpers. Both derive entirely from the server-stamped
 // `standing_offer_mine` payload; neither invents a season the offer does
@@ -71,6 +72,12 @@ export function fitLeadShown(team: FitBlockTeam): boolean {
   return !/^(holds|shifts)\./.test(team.lead.code);
 }
 
+// Win-now season signal — the server's label tag for one asset, verbatim, or
+// undefined (no label, or no block). The card never composes season text.
+export function seasonLabelFor(block: SeasonBlock | undefined, id: string): string | undefined {
+  return block?.labels?.find((l) => l.id === id)?.text;
+}
+
 // WS4b fit block — one team's before/after table rows: position, rank
 // before, rank after, in the mono face with fixed cells so the columns line
 // up across both teams under the block's one Before / After header. Each row
@@ -112,8 +119,10 @@ export interface DispositionReasons extends DeclineReasonPanelProps {
    *  commit the deferred deck advance, or the card is stranded (review #1). */
   onOverlayDismissed?: (banked: boolean) => void;
   /** Flag `trade.pass_reason_cadence` (WS3). The host strips a 'quiet' card's
-   *  reasons entirely, so present here means the cadence is asking: the
-   *  one-tap PassReasonChips row replaces the ✕ and the tile panel. */
+   *  reasons entirely, so present here means the cadence is asking. The card
+   *  looks like any other (✓ and ✕, no tile panel); the ✕ opens the
+   *  PassReasonChips frame over the card, and every exit from that frame is a
+   *  pass (a chip = pass + reason; anything else = `onDismissed` + `onPass`). */
   cadence?: PassReasonCadenceCard;
 }
 
@@ -326,6 +335,19 @@ function TradeCardComp({
   const fitYou = fitBlockShown?.teams.find((t) => t.side === 'you');
   // The Before / After header shows once, when either team has a table.
   const fitTable = !!(fitThem?.positions?.length || fitYou?.positions?.length);
+  // The block's label names league rank only when the block carries a rank
+  // (a table or rank moves). Without one (server flag trade.fit_position_ranks
+  // off, 2026-11-11) the block is tags and reasons, so it reads "Team fit".
+  const fitRanked = fitTable || !!(fitThem?.ranks?.length || fitYou?.ranks?.length);
+  // Win-now season signal (lld §5.3): same gate as the fit block, so an
+  // edited card (whose package the server did not score) shows none of it.
+  const seasonShown = fitFirstEnabled && !data.edited ? data.season_block : undefined;
+  const seasonTag = (p: Player) => {
+    const text = seasonLabelFor(seasonShown, p.id);
+    return text ? (
+      <ChalklineText style={styles.fitTag} numberOfLines={1} testID={`trade-card.season-label.${p.id}`}>{text}</ChalklineText>
+    ) : undefined;
+  };
   // WS8 revised-offer card — the server's one sentence saying the user's
   // earlier offer was declined and what changed. Double-gated on the flag
   // like the fit block; an edited card hides it (it describes the package
@@ -336,7 +358,13 @@ function TradeCardComp({
   // button and the reasons arrive as an overlay over the page, instead of
   // three inline tiles replacing the ✕. `reasonsAsOverlay` is a PROP (see the
   // Props comment): the host owns the "arrived from the calculator" fact.
+  // Also the open state of the cadence card's why-pass frame (WS3): the host
+  // never sets `reasonsAsOverlay` on a cadence card, so the two never share it.
   const [reasonOverlayOpen, setReasonOverlayOpen] = useState(false);
+  // Centre of the ✓/✕ row in card coordinates — the why-pass frame anchors
+  // its panel here (PassReasonChips' placement invariant). A ref: measured
+  // only on a cadence card, read when the frame mounts, never re-renders.
+  const actionRowMidRef = useRef<number | null>(null);
   // Review #1 — a layer-1 tile BANKS the pass (`advance('pass', {
   // deferDeckAdvance: true })`) and the host only fronts the next card from
   // layer 2. So the sheet must stay up through layer 2, and a backdrop
@@ -351,7 +379,8 @@ function TradeCardComp({
   // node can ever claim the id. Skipped when the inline-tile form removes the
   // button — an id pointing at an unmounted node measures to null anyway.
   const passBtnRef = useRef<View | null>(null);
-  const passBtnMounted = !!disposition && !(disposition.reasons && !reasonsAsOverlay);
+  const passBtnMounted =
+    !!disposition && !(disposition.reasons && !reasonsAsOverlay && !disposition.reasons.cadence);
   useEffect(() => {
     if (!passBtnMounted) return;
     registerGuideTarget('trades.pass-btn', passBtnRef);
@@ -573,14 +602,20 @@ function TradeCardComp({
     if (variant === 'swipe' && onRemoveAsset) {
       actions.push({ name: 'remove', label: 'Remove from this trade' });
     }
+    // Projected draft slot: the row speaks the name it prints (PlayerCard
+    // prints `proj_name` for a valid pair) and says why the pick is priced
+    // as it is. Absent/malformed ⇒ `proj` null ⇒ today's label.
+    const proj = projectedPick(p);
     return {
       accessibilityLabel: [
-        p.name,
+        proj ? proj.name : p.name,
         String(p.position),
         p.team || 'FA',
         marked ? 'untouchable' : null,
         p.on_block ? 'on the block' : null,
+        seasonLabelFor(seasonShown, p.id) ?? null,
         p.injury_status ? `injury ${p.injury_status}` : null,
+        proj ? projectedPickA11y(proj) : null,
       ]
         .filter(Boolean)
         .join(', '),
@@ -718,7 +753,7 @@ function TradeCardComp({
           (fitLeadShown). Without it the team renders exactly as before. */}
       {fitThem || fitYou ? (
         <View style={styles.fitBlock} testID="trade-card.fit-block">
-          <ChalklineText style={type.label} numberOfLines={1}>League rank · position value</ChalklineText>
+          <ChalklineText style={type.label} numberOfLines={1}>{fitRanked ? 'League rank · position value' : 'Team fit'}</ChalklineText>
           {fitTable ? (
             <View
               style={styles.fitTeam}
@@ -773,6 +808,15 @@ function TradeCardComp({
                 ) : null}
               </View>
             </View>
+          ) : null}
+          {/* Win-now season signal, under the You team at the block's full
+              width: the season line on one line, the conflict sentence on up
+              to two, both server text printed verbatim. */}
+          {seasonShown?.line ? (
+            <ChalklineText style={styles.fitLead} numberOfLines={1} testID="trade-card.season-line">{seasonShown.line}</ChalklineText>
+          ) : null}
+          {seasonShown?.conflict ? (
+            <ChalklineText style={styles.fitLead} numberOfLines={2} testID="trade-card.season-conflict">{seasonShown.conflict.text}</ChalklineText>
           ) : null}
         </View>
       ) : null}
@@ -870,6 +914,7 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'give')}
                 onLongPress={longPressFor(p, 'give')}
+                belowNameSlot={seasonTag(p)}
                 // #226 — informational badges live in the wrapping header
                 // row; the in-flow rightSlot keeps only the interactive
                 // controls (stacked, so the narrow column keeps its width).
@@ -925,6 +970,7 @@ function TradeCardComp({
                 compact
                 {...rowA11y(p, 'receive')}
                 onLongPress={longPressFor(p, 'receive')}
+                belowNameSlot={seasonTag(p)}
                 // #226 — same treatment as the give column: badge in the
                 // header row, controls stacked in the in-flow rightSlot.
                 badgeSlot={p.on_block ? blockBadge(p) : undefined}
@@ -956,14 +1002,26 @@ function TradeCardComp({
           double-firing. */}
       {disposition ? (
         <>
-          <View style={styles.dispositionRow}>
+          <View
+            style={styles.dispositionRow}
+            onLayout={
+              disposition.reasons?.cadence
+                ? (e) => {
+                    actionRowMidRef.current = e.nativeEvent.layout.y + e.nativeEvent.layout.height / 2;
+                  }
+                : undefined
+            }
+          >
             {/* Decline-reason capture (flag `feedback.decline_reasons`,
                 SPEC §1): with `reasons` wired, the three layer-1 tiles ARE
                 the pass, so the ✕ is removed and this row holds the ✓
                 alone — unchanged in every other respect. `reasons` absent
                 (flag off, and on every non-deck mount) ⇒ this renders
-                byte-identically to the shipped ✓/✕ row. */}
-            {disposition.reasons && !reasonsAsOverlay ? null : (
+                byte-identically to the shipped ✓/✕ row. The cadence
+                asking card (`reasons.cadence`) KEEPS the ✕ — it opens the
+                why-pass frame (TestFlight build 186: a ✕-less card read as
+                having no way to pass). */}
+            {disposition.reasons && !reasonsAsOverlay && !disposition.reasons.cadence ? null : (
               <Pressable
                 ref={passBtnRef}
                 collapsable={false}
@@ -971,15 +1029,19 @@ function TradeCardComp({
                 onPress={
                   // Overlay mode: the ✕ opens the reason sheet, and the
                   // PANEL commits the pass (its layer-1 tap is the
-                  // disposition — same contract as the inline form). Without
-                  // reasons wired it is the plain pass it has always been.
+                  // disposition — same contract as the inline form). On the
+                  // cadence asking card it opens the why-pass frame, which
+                  // always ends in a pass. Without reasons wired it is the
+                  // plain pass it has always been.
                   disposition.reasons && reasonsAsOverlay
                     ? () => {
                         reasonBankedRef.current = false;
                         setReasonOverlayOpen(true);
                         disposition.reasons!.onOverlayOpened?.();
                       }
-                    : disposition.onPass
+                    : disposition.reasons?.cadence
+                      ? () => setReasonOverlayOpen(true)
+                      : disposition.onPass
                 }
                 disabled={disposition.disabled}
                 style={({ pressed }) => [
@@ -1014,17 +1076,9 @@ function TradeCardComp({
               )}
             </Pressable>
           </View>
-          {disposition.reasons?.cadence ? (
-            <PassReasonChips
-              onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
-              onSkip={() => {
-                disposition.reasons!.cadence!.onDismissed(data.trade_id);
-                disposition.onPass();
-              }}
-              onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
-              disabled={disposition.disabled}
-            />
-          ) : disposition.reasons && !reasonsAsOverlay ? (
+          {/* The cadence card mounts no panel here: its reasons live in the
+              why-pass frame, mounted last in the card so it covers it. */}
+          {disposition.reasons?.cadence ? null : disposition.reasons && !reasonsAsOverlay ? (
             <DeclineReasonPanel {...disposition.reasons} />
           ) : null}
           {disposition.reasons && reasonsAsOverlay ? (
@@ -1201,6 +1255,25 @@ function TradeCardComp({
           </View>
         )
       )}
+      {/* WS3 why-pass frame — opened only by the cadence card's ✕, laid over
+          the whole card (absolute fill, after every card block; only the
+          Matches-only `footer` follows, and it never renders on a deck
+          card). Every exit is a pass: a chip is the pass + its reason; Just
+          pass, the scrim, the accessibility escape and Android back are the
+          plain pass that closes the prompt. There is no way back to the
+          card. */}
+      {disposition?.reasons?.cadence && reasonOverlayOpen ? (
+        <PassReasonChips
+          anchorY={actionRowMidRef.current}
+          onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}
+          onSkip={() => {
+            disposition.reasons!.cadence!.onDismissed(data.trade_id);
+            disposition.onPass();
+          }}
+          onShown={() => disposition.reasons!.cadence!.onShown(data.trade_id)}
+          disabled={disposition.disabled}
+        />
+      ) : null}
       {footer ?? null}
     </View>
   );

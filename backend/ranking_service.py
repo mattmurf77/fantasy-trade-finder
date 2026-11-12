@@ -273,6 +273,10 @@ class Player:
     search_rank:          int | None = None   # Sleeper's internal rank proxy
     adp:                  float | None = None # ADP if available
     pick_value:           float | None = None # non-None only for PICK pseudo-players
+    # Projected slot value: set only on an owned pick the league forecast
+    # priced ("1.02" / "2027 1.02 (from dondags)"); None everywhere else.
+    proj_slot:            str | None = None
+    proj_name:            str | None = None
 
 
 @dataclass

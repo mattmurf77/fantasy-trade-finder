@@ -51,6 +51,10 @@ FLAG_KEYS: tuple[str, ...] = (
     # web standings). Off = no `outlook_recommendation` block and no prompt;
     # the projection surfaces and every saved outlook are untouched.
     "league.projection_outlook",
+    # A league-mate with no saved outlook is assumed Rebuilding / Contending
+    # from their playoff chance in the viewer's usable saved forecast
+    # (backend/partner_outlook.py). Off = the roster read for everyone.
+    "trade.partner_outlook_projection",
     # Separate seasonal model / search / calibrated championship graduation.
     "outlook.season_projections",
     "trades.win_now",
@@ -153,6 +157,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # in mobile LAUNCHED_FLAG_DEFAULTS; no client reads it. Supersedes the
     # never-shipped `sleeper.fa_write`. MFL/ESPN get their own keys in Update 1.
     "sleeper.send_add_drop",
+    # D1 Update 1 (docs/plans/in-app-claims/design.md): the same for MFL
+    # leagues, over MFL's documented import API (fcfsWaiver). SERVER-ONLY,
+    # default off. Even on, nothing is sent until mfl_write.
+    # FA_MOVE_SHAPES_VERIFIED is set by the verification commit; until then
+    # an MFL league's capability stays `unsupported` and the route 404s.
+    "mfl.send_add_drop",
     # FB-147 engine hook — SOFT, acquire-side trade-block boost. A card whose
     # ACQUIRE side holds a player the counterparty flagged "on the block" gets
     # a bounded composite bump (knob block_boost_weight). Applied AFTER all
@@ -473,6 +483,9 @@ FLAG_KEYS: tuple[str, ...] = (
                              # spawner for onboarding QA (backend/test_users.py)
     "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
                                # readout (mobile TimingReadoutRow, ruling 11)
+    "dev.test_profile",      # /api/test-profile/* — the operator's onboarding test
+                             # profile (backend/test_profile.py). Also needs the
+                             # real account in env TEST_PROFILE_ACCOUNTS.
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL
@@ -510,6 +523,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # owned-pick label is the pre-D-090 string, BYTE-IDENTICAL, at all five
     # sites that build one.
     "picks.slot_labels",
+    # picks.projected_slot_value (docs/plans/pick-value-projected-slot/):
+    # a NEXT-draft round-1 pick in a Sleeper league with a usable saved
+    # forecast prices by its ORIGINAL team's projected slot distribution,
+    # zero-sum across the league; an adjusted pick names its projected slot
+    # ("2027 1.02 · projected", plus proj_slot / proj_name). Read live in
+    # server._league_pick_projection. Off ⇒ every pick price, label and cache
+    # key is byte-identical to today.
+    "picks.projected_slot_value",
     # ── Market-data readiness (PRD #43 Phase-1 data foundation / #26) ────
     # market.trade_capture: capture executed Sleeper league trades (public
     # v1 /league/<id>/transactions/<week>, type=trade + complete) into the
@@ -1287,6 +1308,10 @@ FLAG_KEYS: tuple[str, ...] = (
     "trades.roster_tier_rank",
     # docs/plans/blind-grading/ — Calibration tab + /api/grading/*; ships false, reaches testers only via the calibration_rollout overlay
     "grading.blind",
+    # docs/plans/founder-review/ — Founders' review (founder-only player label
+    # review in Calibration). OFF => /api/founder/* 404 and the app shows nothing.
+    # Access also needs FOUNDER_ACCOUNTS (env) and a verified session.
+    "founder.review",
     "grading.outlook_round",
     "grading.outlook_prepare",
     # docs/plans/offer-learnings/scope-next-move.md (WS5, R2) — at most one
@@ -1298,6 +1323,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # proof supports a specific fit reason (trade_narrative.fit_lines), and the
     # mobile card leads with them. OFF (default) ⇒ no key, byte-identical.
     "trade.fit_first_copy",
+    # 2026-11-11 operator feedback on TestFlight 186 (the position-rank
+    # "value change" content is disorienting and adds little). ON ⇒ the fit
+    # block carries league position ranks: each team's `ranks`, `positions`
+    # and the rank-fact leads (holds/shifts/flat/none), byte-identical to the
+    # block before this flag. OFF (default) ⇒ only outlook tags and reason
+    # leads (plan/need); a team with no reason is left out, and the job skips
+    # the league-wide position-value walk. Read once per job.
+    "trade.fit_position_ranks",
     # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
     "grading.revision4_arm",
     # docs/plans/offer-learnings/scope-partner-activity.md (WS7, R8). ON and
@@ -1317,6 +1350,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # Sleeper offers are imported. OFF (default) ⇒ no call, no row, GET/POST
     # /api/sleeper/offer-import 404 (DELETE still withdraws).
     "trade.sleeper_offer_import",
+    # docs/plans/win-now-season-signal/ (lld §6). ON ⇒ once per organic owner
+    # job, for a Sleeper league, the worker reads the account's saved league
+    # forecast (read only: no run queued, no provider call), records the season
+    # evidence on the owner request record and logs one `season-signal:` line;
+    # bilateral revision 5, when selected, scores with it, and its cards carry
+    # `season_block`. OFF (default) ⇒ no read, no line, no key anywhere.
+    "trade.season_signal",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}

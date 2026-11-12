@@ -40,11 +40,11 @@ def test_unknown_or_malformed_native_modes_refuse(value):
     assert exc.value.reason=='unsupported_playoff_reseeding_policy'
 
 
-@pytest.mark.parametrize('setting',['divisions','league_average_match','best_ball','bracket_overrides_id'])
+@pytest.mark.parametrize('setting',['divisions','best_ball','bracket_overrides_id'])
 def test_reseeding_admission_preserves_other_rule_guards(setting):
     source,feed=world();league=source[f'{API}/league/123']
     league['settings']['playoff_seed_type']=1
     if setting=='bracket_overrides_id':league[setting]='synthetic-override'
     else:league['settings'][setting]=1
     with pytest.raises(Unavailable) as exc:run(source,feed)
-    assert exc.value.reason=='unsupported_divisions_median_bestball_or_manual_seeding'
+    assert exc.value.reason=='unsupported_divisions_bestball_or_manual_seeding'

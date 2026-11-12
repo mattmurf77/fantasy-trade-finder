@@ -88,7 +88,10 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league, AccountGone,
+    load_founder_label_overrides, save_founder_label_overrides,
+    FounderNoteError, save_founder_rule_note, load_founder_rule_notes,
+    load_founder_rule_note_history,
+    upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
@@ -134,6 +137,8 @@ from .database import (
     upsert_league_members, upsert_member_rankings,
     # The session-init daemon's start read and its guarded members write
     league_row_and_member_ids, write_session_init_members,
+    # Per-user platform-league binding (docs/plans/platform-league-binding/)
+    get_platform_binding, platform_bound_teams,
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -262,9 +267,11 @@ from . import sleeper_write as _sleeper_write
 from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
+from . import test_profile as _tp               # onboarding test profile (dev.test_profile)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
+from . import partner_outlook as _partner_outlook   # trade.partner_outlook_projection
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
@@ -606,6 +613,15 @@ def _sleeper_record(url: str, data) -> None:
     log.info("sleeper-record WROTE %s", path)
 
 
+def _tp_url_names_test_id(url: str) -> bool:
+    """A path segment of `url` is an exact test-world id (review L1: never a
+    substring, so a real username or league containing the text is fine)."""
+    if "qa_tp" not in url:          # cheap pre-filter; the decision is structural
+        return False
+    path = urllib.parse.urlsplit(url).path
+    return any(_tp.is_test_world_id(urllib.parse.unquote(seg)) for seg in path.split("/"))
+
+
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
 
@@ -613,6 +629,10 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     (a URLError) without touching the network; a 429 opens it. Fixture mode
     goes through the circuit too, so cassette 429s exercise the real path.
     """
+    if _tp_url_names_test_id(url):
+        # Test-profile ids (backend/test_profile.py) are never real Sleeper
+        # ids: a namespaced league or profile must not reach the network.
+        raise urllib.error.HTTPError(url, 404, "test-profile id", None, None)
     league = _api_obs.sleeper_endpoint_class(url)[1]
     with _sleeper_http.guard(league):
         return _sleeper_get_unguarded(url, timeout)
@@ -810,10 +830,8 @@ def _detect_scoring_format_from_meta(meta: dict) -> str:
         return "1qb_ppr"
 
     roster_positions = meta.get("roster_positions") or []
-    is_superflex = "SUPER_FLEX" in roster_positions
-    if not is_superflex:
-        qb_count = sum(1 for p in roster_positions if p == "QB")
-        is_superflex = qb_count >= 2
+    from .season_value import is_superflex as _is_superflex   # the one superflex test
+    is_superflex = _is_superflex(roster_positions)
 
     scoring = meta.get("scoring_settings") or {}
     try:
@@ -892,6 +910,7 @@ from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
     priced_pool_value,          # read-time market pricing seam (D-144)
+    projected_pick_slot,        # projected slot value: the slot shown
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -1158,15 +1177,17 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     # such row carries its provenance, and so does a combo containing one.
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)          # D-090, once per call
+    projection = _league_pick_projection(league_id)     # projected slot value, once per call
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
-        val = _priced_pick_value(pk, slot_order, scoring_format)
+        val = _priced_pick_value(pk, slot_order, scoring_format, projection)
         if pid in skip or val <= 0:
             continue
         assets.append({
             "id":       pid,
-            "name":     _owned_pick_label(pk, slot_order),
+            "name":     _owned_pick_label(pk, slot_order, projection, scoring_format),
+            **_owned_pick_projection_fields(pk, slot_order, projection, scoring_format),
             "position": "PICK",
             "team":     None,
             "value":    round(val, 1),
@@ -2628,6 +2649,9 @@ def _restore_persisted_session(token: str) -> dict | None:
         if sess is not None:
             return sess
         user_id = str(row["user_id"])
+        is_test = _tp.is_test_profile_id(user_id)
+        if is_test and not _tp.enabled_for(_tp.real_id_of(user_id), is_enabled):
+            return None
         try:
             if _accts.is_account_user_id(user_id):
                 _, payload = _account_build_session(
@@ -2645,6 +2669,7 @@ def _restore_persisted_session(token: str) -> dict | None:
                                   or profile.get("username") or ""),
                     avatar=profile.get("avatar"),
                     token=token,
+                    **({"test_profile": True} if is_test else {}),
                 )
                 payload.pop("extension", None)
         except Exception:
@@ -2733,11 +2758,55 @@ def _get_session(token: str) -> dict | None:
         return None
     with _sessions_lock:
         sess = _sessions.get(token)
-    if sess is not None:
-        return sess
-    if not is_enabled("auth.persistent_sessions"):
+    if sess is None:
+        if not is_enabled("auth.persistent_sessions"):
+            return None
+        sess = _restore_persisted_session(token)
+    if sess is not None and _tp.is_test_profile_id(sess.get("user_id")) and (
+            not token.startswith(_TP_TOKEN_PREFIX) or not _test_profile_session_allowed(sess)):
+        _tp_drop_session(token, sess)      # review L2: no direct _sessions reader sees it again
         return None
-    return _restore_persisted_session(token)
+    return sess
+
+
+_TP_TOKEN_PREFIX = "tp."
+
+
+def _tp_drop_session(token: str, sess: dict | None = None) -> None:
+    """Remove one test-profile session from memory and the durable store."""
+    with _sessions_lock:
+        if sess is None or _sessions.get(token) is sess:
+            _sessions.pop(token, None)
+        if sess is not None:
+            sess["_revoked"] = True
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+
+
+def _tp_evict_closed_sessions() -> int:
+    """Review L2: evict every in-memory test-profile session whose gate is
+    closed (flag off, account removed from TEST_PROFILE_ACCOUNTS), so the
+    many direct `_sessions` readers never see one. Run by the flag reload and
+    the cleanup loop; `_get_session` evicts on sight too."""
+    with _sessions_lock:
+        dead = [(t, s) for t, s in _sessions.items()
+                if _tp.is_test_profile_id(s.get("user_id"))
+                and not _test_profile_session_allowed(s)]
+    for t, s in dead:
+        _tp_drop_session(t, s)
+    return len(dead)
+
+
+def _test_profile_session_allowed(sess: dict) -> bool:
+    """A test-profile session lives only while its real account is still
+    allowed (flag `dev.test_profile` + TEST_PROFILE_ACCOUNTS). Turning either
+    off makes every test-profile token read as expired. Real sessions: True."""
+    uid = sess.get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return True
+    return _tp.enabled_for(_tp.real_id_of(uid), is_enabled)
 
 
 class _RequestSession(collections.UserDict):
@@ -2824,6 +2893,27 @@ def _active_format(sess: dict) -> str:
     """Return the format that `_require_session` resolved for this request."""
     return (sess.get("_effective_format") if isinstance(sess, _RequestSession)
             else None) or sess.get("active_format") or "1qb_ppr"
+
+
+def _sleeper_identity(sess) -> str:
+    """THE Sleeper user id of a session, for READ-ONLY Sleeper calls (the
+    username step, league discovery, roster resolution). For every real
+    session it is the session's own user id — byte-identical to before, which
+    tests/test_test_profile_sleeper.py pins over every such site. For the
+    onboarding test profile `qa_tp_X` it is the real account's own Sleeper id
+    (X itself, or the Sleeper id bound to account X); the app identity stays
+    `qa_tp_X` and nothing keyed by this id is ever written for it."""
+    uid = str((sess or {}).get("user_id") or "")
+    if not _tp.is_test_profile_id(uid):
+        return uid
+    real = _tp.real_id_of(uid) or ""
+    if real.isdigit():
+        return real
+    from . import accounts as _accounts
+    if _accounts.is_account_user_id(real):
+        acct = _accounts.get_account(real[len(_accounts.ACCOUNT_USER_PREFIX):]) or {}
+        return str(acct.get("sleeper_user_id") or "")
+    return ""
 
 
 def _league_user_id(sess: dict) -> str:
@@ -3159,6 +3249,11 @@ def _cleanup_loop() -> None:
         _sweep_orphaned_overhauls_once()
 
         try:
+            _tp_evict_closed_sessions()
+        except Exception:
+            log.exception("test-profile session sweep failed")
+
+        try:
             _prune_deleted_partner_ids()
         except Exception as err:      # the class only: its text may quote ids
             log.error("cleanup: deleted-id prune failed: %s", type(err).__name__)
@@ -3403,8 +3498,8 @@ from . import user_data_lifecycle as _user_data_lifecycle
 @app.before_request
 def _acquire_user_data_lease():
     g._user_data_started = _user_data_lifecycle.snapshot()
-    if request.endpoint == "delete_account_route":
-        return  # deletion acquires all account aliases in sorted order
+    if request.endpoint in ("delete_account_route", "test_profile_reset"):
+        return  # deletion (and the test-profile reset's drain) acquires the aliases itself
     token = request.headers.get("X-Session-Token", "")
     if not token:
         return
@@ -3687,7 +3782,18 @@ def _trade_job_preferences(user_id, league_id, sess, league):
     seeded = None
     if not outlook:
         seeded, _ = _infer_user_outlook(user_id, league_id, sess, league)
-    return {"prefs": prefs, "seeded_outlook": seeded}
+    out = {"prefs": prefs, "seeded_outlook": seeded}
+    if _partner_outlook.enabled(is_enabled):
+        # trade.partner_outlook_projection: the request's ONE forecast read.
+        # It rides the preload, so the worker uses exactly these reads and the
+        # request signature (job cache, stored pages, prepared inventory)
+        # changes whenever a league-mate's assumed outlook would. Flag off:
+        # the key is absent and the preload is byte-identical.
+        out["partner_projection"] = _partner_outlook.session_reads(
+            sess, user_id, league_id,
+            [m.user_id for m in getattr(league, "members", ()) or ()],
+            platform=getattr(league, "platform", "sleeper"))
+    return out
 
 
 def _trade_request_signature(prefs_preload):
@@ -4581,7 +4687,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 22
+DECK_PIPELINE_VERSION = 30
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4615,6 +4721,8 @@ DECK_PIPELINE_FUNCTIONS = (
     "_load_presentment_exclusions", "_presentment_need_gate_bypass",
     "_owner_cards_valid", "_owner_selected_assignment", "_owner_generation_context",
     "_owner_canonical", "_first_session_confidence_ok", "_audition_statuses",
+    "_apply_partner_outlooks",   # a league-mate's assumed outlook, an engine input
+    "_season_evidence", "_season_viewer_complete",   # win-now season signal: revision 5's input
     # order and composition of the served deck (the F-layers, quality, ghosts)
     "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
     "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
@@ -4629,6 +4737,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_league_pick_projection", "_load_pick_projection_summary",  # projected slot value
     "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
@@ -4637,7 +4746,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
     "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
     "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
-    "_value_core_live", "_slot_labels_enabled",
+    "_value_core_live", "_slot_labels_enabled", "_pick_projection_enabled",
     # the stored card's content
     "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
     "_owner_public_selection", "player_to_dict",
@@ -4664,6 +4773,7 @@ DECK_PIPELINE_IGNORED = {
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
     "_log_owner_selected_run": "run logging",
     "_log_presentment_outcome": "a log line",
+    "_log_season_signal": "a counts-only log line (win-now season signal)",
     "_log_roster_rejections": "shadow logging of rejected candidates",
     "_mirror_skip_rows": "shadow logging of skipped mirrors",
     "_note_mirror_skip": "shadow logging of skipped mirrors",
@@ -4695,11 +4805,13 @@ DECK_PIPELINE_IGNORED = {
     "_iso_age_days": "a date utility",
     "_FA_LEAGUE_META_TTL": "a cache TTL",
     "_SLOT_ORDER_TTL_SECONDS": "a cache TTL",
+    "_PICK_PROJECTION_TTL_SECONDS": "a cache TTL",
     "_THOMPSON_PRIOR_CACHE_TTL_S": "a cache TTL",
     "_thompson_prior_cache": "a mutable cache, not a constant",
     # copy and label formatting on stored cards (copy churn; models-eng's call: out)
     "_standing_offer_reason": "label copy only",
     "_owned_pick_label": "label copy only",
+    "_owned_pick_projection_fields": "label copy only (projected slot value's proj_slot / proj_name)",
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
     "_aggregate_pick_label": "label copy only (the medians' value_label; the fit block reads only value)",
@@ -4732,6 +4844,14 @@ DECK_PIPELINE_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
+    23: "68e072f20220238b",  # Partner outlook from the saved forecast (trade.partner_outlook_projection, default off): the job's one forecast read (request preload, else the worker's) gives a league-mate with no saved outlook an inferred_outlook from their playoff chance (45% cut, two bands) in the owner context, with outlook_source on every league-mate's preferences; the fit context tags those reads source projection; flag off: no read, no key, terms and order unchanged.
+    24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
+    25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector owner_bilateral_revision_5_enabled, default 0): one read-only forecast read per organic owner job, recorded on the request record (digest in the hash), passed only to revision 5; the five revision-5 knobs leave the request hash unless revision 5 is selected; presentment reads owner_presentment_version; trade_card_to_dict adds season_block; flag off and selector 0: context, hash, terms, order and payload unchanged.
+    26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
+    27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
+    28: "f9dc5f829bcd9a92",  # Founders' review (docs/plans/founder-review/): _season_evidence attaches the founder's label overrides that reach this league (season_value.with_label_overrides: players projected here, scope `all` or the league's QB format) and recomputes the evidence digest over them, so the request hash moves with them; league_profile applies them to the future axis only; no override that reaches the league: the same evidence object, digest, hash, terms and order.
+    29: "02e724a78ba569ee",  # Founders' review, use case 2: _run_trade_job takes a per-job rule_waterfall_probe (default None), called once after the rules-first rules are built and before the fit context and generation; only the founder's private diagnostic job passes one, and it always stops that job there; None (every real job): the same calls, terms, order and payload.
+    30: "8b2ee05d3e179b04",  # Sell bonus (model_config season_sell_bonus_tanking 0.05 / season_sell_bonus_rebuilding 0.03; revision 5 only): _owner_selected_assignment pops both with the other season knobs when revision 5 is not selected, and keeps each in the request hash only while above 0, so a bonus-0 unit hashes as before; the rule lives in trade_gen_bilateral_season / trade_first_page (engine code hash); bonus 0 or revision 5 not selected: hash, terms and order unchanged. Shipped in the same bump as the viewer label fit (season_viewer_label_fit, default 1): a Rebuilding / Tanking viewer's re-scored team plan reads the season label table, never milder than the age rule.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4746,10 +4866,12 @@ _ENGINE_CODE_MODULES = (
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "pick_projection.py",         # projected slot value: next-draft firsts by projected order
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "partner_outlook.py",         # a league-mate's assumed outlook (trade.partner_outlook_projection)
     "calibration_native_lineup.py",  # Optional exact range assignment consumed by both owner engines.
     "negmem.py", "trade_breaker.py", "deck_quality.py",
     # composition and order of the served deck
@@ -4758,6 +4880,8 @@ _ENGINE_CODE_MODULES = (
     "small_trade_presentment.py",
     # the card copy itself
     "trade_narrative.py",
+    # the win-now season signal's evidence and labels (revision 5's input)
+    "season_value.py", "league_projections/season_points.py",
 )
 # Excluded on purpose (models-eng, 2026-10-26):
 # - outlook/, except league_state.py: the Outlook feature. Value core's
@@ -7450,10 +7574,12 @@ def _trade_current_snapshot(league_id: str, scoring_format: str):
     from .database import engine as _engine
     try:
         snap = _trade_roster_snapshot(league_id)
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -8311,7 +8437,8 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4"):
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4",
+                       "owner-v2-bilateral-5"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -8494,10 +8621,12 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
     from .database import engine as _engine
     extra = {"parts": parts} if parts is not None else {}
     try:
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key, **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -11049,10 +11178,11 @@ def _build_trade_roster_context(*, sess, league, players, seed_map,
     missing = [pk for pk in picks if str(pk["pick_id"]) not in ctx.assets]
     if missing:
         slot_order = _league_slot_order(league_id)
+        projection = _league_pick_projection(league_id)
         for pk in missing:
             pid = str(pk["pick_id"])
             ctx.assets[pid] = Asset(pid, frozenset(),
-                float(_priced_pick_value(pk, slot_order, scoring_format)), is_pick=True)
+                float(_priced_pick_value(pk, slot_order, scoring_format, projection)), is_pick=True)
     # Explicit intent and inferred defaults are different evidence. No live
     # point provider exists yet: leave projections absent and retain that
     # uncertainty in the frozen benefit snapshot.
@@ -12621,6 +12751,9 @@ class _TradeExecutionContext:
     players: tuple
     league_user_id: str
     prepared_roster_snapshot: tuple | None = None
+    # trade.partner_outlook_projection: the session's roster→owner index, for a
+    # worker that reads the forecast itself (no request-thread preload).
+    sleeper_roster_index: dict | None = None
 
 
 def _capture_trade_execution(sess, user_id, league_id, scoring_format):
@@ -12650,6 +12783,7 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
         user_id, league_id, scoring_format, service, trade_service, league,
         tuple(sess.get("user_roster") or ()), tuple(sess.get("players") or ()),
         _league_user_id(sess),
+        sleeper_roster_index=copy.deepcopy(sess.get("sleeper_roster_index")),
     )
 
 
@@ -12845,6 +12979,7 @@ def _run_trade_job(
     significance_capture=None,
     prepare_sink=None,
     work_check=None,
+    rule_waterfall_probe=None,
 ):
     """Daemon-thread entry point with context captured before thread start.
     Direct internal callers may omit context and capture at entry. All exceptions caught — a thread death
@@ -13079,6 +13214,19 @@ def _run_trade_job(
                                                    g_league, _job_draft_picks())
             if seeded:
                 outlook_value = seeded
+
+        # trade.partner_outlook_projection — the job's one forecast read: the
+        # request thread's (it is in the request signature), else read once here.
+        partner_projection = None
+        partner_on = _partner_outlook.enabled(is_enabled)
+        if partner_on:
+            if prefs_preload is not None and "partner_projection" in prefs_preload:
+                partner_projection = prefs_preload["partner_projection"]
+            else:
+                partner_projection = _partner_outlook.session_reads(
+                    {"sleeper_roster_index": ctx.sleeper_roster_index}, g_user_id, league_id,
+                    [m.user_id for m in g_league.members],
+                    platform=getattr(g_league, "platform", "sleeper"))
 
         # G6 presentment rules — R-5b bypass (server-derived, never
         # client-passable) + the R4 #336 windowless exclusion set, both
@@ -13383,6 +13531,7 @@ def _run_trade_job(
         owner_context = None
         owner_request_evidence = None
         owner_selected_run = None
+        season_out: dict = {}   # trade.season_signal: the job's evidence, for the request record
         if owner_on:
             try:
                 owner_context = _owner_generation_context(
@@ -13391,7 +13540,8 @@ def _run_trade_job(
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
                     captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
-                    job_draft_context=_owner_job_draft_context,
+                    job_draft_context=_owner_job_draft_context, season_out=season_out,
+                    **({"partner_projection": partner_projection} if partner_on else {}),
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -13402,7 +13552,8 @@ def _run_trade_job(
                     opponent_user_id=opponent_user_id, trade_intent=trade_intent,
                     **({"require_all_give": True} if pinned_give and pinned_give_mode == "all" else {}))
                 owner_request_evidence = _owner_selected_assignment(
-                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
+                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive,
+                    season_evidence=season_out.get("evidence"))
                 owner_request_evidence.update(model_arm=owner_model,
                     unit="owner_only" if owner_exclusive else "team_draft",
                     assignment_probability=1.0 if owner_exclusive else None)
@@ -13435,6 +13586,12 @@ def _run_trade_job(
                     user_sources=owner_context.get("user_sources"))
             except Exception:
                 log.exception("trade-job %s: rules-first rules unavailable (full solve)", job_id)
+        if rule_waterfall_probe is not None:
+            # Founders' review, use case 2 (rule-waterfall-design.md §7.3): the founder's
+            # diagnostic run reads the construction inputs here and always raises, so nothing
+            # below (generation, cards, impressions, publication, events) runs. None on every
+            # real job.
+            rule_waterfall_probe(owner_context, deck_rules, check_current)
         fit_context = _fit_league_context(owner_context, service)   # WS4b: once per job
         def _gen_owner(**_overrides):
             if owner_context is None:
@@ -13528,7 +13685,8 @@ def _run_trade_job(
                 final_cards = legacy_cards
             else:
                 assignment = _owner_selected_assignment(owner_context, "targeted_deck",
-                                                       serve=owner_serve, exclusive=owner_exclusive)
+                                                       serve=owner_serve, exclusive=owner_exclusive,
+                                                       season_evidence=season_out.get("evidence"))
                 assignment["captured_at"] = owner_request_evidence["captured_at"]
                 final_cards = proposed if assignment["model_arm"] in _bakeoff.OWNER_ARMS else legacy_cards
                 for card in final_cards:
@@ -14316,8 +14474,7 @@ def _run_trade_job(
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
                 selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
-                generator_version=(owner_model_version if owner_model_version in ("owner-v2-bilateral-3", "owner-v2-bilateral-4")
-                                   else trade_bilateral_presentment.GENERATOR_VERSION))
+                generator_version=_bakeoff.owner_presentment_version(owner_config))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
@@ -15352,7 +15509,7 @@ def player_to_dict(p) -> dict:
         "injury_status",        "injury_body_part",
         "birth_date",           "height",  "weight",
         "college",              "search_rank", "adp",
-        "pick_value",
+        "pick_value",           "proj_slot", "proj_name",
     ):
         val = getattr(p, attr, None)
         if val is not None:
@@ -16373,7 +16530,8 @@ def get_rankings_progress():
                 _league_obj  = sess.get("league")
                 _league_id   = getattr(_league_obj, "league_id", None)
                 _league_name = getattr(_league_obj, "name", "") or ""
-                if _league_id:
+                # A test profile's unlock is never announced to anyone.
+                if _league_id and not _tp.is_test_profile_id(g_user_id):
                     _members  = load_league_member_unlock_states(
                         _league_id, exclude_user_id=g_user_id,
                     )
@@ -19628,10 +19786,11 @@ def _consensus_pricing(fmt: str, league_id: str | None = None):
             # 60s cache), never per pick — same discipline as the deck
             # lane's lookup in `_owned_pick_assets`.
             _slot_order = _league_slot_order(league_id)
+            _projection = _league_pick_projection(league_id)
             for _p in load_draft_picks(league_id=league_id,
                                        source=_pick_read_source()):
                 league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                    _p, _slot_order, fmt)
+                    _p, _slot_order, fmt, _projection)
                 league_pick_rows.append(_p)
         except Exception as _lp_err:
             log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
@@ -20318,13 +20477,15 @@ def get_league_picks():
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
         slot_order = _league_slot_order(league_id)      # D-090, once per request
+        projection = _league_pick_projection(league_id) # projected slot value, once per request
         def _serialize(p: dict) -> dict:
-            priced = _priced_pick_value(p, slot_order, fmt)
+            priced = _priced_pick_value(p, slot_order, fmt, projection)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
                     "original_username": pick_team_name(p, "original"),
                     "owner_username": pick_team_name(p, "owner", raw),
-                    "label": _owned_pick_label(p, slot_order),
+                    "label": _owned_pick_label(p, slot_order, projection, fmt),
+                    **_owned_pick_projection_fields(p, slot_order, projection, fmt),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
         all_picks = [_serialize(p) for p in raw]
@@ -20339,7 +20500,8 @@ def get_league_picks():
         return jsonify({"error": "internal_error"}), 500
 
 
-def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
+def _owned_pick_label(p: dict, slot_order: dict | None = None, projection=None,
+                      scoring_format: str = DEFAULT_SCORING) -> str:
     """Display label for an owned pick, e.g. "2027 1st" or
     "2026 2nd (from Jared)" when the pick was acquired via trade.
 
@@ -20357,18 +20519,56 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
 
     `slot_order` is passed in, never looked up here: this runs once per pick and
     the lookup is once per league (see `_league_slot_order`).
+
+    Projected slot value (operator ruling 2026-11-11) — with `projection`
+    (`_league_pick_projection`, the one the price came from) a pick whose
+    price the projection set names its projected slot in place of the round
+    and ends in the plain-text marker: "2027 1.02 (from dondags) · projected".
+    `_owned_pick_projection_fields` carries the same name without the marker
+    for clients that render their own tag. `projection=None` changes nothing.
     """
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return f"{name}{_PROJECTED_PICK_MARKER}" if projected else name
+
+
+#: The plain-text marker an adjusted pick's `name`/`label` ends with, so a
+#: client build that predates `proj_name` still says it is a projection.
+_PROJECTED_PICK_MARKER = " \u00b7 projected"
+
+
+def _owned_pick_name(p: dict, slot_order: dict | None, projection,
+                     scoring_format: str) -> tuple[str, str | None]:
+    """`(name without marker, projected slot or None)` — the one composition
+    behind `_owned_pick_label` and `_owned_pick_projection_fields`. A real
+    D-090 slot wins; else a pick the projection priced shows its projected
+    slot (`pick_values.projected_pick_slot`); else the round ordinal."""
     season = p.get("season")
     rnd = int(p.get("round") or 0)
     slot = pick_slots.slot_for(slot_order, season, rnd,
                                p.get("original_roster_id"))
+    projected = None
+    if not slot and projection is not None:
+        guess = projected_pick_slot(p, projection, scoring_format)
+        projected = pick_slots.slot_suffix(rnd, guess) if guess else None
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
-            else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
+            else projected or _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
     original = pick_team_name(p, "original")
     if p.get("is_traded") and original:
-        return f"{base} (from {original})"
-    return base
+        return f"{base} (from {original})", projected
+    return base, projected
+
+
+def _owned_pick_projection_fields(p: dict, slot_order: dict | None, projection,
+                                  scoring_format: str = DEFAULT_SCORING) -> dict:
+    """`{"proj_slot": "1.02", "proj_name": "2027 1.02 (from dondags)"}` for a
+    pick the projection priced, else `{}` — so an unadjusted pick's payload is
+    byte-identical. Clients print `proj_name` plus their own PROJECTED tag and
+    never compose or parse these strings (docs/cross-client-invariants.md)."""
+    if projection is None:
+        return {}
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return {"proj_slot": projected, "proj_name": name} if projected else {}
 
 
 def _pick_labels_by_id(asset_ids) -> dict[str, str]:
@@ -20440,11 +20640,13 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
+        projections: dict[str, object] = {}
         for r in rows:
             m = r._mapping
             lg = str(m["league_id"] or "")
             if lg not in orders:
                 orders[lg] = _league_slot_order(lg)
+                projections[lg] = _league_pick_projection(lg)
             labels[m["pick_id"]] = _owned_pick_label({
                 "season":             m["season"],
                 "round":              m["round"],
@@ -20453,7 +20655,7 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "original_roster_id": m["original_roster_id"],
                 "source":             m["source"],
                 "original_user_id":   m["original_user_id"],
-            }, orders[lg])
+            }, orders[lg], projections[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
         # route; the caller falls back to the raw id exactly as before.
@@ -20679,6 +20881,99 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
+# ── Projected slot value — next-draft firsts by projected draft order ─────
+# docs/plans/pick-value-projected-slot/design.md. The twin of
+# `_league_slot_order`: one read per LEAGUE, cached, passed down to every
+# pick. The cache holds the knob-free run summary; the gates and knobs are
+# applied on every call (a dict of floats), so a knob write takes effect at
+# the next reload without waiting out the TTL.
+
+_PICK_PROJECTION_TTL_SECONDS = 300
+_pick_projection_cache: dict[str, tuple[float, object]] = {}
+_pick_projection_lock = threading.Lock()
+
+
+def _pick_projection_enabled() -> bool:
+    """Read live (not off the FLAGS snapshot), like `_slot_labels_enabled`."""
+    return is_enabled("picks.projected_slot_value")
+
+
+def _load_pick_projection_summary(league_id: str):
+    """The newest complete baseline forecast for the league from ANY user
+    whose model is current, compacted, or None. Baselines are the targets'
+    `last_success_id` rows (scenario runs are user what-ifs and never are).
+    Reads `result_json` one row at a time, newest first, so a valid newest
+    run costs one parse."""
+    from sqlalchemy import select as _sa_select
+    from .database import (engine as _engine, get_league_platform,
+                           league_projection_runs_table as _runs,
+                           league_projection_targets_table as _targets)
+    from .league_projections.core import VERSION as _forecast_version
+    from . import pick_projection as _pp
+    if get_league_platform(league_id) != "sleeper":
+        return None
+    with _engine.connect() as conn:
+        baselines = _sa_select(_targets.c.last_success_id).where(
+            _targets.c.league_id == str(league_id),
+            _targets.c.last_success_id.is_not(None))
+        ids = conn.execute(_sa_select(_runs.c.run_id, _runs.c.created_at).where(
+            _runs.c.league_id == str(league_id), _runs.c.status == "complete",
+            _runs.c.run_id.in_(baselines)).order_by(_runs.c.created_at.desc())).fetchall()
+        for run_id, created_at in ids:
+            text = conn.execute(_sa_select(_runs.c.result_json).where(
+                _runs.c.run_id == run_id)).scalar()
+            summary = _pp.compact(text, run_id=run_id, created_at=created_at)
+            if summary is not None and summary.model_version == _forecast_version:
+                return summary
+    return None
+
+
+def _league_pick_projection(league_id: str):
+    """The league's usable `pick_projection.PickProjection`, or None.
+
+    None — flag off, the demo league, a non-Sleeper league, no qualifying run,
+    any gate failing, or weight 0 — makes every pick price and label exactly
+    as without the feature. Never raises: a failed read logs and prices
+    generic."""
+    if not league_id or league_id == "league_demo" or not _pick_projection_enabled():
+        return None
+    from . import pick_projection as _pp
+    from .league_projections.core import VERSION as _forecast_version
+    now = time.time()
+    with _pick_projection_lock:
+        hit = _pick_projection_cache.get(league_id)
+    if hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS:
+        summary = hit[1]
+    else:
+        try:
+            summary = _load_pick_projection_summary(league_id)
+        except Exception as e:
+            log.warning("pick-projection read failed for %s: %s", league_id, e)
+            summary = None
+        with _pick_projection_lock:
+            if len(_pick_projection_cache) > 500:
+                _pick_projection_cache.clear()
+            _pick_projection_cache[league_id] = (now, summary)
+    c = _trade_service_mod._c
+    projection = _pp.usable(
+        summary, model_version=_forecast_version, now=datetime.now(timezone.utc),
+        weight=c("pick_projection_weight"), min_weeks=c("pick_projection_min_weeks"),
+        max_age_days=c("pick_projection_max_age_days"),
+        max_round=c("pick_projection_max_round"),
+        season_scaling=c("pick_projection_season_scaling"))
+    if not (hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS):
+        log.info("pick-projection: league=%s applied=%s w=%s", league_id,
+                 projection is not None,
+                 round(projection.weight, 3) if projection is not None else None)
+    return projection
+
+
+def _pick_projection_key(league_id: str) -> str | None:
+    """The projection's cache key for `roster_snapshot`'s vsn1, or None."""
+    projection = _league_pick_projection(league_id)
+    return projection.key if projection is not None else None
+
+
 # ── D-148 — ONE priced value for an owned pick, engine and league alike ───
 #
 # D-146 shipped the per-slot waterfall into the ENGINE only and left the two
@@ -20698,7 +20993,7 @@ def _invalidate_slot_order(league_id: str) -> None:
 # DB read plus a cache lookup once per LEAGUE. Every caller hoists it.
 
 def _priced_pick_value(p: dict, slot_order: dict | None,
-                       scoring_format: str) -> float:
+                       scoring_format: str, projection=None) -> float:
     """The engine value of ONE owned-pick row `p` — THE only pricing call.
 
     `pick_slots.slot_for` is pure and refuses everything it should (a future
@@ -20711,11 +21006,16 @@ def _priced_pick_value(p: dict, slot_order: dict | None,
     Returns a number in the stored `draft_picks.pool_value` scale
     (elo_to_value units). It NEVER writes: pricing is read-time in every mode
     and the stored column stays the sync-written ladder value (D-146).
+
+    `projection` is `_league_pick_projection(league_id)`, hoisted once per
+    league beside `slot_order` by every caller (projected slot value; None =
+    today's price exactly). Passed POSITIONALLY at every site.
     """
     return priced_pool_value(
         p, scoring_format=scoring_format,
         slot=pick_slots.slot_for(slot_order, p.get("season"), p.get("round"),
-                                 p.get("original_roster_id")))
+                                 p.get("original_roster_id")),
+        projection=projection)
 
 
 def _owned_picks_available(league_id: str, league) -> bool:
@@ -20796,6 +21096,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     # `picks`, when supplied, is the SAME read this line would issue, already
     # done once for this job (see `_run_trade_job`'s `_job_draft_picks`).
     if picks is None:
@@ -20813,7 +21114,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             # `_owned_pick_label` would mean changing all five of its call
             # sites, four of which have no price to keep in step.
             _priced[p["pick_id"]] = _priced_pick_value(p, slot_order,
-                                                       scoring_format)
+                                                       scoring_format, projection)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -20828,13 +21129,15 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             inv_pick_value = (v2e(pool_v) - 1200.0) / 6.0
             assets.append(Player(
                 id               = p["pick_id"],
-                name             = _owned_pick_label(p, slot_order),
+                name             = _owned_pick_label(p, slot_order, projection,
+                                                     scoring_format),
                 position         = "PICK",
                 team             = "PICK",
                 age              = 0,
                 years_experience = 0,
                 pick_value       = round(inv_pick_value, 3),
                 search_rank      = _OWNED_PICK_SEARCH_RANK.get(int(p.get("round") or 4), 200),
+                **_owned_pick_projection_fields(p, slot_order, projection, scoring_format),
             ))
         if assets:
             out[owner] = assets
@@ -20968,8 +21271,9 @@ def _sync_mfl_owned_picks(league_id: str, *, source_picks=None,
         replace_draft_picks(league_id, [])
         return 0
 
-    my_team   = str(row.get("platform_my_team") or "")
-    link_user = str(row.get("user_id") or "")
+    # Every franchise an app user is bound to → that user's id (the label the
+    # shared league_members snapshot carries); every other → synthetic.
+    bound = platform_bound_teams(league_id, "mfl")
     try:
         cur_season = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
     except (TypeError, ValueError):
@@ -20982,8 +21286,8 @@ def _sync_mfl_owned_picks(league_id: str, *, source_picks=None,
 
     def _fr_to_user(fid: str) -> str:
         fid = str(fid)
-        if fid and fid == my_team:
-            return link_user
+        if fid and fid in bound:
+            return bound[fid]
         return _mfl_member_id(league_id, fid) if fid else ""
 
     members_by_uid = {str(m.get("user_id")): m for m in load_league_members(league_id)}
@@ -21243,6 +21547,10 @@ def _fit_league_context(owner_context, service):
     each window, exactly as trade_gen_owner._team resolves an undeclared team
     (a stored inferred outlook, else infer_team_outlook over the roster under
     the job's config). A DECLARED outlook is never read here.
+
+    Flag trade.fit_position_ranks (read once here, for the whole job): off ⇒
+    the block states no league rank, so the position-value walk is skipped
+    and the context carries the roster reads alone.
     """
     if owner_context is None or not is_enabled("trade.fit_first_copy"):
         return None
@@ -21257,14 +21565,17 @@ def _fit_league_context(owner_context, service):
         for member in league.members:
             if member.user_id != viewer:
                 rosters[member.user_id] = list(member.roster)
-        seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
-                                         players.values())
-        player_ids = {uid: [pid for pid in roster
-                            if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
-                      for uid, roster in rosters.items()}
-        teams = compute_power_rankings(
-            [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
-            seed, meta)
+        position_ranks = is_enabled("trade.fit_position_ranks")
+        teams, player_ids = [], {}
+        if position_ranks:
+            seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
+                                             players.values())
+            player_ids = {uid: [pid for pid in roster
+                                if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
+                          for uid, roster in rosters.items()}
+            teams = compute_power_rankings(
+                [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
+                seed, meta)
         prefs = owner_context.get("manager_preferences") or {}
         inferred = owner_context.get("inferred_outlooks") or {}
         reads = {}
@@ -21277,9 +21588,15 @@ def _fit_league_context(owner_context, service):
                     read = ts.infer_team_outlook(list(roster), players,
                                                  num_teams=len(rosters))[0]
                 reads[uid] = read
+        # trade.partner_outlook_projection: a read taken from the saved
+        # forecast is tagged as such (the tag's words are unchanged).
+        sources = {uid: "projection" for uid in reads if uid != viewer
+                   and (prefs.get(uid) or {}).get("outlook_source") == "projection"}
         return FitLeagueContext(viewer_id=viewer, teams=teams,
-                                medians=_position_medians(teams),
-                                rosters=player_ids, reads=reads)
+                                medians=_position_medians(teams) if position_ranks else {},
+                                rosters=player_ids, reads=reads,
+                                position_ranks=position_ranks,
+                                **({"sources": sources} if sources else {}))
     except Exception:
         log.exception("fit block: league context unavailable (cards carry no block)")
         return None
@@ -21333,6 +21650,14 @@ def trade_card_to_dict(card, players: dict) -> dict:
             fit = _fit_block(identity, card, players, card.fit_context)
             if fit:
                 out["fit_block"] = fit
+            # Win-now season signal (lld §5.2, trade.season_signal): composed
+            # from the frozen proof alone (revision 5 carries `season_signal`);
+            # absent, never null or empty, when there is nothing to show.
+            if is_enabled("trade.season_signal"):
+                from .trade_narrative import season_block as _season_block
+                season = _season_block(identity, card, players)
+                if season:
+                    out["season_block"] = season
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
@@ -22129,12 +22454,116 @@ def _owner_enabled(league_id):
             and any(arm in _bakeoff.OWNER_ARMS for arm in _bakeoff.arm_roster(exclusive=False)))
 
 
+_PARTNER_UNREAD = object()   # _owner_generation_context: no forecast read was passed
+
+
+def _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection):
+    """trade.partner_outlook_projection: each league-mate's assumed outlook and
+    its source (`partner_outlook.assumed`). A league-mate with no saved outlook
+    and a projection read gets it as `inferred_outlook`, the engine's input for
+    an undeclared team (the owner generators and the fit block's roster read
+    both take it from there). Every league-mate's preferences record
+    `outlook_source` (declared / projection / roster), which the request
+    evidence captures. The viewer is not touched (D-230)."""
+    if partner_projection is _PARTNER_UNREAD:
+        partner_projection = _partner_outlook.session_reads(
+            sess, user_id, league.league_id, [m.user_id for m in league.members],
+            platform=getattr(league, "platform", "sleeper"))
+    reads = (partner_projection or {}).get("reads") or {}
+    for uid, prefs in manager_preferences.items():
+        if uid == user_id:
+            continue
+        outlook, source = _partner_outlook.assumed(
+            uid, declared={uid: prefs.get("team_outlook")}, projection=reads,
+            roster=prefs.get("inferred_outlook"))
+        if source == "projection":
+            prefs["inferred_outlook"] = outlook
+        prefs["outlook_source"] = source
+
+
+def _season_evidence(user_id, league_id, platform, slots, *, as_of=None):
+    """The season evidence for one owner job (win-now season signal, lld §6).
+
+    Read only: the account's last saved league forecast for this league
+    (`league_projections.batch.view` for its state, `store.get` for the
+    snapshot); never queues a run or calls a provider. Not a Sleeper league:
+    `platform_unsupported` without touching the store. `slots` None means the
+    snapshot's own (the admin label tool, which has no session). Any failure is
+    `read_failed`, logged without payloads: the job then serves today's deck.
+    """
+    from . import season_value
+    if str(platform or "").lower() != "sleeper":
+        return season_value.unavailable("platform_unsupported")
+    try:
+        from .league_projections import batch as lp_batch, store as lp_store
+        from .league_projections.core import VERSION as model_now
+        view = lp_batch.view(user_id, league_id)
+        run = view.get("run")
+        if not run or view.get("state") == "unsupported_policy":
+            return season_value.unavailable("no_forecast")
+        model_version = (json.loads(run.get("result_json") or "null") or {}).get("model_version")
+        if model_version != model_now:
+            return season_value.unavailable("old_model")      # no snapshot read for a dead model
+        if view.get("state") != "current":
+            return season_value.unavailable("stale")
+        row = lp_store.get(run["run_id"], user_id, league_id)
+        snapshot = (row or {}).get("snapshot_json")
+        if snapshot is not None and slots is None:
+            snapshot = json.loads(snapshot) if isinstance(snapshot, (str, bytes)) else snapshot
+            slots = snapshot.get("slots")
+        evidence = season_value.build_evidence(
+            snapshot, as_of=as_of or datetime.now(timezone.utc), league_id=league_id, slots=slots,
+            platform="sleeper", run_id=run["run_id"], model_version=model_version, current=True)
+        # Founders' review: the founder's label overrides that reach this league join
+        # the evidence and its digest (none: the same object, byte-identical).
+        return season_value.with_label_overrides(
+            evidence, load_founder_label_overrides() if season_value.usable(evidence) else None)
+    except Exception as exc:
+        log.warning("season signal: forecast read failed (%s)", type(exc).__name__)
+        return season_value.unavailable("read_failed")
+
+
+def _season_viewer_complete(evidence, *, user_roster, players, seed_map):
+    """PRD §2.5 rule 5 on the VIEWER's roster only: a healthy, unprojected
+    player worth the filler floor or more makes the viewer's season lineup
+    unknown (`viewer_unprojected_asset`). League-mates' gaps never count."""
+    from . import season_value
+    from .trade_roster import UNAVAILABLE
+    if not season_value.usable(evidence):
+        return evidence
+    value = _trade_service_mod.make_consensus_value_fn(seed_map, players)
+    roster = [pid for pid in user_roster if pid in players]
+    market = {pid: value(pid) for pid in roster if isinstance(seed_map.get(pid), (int, float))}
+    return season_value.require_viewer_projected(
+        evidence, roster=roster, position={pid: getattr(players[pid], "position", None) for pid in roster},
+        market=market,
+        inactive={pid for pid in roster
+                  if str(getattr(players[pid], "injury_status", "") or "").upper() in UNAVAILABLE})
+
+
+def _log_season_signal(evidence, viewer_prefs, config):
+    """The one counts-only `season-signal:` line per organic owner job (no ids)."""
+    from . import season_value
+    declared = viewer_prefs.get("team_outlook")
+    outlook = declared or viewer_prefs.get("inferred_outlook")
+    revision_5 = _bakeoff.owner_revision_5_enabled(config)
+    scored = (revision_5 and season_value.usable(evidence)
+              and outlook in ("championship", "contender", "rebuilder", "jets"))
+    log.info("season-signal: state=%s reason=%s weeks=%d viewer_outlook=%s source=%s scored=%s "
+             "unprojected=%d revision=%s",
+             evidence.get("state"), evidence.get("reason") or "-", len(evidence.get("weeks") or ()),
+             outlook or "-", "declared" if declared else ("inferred" if outlook else "-"),
+             "true" if scored else "false", len(evidence.get("unprojected") or ()),
+             _bakeoff.owner_version(config))
+
+
 def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
                               captured_config=None, job_draft_picks=None,
-                              job_draft_context=None, **selection):
+                              job_draft_context=None, partner_projection=_PARTNER_UNREAD,
+                              season_out=None, **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
@@ -22143,6 +22572,12 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
     each, the ones its roster stamp is checked against (#486 QA P3-1); other
     entrances read their own.
+    `partner_projection`: the job's one forecast read
+    (`partner_outlook.session_reads`); an entrance that passes none reads its
+    own once here. Only with trade.partner_outlook_projection on.
+    `season_out`: a trade job's dict; with trade.season_signal on it receives
+    the job's season evidence under "evidence" (the request record's copy),
+    never a context key, so no generator but revision 5 ever sees it.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -22184,6 +22619,8 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         prefs["lineup_source"] = "observed" if roster_slots else "estimated"
         prefs["roster_capacity"] = sum(s not in ("IR", "TAXI") for s in roster_slots) if roster_slots else None
         manager_preferences[uid] = prefs
+    if _partner_outlook.enabled(is_enabled):
+        _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection)
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
@@ -22237,6 +22674,21 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         # compares within the league. Only revision 4 accepts the key, and
         # flag-off contexts, evidence and request hashes never carry it.
         context["partner_activity"] = load_manager_trade_counts(league.league_id)
+    if FLAGS.trade_season_signal and _bakeoff.owner_revision_enabled(config) and (
+            season_out is not None or _bakeoff.owner_revision_5_enabled(config)):
+        # Win-now season signal (lld §6): one forecast read per owner job. The
+        # trade job passes `season_out` and records the evidence on its request
+        # record whatever revision is selected; only revision 5 accepts the
+        # generator keyword. Flag off: no read, no line, no key.
+        evidence = _season_evidence(user_id, league.league_id, getattr(league, "platform", None),
+                                    own["starter_slots"])
+        evidence = _season_viewer_complete(evidence, user_roster=user_roster, players=players,
+                                           seed_map=seed_map)
+        if _bakeoff.owner_revision_5_enabled(config):
+            context["season_evidence"] = evidence
+        if season_out is not None:
+            season_out["evidence"] = evidence
+            _log_season_signal(evidence, own, config)
     if _bakeoff.owner_revision_enabled(config):
         from .trade_input_evidence import detached_context, PoolInputEvidence
         pool = (g_universal_by_format.get(scoring_format)
@@ -22319,18 +22771,36 @@ def _owner_request_snapshot(assignment, card, *, detach=True):
     if "input_evidence" in assignment:
         from .trade_input_evidence import project_evidence
         snapshot["input_evidence"] = project_evidence(assignment["input_evidence"], assets)
+    if isinstance(assignment.get("season_evidence"), dict):
+        # Per impression: the offered assets' rows only; the request record
+        # (bake-off run) keeps the whole map and the digest names it.
+        season = assignment["season_evidence"]
+        snapshot["season_evidence"] = {
+            **season,
+            **({"players": {pid: row for pid, row in season["players"].items() if pid in assets}}
+               if isinstance(season.get("players"), dict) else {}),
+            **({"unprojected": [pid for pid in season["unprojected"] if pid in assets]}
+               if isinstance(season.get("unprojected"), list) else {}),
+            **({"label_overrides": {pid: row for pid, row in season["label_overrides"].items() if pid in assets}}
+               if isinstance(season.get("label_overrides"), dict) else {})}
     # Impression assembly serializes this frozen request immediately without
     # mutating it. Other consumers retain the detached-copy contract.
     return copy.deepcopy(snapshot) if detach else snapshot
 
 
-def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
+def _owner_selected_assignment(context, surface, *, serve, exclusive=False, season_evidence=None):
     """Stable request/input assignment, not a client-selected model or user trial.
 
     Do not hash capture time: identical repeated requests stay in the same arm.
     A genuinely changed board/market/outlook/roster is a new comparison unit.
+    `season_evidence` (trade.season_signal): the job's evidence, else the
+    context's (revision 5). Only its digest (or state and reason) joins the
+    hash, never `as_of`; the full object is recorded beside `input_evidence`.
     """
-    inputs = _owner_canonical({k: v for k, v in context.items() if k not in {"players", "league", "input_evidence"}})
+    if season_evidence is None:
+        season_evidence = context.get("season_evidence")
+    inputs = _owner_canonical({k: v for k, v in context.items()
+                               if k not in {"players", "league", "input_evidence", "season_evidence"}})
     inputs["members"] = [{"id": m.user_id, "roster": list(m.roster),
                           "elo": m.elo_ratings,
                           "board_updated_at": getattr(m, "board_updated_at", None)}
@@ -22365,6 +22835,31 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
+    if not _bakeoff.owner_revision_5_enabled(context["config"]):
+        # Revision 5's selector and season knobs never reshuffle revision 2-4 units.
+        for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
+                    "season_partner_matching", "season_shed_weight_tanking",
+                    "season_shed_weight_rebuilding", "season_viewer_label_fit",
+                    "season_sell_bonus_tanking", "season_sell_bonus_rebuilding"):
+            canonical["config"].pop(key, None)
+    else:
+        if canonical["config"].get("season_viewer_label_fit") != 1.0:
+            # The viewer's label fit off is the rule every revision 5 unit before it was
+            # built under: it keeps their hashes. On (the default) it is a new unit.
+            canonical["config"].pop("season_viewer_label_fit", None)
+        for key in ("season_sell_bonus_tanking", "season_sell_bonus_rebuilding"):
+            # A sell bonus <= 0 is off: it keeps the hashes of units built before it.
+            if not canonical["config"].get(key, 0) > 0:
+                canonical["config"].pop(key, None)
+    if season_evidence is not None:
+        canonical["season_evidence"] = (
+            {"digest": season_evidence.get("digest")} if season_evidence.get("digest")
+            else {"state": season_evidence.get("state"), "reason": season_evidence.get("reason")})
+    from . import trade_gen_owner as _owner_gen
+    if not _owner_gen.untouchable_hard(canonical["config"]):
+        # Knob 0 is the premium-return rule every unit before it was built
+        # under: it keeps their hashes. On (the default) it is a new unit.
+        canonical["config"].pop(_owner_gen.UNTOUCHABLE_HARD_KEY, None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:
@@ -22392,6 +22887,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
             **({"exclusive": True} if exclusive else {}),
             "serve_enabled": serve, "input": inputs,
             **({"input_evidence": input_evidence} if input_evidence is not None else {}),
+            **({"season_evidence": copy.deepcopy(season_evidence)} if season_evidence is not None else {}),
             "captured_at": datetime.now(timezone.utc).isoformat(), "market_as_of": "unavailable"}
 
 
@@ -24515,8 +25011,9 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
         looking board.
       * franchise → user ← the SAME synthetic-id scheme every other MFL
         surface uses (`_mfl_member_id`: `mfl:<league>.f<franchise>`), with
-        the linking user's own franchise (`platform_my_team`) mapped to
-        their real user id so `my_picks` resolves.
+        every bound franchise mapped to its app user (platform_bound_teams)
+        and the viewer's own bound franchise to the viewer, so `my_picks`
+        resolves.
       * MFL player id → our id ← the EXISTING shared DP crosswalk
         (`_shared_crosswalk().by_mfl_sleeper`). This is load-bearing:
         `draft_board_service._render_mfl` SUPPRESSES the undrafted list
@@ -24567,10 +25064,13 @@ def _mfl_board_binding(league_id: str, sess) -> dict | None:
             usernames[uid] = name
         if uid.startswith(prefix):
             franchise_to_user[uid[len(prefix):]] = uid
-    my_team = str(row.get("platform_my_team") or "")
-    link_user = str(row.get("user_id") or "")
-    if my_team and link_user:
-        franchise_to_user[my_team] = link_user
+    # Bound franchises carry their app user's id; the VIEWER's own bound
+    # franchise maps to the viewer (my_picks), co-owned or not.
+    franchise_to_user.update(platform_bound_teams(lid, "mfl"))
+    viewer = str(sess.get("user_id") or "")
+    mine = get_platform_binding(viewer, lid, "mfl") if viewer else None
+    if mine:
+        franchise_to_user[mine["team_id"]] = viewer
 
     try:
         xw = _shared_crosswalk()
@@ -24843,8 +25343,8 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
 
     `order` is FTF member `user_id`s in round-1 pick order, so it drops
     straight into `settings.order`. The ESPN team → member mapping is the
-    SAME one the import writes (`_espn_member_id`, with the linking user's
-    own real id for their own team), and the result must be an exact
+    SAME one the import writes (`_espn_member_id`, with each bound app
+    user's real id for their own team — platform_bound_teams), and the result must be an exact
     permutation of the league's current membership — anything else (a team
     left, a re-link changed the binding) returns None rather than a
     partially-right order.
@@ -24868,14 +25368,13 @@ def _espn_suggested_order(league_id: str, member_ids: list[str]) -> dict | None:
                 league["teams"], league.get("playoff_team_count"))
             if order_ids:
                 by_id = {t.team_id: t for t in league["teams"]}
-                my_team = row.get("espn_my_team_id")
-                importer = str(row.get("user_id") or "")
+                bound = platform_bound_teams(str(league_id), "espn")
                 n_playoff = int(league.get("playoff_team_count") or 0)
                 order, detail = [], []
                 for pick, tid in enumerate(order_ids, start=1):
                     t = by_id[tid]
-                    uid = (importer if (importer and tid == my_team)
-                           else _espn_member_id(str(league_id), t))
+                    uid = (bound.get(str(tid))
+                           or _espn_member_id(str(league_id), t))
                     order.append(uid)
                     detail.append({
                         "user_id":       uid,
@@ -26558,6 +27057,8 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
     when the fetch fails, so a verdict that just flipped to `drafted` still
     drops the stale season's rows.
     """
+    if _tp.is_test_league_id(league_id):
+        return None   # a test-profile snapshot keeps the copied verdict; no platform read
     try:
         ctx = get_league_draft_context(league_id)
         if not ctx:
@@ -27035,6 +27536,8 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     route wrapper repeats its own prefix checks first so its ordering is
     byte-identical; on that path these re-checks are no-ops.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("trade.send_in_sleeper"):
@@ -28476,6 +28979,15 @@ def submit_rankings():
     body      = request.get_json(force=True) or {}
     user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
+    # Review M1 (2026-11-12): publishing into a league marks every member's
+    # stored decks stale and feeds their trade generation, so the caller must
+    # be IN it: the session's own league, or a stored league_members row. No
+    # client sends another league today (mobile, web and extension never call
+    # this route), so this changes nothing for a real flow.
+    if str(league_id) != str(getattr(g_league, "league_id", "")):
+        member_ids = {str(m.get("user_id")) for m in (load_league_members(str(league_id)) or [])}
+        if str(g_user_id) not in member_ids:
+            return jsonify({"error": "league_membership_required"}), 403
 
     with service._lock:
         all_rankings = service.get_rankings(position=None)
@@ -29452,11 +29964,23 @@ def sleeper_user(username):
 @app.route("/api/sleeper/leagues/<user_id>")
 def sleeper_leagues(user_id):
     """Fetch NFL leagues for a Sleeper user (2026 season) + local DB leagues."""
-    url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/2026"
+    fetch_uid = user_id
+    if _tp.is_test_profile_id(user_id):
+        # Onboarding test profile: the SAME discovery read, made with the
+        # real account's Sleeper id, ids returned in the profile's namespace.
+        # Only the profile's own session may ask.
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if not caller or caller.get("user_id") != user_id:
+            return jsonify([])
+        fetch_uid = _sleeper_identity(caller)
+    url = f"https://api.sleeper.app/v1/user/{fetch_uid}/leagues/nfl/2026"
     log.info("=== /api/sleeper/leagues  user_id=%r", user_id)
     sleeper_failed = False
     try:
         sleeper_data = _sleeper_get(url) or []
+        if fetch_uid != user_id:
+            sleeper_data = [{**lg, "league_id": _tp.storage_league_id(user_id, str(lg.get("league_id")))}
+                            for lg in sleeper_data if isinstance(lg, dict) and lg.get("league_id")]
     except Exception as e:
         log.error("  leagues error: %s", e)
         sleeper_data = []
@@ -29465,6 +29989,9 @@ def sleeper_leagues(user_id):
     # Append any locally-stored leagues where this user is a member
     try:
         local = load_local_leagues_for_user(user_id)
+        if fetch_uid != user_id:   # a namespaced Sleeper league is listed once
+            _seen = {str(lg.get("league_id")) for lg in sleeper_data}
+            local = [lg for lg in local if str(lg.get("league_id")) not in _seen]
         if local:
             log.info("  appending %d local league(s) for user %s", len(local), user_id)
         sleeper_data = list(sleeper_data) + local
@@ -29519,6 +30046,25 @@ def sleeper_leagues(user_id):
 def sleeper_rosters(league_id):
     """Fetch all rosters for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/rosters  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "rosters" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "rosters" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Platform-imported leagues (ESPN/MFL/Fleaflicker) have NUMERIC
         # platform-native ids, so the isdigit() split alone would misroute
@@ -29553,6 +30099,25 @@ def sleeper_rosters(league_id):
 def sleeper_league_users(league_id):
     """Fetch all users for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/league_users  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "users" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "users" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Same platform-imported split as /api/sleeper/rosters (#149/#150).
         if not league_id.isdigit() or is_linked_platform_league(league_id):
@@ -29685,6 +30250,390 @@ def admin_config_update(key: str):
     except Exception as e:
         log.exception("admin_config_update failed for key=%s", key)
         return jsonify({"error": "internal_error"}), 500
+
+
+def _season_label_search(user_id: str, league_id: str, viewer_id: str | None = None):
+    """(search, evidence, players) for one account's league, from stored state only: the
+    league's stored rosters, the consensus pool, and the account's saved forecast (read
+    only, no provider call). `search` is a revision 5 search over consensus boards (no
+    private board is read), None without usable evidence. The viewer's team is
+    `viewer_id` (the caller's LEAGUE identity), else `user_id`. Raises LookupError for an
+    unknown league or an account with no team in it."""
+    from . import trade_gen_bilateral_season as r5
+    from . import season_value
+    from .database import get_league_platform
+    viewer_id = viewer_id or user_id
+    platform = get_league_platform(league_id)
+    members_rows = load_league_members(league_id)
+    if platform is None or not members_rows:
+        raise LookupError("league_not_found")
+    if not any(str(m.get("user_id")) == viewer_id for m in members_rows):
+        raise LookupError("not_a_member")
+    pool, seed = _get_universal_pool(get_league_scoring(league_id))
+    players = {p.id: p for p in pool}
+    rosters = {str(m["user_id"]): [str(x) for x in m.get("player_ids") or [] if str(x) in players]
+               for m in members_rows}
+    evidence = _season_evidence(user_id, league_id, platform, None)
+    if not season_value.usable(evidence):
+        return None, evidence, players
+    members = [_trade_service_mod.LeagueMember(uid, uid, roster, {}, False)
+               for uid, roster in sorted(rosters.items()) if uid != viewer_id and roster]
+    slots = list(evidence["slots"])
+    search = r5._Search(
+        players=players, league=_trade_service_mod.League(str(league_id), "League", platform, members),
+        user_id=viewer_id, user_roster=rosters[viewer_id], seed_elo=dict(seed), user_elo=dict(seed),
+        outlook="championship", fairness_threshold=0.75,
+        manager_preferences={uid: {"starter_slots": slots, "lineup_source": "observed"} for uid in rosters},
+        season_evidence=evidence)
+    return search, evidence, players
+
+
+def _season_label_rows(user_id: str, league_id: str) -> dict:
+    """One league's label-review rows (`season-label-review-1`, lld §8) for an
+    account and league (`_season_label_search`). Raises LookupError for an unknown
+    league or an account with no team in it."""
+    from . import trade_gen_bilateral_season as r5
+    from .eval.season_label_review import SCHEMA, rows_from_search
+    search, evidence, _ = _season_label_search(user_id, league_id)
+    key = "league-" + hashlib.sha256(str(league_id).encode()).hexdigest()[:10]
+    shown = {"state": evidence.get("state"), "reason": evidence.get("reason"),
+             "weeks": evidence.get("weeks") or [], "captured_at": evidence.get("captured_at")}
+    if search is None:
+        return {"schema": SCHEMA, "league_key": key, "label_rules_version": r5.LABEL_RULES_VERSION,
+                "evidence": shown, "line": {}, "players": [], "own": []}
+    return {**rows_from_search(search, key), "evidence": shown}
+
+
+@app.route("/api/admin/season-signal/labels", methods=["GET"])
+def admin_season_signal_labels():
+    """GET /api/admin/season-signal/labels?user_id=&league_id= (X-Cron-Secret).
+
+    The win-now season signal's label table for one account's league, as the
+    rows `backend/eval/season_label_review.py write --rows` reads
+    (`season-label-review-1`). Operator tool: read only, not flag-gated. Rows
+    carry public NFL player ids and names, never a user id, team name or
+    manager name; `league_key` is a hash of the league id. Without usable
+    season evidence the rows are empty and `evidence` says why.
+    """
+    _require_cron_auth()
+    user_id = str(request.args.get("user_id") or "").strip()
+    league_id = str(request.args.get("league_id") or "").strip()
+    if not user_id or not league_id:
+        return jsonify(error="user_id_and_league_id_required"), 400
+    try:
+        return jsonify(_season_label_rows(user_id, league_id))
+    except LookupError as exc:
+        return jsonify(error=str(exc)), 404
+
+
+# ─── Founders' review (docs/plans/founder-review/design.md) ─────────────────
+# Founder-only player label review for the win-now season signal. Access is
+# server-enforced on every route: flag founder.review AND the account id of a
+# VERIFIED, non-demo session in FOUNDER_ACCOUNTS (comma-separated env var; unset
+# or empty => nobody). Never a device id, never anything in the request body.
+# Anything else is 404 with no state change (no existence signal).
+
+def _founder_accounts() -> frozenset:
+    return frozenset(x.strip() for x in os.environ.get("FOUNDER_ACCOUNTS", "").split(",") if x.strip())
+
+
+def _founder_session():
+    """The caller's session when it is a founder's, else None."""
+    if not is_enabled("founder.review"):
+        return None
+    allowed = _founder_accounts()
+    if not allowed:
+        return None
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
+    if sess is None or not sess.get("verified") or _synthetic_demo_session(sess):
+        return None
+    return sess if str(sess.get("user_id") or "") in allowed else None
+
+
+def _founder_not_found():
+    return jsonify({"error": "not_found"}), 404
+
+
+@app.route("/api/founder/capability", methods=["GET"])
+def founder_capability():
+    """GET /api/founder/capability — 200 {"founder_review": true} for a founder
+    session, else 404. The app shows the Founders' review section only on this."""
+    if _founder_session() is None:
+        return _founder_not_found()
+    return jsonify({"founder_review": True})
+
+
+@app.route("/api/founder/labels", methods=["GET", "POST"])
+def founder_labels():
+    """GET ?league_id= — the label review page for one league (founder_review.page).
+    POST {league_id, set: {player_id: label}, clear: [player_id]} — set / clear the
+    founder's overrides in one transaction; idempotent. A QB's override is written
+    under the league's QB format, any other position's under `all`."""
+    from . import founder_review, season_value
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    body = request.get_json(silent=True) if request.method == "POST" else None
+    league_id = str((request.args.get("league_id") if body is None else (body or {}).get("league_id")) or "").strip()
+    if not league_id:
+        return jsonify(error="league_id_required"), 400
+    try:
+        search, evidence, players = _season_label_search(
+            str(sess["user_id"]), league_id, viewer_id=_league_user_id(sess))
+    except LookupError as exc:
+        return jsonify(error=str(exc)), 404
+    stored = {(pid, scope): label for pid, scope, label in load_founder_label_overrides()}
+    if request.method == "GET":
+        return jsonify(founder_review.page(search, evidence, stored))
+    if not season_value.usable(evidence):
+        return jsonify(error="no_usable_forecast", reason=evidence.get("reason")), 409
+    try:
+        to_set, to_clear = founder_review.parse_write(
+            body, known={pid: getattr(p, "position", None) for pid, p in players.items()},
+            stored=set(stored), slots=evidence.get("slots") or [])
+    except founder_review.InvalidRequest as exc:
+        return jsonify(error=exc.code, ids=exc.ids), 400
+    result = save_founder_label_overrides(to_set, to_clear, set_by=str(sess["user_id"]))
+    log.info("founder-review: set=%d cleared=%d", result["set"], result["cleared"])
+    return jsonify({**result, "overrides_total": len(load_founder_label_overrides())})
+
+
+# ─── Founders' review, use case 2: the decline waterfall ─────────────────────
+# docs/plans/founder-review/rule-waterfall-design.md §7. Same founder gate as
+# the label routes. A run is a PRIVATE trade job for the founder's own organic
+# request in the league their session has selected: _run_trade_job with a
+# preparation sink that is never reached, an isolated card registry, never
+# registered under a cache key, and `rule_waterfall_probe`, which measures the
+# waterfall at the construction inputs and always stops the job there. One run
+# at a time per process; 60-second cap through the job's cancellation check;
+# the latest result per (account, league) in memory only (a restart loses it).
+
+_RULE_WATERFALL_CAP_S = 60.0
+_RULE_WATERFALL_SOURCE = "founder_rule_waterfall"
+_rule_waterfall_lock = threading.Lock()
+_rule_waterfall_running: dict | None = None      # {"run_id", "key"} while a run is in progress
+_rule_waterfall_results: dict = {}               # (account, league) -> latest state
+_RULE_NOTE_SAVES_PER_HOUR = 60
+_rule_note_saves: dict = {}                       # account -> [monotonic save times]
+_RULE_WATERFALL_ERRORS = {
+    "diagnostic_timed_out": "The run took longer than 60 seconds and was stopped.",
+    "inputs_changed": "Your rankings, settings or league changed during the run. Run it again.",
+}
+
+
+class _NoPrepareSink:
+    """The run's preparation sink. Preparation mode keeps the value core, exposure events and
+    suppression grants out of the job; the probe stops the job before any sink use, so touching
+    this sink at all means the run left construction: it fails the job instead."""
+
+    def __getattr__(self, name):
+        raise RuntimeError("rule waterfall run reached the preparation sink")
+
+
+def _rule_waterfall_scope_error(league_id: str) -> str | None:
+    """Why the founder's organic deck in this league is not built rules-first, or None."""
+    if league_id == "league_demo":
+        return "The demo league has no rules-first deck."
+    if not (_owner_enabled(league_id) and _bakeoff.serve_owner() and _bakeoff.owner_only()):
+        return "This league's deck is not served by the owner engine alone, so it is not built rules-first."
+    if not is_enabled("deck.rules_first"):
+        return "Rules-first deck construction (deck.rules_first) is switched off."
+    return None
+
+
+def _rule_waterfall_job(run_id, key, league_id, context, prefs_preload, fairness,
+                        significance_capture, presentation_capture, *, cap_s=None):
+    """The run's worker thread: one private job, stopped at the construction inputs."""
+    global _rule_waterfall_running
+    from . import rule_waterfall
+    deadline = time.monotonic() + (_RULE_WATERFALL_CAP_S if cap_s is None else cap_s)
+    measured: dict = {}
+
+    def work_check():
+        if time.monotonic() > deadline:
+            raise TradeWorkCancelled("diagnostic_timed_out")
+
+    def probe(owner_context, deck_rules, check):
+        try:
+            if owner_context is None:
+                raise rule_waterfall.Unsupported("The owner engine's inputs could not be captured for this league.")
+            if deck_rules is None:
+                raise rule_waterfall.Unsupported(
+                    "This request is not built rules-first (organic owner-only decks only).")
+            generate = _bakeoff.owner_generator(owner_context["config"])
+            stages = rule_waterfall.server_stages(
+                sys.modules[__name__], context=owner_context, rules=deck_rules,
+                league=owner_context["league"], league_id=league_id,
+                significance_capture=significance_capture)
+            measured["waterfall"] = rule_waterfall.compute(
+                generate, owner_context, deck_rules, after=stages, check=check)
+        except TradeWorkCancelled:
+            raise
+        except rule_waterfall.Unsupported as exc:
+            measured["unsupported"] = str(exc)
+        except Exception as exc:
+            log.exception("founder rule waterfall: measurement failed")
+            measured["failed"] = f"The measurement failed ({type(exc).__name__})."
+        raise TradeWorkCancelled("diagnostic_complete")
+
+    job_id = "rule-waterfall-" + run_id
+    job = {"job_id": job_id, "key": key, "status": "running", "started_at": time.monotonic(),
+           "finished_at": None, "cards": [], "error": None, "source": _RULE_WATERFALL_SOURCE,
+           "is_pinned": False, "owner_model": _bakeoff.owner_arm(),
+           "owner_model_version": _bakeoff.owner_version(), "opponents_done": 0,
+           "opponents_total": 0, "final_checks_pending": True, "fairness_threshold": fairness}
+    state = {"status": "failed", "error": "The run did not finish."}
+    try:
+        with _trade_jobs_lock:
+            _trade_jobs[job_id] = job     # never under _trade_jobs_by_key: no request can find it
+        _run_trade_job(job_id, "", league_id, fairness, [], prefs_preload=prefs_preload,
+                       execution_context=context, presentation_capture=presentation_capture,
+                       significance_capture=significance_capture, prepare_sink=_NoPrepareSink(),
+                       work_check=work_check, rule_waterfall_probe=probe)
+        if "waterfall" in measured:
+            state = {"status": "complete", "error": None, "waterfall": measured["waterfall"],
+                     "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        elif "unsupported" in measured:
+            state = {"status": "unsupported", "error": measured["unsupported"]}
+        elif "failed" in measured:
+            state = {"status": "failed", "error": measured["failed"]}
+        else:
+            reason = job.get("error") or "unknown"
+            state = {"status": "failed", "error": _RULE_WATERFALL_ERRORS.get(
+                reason, "The run stopped before it reached the trade search ({}).".format(reason))}
+    except Exception as exc:
+        log.exception("founder rule waterfall: run failed")
+        state = {"status": "failed", "error": f"The run failed ({type(exc).__name__})."}
+    finally:
+        with _trade_jobs_lock:
+            _trade_jobs.pop(job_id, None)
+        with _rule_waterfall_lock:
+            previous = _rule_waterfall_results.get(key[:2]) or {}
+            if state["status"] != "complete":     # a failed run never replaces the last result
+                state = {**state, "waterfall": previous.get("waterfall"), "run_at": previous.get("run_at")}
+            _rule_waterfall_results[key[:2]] = state
+            if (_rule_waterfall_running or {}).get("run_id") == run_id:
+                _rule_waterfall_running = None
+        if state["status"] == "complete":
+            out = state["waterfall"]
+            log.info("founder rule waterfall: teams=%s started=%s served=%s elapsed_ms=%s",
+                     out["teams"], out["started"], out["served"], out["elapsed_ms"])
+
+
+def _rule_waterfall_catalog() -> list:
+    from . import rule_catalog
+    return [{k: v for k, v in row.items() if k not in ("source", "counted")}
+            for row in rule_catalog.as_rows()]
+
+
+@app.route("/api/founder/rule-waterfall", methods=["GET", "POST"])
+def founder_rule_waterfall():
+    """GET ?league_id= — {status, error, run_at, waterfall, catalog, notes} (design §7.1).
+    POST {league_id} — start one background run for the founder's own organic deck in the
+    league their session has selected: 202 {status: running, run_id}; 200 {status:
+    unsupported, error} when that deck is not built rules-first; 409 run_in_progress (one run
+    per process, any founder); 400 league_required / league_not_selected."""
+    global _rule_waterfall_running
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    account = str(sess["user_id"])
+    if request.method == "GET":
+        league_id = str(request.args.get("league_id") or "").strip()
+        if not league_id:
+            return jsonify(error="league_required"), 400
+        with _rule_waterfall_lock:
+            state = dict(_rule_waterfall_results.get((account, league_id)) or {})
+            running = (_rule_waterfall_running or {}).get("key", ())[:2] == (account, league_id)
+        status = "running" if running else state.get("status", "none")
+        return jsonify({"status": status, "error": None if running else state.get("error"),
+                        "run_at": state.get("run_at"), "waterfall": state.get("waterfall"),
+                        "catalog": _rule_waterfall_catalog(),
+                        "notes": load_founder_rule_notes(viewer_id=account)})
+    body = request.get_json(silent=True) or {}
+    league_id = str(body.get("league_id") or "").strip() if isinstance(body, dict) else ""
+    if not league_id:
+        return jsonify(error="league_required"), 400
+    league = sess.get("league")
+    if league is None or getattr(league, "league_id", None) != league_id:
+        return jsonify(error="league_not_selected"), 400
+    fmt = _active_format(sess)
+    key = (account, league_id, fmt)
+    with _rule_waterfall_lock:
+        if _rule_waterfall_running is not None:
+            return jsonify(error="run_in_progress"), 409
+        reason = _rule_waterfall_scope_error(league_id)
+        if reason is not None:
+            previous = _rule_waterfall_results.get(key[:2]) or {}
+            _rule_waterfall_results[key[:2]] = {"status": "unsupported", "error": reason,
+                                                "waterfall": previous.get("waterfall"),
+                                                "run_at": previous.get("run_at")}
+            return jsonify(status="unsupported", error=reason), 200
+        run_id = uuid.uuid4().hex[:12]
+        _rule_waterfall_running = {"run_id": run_id, "key": key}
+    try:
+        context = _capture_trade_execution(sess, account, league_id, fmt)
+        # Like a prepared job's private session: cards built by this job can never reach
+        # the session's card store or significance provenance.
+        context.trade_service._trade_cards = {}
+        context.trade_service._significance_exemptions = {}
+        try:
+            prefs_preload = _trade_job_preferences(account, league_id, sess, league)
+        except Exception:
+            prefs_preload = None          # the worker loads them itself, as for a real job
+        fairness = float(sess.get("trade_fairness_threshold", 0.75))
+        _start_trade_job_thread(target=_rule_waterfall_job, args=(
+            run_id, key, league_id, context, prefs_preload, fairness,
+            _capture_trade_significance(), _capture_trade_presentation()), kwargs={})
+    except Exception:
+        log.exception("founder rule waterfall: could not start")
+        with _rule_waterfall_lock:
+            _rule_waterfall_running = None
+        return jsonify(error="run_unavailable"), 500
+    log.info("founder rule waterfall: run started")
+    return jsonify(status="running", run_id=run_id), 202
+
+
+@app.route("/api/founder/rule-notes/<rule_key>", methods=["GET", "PUT"])
+def founder_rule_note(rule_key):
+    """PUT {body} — save a new version of the founder's note on one catalog rule ("" clears;
+    the history keeps every version): 200 the current note; 404 unknown_rule; 400
+    too_long / invalid_body; 429 rate_limited (60 saves an hour per account).
+    GET — that rule's note history, oldest first: {rule_key, history: [{body, author,
+    created_at}]} (author "you" or "founder"; never an account id)."""
+    sess = _founder_session()
+    if sess is None:
+        return _founder_not_found()
+    account = str(sess["user_id"])
+    try:
+        if request.method == "GET":
+            return jsonify(rule_key=rule_key,
+                           history=load_founder_rule_note_history(rule_key, viewer_id=account))
+        body = request.get_json(silent=True)
+        text = body.get("body") if isinstance(body, dict) else None
+        now = time.monotonic()
+        with _rule_waterfall_lock:
+            recent = [t for t in _rule_note_saves.get(account, ()) if now - t < 3600]
+            if len(recent) >= _RULE_NOTE_SAVES_PER_HOUR:
+                return jsonify(error="rate_limited"), 429
+            recent.append(now)
+            _rule_note_saves[account] = recent
+        return jsonify(save_founder_rule_note(rule_key, text, account))
+    except FounderNoteError as exc:
+        return jsonify(error=exc.code), (404 if exc.code == "unknown_rule" else 400)
+
+
+@app.route("/api/admin/founder/rule-notes", methods=["GET"])
+def admin_founder_rule_notes():
+    """GET /api/admin/founder/rule-notes (X-Cron-Secret). Every rule that has ever had a
+    founder note: its current note (empty when cleared) and every version, oldest first, in
+    catalog order. Authors are "founder"; no account id is returned. Operator tool: read
+    only, not flag-gated, so engineering sessions can read the founder's questions."""
+    _require_cron_auth()
+    from . import rule_catalog
+    notes = [{**note, "history": load_founder_rule_note_history(note["rule_key"])}
+             for note in load_founder_rule_notes(include_empty=True) if note["versions"]]
+    return jsonify(catalog_version=rule_catalog.VERSION, notes=notes)
 
 
 @app.route("/api/admin/engine-metrics", methods=["GET"])
@@ -29823,7 +30772,11 @@ def session_init():
     from .session_input import resolve_session_input, SessionInputError
     _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
+        # The Sleeper identity differs from the session user only for the
+        # onboarding test profile; a real session's call is unchanged.
+        _tp_kw = ({"sleeper_identity": _sleeper_identity(existing_sess)}
+                  if _tp.is_test_profile_id((existing_sess or {}).get("user_id")) else {})
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw, **_tp_kw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
@@ -29843,6 +30796,10 @@ def session_init():
     avatar            = body.get("avatar", None)
     # Referrer attribution (set only on user INSERT)
     invited_by        = body.get("invited_by") or None
+    if _tp.is_test_profile_id(user_id):
+        # A test profile never credits a referral or notifies an inviter.
+        invited_by = None
+        body = {**body, "invite_id": None}
 
     # ── League identity vs account identity (co-owner support) ───────────
     # `user_id` is WHO IS LOGGED IN (rankings, swipes, entitlements,
@@ -30162,6 +31119,14 @@ def session_init():
                                   league_user_id, league_display_name,
                                   user_player_ids, opponent_rosters)]
                              if _s0_raw.get("fetch_started_at") else None),
+        # trade.partner_outlook_projection: which Sleeper roster each league
+        # member owns or co-owns, from this init's read, so a league-mate's
+        # forecast probability (keyed by roster_id) maps to the member without
+        # another Sleeper call. Always set: `update` must not keep an older
+        # init's (or another league's) rosters.
+        "sleeper_roster_index": ({"league_id": str(league_id),
+                                  "rosters": _partner_outlook.roster_index(_s0_raw.get("rosters"))}
+                                 if _s0_raw.get("rosters") else None),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -30303,8 +31268,12 @@ def session_init():
                     platform         = authoritative["platform"],
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
+                    # League median, from the league payload S0 already
+                    # read (no extra call); None for a platform league.
+                    median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
                 )
-                if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
+                if (authoritative["platform"] == "sleeper" and is_enabled("league.projections")
+                        and not _tp.is_test_league_id(league_id)):
                     try:
                         from .league_projections.batch import register as _register_projection_target
                         _projection_season = (_s0_raw.get("meta") or {}).get("season")
@@ -30368,8 +31337,9 @@ def session_init():
                 # pair on the joining user's first session. Doesn't ping
                 # the joiner. Capped implicitly by the dedup_key — a
                 # returning user re-init won't re-fire because
-                # _is_new_user is False.
-                if _is_new_user:
+                # _is_new_user is False. Never for a test profile: its
+                # snapshot league has no real members, and this pins it.
+                if _is_new_user and not _tp.is_test_profile_id(user_id):
                     try:
                         _new_username = username or display_name or user_id
                         _peers = load_league_member_unlock_states(
@@ -31243,6 +32213,9 @@ def _send_typed_push(
          and exit. The 8am cron drains and bundles.
       5. Otherwise: load device tokens, send via Expo, log + record_event.
     """
+    if _tp.outbound_blocked(user_id, payload=data, kind=f"push:{kind}"):
+        log.info("push dropped (test profile): kind=%s", kind)
+        return
     started = g.get("_user_data_started") if has_request_context() else None
     with _user_data_lifecycle.capture(user_id, started=started).active() as active:
         if not active:
@@ -31814,6 +32787,10 @@ def _do_league_history_snapshot(league_id: str, platform: str,
     two can never disagree about a team. `live_user`: both writes run under
     that account's users-row lock (AccountGone when it's gone)."""
     from . import roster_history as _rh
+    if _tp.is_test_league_id(league_id):
+        # Onboarding test profile (review M2): every trigger's shared tail
+        # refuses a namespaced league — no history row, no platform read.
+        return {"rosters": {"skipped": "test_profile"}, "boards": {}}
     fmt = get_league_scoring(league_id) or "1qb_ppr"
     pool_players, seed = _get_universal_pool(fmt)
     players_meta = {p.id: p for p in pool_players}
@@ -31838,6 +32815,8 @@ def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
     rosters fetch, whose roster_id → owner_id map is what makes team_key
     platform-native. No map ⇒ weak keys, stamped as such — the recap
     declines to chart weak-keyed teams rather than fragmenting silently."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     owner_map: dict[str, tuple] = {}
     for r in roster_rows or []:
         oid = str(r.get("owner_id") or "")
@@ -31879,6 +32858,8 @@ def _platform_roster_history_on_sync(league_id: str, platform: str,
     Also the late-joiner re-stamp: at link time we know the joining user's
     native team, so their team's whole recorded season resolves to them in
     one idempotent UPDATE — no mapping table."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     if not is_enabled("market.roster_history"):
         return
     try:
@@ -31946,6 +32927,8 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
     one."""
     platform = lg.get("platform") or "sleeper"
     lid = str(lg["league_id"])
+    if _tp.is_test_league_id(lid):
+        return None, "test_profile"   # never read a platform with a test profile's cookies
 
     if platform == "sleeper":
         rows = _fetch_league_rosters(lid)
@@ -31991,8 +32974,12 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             return None, "espn_auth_expired"
         except _espn.EspnError:
             return None, "espn_fetch_failed"
-        my_tid = lg.get("espn_my_team_id")
+        # The credential read above is the leagues row's user's; R9 holds it
+        # to THAT user's own binding (none → no assertion, never a wrong-
+        # account nudge computed against a league-mate's team).
         my_uid = str(lg.get("user_id") or "")
+        my_tid = (get_platform_binding(my_uid, lid, "espn") or {}).get("team_id_int")
+        bound = platform_bound_teams(lid, "espn")
         # #321 R9 — the sweep is identity-aware: a stored SWID that
         # conclusively doesn't own the bound team gets the honest
         # wrong-account nudge (same `espn_reconnect` type, deduped per
@@ -32006,8 +32993,7 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
                 _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
-            mid = my_uid if (my_uid and t.team_id == my_tid) \
-                else _espn_member_id(lid, t)
+            mid = bound.get(str(t.team_id)) or _espn_member_id(lid, t)
             teams.append({"team_key": f"espn:{lid}.t{t.team_id}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -32029,12 +33015,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
         except Exception:
             return None, "mfl_fetch_failed"
-        my_fid = lg.get("platform_my_team")
-        my_uid = str(lg.get("user_id") or "")
+        bound = platform_bound_teams(lid, "mfl")
         teams = []
         for fr in parsed["franchises"]:
             fid = fr["franchise_id"]
-            mid = my_uid if (my_uid and fid == my_fid) else _mfl_member_id(lid, fid)
+            mid = bound.get(str(fid)) or _mfl_member_id(lid, fid)
             teams.append({"team_key": f"mfl:{lid}.f{fid}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -32050,12 +33035,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
             mapped = _flea.map_teams(parsed, _shared_crosswalk())
         except Exception:
             return None, "fleaflicker_fetch_failed"
-        my_tid = lg.get("platform_my_team")
-        my_uid = str(lg.get("user_id") or "")
+        bound = platform_bound_teams(lid, "fleaflicker")
         teams = []
         for t in parsed["teams"]:
             tid = t["team_id"]
-            mid = my_uid if (my_uid and tid == my_tid) else _flea_member_id(lid, tid)
+            mid = bound.get(str(tid)) or _flea_member_id(lid, tid)
             teams.append({"team_key": f"fleaflicker:{lid}.t{tid}",
                           "team_key_quality": "strong",
                           "member_user_id": mid,
@@ -33429,10 +34413,12 @@ def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None
                             / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
         from . import roster_snapshot
         from .database import engine as _engine
+        projection_key = _pick_projection_key(league_id or "")
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
         pick = v["gap"].get("pick_equivalent")
         snapshot = {
             "v":                1,
@@ -34086,8 +35072,14 @@ def _verify_retry_response():
 def _extension_build_session(user_id: str, username: str,
                              display_name: str, avatar: str | None,
                              token: str | None = None,
-                             load_history: bool = True) -> tuple[str, dict]:
+                             load_history: bool = True,
+                             test_profile: bool = False) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
+
+    `test_profile` must be True exactly when `user_id` is an onboarding
+    test-profile id (backend/test_profile.py): only the test-profile switch
+    and its durable restore pass it, so no sign-in path that takes its id
+    from Sleeper or an account can ever mint or claim a `qa_tp_` session.
 
     `token` re-registers the session under an existing bearer token —
     used only by the persistent-session restore path (teardown 06-03),
@@ -34108,6 +35100,8 @@ def _extension_build_session(user_id: str, username: str,
 
     Returns (token, session_payload).
     """
+    if _tp.is_test_profile_id(user_id) != bool(test_profile):
+        raise ValueError("test-profile ids are minted only by the test-profile switch")
     # Durable restore already holds _session_restore_lock; never invert its
     # order with deletion's user gates. Fresh auth keeps this lease to teardown.
     if token is None:
@@ -34155,7 +35149,11 @@ def _extension_build_session(user_id: str, username: str,
     if not load_history:
         payload["_history_pending"] = True
         payload["_history_lock"] = threading.Lock()   # hydrate single-flight
-    token = token or secrets.token_urlsafe(32)
+    # Test-profile tokens carry `_TP_TOKEN_PREFIX` ('.' is outside
+    # token_urlsafe's alphabet, so no real token can start with it): the
+    # request fence and extension_auth tell a test token from a real one
+    # without a lookup (review L7, M3).
+    token = token or ((_TP_TOKEN_PREFIX if test_profile else "") + secrets.token_urlsafe(32))
     with _sessions_lock:
         _sessions[token] = payload
     return token, payload
@@ -34214,6 +35212,39 @@ def extension_auth():
         ]
     except Exception as e:
         log.info("extension_auth: leagues fetch failed (non-fatal): %s", e)
+
+    # Onboarding test profile: the username step above ran unchanged; a test
+    # session is NOT replaced by a new identity — it keeps qa_tp_X and gets
+    # the league list in its own namespace. Only the real account's own
+    # Sleeper user is accepted (a test session is already verified, so it may
+    # not borrow another person's Sleeper identity).
+    _tp_token = request.headers.get("X-Session-Token", "")
+    _tp_caller = _get_session(_tp_token)
+    if _tp_token.startswith(_TP_TOKEN_PREFIX) and not (
+            _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id"))):
+        # Review M3: a test-profile token that no longer resolves (reset or
+        # exit elsewhere, the gate closed, a restart without durable
+        # sessions) must never fall through to minting a REAL session that a
+        # phone still showing TEST PROFILE would store.
+        return jsonify({"error": "test_profile_ended",
+                        "message": "The test profile has ended. Tap “Back to my profile”."}), 401
+    if _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id")):
+        if str(user_id) != _sleeper_identity(_tp_caller):
+            return jsonify({"error": "not_your_sleeper_account",
+                            "message": "Use your own Sleeper username — the test "
+                                       "profile reads your linked Sleeper account."}), 403
+        _pid = _tp_caller["user_id"]
+        return jsonify({
+            "stage":         "connected",
+            "session_token": request.headers.get("X-Session-Token", ""),
+            "expires_at":    int(time.time()) + 4 * 3600,
+            "user_id":       _pid,
+            "username":      username,
+            "display_name":  display_name,
+            "avatar":        avatar,
+            "leagues":       [{**lg, "league_id": _tp.storage_league_id(_pid, lg["league_id"])}
+                              for lg in leagues_compact],
+        })
 
     # Mint session immediately. Unverified, so history waits for the verify
     # (R28.17: loading it here made the response time reveal whether this
@@ -35676,6 +36707,10 @@ def feature_flags_reload_route():
     """
     _require_cron_auth()
     flags = reload_flags()
+    try:
+        _tp_evict_closed_sessions()  # a flag turned off ends test-profile sessions now
+    except Exception:
+        log.exception("test-profile session sweep failed")   # never fails the reload
     return jsonify({"ok": True, "flags": flags})
 
 
@@ -36326,6 +37361,330 @@ def delete_test_user_route(user_id: str):
     except Exception as e:
         log.error("test-users delete failed: %s\n%s", e, traceback.format_exc())
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Onboarding test profile (docs/plans/onboarding-test-profile/) ─────────
+# The operator becomes a brand-new app user (`qa_tp_<real working key>`) to
+# test onboarding, then flips back. Logic and the identity rules live in
+# backend/test_profile.py. Gate, every route: flag `dev.test_profile` AND the
+# authenticated session's real working key listed in TEST_PROFILE_ACCOUNTS —
+# never the tester allow-list, never a device id, never a client-supplied id.
+# Anything else ⇒ 404, no existence signal. The only switch is a session's own
+# real account ↔ that account's own test profile.
+
+_TP_BLOCKED_MESSAGE = ("Not available in the test profile. Tap “Back to my "
+                       "profile” to do this with your real account.")
+
+# Non-GET calls a test-profile session may never make: platform writes
+# (trades, free-agent moves, overhaul sends), Sleeper linking (the Sleeper id
+# IS the app identity) and the dark Fleaflicker linking, identity
+# minting/binding, account deletion (Reset is the test profile's delete),
+# referral and public-profile surfaces. ESPN and MFL LINKING are NOT here: the
+# operator tests them through the real routes (ruling 2026-11-11), whose
+# storage goes through `_tp.storage_league_id` (design.md §11).
+_TP_BLOCKED_ENDPOINTS = frozenset({
+    "propose_trade_to_sleeper", "propose_trade_to_mfl", "respond_trade_in_mfl",
+    "propose_trade_to_espn", "league_free_agents_move_route", "overhaul_send_route",
+    "sleeper_link", "fleaflicker_link", "fleaflicker_import", "fleaflicker_discover",
+    "platform_write_consent_route", "sleeper_offer_import_route",
+    "link_sleeper_source", "auth_apple", "auth_google", "entry_platform",
+    "session_demo", "spawn_test_user", "delete_test_user_route",
+    "delete_account_route", "mint_invite_token", "profile_visibility",
+})
+
+
+_TP_LEAGUE_KEY = re.compile(r"(?:^|_)league_?ids?$", re.I)
+
+# Platform-native league inputs of the real LINKING routes (design.md §11):
+# they name a league on ESPN/MFL by its own id, and the route stores it under
+# the namespace through `_tp.storage_league_id`. Exempt only on these routes.
+_TP_LINK_INPUT_KEYS = {
+    "espn_link": {"espn_league_id"},
+    "mfl_link": {"mfl_league_id", "mfl_league_url"},
+    "mfl_auth_import": {"league_ids"},
+}
+
+# The fence never reads a body larger than the SMALLEST Content-Length cap any
+# route checks before reading (today POST /api/leagues/<id>/projection-runs,
+# 8192 bytes, league_projections/api.py): those routes answer 413 before ANY
+# read, and a read here would break that. Larger bodies are left to the route
+# (and, for a test session, to the database write fence).
+# tests/test_test_profile_review.py walks every route cap in backend/ and
+# fails if one is ever smaller than this.
+_TP_BODY_SCAN_LIMIT = 8192
+
+
+def _tp_collect_league_ids(obj, out: list, exempt=frozenset()) -> None:
+    """Every value under a league-id key (`league_id`, `league_ids`,
+    `*_league_id(s)`, camelCase too) at any depth of a dict/list body."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if _TP_LEAGUE_KEY.search(str(k)) and str(k) not in exempt:
+                many = str(k).lower().endswith("ids")
+                for x in (v if isinstance(v, (list, tuple)) else [v]):
+                    # `league_ids` also arrives comma-joined (?league_ids=a,b).
+                    out.extend(x.split(",") if many and isinstance(x, str) else [x])
+            if isinstance(v, (dict, list, tuple)):
+                _tp_collect_league_ids(v, out, exempt)
+    elif isinstance(obj, (list, tuple)):
+        for x in obj:
+            _tp_collect_league_ids(x, out, exempt)
+
+
+def _tp_request_league_ids(exempt=frozenset()) -> list[str]:
+    """Every league id this request names, from EVERY request source: path
+    args, the query string, form fields and the body parsed the way the
+    routes parse it (`get_json(force=True)`: any content type). Review M1."""
+    ids: list = [v for k, v in (request.view_args or {}).items() if "league" in k]
+    args = {k: request.args.getlist(k) for k in request.args.keys()}
+    _tp_collect_league_ids(args, ids, exempt)
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT:
+        if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):
+            form = {k: request.form.getlist(k) for k in request.form.keys()}
+            _tp_collect_league_ids(form, ids, exempt)
+        else:
+            # Parse the raw bytes ourselves: get_json(force=True) would leave
+            # its parse in Werkzeug's JSON cache, where a route's own
+            # non-forced get_json() would then read it, and cache=False would
+            # consume the stream. The BYTES are cached (get_data(cache=True)),
+            # which is what every later get_json/get_data reads anyway.
+            try:
+                parsed = json.loads(request.get_data(cache=True) or b"null")
+            except ValueError:
+                parsed = None
+            _tp_collect_league_ids(parsed, ids, exempt)
+    return [str(x).strip() for x in ids if x not in (None, "") and str(x).strip()]
+
+
+def _tp_request_mentions_namespace() -> bool:
+    """Cheap pre-filter for a real or anonymous request: could it name a
+    `qa_tp:` league at all? Raw bytes only; the decision is structural."""
+    if "qa_tp" in request.path or b"qa_tp" in (request.query_string or b""):
+        return True
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT and request.mimetype != "multipart/form-data":
+        return b"qa_tp" in request.get_data(cache=True)
+    return False                    # never read past the smallest route cap
+
+
+@app.teardown_request
+def _test_profile_actor_reset(exc):
+    token = g.pop("_tp_actor_token", None)
+    if token is not None:
+        _tp.ACTOR.reset(token)
+
+
+@app.before_request
+def _test_profile_request_guard():
+    """Fences every request against the onboarding test profile.
+
+    A real or anonymous request may never name a `qa_tp:` league (review L6:
+    nobody but its owner reads or writes a test league). A test-profile
+    session (its token carries `_TP_TOKEN_PREFIX`, review L7: real tokens are
+    decided without a lookup): blocked endpoints refuse with a message the
+    app shows, the push-token registration is skipped, and any league id from
+    any request source outside its own namespace is refused (default-deny;
+    the database write fence in test_profile.check_write backs it)."""
+    token = request.headers.get("X-Session-Token", "")
+    if not token.startswith(_TP_TOKEN_PREFIX):
+        if _tp_request_mentions_namespace() and any(
+                _tp.is_test_league_id(x) for x in _tp_request_league_ids()):
+            return _tp_not_found()
+        return None
+    sess = _get_session(token)
+    uid = (sess or {}).get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return None                       # a dead test token: routes see no session
+    g._tp_actor_token = _tp.ACTOR.set(uid)   # read by the outbound chokepoint + write fence
+    endpoint = request.endpoint or ""
+    if endpoint == "register_device_for_push":
+        return jsonify({"ok": True, "skipped": "test_profile"})
+    if endpoint in _TP_BLOCKED_ENDPOINTS and request.method != "GET":
+        return jsonify({"error": "test_profile_blocked",
+                        "message": _TP_BLOCKED_MESSAGE}), 403
+    exempt = frozenset(_TP_LINK_INPUT_KEYS.get(endpoint, ()))
+    for lid in _tp_request_league_ids(exempt):
+        if lid != "no_league" and not _tp.owns_test_league(uid, lid):
+            return jsonify({"error": "test_profile_league",
+                            "message": "The test profile only uses its own "
+                                       "copies of your leagues."}), 403
+    return None
+
+
+def _tp_caller():
+    """(session, user_id) for the request's session, or (None, None)."""
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
+    return (sess, str(sess.get("user_id") or "")) if sess else (None, None)
+
+
+def _tp_not_found():
+    return jsonify({"error": "not_found"}), 404
+
+
+def _tp_mint_session(profile_uid: str) -> tuple[str, dict]:
+    """A fresh verified session for the test profile. Verified because it is
+    derived from the real account's verified session; persisted like any
+    verified session, so it survives restarts and deploys."""
+    token, payload = _extension_build_session(
+        user_id=profile_uid, username=profile_uid,
+        display_name=_tp.DISPLAY_NAME, avatar=None, test_profile=True)
+    payload.pop("extension", None)
+    payload["verified"] = True
+    payload["verified_via"] = "test_profile"
+    _persist_session_if_eligible(token, payload)
+    return token, payload
+
+
+def _tp_session_body(token: str, profile_uid: str) -> dict:
+    return {"session_token": token, "user_id": profile_uid,
+            "username": profile_uid, "display_name": _tp.DISPLAY_NAME}
+
+
+# Module caches keyed by a league id or a user id (alone or inside a tuple
+# key). Reset drops the profile's entries so a fresh onboarding never reads a
+# cached answer from before it (review L4). Each cache is purged under the
+# lock its own readers and writers hold (None: they take none), so a purge can
+# never land between another thread's `get(key) == x` and its `pop(key)`.
+_TP_KEYED_CACHES = (
+    ("_OUTLOOK_IMPACT_CACHE", "_OUTLOOK_IMPACT_LOCK"), ("_DRAFT_CONTEXT_CACHE", None),
+    ("_LEADERBOARD_CACHE", None), ("_LEAGUE_MEMBERS_CACHE", None),
+    ("_slot_order_cache", "_slot_order_lock"), ("_pick_projection_cache", "_pick_projection_lock"),
+    ("_trade_block_cache", "_trade_block_cache_lock"), ("_SUGGESTED_ORDER_CACHE", None),
+    ("_ROS_CACHE", None), ("_rank_chip_cache", None),
+    ("_OUTLOOK_WEEK_SETTLED", "_outlook_cache_lock"), ("_OUTLOOK_WEEK_LIVE", "_outlook_cache_lock"),
+    ("_OUTLOOK_WEEK_HIGHWATER", "_outlook_cache_lock"),
+    ("_OUTLOOK_SEASON_BY_LEAGUE", "_outlook_cache_lock"), ("_FA_LEAGUE_META_CACHE", None),
+    ("_usage_cache", "_usage_lock"), ("_gate_miss_tests", "_gate_miss_tests_lock"),
+    ("_roster_moved_reads", "_trade_jobs_lock"), ("_trade_jobs_by_key", "_trade_jobs_lock"),
+)
+
+
+from contextlib import nullcontext as _tp_nullcontext
+
+
+def _tp_purge_caches(profile_uid: str) -> int:
+    prefix = _tp.league_prefix(profile_uid)
+
+    def names(key):
+        parts = key if isinstance(key, tuple) else (key,)
+        return any(str(p) == profile_uid or str(p).startswith(prefix) for p in parts)
+    n = 0
+    for name, lock_name in _TP_KEYED_CACHES:
+        cache = globals().get(name)
+        if not isinstance(cache, dict):
+            continue
+        lock = globals().get(lock_name) if lock_name else None
+        with (lock if lock is not None else _tp_nullcontext()):
+            for k in [k for k in list(cache.keys()) if names(k)]:
+                cache.pop(k, None)
+                n += 1
+    try:
+        from .outlook_result_cache import OUTLOOK_RESULTS
+        OUTLOOK_RESULTS.purge_callers({profile_uid})
+    except Exception:
+        pass
+    return n
+
+
+def _tp_revoke_sessions(profile_uid: str) -> int:
+    with _sessions_lock:
+        stale = [t for t, s in _sessions.items() if s.get("user_id") == profile_uid]
+        for t in stale:
+            _sessions[t]["_revoked"] = True
+            _sessions.pop(t, None)
+    try:
+        delete_persisted_sessions_for_user(profile_uid)
+    except Exception:
+        log.warning("test-profile: durable session cleanup failed")
+    return len(stale)
+
+
+@app.route("/api/test-profile", methods=["GET"])
+def test_profile_status():
+    """GET — {available, active}: whether this account may use a test profile
+    and whether this session IS one. 404 for everyone else."""
+    sess, uid = _tp_caller()
+    if sess is None:
+        return _tp_not_found()
+    if _tp.is_test_profile_id(uid):   # _get_session already enforced the gate
+        return jsonify({"available": True, "active": True,
+                        "user_id": uid, "display_name": _tp.DISPLAY_NAME})
+    # Review L3: an unverified session never learns whether its id is the
+    # operator's — the same 404 as everyone else.
+    if sess.get("verified") and _tp.enabled_for(uid, is_enabled):
+        return jsonify({"available": True, "active": False})
+    return _tp_not_found()
+
+
+@app.route("/api/test-profile/enter", methods=["POST"])
+def test_profile_enter():
+    """POST — from a verified real session of an allowed account, mint a
+    session for that account's own test profile. The real session is left
+    untouched; the app keeps its token to switch back."""
+    sess, uid = _tp_caller()
+    if (sess is None or _tp.is_test_profile_id(uid) or not sess.get("verified")
+            or not _tp.enabled_for(uid, is_enabled)):
+        return _tp_not_found()          # review L3: unverified ⇒ 404, never 403
+    profile_uid = _tp.profile_id(uid)
+    token, _ = _tp_mint_session(profile_uid)
+    log.info("test-profile: entered (account %s)", uid)
+    return jsonify(_tp_session_body(token, profile_uid))
+
+
+@app.route("/api/test-profile/exit", methods=["POST"])
+def test_profile_exit():
+    """POST — end THIS test-profile session (memory + durable row). The app
+    restores the real token it kept; nothing here touches the real account."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    token = request.headers.get("X-Session-Token", "")
+    with _sessions_lock:
+        _sessions.pop(token, None)
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/test-profile/reset", methods=["POST"])
+def test_profile_reset():
+    """POST — wipe every row the test profile wrote (test_profile.reset_profile:
+    its own id and its own `qa_tp:` league copies only), end all of its
+    sessions, and hand back a fresh session so onboarding starts from zero."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    # Review L4: the account-deletion drain. `deletion_scope` stops new work for
+    # the profile and waits for in-flight work holding its user-data lease
+    # (session-init daemons, trade jobs); `invalidate` then fails any queued
+    # work captured before the reset, so nothing finishes into the new
+    # incarnation. Caches keyed by the profile or its leagues are purged.
+    known = {lid for s2 in list(_sessions.values()) if s2.get("user_id") == uid
+             for lid in [getattr(s2.get("league"), "league_id", None)] if lid}
+    try:
+        with _accounts.deletion_scope(uid, None) as (user_ids, _acct_ids):
+            leagues = _tp.profile_league_ids(uid, known)
+            evicted = _tp_revoke_sessions(uid)
+            deleted = _tp.reset_profile(uid, leagues)
+            _user_data_lifecycle.invalidate(user_ids)
+    except _user_data_lifecycle.UserDataBusy:
+        return jsonify({"error": "test_profile_busy",
+                        "message": "Still finishing the last step. Try Reset again in a moment."}), 409
+    try:
+        _revoke_trade_jobs_naming({uid}, leagues)
+    except Exception as err:
+        log.error("test-profile reset: trade job revoke failed: %s", type(err).__name__)
+    _tp_purge_caches(uid)
+    # The fresh incarnation's work starts after the invalidation, not at the
+    # request's start (its lease would otherwise read as pre-reset work).
+    g._user_data_started = _user_data_lifecycle.snapshot()
+    token, _ = _tp_mint_session(uid)
+    log.info("test-profile: reset %s — %s", uid, deleted)
+    return jsonify({**_tp_session_body(token, uid),
+                    "deleted": deleted, "sessions_evicted": evicted})
 
 
 # ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
@@ -37640,7 +38999,7 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
     valid ESPN session for SOME account" — the 2026-08-12 incident stored a
     different human's working session as the caller's. So after the auth
     verdict, a MEMBERSHIP assertion runs regardless of oracle strength: the
-    pair's SWID must own the caller's bound team (`espn_my_team_id`) in
+    pair's SWID must own the caller's bound team (their own binding) in
     their linked ESPN leagues. Set semantics over EVERY bound league row —
     one ESPN human owns one SWID, so a conclusive mismatch against ANY bound
     league means the wrong account (or a mis-picked binding; either way the
@@ -37685,6 +39044,8 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
         linked = load_espn_leagues_for_user(user_id)
     except Exception:
         log.exception("espn verify: linked-league lookup failed for %s", user_id)
+    for lg in linked:   # test-profile READ seam: stored qa_tp: ids → ESPN's own
+        lg["league_id"] = _tp.native_league_id(lg.get("league_id"))
 
     # 1. Strong oracle: an already-linked league ESPN only serves to a
     #    signed-in member. PUBLIC links are skipped on purpose.
@@ -38187,6 +39548,7 @@ def espn_link():
                 # public league doesn't need.
                 auth_mode = "public"
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for t in league["teams"]:
         mid = user_id if t.team_id == team_id else _espn_member_id(league_id, t)
@@ -38201,7 +39563,7 @@ def espn_link():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
+            league_id       = store_lid,
             user_id         = user_id,
             name            = league["name"] or f"ESPN league {league_id}",
             espn_season     = league["season"] or season,
@@ -38209,14 +39571,14 @@ def espn_link():
             espn_my_team_id = team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — AFTER the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{team_id}")
 
     r = mapped["report"]
@@ -38226,7 +39588,7 @@ def espn_link():
              r["match_rate"] * 100, len(r["unmatched"]))
     resp = {
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -38359,9 +39721,15 @@ def espn_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_espn_league(league_id) if league_id else None
-    if not row:
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_espn_league(store_lid) if league_id else None
+    # Per-user binding: a re-sync refreshes the CALLER's own team only; a
+    # caller with no binding (never linked, or a pre-fix binding that was
+    # overwritten) is told to link — never handed the row's team. Read under
+    # the STORED id, the same key the link wrote it under.
+    binding = get_platform_binding(user_id, store_lid, "espn") if row else None
+    if not row or binding is None:
         return jsonify({"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}), 404
 
@@ -38384,7 +39752,7 @@ def espn_import():
     except _espn.EspnError as e:
         return _espn_error_response(e)
 
-    my_team_id = row.get("espn_my_team_id")
+    my_team_id = binding["team_id_int"]
     if my_team_id not in {t.team_id for t in league["teams"]}:
         return jsonify({"error": "espn_team_missing",
                         "message": "Your team is no longer in this ESPN "
@@ -38397,8 +39765,11 @@ def espn_import():
     # alone cannot identify. Only asserted for the linker's own binding
     # (zero false rejects if another user ever re-syncs). "Owns" = any listed
     # owner, co-owners included (_espn_binding_mismatch); an ownerless bound
-    # team is inconclusive-accept.
-    if swid and str(row.get("user_id") or "") == str(user_id):
+    # team is inconclusive-accept. (Per-user bindings: my_team_id IS the
+    # caller's own binding now, so the assertion holds every re-syncer to
+    # their own team — the old linker-only condition existed because a
+    # non-linker re-sync used to carry the linker's team.)
+    if swid:
         bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
         if _espn_binding_mismatch(bound, swid):
             clear_espn_credential_verification(user_id)
@@ -38420,27 +39791,27 @@ def espn_import():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
-            user_id         = row["user_id"],
+            league_id       = store_lid,
+            user_id         = user_id,
             name            = league["name"] or row.get("name") or "",
             espn_season     = league["season"] or season,
             espn_auth       = row.get("espn_auth") or "public",
             espn_my_team_id = my_team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{my_team_id}")
 
     return jsonify({
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -38564,6 +39935,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     cur_season = min(seasons) if seasons else 0
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     out: dict[str, list[dict]] = {}
     for p in rows:
         owner = str(p.get("owner_user_id") or "")
@@ -38583,9 +39955,10 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
             p = {**p, "pool_value": pick_pool_value(
                 int(p.get("round") or 4), years_out, fmt)}
-        val = _priced_pick_value(p, slot_order, fmt)
+        val = _priced_pick_value(p, slot_order, fmt, projection)
         out.setdefault(owner, []).append({
-            "label": _owned_pick_label(p, slot_order),
+            "label": _owned_pick_label(p, slot_order, projection, fmt),
+            **_owned_pick_projection_fields(p, slot_order, projection, fmt),
             "value": round(float(val), 1),
             # #285 — round for _pick_firsts_equivalent's literal pick-count
             # label math; never serialized on its own (see docstring above).
@@ -39302,6 +40675,25 @@ def league_team_review_route():
             except Exception:
                 member_windows[uid] = "not_sure"
 
+        # trade.partner_outlook_projection — the same assumed outlook the trade
+        # engine and the card's fit tag use (partner_outlook.assumed): a
+        # league-mate with no saved outlook takes their read from the saved
+        # forecast when it is usable. A saved outlook is never shown here
+        # (this beat has only ever used reads), so a declared league-mate
+        # keeps the roster read. One forecast read for the request.
+        member_outlook_sources = None
+        if _partner_outlook.enabled(is_enabled):
+            member_outlook_sources = {}
+            others = [uid for uid in member_windows if uid != str(me_league_id)]
+            projection = (_partner_outlook.session_reads(
+                sess, str(sess["user_id"]), str(league_id), others, platform=platform) or {}).get("reads") or {}
+            declared = ({uid: (row or {}).get("team_outlook") for uid, row in
+                         load_league_preferences_bulk(others, str(league_id)).items()}
+                        if projection else {})
+            for uid in others:
+                member_windows[uid], member_outlook_sources[uid] = _partner_outlook.public(
+                    uid, declared=declared, projection=projection, roster=member_windows[uid])
+
         my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
             my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
             firsts_ledgers.get(me_league_id),
@@ -39378,6 +40770,7 @@ def league_team_review_route():
             window_odds=window_odds,
             window_odds_reason=window_odds_reason,
             window_projection=window_projection,
+            member_outlook_sources=member_outlook_sources,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404
@@ -39980,7 +41373,9 @@ def league_free_agents_route():
         "drop_candidates": {"players": [{"id","name","position","value",
                                          "tier"},...],
                             "untouchables_excluded": int} | null
-          # #179 claim sheet — Sleeper leagues only. The caller's roster
+          # #179 claim sheet — Sleeper leagues, and MFL leagues while their
+          # moves are live (D1 Update 1; roster_capacity then carries a null
+          # limit). The caller's roster
           # priced on their board, value-ASCENDING (least valuable first),
           # capped at 8; untouchables (asset_prefs) never appear, and the
           # count tells the sheet they were withheld.
@@ -40172,6 +41567,30 @@ def league_free_agents_route():
                 "players":                cand_rows,
                 "untouchables_excluded":  cand_excluded,
             }
+        elif _fa_move_live("mfl") and _fa_move_league_platform(league_id) == "mfl":
+            # D1 Update 1 (in-app-claims design.md §4): a live MFL league gets
+            # the drop list too, from the caller's franchise row; its roster
+            # limit and waiver settings aren't stored, so both stay unknown
+            # (null) and MFL decides. Unreachable while `mfl.send_add_drop`
+            # is off or the MFL shapes are unverified.
+            _cred, _row, mfl_fid = _fa_move_mfl_binding(str(g_user_id), league_id)
+            mfl_roster = _fa_move_mfl_my_roster(league_id, mfl_fid) if mfl_fid else None
+            if mfl_roster is not None:
+                roster_capacity = {"my_count": len(mfl_roster), "limit": None,
+                                   "open_slots": None}
+                untouchable_ids = set()
+                try:
+                    ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+                    untouchable_ids = {str(x) for x in ap.get("untouchables", [])}
+                except Exception as ap_err:
+                    log.warning("free-agents: asset-prefs read failed for %s "
+                                "(drop candidates unfiltered): %s", league_id, ap_err)
+                cand_rows, cand_excluded = compute_drop_candidates(
+                    pool_players=pool_players, seed_elo=seed, user_elo=user_elo,
+                    user_roster=mfl_roster, exclude_ids=untouchable_ids,
+                    tier_fn=fa_tier_fn)
+                drop_candidates = {"players": cand_rows,
+                                   "untouchables_excluded": cand_excluded}
 
         free_agents = compute_free_agents(
             pool_players = pool_players,
@@ -40241,8 +41660,10 @@ _FA_MOVE_SURFACES = ("free_agents", "usage_trends")
 _FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
 # Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
 _FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
-# Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
-_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
+# Each platform's server-only kill switch. MFL's is Update 1
+# (docs/plans/in-app-claims/design.md); ESPN has none until its write shapes
+# are captured, so an ESPN league stays `unsupported`.
+_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop", "mfl": "mfl.send_add_drop"}
 
 # Contract §5: request receipt to response is at most 76 s. A 30 s preflight
 # budget, checked immediately before the platform write (the
@@ -40290,6 +41711,9 @@ def _fa_move_live(platform: str) -> bool:
         return False
     if platform == "sleeper":
         return bool(_sleeper_write.FA_MOVE_SHAPES_CAPTURED)
+    if platform == "mfl":
+        from . import mfl_write as _mfl_write
+        return bool(_mfl_write.FA_MOVE_SHAPES_VERIFIED)
     return False
 
 
@@ -40462,6 +41886,8 @@ def _fa_move_capability(sess, league_id: str, live_rosters) -> tuple[dict, dict]
     and local leagues → 'unsupported'. `claims` only under R15.8 D5. Draft
     copy is served only in 'submit' mode (fa_move_copy's docstring)."""
     platform = _fa_move_league_platform(league_id)
+    if platform == "mfl" and _fa_move_live(platform):
+        return _fa_move_capability_mfl(sess, league_id)
     if platform != "sleeper":
         return {"mode": "unsupported", "claims": False,
                 "league_platform": platform if platform in _FA_MOVE_PLATFORMS else None,
@@ -40875,6 +42301,8 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
        `complete`, the roster save → event → response (the stamp starts off
        the request thread).
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     t0 = _fa_move_clock()
     user_id = str(sess.get("user_id") or "")
     # 3. A verified session (the hard write gate). `_verified_write_denial`
@@ -40918,6 +42346,10 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message(key, platform, add=names.get(add_id)),
                               title=_fa_copy.UNKNOWN_TITLE)
+    if platform == "mfl":
+        # Steps 8-13 for MFL (in-app-claims design.md §4): its own credential,
+        # league binding and roster read, the same consent and move record.
+        return _fa_move_core_mfl(sess, req, now, t0)
     # 8. The credential.
     cred = get_sleeper_credential(user_id)
     if not cred:
@@ -41132,6 +42564,337 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
                 _invalidate_league_members_cache(league_id)
         except Exception:
             log.exception("fa move: roster save failed (league %s)", league_id)
+            stamp = False
+    if status == 200:
+        _fa_move_event(user_id, "fa_move_write_succeeded", {
+            "move_kind": kind, "has_drop": bool(drop_id), "has_bid": bid is not None,
+            "result": result, "attempt_id": attempt_id, "league_platform": platform,
+        }, league_id=league_id)
+    if stamp:
+        _fa_move_stamp_async(league_id)
+    return payload, status
+
+
+# ── D1 Update 1: MFL free-agent moves (docs/plans/in-app-claims/design.md) ──
+# Reached only when `_fa_move_live("mfl")`: `mfl.send_add_drop` on AND
+# mfl_write.FA_MOVE_SHAPES_VERIFIED (False until one supervised real MFL
+# transaction is recorded). Until then the capability answers `unsupported`
+# for an MFL league and the move route 404s at step 6, exactly as before
+# Update 1. The MFL path reuses everything platform-neutral (the attempt_id
+# replay, the double-move block, consent, the `sent`/`result` rows, the
+# outcome classification, the roster save); what differs is the credential
+# (the MFL session cookie, bound to `mfl_username`), the league binding (the
+# CALLER's own franchise from platform_league_bindings, D-246), the live
+# `rosters` export and the crosswalk from FTF (Sleeper) ids to MFL ids.
+
+def _fa_move_mfl_binding(user_id: str, league_id: str):
+    """(cred, row, my_fid): the caller's stored MFL credential, the league
+    row, and the caller's OWN franchise id from their per-user binding
+    (`get_platform_binding`), else None. Never the leagues row's
+    `platform_my_team` / `user_id`: those hold the last linker (D-246)."""
+    from .database import get_mfl_credential, get_platform_league
+    cred = get_mfl_credential(user_id)
+    row = get_platform_league(league_id, "mfl")
+    binding = get_platform_binding(user_id, league_id, "mfl") if row else None
+    my_fid = str((binding or {}).get("team_id") or "").strip() or None
+    return cred, row, my_fid
+
+
+def _fa_move_mfl_account(cred) -> str:
+    """The platform account a grant is bound to: the MFL username, lowered,
+    so a re-link that only changes its case keeps the grant (assumes MFL
+    usernames are case-insensitive; UNVERIFIED). Empty when unknown."""
+    return str((cred or {}).get("mfl_username") or "").strip().lower()
+
+
+def _fa_move_mfl_my_member(league_id: str, my_fid: str) -> tuple[str, list[str] | None]:
+    """(member_id, roster): the franchise's row in the shared league_members
+    snapshot and its stored roster (FTF ids), or roster None when no row is
+    stored. The row is labelled with the app user bound to the franchise (its
+    EARLIEST binder, so possibly a co-owner rather than the caller), else the
+    synthetic `mfl:{league}.f{fid}` id: the map the owned-pick sync and the
+    roster sweep use (`platform_bound_teams`). A snapshot written before the
+    label still carries the synthetic id, so that is tried second."""
+    synthetic = _mfl_member_id(league_id, my_fid)
+    label = platform_bound_teams(league_id, "mfl").get(str(my_fid))
+    rows = {str(r.get("user_id")): r for r in load_league_members(league_id)}
+    for member in ([label] if label else []) + [synthetic]:
+        if member in rows:
+            return member, [str(p) for p in (rows[member].get("player_ids") or [])
+                            if p not in (None, "")]
+    return label or synthetic, None
+
+
+def _fa_move_mfl_my_roster(league_id: str, my_fid: str) -> list[str] | None:
+    """The caller's stored roster (FTF ids): `_fa_move_mfl_my_member`'s."""
+    return _fa_move_mfl_my_member(league_id, my_fid)[1]
+
+
+def _fa_move_capability_mfl(sess, league_id: str) -> tuple[dict, dict]:
+    """Contract §1 for a live MFL league. The 11-06 binary has no MFL connect
+    screen (contract §6), so anything but `connect: ok` answers `unsupported`
+    (scope §E: never `submit` to an MFL user who can't connect from the sheet).
+    `claims` stays false: MFL claims need their own consent version and a
+    verified claim shape (design.md §5)."""
+    user_id = str(sess.get("user_id") or "")
+    now = _fa_move_now()
+    cred, _row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    if not cred or not account:
+        connect = "not_linked"
+    elif not my_fid:
+        connect = "other_account"
+    elif not (sess.get("verified") or _synthetic_demo_session(sess)):
+        connect = "unverified"
+    else:
+        connect = "ok"
+    grant = _fa_move_grant(user_id, "mfl", account, now) if account else None
+    rows = {pid: {"move_mode": "handoff", "move_line": _fa_copy.row_line(reason, "mfl")}
+            for pid, reason in _fa_move_blocks(user_id, str(league_id), now).items()}
+    return {
+        "mode": "submit" if connect == "ok" else "unsupported",
+        "claims": _fa_move_claims_enabled("mfl"),
+        "league_platform": "mfl",
+        "connect": connect,
+        "consent_until": grant["expires_at"] if grant else None,
+        "copy": _fa_copy.move_copy("mfl", include_drafts=True),
+    }, rows
+
+
+def _fa_move_drop_mfl_credential(user_id: str, sess, via: str) -> None:
+    """A dead or rejected MFL cookie: delete it (the trade send's treatment)
+    and end any open MFL roster-move grant, so a reconnect means re-consent
+    (consent.md §4.4, the Sleeper rule). Never raises."""
+    from .database import delete_mfl_credential
+    sess.pop("mfl_cookie", None)
+    try:
+        if delete_mfl_credential(user_id, withdrawn_via=via):
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": via, "league_platform": "mfl"}, touch_user=False)
+    except Exception:
+        log.exception("fa move (mfl): credential delete failed")
+
+
+def _fa_move_core_mfl(sess, req: dict, now: datetime, t0: float) -> tuple[dict, int]:
+    """Steps 8-13 of `_fa_move_core` for an MFL league (scope §B3's order):
+    8 credential + league binding → 9 consent (committed before any MFL
+    call) → 10 pre-write reads (crosswalk, host, the live rosters export,
+    ownership, availability) → 11 the claim gate → the preflight budget →
+    12-13 `_fa_move_send`. MFL's roster limit isn't stored, so a full roster
+    is MFL's to refuse (10f), never guessed here."""
+    from . import mfl_service as _mfl
+    from . import mfl_write as _mfl_write
+    platform = "mfl"
+    user_id = str(sess.get("user_id") or "")
+    league_id = req["league_id"]
+    add_id, drop_id, kind = req["add_player_id"], req["drop_player_id"], req["move_kind"]
+    # 8. The credential and the league binding.
+    cred, row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    cookie = _mfl_cookie_for(sess, user_id) if cred else None
+    if not cred or not account or not cookie:
+        return _fa_move_error(f"{platform}_not_linked", 409,
+                              _fa_copy.message("not_linked", platform))
+    # The league row's name: never `_fa_league_meta`, a Sleeper read.
+    league_name = str((row or {}).get("name") or "").strip() or None
+    if not my_fid:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    # 9. Consent: a grant is committed here, before any MFL call.
+    refusal, grant = _fa_move_consent_step(user_id, platform, account, req, now)
+    if refusal is not None:
+        return refusal
+    # 10. Pre-write reads. Nothing is sent if any of them fails or refuses.
+    names = _player_names_by_id([p for p in (add_id, drop_id) if p])
+    add_name, drop_name = names.get(add_id), names.get(drop_id) if drop_id else None
+    inverse = _sleeper_to_mfl_map()
+    mfl_add, mfl_drop = inverse.get(add_id), inverse.get(drop_id) if drop_id else None
+    if mfl_add is None or (drop_id and mfl_drop is None):
+        missing = add_name if mfl_add is None else drop_name
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unmapped", platform, add=missing))
+
+    def _read_failed():
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+
+    year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    host = row.get("platform_host")
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+    except _mfl.MflAuthError as e:
+        log.warning("fa move (mfl): rosters read auth-rejected: %s", type(e).__name__)
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_expired")
+        return _fa_move_error(f"{platform}_expired", 409, _fa_copy.message("expired", platform))
+    except Exception as e:
+        log.warning("fa move (mfl): rosters read failed: %s", type(e).__name__)
+        return _read_failed()
+    if not isinstance(raw, dict) or "rosters" not in raw:
+        return _read_failed()
+    norm = _mfl_write.normalize_franchise_id
+    held_by: dict[str, set] = {}
+    for fid, ids in _mfl.parse_roster_ids(raw).items():
+        try:
+            held_by[norm(fid)] = {str(i) for i in ids}
+        except _mfl_write.MflWriteError:
+            continue
+    try:
+        mine_mfl = held_by.get(norm(my_fid))
+    except _mfl_write.MflWriteError:
+        mine_mfl = None
+    if mine_mfl is None:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    if str(mfl_add) in mine_mfl:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_already_yours", platform, add=add_name))
+    if any(str(mfl_add) in ids for ids in held_by.values()):
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unavailable", platform, add=add_name))
+    if drop_id and str(mfl_drop) not in mine_mfl:
+        return _fa_move_error("asset_not_owned", 422, _fa_copy.message(
+            "asset_not_owned", platform, drop=drop_name))
+    # 11. The claim gate: MFL claims stay off (design.md §5). Waiver status
+    # can't be read before the tap, so an add of a player MFL holds on
+    # waivers is MFL's to refuse (10f), never sent as a claim.
+    if kind == "claim" and not _fa_move_claims_enabled(platform):
+        return _fa_move_error("waiver_claim_unsupported", 422, _fa_copy.message(
+            "waiver_claim_unsupported", platform, add=add_name))
+    if _fa_move_preflight_over_budget(t0):
+        return _read_failed()
+    fa_req = _mfl_write.FaMoveRequest(
+        league_id=league_id, add_player_id=str(mfl_add),
+        drop_player_id=str(mfl_drop) if drop_id else None,
+        move_kind=kind, faab_bid=req["faab_bid"])
+
+    def _write():
+        return _mfl_write.fa_move(cookie, host, year, fa_req)
+
+    def _on_auth():
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_rejected")
+
+    member_id, my_players = _fa_move_mfl_my_member(league_id, my_fid)
+    return _fa_move_send(
+        sess=sess, req=req, platform=platform, platform_user_id=account, now=now,
+        grant=grant, write=_write, auth_error=_mfl_write.MflWriteAuthError,
+        write_error=_mfl_write.MflWriteError, on_auth=_on_auth,
+        add_name=add_name, drop_name=drop_name, league_name=league_name,
+        member_id=member_id, my_players=my_players)
+
+
+def _fa_move_send(*, sess, req: dict, platform: str, platform_user_id: str, now: datetime,
+                  grant, write, auth_error, write_error, on_auth, add_name, drop_name,
+                  league_name, member_id: str, my_players: list[str] | None) -> tuple[dict, int]:
+    """Steps 12-13 for a platform past its pre-write reads: the grant re-read,
+    the `sent` row (atomic double-move block), the ONE platform call, the
+    `result` row, the roster save on `complete`, the event. The same rules as
+    `_fa_move_core`'s Sleeper tail, which keeps its own copy until the Sleeper
+    capture lands (design.md §4: one refactor, one review). `write()` returns
+    the adapter's neutral result; it is called at most once and never retried.
+    `my_players` is the caller's stored roster (FTF ids), or None (no save)."""
+    user_id = str(sess.get("user_id") or "")
+    league_id, attempt_id = req["league_id"], req["attempt_id"]
+    add_id, drop_id, kind, bid = (req["add_player_id"], req["drop_player_id"],
+                                  req["move_kind"], req["faab_bid"])
+    # The grant again, right before the `sent` row: a withdrawal during the
+    # preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
+    record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
+              "platform_user_id": platform_user_id, "league_id": league_id,
+              "consent_id": grant["consent_id"], "move_kind": kind,
+              "add_player_ids": json.dumps([add_id]),
+              "drop_player_ids": json.dumps([drop_id] if drop_id else []),
+              "faab_bid": bid}
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival or not sent_id:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
+    reported = None
+    try:
+        reported = write()
+    except auth_error as e:
+        log.warning("fa move (%s) auth-rejected: %s", platform,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        try:
+            on_auth()
+        except Exception:
+            log.exception("fa move (%s): dropping the rejected credential failed", platform)
+        payload, status = _fa_move_error(f"{platform}_rejected", 409,
+                                         _fa_copy.message("rejected", platform))
+        result = "error"
+    except write_error as e:
+        log.warning("fa move (%s) write-failed [%s]: %s", platform, e.kind,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        # 'input' is decided before any byte is sent, like 'config'.
+        payload, status, result = _fa_move_write_failure(
+            "config" if e.kind == "input" else e.kind, platform)
+    except Exception:
+        log.exception("fa move (%s): unexpected error during the platform write", platform)
+        payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN, platform)
+    if reported is not None:
+        move_status, result = reported.get("status"), reported.get("result")
+        if move_status not in ("complete", "pending") or result not in ("accepted", "partial"):
+            log.warning("fa move (%s): unreadable adapter result; outcome unknown", platform)
+            payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN,
+                                                             platform)
+            reported = None
+    added = dropped = []
+    if reported is not None:
+        fallback = result == "accepted"
+        added = [str(p) for p in (reported.get("added") or ([add_id] if fallback else []))]
+        dropped = [str(p) for p in (reported.get("dropped")
+                                    or ([drop_id] if fallback and drop_id else []))]
+        title, lines = _fa_copy.result_copy(
+            status=move_status, result=result, platform=platform,
+            add=add_name or "This player", drop=(drop_name or "That player") if drop_id else None,
+            league=league_name or "your league", added=added, dropped=dropped, bid=bid)
+        payload = {"status": move_status, "move_kind": kind, "result": result,
+                   "league_platform": platform, "attempt_id": attempt_id,
+                   "title": title, "lines": lines}
+        if reported.get("transaction_id"):
+            payload["platform_transaction_id"] = str(reported["transaction_id"])
+        status = 200
+    try:
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": result,
+            "status": payload.get("status") if status == 200 else None,
+            "platform_transaction_id": payload.get("platform_transaction_id"),
+            "error_code": None if status == 200 else payload.get("error"),
+            "response_status": status, "response_json": json.dumps(payload)})
+    except Exception:
+        log.exception("fa move (%s): the result row failed (attempt %s)", platform, attempt_id)
+    stamp = False
+    if status == 200 and payload["status"] == "complete" and my_players is not None:
+        try:
+            held = set(my_players)
+            new_roster = ([p for p in my_players if p not in set(dropped)]
+                          + [p for p in added if p not in held])
+            stamp = _fa_db.set_league_member_roster(league_id, member_id, new_roster)
+            if stamp:
+                _invalidate_league_members_cache(league_id)
+        except Exception:
+            log.exception("fa move (%s): roster save failed (league %s)", platform, league_id)
             stamp = False
     if status == 200:
         _fa_move_event(user_id, "fa_move_write_succeeded", {
@@ -42200,6 +43963,7 @@ def mfl_link():
         return jsonify({"error": "mfl_bad_team_id",
                         "message": "That franchise isn't in this league."}), 400
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -42210,19 +43974,19 @@ def mfl_link():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=user_id,
+            league_id=store_lid, user_id=user_id,
             name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
             season=year, auth="public", my_team=franchise_id,
             total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — normalize MFL owned picks into draft_picks (same store Sleeper
@@ -42230,20 +43994,20 @@ def mfl_link():
     # persisted so franchise→user name resolution has the member snapshot.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_link: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_link: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_link")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_link")
 
     r = mapped["report"]
     log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
              "unmatched=%d picks=%d", user_id, league_id, year, len(members),
              r["match_rate"] * 100, len(r["unmatched"]), len(parsed["future_picks"]))
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": franchise_id,
@@ -42318,9 +44082,13 @@ def mfl_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_platform_league(league_id, "mfl") if league_id else None
-    if not row:
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_platform_league(store_lid, "mfl") if league_id else None
+    # Per-user binding (see espn_import): the caller's own franchise only,
+    # read under the stored id.
+    binding = get_platform_binding(user_id, store_lid, "mfl") if row else None
+    if not row or binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
 
@@ -42339,7 +44107,7 @@ def mfl_import():
 
     parsed = _mfl.parse_bundle(raw)
     mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
-    my_team = row.get("platform_my_team")
+    my_team = binding["team_id"]
     if my_team not in {fr["franchise_id"] for fr in parsed["franchises"]}:
         return jsonify({"error": "mfl_team_missing",
                         "message": "Your franchise is no longer in this league — "
@@ -42355,35 +44123,35 @@ def mfl_import():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=row["user_id"],
+            league_id=store_lid, user_id=user_id,
             name=parsed["name"] or row.get("name") or "", platform="mfl",
             season=year, auth=row.get("platform_auth") or "public",
             my_team=my_team, total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{my_team}")
 
     # #158 — re-normalize MFL owned picks on manual refresh (see mfl_link).
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_import: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_import: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — re-detect on every re-sync. This is also the manual fix-up path
     # for leagues linked before format detection existed.
-    _mfl_store_scoring_format(league_id, raw, "mfl_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_import")
 
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": row.get("platform_auth") or "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
@@ -42453,6 +44221,7 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         raise _mfl.MflError(
             "couldn't match your franchise in this league", kind="franchise")
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -42462,22 +44231,22 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "player_ids": mapped["rosters"].get(fid, []),
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     upsert_platform_league(
-        league_id=league_id, user_id=user_id,
+        league_id=store_lid, user_id=user_id,
         name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
         season=year, auth="cookie", my_team=franchise_id,
         total_rosters=parsed["total_teams"], host=host,
         future_picks=parsed["future_picks"])
-    replace_espn_league_members(league_id, members)
+    replace_espn_league_members(store_lid, members)
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — same best-effort owned-pick normalization as the public path.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_auth_import: normalized %d owned picks (league=%s)",
                      _npk, league_id)
         except Exception as _mpk_err:
@@ -42485,11 +44254,11 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "(continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_auth_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_auth_import")
 
     r = mapped["report"]
     return {
-        "league_id": league_id, "name": parsed["name"], "season": year,
+        "league_id": store_lid, "name": parsed["name"], "season": year,
         "my_team_id": franchise_id, "teams_imported": len(members),
         "total_teams": parsed["total_teams"],
         "future_picks_stored": len(parsed["future_picks"]),
@@ -42989,7 +44758,12 @@ def _mfl_franchise_from_member_id(league_id: str, member_id) -> str | None:
     None when the value isn't a synthetic id for THIS league."""
     m = re.match(rf"^mfl:{re.escape(str(league_id))}\.f(\d+)$",
                  str(member_id or ""))
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # A league-mate who uses the app carries their real id on their team
+    # (the shared snapshot labels every bound team): their own binding.
+    b = get_platform_binding(member_id, league_id, "mfl")
+    return b["team_id"] if b else None
 
 
 # ── MFL pick-asset encoding (FTF pick ids → MFL `FP_…` strings) ──────────────
@@ -43235,7 +45009,7 @@ def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
     warnings: list[dict] = []
     norm = _mfl_write.normalize_franchise_id
 
-    my_fid = row.get("platform_my_team")
+    my_fid = (get_platform_binding(user_id, league_id, "mfl") or {}).get("team_id")
     their_fid = (str(their_franchise_in).strip() if their_franchise_in is not None
                  else _mfl_franchise_from_member_id(league_id, their_user_id))
     if not my_fid or not their_fid:
@@ -43384,7 +45158,7 @@ def _validate_espn_trade(sess, user_id, row, league_id, their_user_id,
     teams = _espn.parse_league(raw)["teams"]
     rostered = {t.get("id") for t in raw["teams"]
                 if isinstance(t, dict) and isinstance(t.get("roster"), dict)}
-    my_tid = row.get("espn_my_team_id")
+    my_tid = (get_platform_binding(user_id, league_id, "espn") or {}).get("team_id_int")
     if their_team_in is not None:
         try:
             their_tid = int(their_team_in)
@@ -43507,6 +45281,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     byte-identical; on that path these re-checks are no-ops. Extracted
     2026-09-07 exactly the way `_sleeper_propose_core` was.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
@@ -43545,13 +45321,14 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     if not row:
         return {"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}, 404
-    if str(row.get("user_id") or "") != str(user_id):
-        # One linker per platform-league row; only the linker has a franchise
-        # binding, so nobody else can send from it.
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
+        # The SENDER's own binding is the only source of "my franchise" —
+        # never the leagues row, which every league-mate's link shares.
         return {"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}, 404
-    my_fid = str(row.get("platform_my_team") or "").strip()
+    my_fid = binding["team_id"].strip()
     if not my_fid:
         return {"error": "mfl_franchise_unknown",
                         "message": "Couldn't determine your franchise — "
@@ -43838,7 +45615,8 @@ def respond_trade_in_mfl():
     if not row:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
-    if str(row.get("user_id") or "") != str(user_id):
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}), 404
@@ -43939,7 +45717,8 @@ def mfl_pending_trades():
     if not row:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
-    if str(row.get("user_id") or "") != str(user_id):
+    binding = get_platform_binding(user_id, league_id, "mfl")
+    if binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "This MFL league isn't linked to your "
                                    "account."}), 404
@@ -43973,7 +45752,7 @@ def mfl_pending_trades():
 
     return jsonify({
         "trades": _mfl.parse_pending_trades(raw),
-        "my_franchise_id": str(row.get("platform_my_team") or "") or None,
+        "my_franchise_id": binding["team_id"] or None,
     })
 
 
@@ -44030,7 +45809,12 @@ def _espn_team_id_from_member_id(league_id: str, member_id, teams) -> int | None
         for t in teams:
             if t.owner_swid and _espn.canonical_swid(t.owner_swid).upper() == target:
                 return t.team_id
-    return None
+        return None
+    # A league-mate who uses the app: their own binding, still verified
+    # against the live team list.
+    b = get_platform_binding(s, league_id, "espn")
+    tid = b["team_id_int"] if b else None
+    return tid if tid is not None and any(t.team_id == tid for t in teams) else None
 
 
 @app.route("/api/trades/propose-espn", methods=["POST"])
@@ -44118,6 +45902,8 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     `espn_pick_unsupported`); the overhaul refuses them earlier, at
     prepare-send, so nothing is half-sent.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
@@ -44151,13 +45937,14 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     if not row:
         return {"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}, 404
-    if str(row.get("user_id") or "") != str(user_id):
-        # One linker per ESPN league row; only the linker has a team binding,
-        # so nobody else can send from it.
+    binding = get_platform_binding(user_id, league_id, "espn")
+    if binding is None:
+        # The SENDER's own binding is the only source of "my team" — never
+        # the leagues row, which every league-mate's link shares.
         return {"error": "espn_not_linked",
                         "message": "This ESPN league isn't linked to your "
                                    "account."}, 404
-    my_team_id = row.get("espn_my_team_id")
+    my_team_id = binding["team_id_int"]
     if my_team_id is None:
         return {"error": "espn_team_unknown",
                         "message": "Couldn't determine your team — re-link "
@@ -44538,7 +46325,8 @@ def fleaflicker_import():
     body = request.get_json(force=True) or {}
     league_id = str(body.get("league_id") or "").strip()
     row = get_platform_league(league_id, "fleaflicker") if league_id else None
-    if not row:
+    binding = get_platform_binding(user_id, league_id, "fleaflicker") if row else None
+    if not row or binding is None:
         return jsonify({"error": "fleaflicker_not_linked",
                         "message": "Link this Fleaflicker league first."}), 404
     try:
@@ -44548,7 +46336,7 @@ def fleaflicker_import():
 
     parsed = _flea.parse_bundle(raw)
     mapped = _flea.map_teams(parsed, _shared_crosswalk())
-    my_team = row.get("platform_my_team")
+    my_team = binding["team_id"]
     if my_team not in {t["team_id"] for t in parsed["teams"]}:
         return jsonify({"error": "fleaflicker_team_missing",
                         "message": "Your team is no longer in this league — "
@@ -44564,7 +46352,7 @@ def fleaflicker_import():
                         "team_key": f"fleaflicker:{league_id}.t{tid}"})  # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=row["user_id"],
+            league_id=league_id, user_id=user_id,
             name=parsed["name"] or row.get("name") or "", platform="fleaflicker",
             season=row.get("platform_season") or _MFL_DEFAULT_YEAR,
             auth=row.get("platform_auth") or "public", my_team=my_team,
@@ -44613,7 +46401,7 @@ def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
     data = request.get_json(silent=True) if request.content_length else {}
-    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete"}:
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete", "retry_unsupported"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
         return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))
@@ -44647,8 +46435,10 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
     (`_mfl_import_league_authed` / `_espn_import_payload`) so a fresh read and
     the session agree on player identity — an id-only read would report a
     name-matched player as "gone". Persists nothing. Member ids follow the
-    import: the linker's own team is `user_id`, every other team the synthetic
-    `mfl:{L}.f{FID}` / `espn:{SWID}` id. Credentials never leave this function.
+    session's view of the snapshot: the CALLER's bound team (their own
+    platform_league_bindings row) is `user_id`, another app user's bound team
+    carries that user's id, every other team the synthetic `mfl:{L}.f{FID}` /
+    `espn:{SWID}` id. No binding → None. Credentials never leave this function.
     """
     user_id = str(sess.get("user_id") or "")
     if not user_id or not str(league_id).isdigit():
@@ -44658,9 +46448,11 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             from . import mfl_service as _mfl
             from .database import get_platform_league
             row = get_platform_league(league_id, "mfl")
-            if not row or str(row.get("user_id") or "") != user_id:
+            binding = get_platform_binding(user_id, league_id, "mfl")
+            if not row or binding is None:
                 return None
-            my_fid = str(row.get("platform_my_team") or "").strip()
+            my_fid = binding["team_id"].strip()
+            labels = platform_bound_teams(league_id, "mfl")
             year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
             host = row.get("platform_host") or _mfl.resolve_host(league_id, year)
             raw = _mfl.fetch_league_bundle(league_id, year, host,
@@ -44669,15 +46461,18 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             rosters = _mfl.map_franchises(parsed, _shared_crosswalk())["rosters"]
             return [{"roster_id": fr["franchise_id"],
                      "owner_id": (user_id if fr["franchise_id"] == my_fid
-                                  else _mfl_member_id(league_id, fr["franchise_id"])),
+                                  else labels.get(fr["franchise_id"])
+                                  or _mfl_member_id(league_id, fr["franchise_id"])),
                      "players": list(rosters.get(fr["franchise_id"], []))}
                     for fr in parsed["franchises"]]
         if platform == "espn":
             from .database import get_espn_league, get_espn_credential
             row = get_espn_league(league_id)
-            if not row or str(row.get("user_id") or "") != user_id:
+            binding = get_platform_binding(user_id, league_id, "espn")
+            if not row or binding is None:
                 return None
-            my_team_id = row.get("espn_my_team_id")
+            my_team_id = binding["team_id_int"]
+            labels = platform_bound_teams(league_id, "espn")
             cred = get_espn_credential(user_id) or {}
             espn_s2 = swid = None
             if cred.get("swid") and cred.get("espn_s2_encrypted"):
@@ -44687,7 +46482,8 @@ def _overhaul_platform_rosters(sess, league_id: str, platform: str):
             league, mapped = _espn_import_payload(league_id, season, espn_s2, swid)
             return [{"roster_id": t.team_id,
                      "owner_id": (user_id if t.team_id == my_team_id
-                                  else _espn_member_id(league_id, t)),
+                                  else labels.get(str(t.team_id))
+                                  or _espn_member_id(league_id, t)),
                      "players": list(mapped["rosters"].get(t.team_id, []))}
                     for t in league["teams"]]
     except Exception as exc:
@@ -44716,6 +46512,8 @@ _install_overhaul(app, require_session=_require_initialized_session,
                   is_pick_asset=_is_ftf_pick_asset, owned_picks_available=_owned_picks_available,
                   inject_owned_picks=_inject_owned_picks, pick_label=_owned_pick_label,
                   slot_order=_league_slot_order, priced_pick_value=_priced_pick_value,
+                  pick_projection=_league_pick_projection,
+                  pick_projection_fields=_owned_pick_projection_fields,
                   elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
                   sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
 

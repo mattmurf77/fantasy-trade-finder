@@ -22,6 +22,7 @@
     "test:breaker-card": "node tests/check-breaker-card.js",
     "test:calc-merged-behavior": "node tests/check-calc-merged-behavior.js",
     "test:fit-first-copy": "node tests/check-fit-first-copy.js",
+    "test:season-signal": "node tests/check-season-signal.js",
     "test:offer-import": "node tests/check-offer-import.js",
     "test:revised-offer-card": "node tests/check-revised-offer-card.js",
     "test:calc-merged-layout": "node tests/check-calc-merged-layout.js",
@@ -53,6 +54,7 @@
     "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:external-links": "node tests/check-external-links.js",
     "test:fa-move": "node tests/check-fa-move.js",
+    "test:in-app-claims": "node tests/check-in-app-claims.js",
     "test:fairness-default": "node tests/check-fairness-default.js",
     "test:share-text": "node tests/check-share-text.js",
     "test:feedback-badge": "node tests/check-feedback-badge.js",
@@ -69,6 +71,8 @@
     "test:invite-links": "node tests/check-invite-links.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
+    "test:test-profile": "node tests/check-test-profile.js",
+    "test:test-profile-swap": "node tests/check-test-profile-swap.js",
     "test:landing-platform-options": "node tests/check-landing-platform-options.js",
     "test:league-candidates-300": "node tests/check-league-candidates-300.js",
     "test:league-drill-in": "node tests/check-league-drill-in.js",
@@ -137,6 +141,7 @@
     "test:tour-suppression": "node tests/check-tour-suppression.js",
     "test:trade-text": "node tests/check-trade-text.js",
     "test:value-bar-b2": "node tests/check-value-bar-b2.js",
+    "test:projected-pick-tag": "node tests/check-projected-pick-tag.js",
     "test:web-calc-favors": "node tests/check-web-calc-favors.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
@@ -177,7 +182,9 @@
     "test:home-playoff-banner": "node tests/check-home-playoff-banner.js",
     "test:outlook-suggestion": "node tests/check-outlook-suggestion.js",
     "test:first-page-failure": "node tests/check-first-page-failure.js",
-    "test:trade-input-readiness": "node tests/check-trade-input-readiness.js"
+    "test:trade-input-readiness": "node tests/check-trade-input-readiness.js",
+    "test:founder-review": "node tests/check-founder-review.js",
+    "test:founder-rule-waterfall": "node tests/check-founder-rule-waterfall.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

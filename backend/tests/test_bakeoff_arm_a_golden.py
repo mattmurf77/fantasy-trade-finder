@@ -529,10 +529,23 @@ def test_r4_bypass_is_thread_local():
 # Contract: docs/plans/small-trade-packages/prd.md §4.
 # Owner include/serve/exclusive switches are runner-only: no historical generator reads
 # them. Listing the new keys is an inventory disposition, not a golden recapture.
+# Win-now season signal (2026-11-11): the revision 5 selector and its two knobs are
+# EXCLUDED, read only by the owner bilateral revision 5 search (and dropped from
+# every other owner search's config); no arm-A generator reads them. The two shed weights
+# (`season_shed_weight_tanking` / `_rebuilding`, 2026-11-11, operator direction) are the same:
+# EXCLUDED, read only by revision 5, dropped from every other owner search's config.
+# The viewer's label fit (`season_viewer_label_fit`, 2026-11-12, operator direction) is the
+# same: EXCLUDED, read only by revision 5, dropped from every other owner search's config.
+# The sell bonus (`season_sell_bonus_tanking` / `_rebuilding`, 2026-11-12, operator direction)
+# is the same: EXCLUDED, read only by revision 5, dropped from every other owner search's config.
 _PINNED_KNOBS = frozenset("""
 simple_player_presentment
 bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only owner_bilateral_enabled
 owner_bilateral_revision_enabled owner_outlook_evidence_enabled owner_bilateral_revision_4_enabled
+owner_bilateral_revision_5_enabled season_conflict_demotion season_partner_matching
+season_shed_weight_tanking season_shed_weight_rebuilding season_viewer_label_fit
+season_sell_bonus_tanking season_sell_bonus_rebuilding
+owner_untouchable_hard
 owner_pool_size owner_pair_budget owner_total_budget
 significance_mode significance_player_min_tier significance_allow_first_round_pick
 age_pref_mult_u23 age_pref_mult_30plus age_pref_boost_cap
@@ -736,6 +749,21 @@ policy_shadow_log_cap
     # `priced_pool_value` is never entered — so no season, no round, and
     # nothing for a market floor to clamp.
     "market_r1_yoy_floor",
+
+    # ── projected slot value, 2026-11-11 ───────────────────────────────────
+    # docs/plans/pick-value-projected-slot/design.md. Five knobs, one
+    # disposition, the same as `market_r1_yoy_floor` above and for both of
+    # its reasons. WHERE THEY ARE READ: `server._league_pick_projection` →
+    # `_c`, hoisted once per league in `_owned_pick_assets`, on the
+    # `_run_trade_job` thread before any arm's `_cfg_override` is entered, so
+    # an arm pin is unreachable; and they price an ASSET (a next-draft 1st)
+    # rather than decide which package to build. The flag
+    # `picks.projected_slot_value` is off by default, and the golden's PICK
+    # assets are literal `_Pick` objects that never reach `priced_pool_value`.
+    # DECISION: EXCLUDED from MODEL_A_PROFILE; the golden stands.
+    "pick_projection_weight", "pick_projection_min_weeks",
+    "pick_projection_max_age_days", "pick_projection_max_round",
+    "pick_projection_season_scaling",
 
     # ── consensus roster-fit sort key, 2026-09-02 ──────────────────────────
     # docs/plans/consensus-fit-sort-key/scope.md. One knob, one disposition.
