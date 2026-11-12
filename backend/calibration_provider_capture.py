@@ -91,8 +91,11 @@ class LinkedSnapshot:
         year = int(binding['platform_season'] or s._MFL_DEFAULT_YEAR)
         exclude = not s._current_season_picks_visible(
             binding.get('draft_status'), binding.get('draft_status_confidence'))
-        owner = lambda fid: (binding['user_id'] if str(fid) == str(binding['platform_my_team'])
-                             else s._mfl_member_id(self.provenance['league_id'], str(fid)))
+        # Mirrors server._sync_mfl_owned_picks' franchise → member map: every
+        # franchise an app user is bound to carries that user's id.
+        bound = s.platform_bound_teams(self.provenance['league_id'], 'mfl')
+        owner = lambda fid: (bound.get(str(fid))
+                             or s._mfl_member_id(self.provenance['league_id'], str(fid)))
         expected = {}
         for pick in self.future_picks:
             yr, rnd = int(pick['year']), int(pick['round'])

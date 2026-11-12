@@ -313,11 +313,11 @@ row. It inserts only on a Sleeper league's first init, with
 | `platform` | str | League source: NULL reads as `'sleeper'` (session init writes `'sleeper'` on a Sleeper league's first insert since 2026-11-03; older Sleeper rows stay NULL); `'espn'` (flag `espn.link`), `'mfl'` (flag `mfl.link`), `'fleaflicker'` (flag `fleaflicker.link`). For every non-Sleeper platform the PK column holds the **platform-native** league id — the plans chose a platform column over magic-prefix ids ([ESPN §2](plans/espn-league-linking-plan-2026-07-11.md) / [multi-platform](plans/multi-platform-linking-plan-2026-07-17.md)) |
 | `espn_season` | int | ESPN `seasonId` used at import — the re-sync key (`/api/espn/import`). NULL for non-ESPN rows |
 | `espn_auth` | str | `'public'` / `'cookie'` — how the ESPN league was read; `'cookie'` re-syncs decrypt the importer's `espn_credentials` row |
-| `espn_my_team_id` | int | The linking user's ESPN team id — binds their `league_members` row to their real FTF `user_id` across re-syncs |
+| `espn_my_team_id` | int | **Legacy (2026-11-11).** The LAST linker's ESPN team id — still written by `upsert_espn_league` (rollback safety), read only by the `platform_league_bindings` backfill. Never anyone's binding: see [`platform_league_bindings`](#platform_league_bindings) |
 | `platform_season` | int | Season/year at import for MFL/Fleaflicker (`mfl`/`fleaflicker`) — the re-sync key. NULL for ESPN/Sleeper rows (ESPN uses `espn_season`) |
 | `platform_host` | str | MFL's per-league `wwwNN.myfantasyleague.com` host (the wwwNN gotcha) — reused on re-sync so no re-resolve is needed. NULL for Fleaflicker/ESPN/Sleeper |
 | `platform_auth` | str | `'public'` / `'cookie'` for MFL/Fleaflicker (Phase 1 is public-only → always `'public'`) |
-| `platform_my_team` | str | The linking user's franchise/team key (MFL franchise id `"0001"`, Fleaflicker team id) — binds their `league_members` row across re-syncs (generic analog of `espn_my_team_id`; **string**, since these ids aren't numeric integers) |
+| `platform_my_team` | str | **Legacy (2026-11-11).** The LAST linker's franchise/team key (MFL `"0001"`, Fleaflicker team id) — written by `upsert_platform_league`, read only by the bindings backfill (see `espn_my_team_id`) |
 | `platform_future_picks` | text (JSON) | MFL/Fleaflicker `futureDraftPicks` stored **raw** (`[{franchise_id,year,round,original_owner}]`). Written at link/import by `upsert_platform_league`, and — for MFL since #207/#228 parity — **refreshed on the draft-status refresh cadence** by `server._refresh_mfl_future_picks` via the narrow `set_platform_future_picks` setter (never wiped when the export is unavailable). Normalized into `draft_picks` by `server._sync_mfl_owned_picks` since #158, so it **is** engine-visible through that store |
 | `draft_status` | str | #207 rookie-draft verdict for the league's CURRENT season: `'drafted'` / `'not_drafted'` / `'unknown'`. NULL = never checked. Written by `server._refresh_league_draft_status` (`backend/draft_status.py` decides); read by `/api/rankings` + `/api/trio` to year-tag the generic pick rungs. **Fail-safe: anything but `'drafted'` shows current-year picks** |
 | `draft_status_confidence` | str | `'high'` (platform-authoritative: Sleeper `complete`+`last_picked`, MFL `made==total`) / `'medium'` (roster heuristic, or a platform/roster conflict) / `'low'` (abstained). Recorded for diagnosis; the serialization path gates on the verdict only |
@@ -386,7 +386,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `write_session_init_members` (delete-then-insert in one transaction under the caller's users-row lock; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). A row that was there when the init's daemon started and is gone by its write (an account deletion) is not re-created by that init (2026-11-03), except in one Postgres interleaving, a public-data limit documented on `write_session_init_members`; session init only updates an imported league's rows. Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
-For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
+For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): **every team an app user is bound to (`platform_league_bindings`) carries that user's real FTF `user_id`** — whoever's link or re-sync writes the snapshot; a team two app accounts are bound to carries the earliest binder's id, and each binder's league list relabels it to them (`database._members_as_seen_by`). Every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
 MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same writer** (`replace_espn_league_members`, which is platform-agnostic) and the same snapshot rule, with synthetic counterparty ids `mfl:{league_id}.f{franchise_id}` / `flea:{league_id}.t{team_id}`. Rosters are crosswalked to Sleeper ids via `mfl_id` / `sportradar_id` respectively (`backend/mfl_service.py`, `backend/fleaflicker_service.py`, shared crosswalk in `espn_service`). League rows are written by the generic `upsert_platform_league`; loaded by `load_platform_leagues_for_user(user_id, platform)`.
 
@@ -1892,6 +1892,26 @@ ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-
 | `created_at`, `updated_at` | str | |
 
 Interim home; folds into the auth epic's `linked_sources` when that lands.
+
+---
+
+## `platform_league_bindings`
+
+Per-user binding for linked ESPN / MFL / Fleaflicker leagues (2026-11-11, [design](plans/platform-league-binding/design.md)): "this app user manages this team in this league". The `leagues` row and `league_members` stay one shared copy per league; before this table "my team" was the shared `leagues.espn_my_team_id` / `platform_my_team` (last linker wins), so a league-mate's link rebound or unlisted the first user. Written **only** by that user's own link (`upsert_espn_league` / `upsert_platform_league`, same transaction as the row) and by the boot backfill; read **only** through `get_platform_binding(user_id, league_id, platform)` ("my team" — no row = not the user's league, fail closed) and `platform_bound_teams(league_id)` (every bound team → its earliest binder, the id `league_members` carries). Pinned by `test_platform_league_binding.py::test_binding_columns_have_one_reader`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | FTF user_id |
+| `league_id` | str PK | `leagues.sleeper_league_id` (platform-native id). Index `ix_plb_league` |
+| `platform` | str | `'espn'` \| `'mfl'` \| `'fleaflicker'` |
+| `team_id` | str | Native team id as text (ESPN teamId, MFL franchise id `"0001"`, Fleaflicker team id) |
+| `source` | str | `'link'` (the user's own link / re-sync) \| `'backfill'` |
+| `created_at` | str | Kept on re-link; orders co-owner labels |
+| `updated_at` | str | |
+
+**Backfill** (`backfill_platform_league_bindings`, `_migrate_db` every boot, idempotent): only leagues with no binding row yet; binds the league's single app-user `league_members` row to the legacy team column (the last link's own pair); zero or several app-user members, a null team, or (ESPN) the candidate's own SWID labelling another team → nothing (that user re-links). `INSERT … ON CONFLICT DO NOTHING`; never writes `leagues` / `league_members`.
+
+User-keyed: deleted with the account and exported (`accounts._ADDITIONAL_PRIVATE_TABLES`). On deletion a platform `leagues` row the user created is handed (`leagues.user_id`) to the earliest surviving binder instead of deleted.
 
 ---
 

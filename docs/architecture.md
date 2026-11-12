@@ -1188,3 +1188,16 @@ still checks every delivery. Different selections and force remain independent;
 intent-only retains the organic index. Strong source identities are job-private
 and released on terminal/revocation paths. No completed proof reuse or global
 admission guarantee follows. [Contract and evidence](plans/selected-running-single-flight/scope.md).
+
+## Linked platform leagues: shared league, per-user binding (2026-11-11)
+
+ESPN / MFL / Fleaflicker leagues are stored once: the `leagues` row (platform-native
+id) and the `league_members` snapshot (every team's crosswalked roster). Which team is
+whose is per user: `platform_league_bindings` (user, league) → team, written only by
+that user's own link (`upsert_espn_league` / `upsert_platform_league`) and read through
+`database.get_platform_binding` (league list, re-sync, sends, validate, MFL
+respond/pending, overhaul rosters, #321 checks) or `platform_bound_teams` (pick owners,
+draft board, draft order, roster-history sweep). `replace_espn_league_members` labels
+every bound team with its binder's id inside the snapshot transaction, so league-mates
+see each other as real members. [Design](plans/platform-league-binding/design.md).
+
