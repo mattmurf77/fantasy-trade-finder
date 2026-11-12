@@ -199,7 +199,9 @@ export default function StandingsScreen() {
 
   let projected: React.ReactNode;
   if (batchProjections) {
-    projected = <LeagueProjectionSection />;
+    // Keyed by league: a switch in the header must not carry an expanded
+    // team row (selected by roster id, which repeats across leagues) over.
+    projected = <LeagueProjectionSection key={leagueId ?? ''} />;
   } else if (!isSleeper) {
     projected = <OutlookUnsupportedRow />;
   } else {

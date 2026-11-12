@@ -361,8 +361,8 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
   assert(/<UsageLeagueList[^>]*compact/.test(table), '2p. the expanded row lists the other leagues');
   assert(/getUsageTrends\(focusId as string, otherIds, selectedWeeks, periodParam\)/.test(screen)
     && /queryKey: \['usage-trends', focusId, otherIds\.join\(','\), weeksParam\(selectedWeeks\),\s*\.\.\.\(periodParam \? \['period3'\] : \[\]\)\]/.test(screen)
-    && /placeholderData: keepPreviousData/.test(screen),
-    '2p2. the week selection reaches the server and keys the cache; the old list stays up while it loads');
+    && /placeholderData: \(prev, prevQuery\) => \(prevQuery\?\.queryKey\[1\] === focusId \? prev : undefined\)/.test(screen),
+    '2p2. the week selection reaches the server and keys the cache; the old list stays up while it loads (same league only)');
   assert(/<TickLabel>WEEKS<\/TickLabel>/.test(screen) && /testID=\{`usage-trends\.week\.\$\{w\}`\}/.test(screen)
     && /setDraft\(toggleWeek\(shown, w\)\)/.test(screen) && /available=\{data\?\.available_weeks \?\? \[\]\}/.test(screen),
     '2p3. Filters offers every completed week (server-provided) as a toggle, plus presets');

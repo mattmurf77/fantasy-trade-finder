@@ -285,15 +285,21 @@ function HeaderBack({ onPress, testID }: { onPress: () => void; testID: string }
 // ideas) renders under TopBar. Rendered as native-stack's custom `header`,
 // so no native header (and so no native back button, RNS#3294) exists on
 // the screen: the #151 JS HeaderBack is the back control. TopBar owns the
-// top safe-area inset, exactly as it does above TabNav.
+// top safe-area inset, exactly as it does above TabNav. Standings, Usage
+// Trends, Track record and Win Now use it too (operator, 2026-11-12: "Yes
+// add the selector to the recommended pages").
 function LeagueTopBarHeader({
   title,
   back,
+  right,
 }: {
   title: string;
   /** The screen's HeaderBack element (its testID stays a greppable literal
    *  at the registration, for testid-lint). */
   back: React.ReactNode;
+  /** Optional trailing control — what a native `headerRight` would draw
+   *  (Usage Trends' info button, set by the screen via setOptions). */
+  right?: React.ReactNode;
 }) {
   return (
     <View style={styles.leagueHeader}>
@@ -303,6 +309,7 @@ function LeagueTopBarHeader({
         <View style={styles.leagueSubHeaderTitle} pointerEvents="none">
           <HeaderTitle>{title}</HeaderTitle>
         </View>
+        {right ? <View style={styles.leagueSubHeaderRight}>{right}</View> : null}
       </View>
     </View>
   );
@@ -871,17 +878,31 @@ export default function RootNav({ booted }: { booted: boolean }) {
             ),
           })}
         />
+        {/* Win Now — the league selector stays as the header
+            (LeagueTopBarHeader). The screen remounts per league
+            (`key={userId:leagueId}`), so a switch drops every result, editor
+            and protected asset. #151 JS back (RNS#3294). */}
         <Stack.Screen
           name="WinNow"
           component={WinNowScreen}
           options={({ navigation }) => ({
             headerShown: true,
             title: 'Win Now',
-            headerTitle: () => <HeaderTitle>Win Now</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            headerBackVisible: false,
-            headerLeft: () => <HeaderBack testID="win-now.back-btn" onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('Main')} />,
+            header: () => (
+              <LeagueTopBarHeader
+                title="Win Now"
+                back={
+                  <HeaderBack
+                    testID="win-now.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
+                }
+              />
+            ),
           })}
         />
         {/* FA finder — pushed from the League tab's "Free agents" row. */}
@@ -920,25 +941,27 @@ export default function RootNav({ booted }: { booted: boolean }) {
         {/* Home hub (scope R5) — Standings, pushed over the tabs from Home's
             Standings row so Back returns to Home. Registered
             UNCONDITIONALLY: `nav.home_hub` gates the Home row, not the route.
-            FreeAgents' #151 back control (RNS#3294); the screen mounts its
-            own FeedbackFAB. */}
+            FreeAgents' header: the league selector stays as the header
+            (LeagueTopBarHeader) with the #151 JS back control (RNS#3294);
+            the screen mounts its own FeedbackFAB. */}
         <Stack.Screen
           name="Standings"
           component={StandingsScreen}
           options={({ navigation }) => ({
             headerShown: true,
             title: 'Standings',
-            headerTitle: () => <HeaderTitle>Standings</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            headerBackVisible: false,
-            headerLeft: () => (
-              <HeaderBack
-                testID="standings.back-btn"
-                onPress={() =>
-                  navigation.canGoBack()
-                    ? navigation.goBack()
-                    : navigation.navigate('Main')
+            header: () => (
+              <LeagueTopBarHeader
+                title="Standings"
+                back={
+                  <HeaderBack
+                    testID="standings.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
                 }
               />
             ),
@@ -948,26 +971,30 @@ export default function RootNav({ booted }: { booted: boolean }) {
             usage_trends.enabled) — pushed from the Home hub's "Usage Rates"
             tile and the Free Agents link. Registered unconditionally (house
             rule): the flag gates the entry points, and a stale link lands on
-            the screen's honest unavailable state. */}
+            the screen's honest unavailable state. The league selector stays
+            as the header (LeagueTopBarHeader, #151 JS back — RNS#3294). The
+            screen still sets its info button as `headerRight` via
+            setOptions; the custom header draws it in the right slot. */}
         <Stack.Screen
           name="UsageTrends"
           component={UsageTrendsScreen}
           options={({ navigation }) => ({
             headerShown: true,
             title: 'Usage Trends',
-            headerTitle: () => <HeaderTitle>Usage Trends</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            // #151 pattern — see FreeAgents above (RNS#3294).
-            headerBackVisible: false,
-            headerLeft: () => (
-              <HeaderBack
-                testID="usage-trends.back-btn"
-                onPress={() =>
-                  navigation.canGoBack()
-                    ? navigation.goBack()
-                    : navigation.navigate('Main')
+            header: ({ options }) => (
+              <LeagueTopBarHeader
+                title="Usage Trends"
+                back={
+                  <HeaderBack
+                    testID="usage-trends.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
                 }
+                right={options.headerRight?.({ canGoBack: navigation.canGoBack() })}
               />
             ),
           })}
@@ -980,26 +1007,28 @@ export default function RootNav({ booted }: { booted: boolean }) {
             revalidation instead of unmounting under the user.
 
             A ROOT-STACK push, so ReceiptsScreen mounts its own FeedbackFAB
-            (#188) — RootNav's global mount covers the tab stack only. */}
+            (#188) — RootNav's global mount covers the tab stack only.
+            The league selector stays as the header (LeagueTopBarHeader);
+            same iOS 26 JS back control as FreeAgents above
+            (react-native-screens#3294). */}
         <Stack.Screen
           name="Receipts"
           component={ReceiptsScreen}
           options={({ navigation }) => ({
             headerShown: true,
             title: 'Track record',
-            headerTitle: () => <HeaderTitle>Track record</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            // Same iOS 26 back-control workaround as FreeAgents above
-            // (react-native-screens#3294).
-            headerBackVisible: false,
-            headerLeft: () => (
-              <HeaderBack
-                testID="receipts.back-btn"
-                onPress={() =>
-                  navigation.canGoBack()
-                    ? navigation.goBack()
-                    : navigation.navigate('Main')
+            header: () => (
+              <LeagueTopBarHeader
+                title="Track record"
+                back={
+                  <HeaderBack
+                    testID="receipts.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
                 }
               />
             ),
@@ -1323,6 +1352,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 64,
   },
+  // Trailing slot: pinned to the row's right edge, above the title layer.
+  leagueSubHeaderRight: { marginLeft: 'auto' },
   // #130 — Icon Button spec (components.md): 32×32, radius sm, not circular.
   headerClose: {
     width: 32,

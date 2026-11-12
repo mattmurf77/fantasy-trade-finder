@@ -1,3 +1,13 @@
+## 2026-11-12 — League selector header on four more pushed pages (D-252), branch `feat/league-selector-pushed-pages`
+
+- **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 182 of 182 `check-*.js`, including the new `check-league-header-pages.js` (43 assertions) and the updated `check-home-destinations.js` 5d and `check-usage-trends.js` 2p2; testid-lint OK.
+- **Backend:** no change. The digest test and the 19 backend tests that read `mobile/src`: 477 passed (subagent). Full backend suite: CI on the PR.
+- **What is pinned, per screen:** registered through `LeagueTopBarHeader`; literal back testID and the fallback to the tabs; no native `headerLeft`; the right slot and Usage Trends' info button reaching it; FeedbackFAB and the bottom-only safe area; league in the query keys; league-bound state dropped on a switch; no league-name line on Usage Trends.
+- **Sabotages, red then restored (47, subagent; hashes equal after each):** every new or changed assertion.
+- **Main session:** read the Standings and Usage Trends diffs.
+- **Not verified:** anything on a device, including the info button's position in the right slot and the reduced list height. Operator checklist: the scope addendum.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Founders' review: any label for any player (D-251), branch `fix/founder-labels-any-label`
 
 - **Full backend suite (Opus subagent, no edits in flight, before merging the Free Agents and Usage Trends branches):** 15,405 passed, 42 skipped, 0 failed. Targeted (`test_founder_review.py` 70, season value, season signal worker, bilateral season, season copy, label review, replay, digest): 297 passed.

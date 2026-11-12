@@ -55,6 +55,7 @@
     "test:external-links": "node tests/check-external-links.js",
     "test:fa-move": "node tests/check-fa-move.js",
     "test:free-agents-header": "node tests/check-free-agents-header.js",
+    "test:league-header-pages": "node tests/check-league-header-pages.js",
     "test:in-app-claims": "node tests/check-in-app-claims.js",
     "test:fairness-default": "node tests/check-fairness-default.js",
     "test:share-text": "node tests/check-share-text.js",
