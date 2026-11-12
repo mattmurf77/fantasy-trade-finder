@@ -265,4 +265,4 @@ runbook, cross-client-invariants) and write the dated entry in
 [D-056]: ../../living-memory/DECISIONS.md
 [D-058]: ../../living-memory/DECISIONS.md
 
-- [League projections](league-projections/implementation.md): default-off weekly standings + joint non-playoff Max PF capability; implementation under review, provider coverage and launch decisions unresolved. Original spec and confirmed cadence addendum retained.
+- [League projections](league-projections/implementation.md): default-off weekly standings + joint non-playoff Max PF capability; implementation under review, provider coverage and launch decisions unresolved. Original spec and confirmed cadence addendum retained. Research 2026-11-12, no code change: [calibration check](league-projections/calibration-check/README.md) finds no week-to-week persistence in projection error (a persistent team SD of 3+ is ruled out), so independent weekly draws are not what makes the odds extreme; horizon error is unmeasured.
