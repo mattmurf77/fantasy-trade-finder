@@ -26,6 +26,8 @@ exceptions. See [configuration](config-reference.md#shared-recommendation-signif
 
 **Write consent** (D1 free-agent moves) — The user's ticked, time-boxed authorization for Fleeced to make roster moves (adds, drops, later waiver claims) in their platform leagues on their behalf: per platform account, never per league, for a rolling 7 × 24 h from the server's own timestamp, and only for moves the user starts and confirms with the named button. A row in the append-only `platform_write_consents` table, tied to the exact text shown by its `copy_version` (`sleeper-roster-moves-v1`; v2 once claims are on). A version bump, a different platform account, disconnecting, the token expiring or being refused, or Settings › Leagues › Stop roster moves ends it, each as a new withdrawal row. See [legal R15 / contract](plans/sleeper-fa-write/contract.md).
 
+**Verified write shape** (D1 Update 1) — A platform's free-agent request builder is "verified" once one supervised real transaction has been recorded against it. Until then its module constant stays false (`sleeper_write.FA_MOVE_SHAPES_CAPTURED`, `mfl_write.FA_MOVE_SHAPES_VERIFIED` / `FA_CLAIM_SHAPE_VERIFIED`) and the adapter refuses before building or sending, whatever the platform's `*.send_add_drop` flag says. See `docs/plans/in-app-claims/design.md`.
+
 **Move capability** (`move`, D1) — The server's per-league answer, on `GET /api/league/free-agents`, to "what may the claim sheet do here?": `move.mode` is `submit` (make the move in the app), `handoff` ("Open in Sleeper to claim") or `unsupported` (today's no-add alert), with `claims`, `league_platform`, `connect`, `consent_until` and server-authored `copy`. The client reads no flag; the server's kill switch (`sleeper.send_add_drop`) and whether the platform's write shapes are captured decide `mode`, so a platform lights up server-only. Rows may carry `move_kind` (`add` \| `claim` \| null) and a `move_mode: 'handoff'` override. Distinct from a move's **outcome unknown** (502 `{platform}_outcome_unknown`): the move may have landed, so the app never retries it.
 
 **search_id** — A client UUID minted at the tap on a search-starting control (`state/tradeSearchTrace.ts`). It rides `/api/trades/generate` and every time-to-suggestion event of that search (R1 `find_trades_tapped`, R2/R2b, `deck_buffer_empty`), so a tap, its job and its first card join on one key. Exactly one of R2/R2b fires per `search_id`. See the [events addendum](business/analytics/2026-10-20-time-to-suggestion-events.md).
@@ -677,6 +679,10 @@ A unique allocation of currently available players meeting the existing dynasty 
 **Attempt** — One send of one offer inside one batch (`overhaul_attempts`), with a cross-client state enum (`queued … stale`), a state source (server / provider / ownership refresh / user-reported) and, for Sleeper, the `provider_transaction_id`. Accepted is derived from ownership change on refresh, never asserted by the client.
 
 **Recovery (Priority 1: Recover your first)** — For `blow_it_up`, the exact-identity requirement to own the user's **own original** next-season (league season + 1) first-round pick; when a league-mate holds it, a targeted search against that holder produces `is_recovery` offers. Advisory: it never blocks other sends.
+
+## Test profile
+
+**Test profile** — the operator's throwaway onboarding identity, `qa_tp_<real working key>`. The server treats it as an app user who has never onboarded (`backend/test_profile.py`, flag `dev.test_profile` + env `TEST_PROFILE_ACCOUNTS`). Whether an id is a test profile is a pure function of the id. It may enter only leagues in its own namespace, `qa_tp:<real key>:<league id>`. In those leagues every other team is `qa_tpo_<id>`, so no real person is a member. Leagues reach that namespace through the real Sleeper/ESPN/MFL linking flows (plan design.md §11–§12). Not to be confused with Test Stages' random `qa_<hex>` stage users.
 
 ## Redaction token
 

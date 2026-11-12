@@ -1025,6 +1025,16 @@ in-flight one, so two inits never swap services side by side.
 
 ## Ownership and telemetry boundaries
 
+**Onboarding test profile** (`backend/test_profile.py`, a leaf: imports `database` only). An allow-listed operator session can switch to `qa_tp_<real key>`, a second app user whose identity is a pure function of its id.
+- It enters only leagues in its own namespace (`qa_tp:<key>:<league id>`, every other team `qa_tpo_*`), filled by the production linking flows (`plans/onboarding-test-profile/design.md` §11–§12):
+  - ESPN/MFL link routes write through the seam `test_profile.storage_league_id`, and the platform URL builders read back through `native_league_id`.
+  - Sleeper reads use `server._sleeper_identity`, and `session_input` re-keys every league-mate.
+  - `test_profile.outbound_blocked` sits in every push, inbox, match, referral and platform-write writer.
+- `server._test_profile_request_guard` (before_request) fences each request. It refuses any other league id, platform writes, Sleeper JWT capture, Fleaflicker and identity minting, and it skips push-token registration.
+- `_get_session` drops a test session once its account leaves the gate.
+- Crons, cohorts, the eval spine, the leaderboard and analytics skip `qa_` ids.
+- The device half (`mobile/src/state/testProfile.ts`) stashes and restores the real profile's storage and token.
+
 Private route gates require a verified session; username discovery cannot authorize private state. `backend/session_input.py` resolves identity and roster inputs from authenticated session state plus authoritative league sources before session construction or persistence. Apple/Google proof authenticates its provider account; a new Sleeper binding separately requires Sleeper proof. Analytics commits validated events before recommendation outcome side effects, which require verified ownership of an existing impression. Authentication tokens are replaced by domain-separated analytics identifiers at both persistence entry points. Account deletion revokes durable sessions in the same transaction as private data deletion.
 
 ---

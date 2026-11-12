@@ -98,6 +98,7 @@ an old job during polling or refill an offer removed by #419's disposition check
 | `profile_session_init.py` | 210 | Standalone profiler for `/api/session/init` — run directly, not imported by the app. |
 | `test_support.py` | 382 | ⚠️ **Production module** — the `FTF_TEST_MODE` `/__test__/*` blueprint. |
 | `test_users.py` | 184 | ⚠️ **Production module** — the `qa_*` stage-user spawner. |
+| `test_profile.py` | 400 | ⚠️ **Production module** — the operator's onboarding test profile (`qa_tp_<real key>`, flag `dev.test_profile` + env `TEST_PROFILE_ACCOUNTS`). It holds:<br>• the identity predicates;<br>• the `qa_tp:` namespace seams `storage_league_id` (write) / `native_league_id` (read), both the identity for real users;<br>• `masked_member_id` (league-mates → `qa_tpo_*`);<br>• the outbound chokepoint `outbound_blocked` + `ACTOR`, matching structured ids only (`is_test_world_id`);<br>• the database write fence `check_write` (registered on every engine by `database._tp_write_fence`);<br>• the derived-scope reset.<br>Import-light: `database` is imported only inside reset. Routes, the request fence and `_sleeper_identity` are in `server.py`. |
 | `tier_config.json` | — | Per (format, position) tier bands, loaded by `ranking_service`. Cross-client contract. |
 
 ## Subpackages

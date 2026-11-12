@@ -19,11 +19,12 @@
 // Intentional behavior changes: NONE. No queries, no loading state.
 
 import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
 
 import { chalk } from '../../../theme/chalkline';
 import { TickLabel, Icon } from '../../../components/chalkline';
 import { useFlag } from '../../../state/useFeatureFlags';
+import { enterTestProfile, useTestProfile } from '../../../state/testProfile';
 import { styles } from '../styles';
 import type { SettingsSectionProps } from './types';
 
@@ -44,6 +45,33 @@ export default function TestingSection({
   // flag is delivered per-device via the experiment overlay, so it doubles
   // as the tester-allowlist signal for gating the Testing section in v2.
   const stageUsersEnabled = useFlag('testing.stage_users');
+  // Onboarding test profile: shown only when the SERVER offers it to this
+  // account (GET /api/test-profile — flag dev.test_profile AND the account in
+  // TEST_PROFILE_ACCOUNTS) and the device is not already in it.
+  const testProfileOffered = useTestProfile((s) => s.available && !s.active);
+  const testProfileBusy = useTestProfile((s) => s.busy);
+
+  const confirmTestProfile = () =>
+    Alert.alert(
+      'Test onboarding as a new user?',
+      'The app restarts as a first launch. Sleeper, ESPN and MFL linking run the real flows ' +
+        'with your own accounts; Apple / Google sign-in is not part of the test, and the ' +
+        'landing ESPN / MFL buttons continue to the "Link a league" screens. Your real profile ' +
+        'and data are kept exactly as they are; the banner at the top takes you back, or ' +
+        'resets the test profile, at any time.\n\n' +
+        'Signing in to ESPN or MFL here starts a new session with them. If they end older ' +
+        'sessions, your real profile\'s ESPN or MFL link will ask you to re-link.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start',
+          onPress: () =>
+            enterTestProfile().catch((e) =>
+              Alert.alert('Test profile', e?.message || 'Could not start the test profile.'),
+            ),
+        },
+      ],
+    );
 
   return (
     <>
@@ -61,6 +89,23 @@ export default function TestingSection({
             <Text style={styles.rowKey}>Test stages</Text>
             <Text style={styles.rowSub}>
               Spawn a synthetic user at any adoption stage (operator QA).
+            </Text>
+          </View>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+      ) : null}
+      {testProfileOffered ? (
+        <Pressable
+          testID="settings.testing.test-profile"
+          accessibilityRole="button"
+          disabled={testProfileBusy}
+          onPress={confirmTestProfile}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowKey}>Test onboarding as a new user</Text>
+            <Text style={styles.rowSub}>
+              Switch to a fresh test profile to run onboarding and Sleeper / ESPN / MFL linking. Your profile is kept.
             </Text>
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />

@@ -15,10 +15,14 @@
 // Pinned by tests/check-settings-ia.js.
 
 import { useFlag } from '../../state/useFeatureFlags';
+import { useTestProfile } from '../../state/testProfile';
 
 export function useTesterSurface(): boolean {
-  // Both hooks run on every render; only the result is combined.
+  // All hooks run on every render; only the result is combined.
   const stageUsers = useFlag('testing.stage_users');
   const timingReadout = useFlag('testing.timing_readout');
-  return __DEV__ || stageUsers || timingReadout;
+  // Onboarding test profile: offered by the SERVER (allow-listed account),
+  // read from the store the boot leg fills — no query here.
+  const testProfile = useTestProfile((s) => s.available || s.active);
+  return __DEV__ || stageUsers || timingReadout || testProfile;
 }

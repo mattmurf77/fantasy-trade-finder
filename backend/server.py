@@ -267,6 +267,7 @@ from . import sleeper_write as _sleeper_write
 from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
+from . import test_profile as _tp               # onboarding test profile (dev.test_profile)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
@@ -612,6 +613,15 @@ def _sleeper_record(url: str, data) -> None:
     log.info("sleeper-record WROTE %s", path)
 
 
+def _tp_url_names_test_id(url: str) -> bool:
+    """A path segment of `url` is an exact test-world id (review L1: never a
+    substring, so a real username or league containing the text is fine)."""
+    if "qa_tp" not in url:          # cheap pre-filter; the decision is structural
+        return False
+    path = urllib.parse.urlsplit(url).path
+    return any(_tp.is_test_world_id(urllib.parse.unquote(seg)) for seg in path.split("/"))
+
+
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
 
@@ -619,6 +629,10 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
     (a URLError) without touching the network; a 429 opens it. Fixture mode
     goes through the circuit too, so cassette 429s exercise the real path.
     """
+    if _tp_url_names_test_id(url):
+        # Test-profile ids (backend/test_profile.py) are never real Sleeper
+        # ids: a namespaced league or profile must not reach the network.
+        raise urllib.error.HTTPError(url, 404, "test-profile id", None, None)
     league = _api_obs.sleeper_endpoint_class(url)[1]
     with _sleeper_http.guard(league):
         return _sleeper_get_unguarded(url, timeout)
@@ -2635,6 +2649,9 @@ def _restore_persisted_session(token: str) -> dict | None:
         if sess is not None:
             return sess
         user_id = str(row["user_id"])
+        is_test = _tp.is_test_profile_id(user_id)
+        if is_test and not _tp.enabled_for(_tp.real_id_of(user_id), is_enabled):
+            return None
         try:
             if _accts.is_account_user_id(user_id):
                 _, payload = _account_build_session(
@@ -2652,6 +2669,7 @@ def _restore_persisted_session(token: str) -> dict | None:
                                   or profile.get("username") or ""),
                     avatar=profile.get("avatar"),
                     token=token,
+                    **({"test_profile": True} if is_test else {}),
                 )
                 payload.pop("extension", None)
         except Exception:
@@ -2740,11 +2758,55 @@ def _get_session(token: str) -> dict | None:
         return None
     with _sessions_lock:
         sess = _sessions.get(token)
-    if sess is not None:
-        return sess
-    if not is_enabled("auth.persistent_sessions"):
+    if sess is None:
+        if not is_enabled("auth.persistent_sessions"):
+            return None
+        sess = _restore_persisted_session(token)
+    if sess is not None and _tp.is_test_profile_id(sess.get("user_id")) and (
+            not token.startswith(_TP_TOKEN_PREFIX) or not _test_profile_session_allowed(sess)):
+        _tp_drop_session(token, sess)      # review L2: no direct _sessions reader sees it again
         return None
-    return _restore_persisted_session(token)
+    return sess
+
+
+_TP_TOKEN_PREFIX = "tp."
+
+
+def _tp_drop_session(token: str, sess: dict | None = None) -> None:
+    """Remove one test-profile session from memory and the durable store."""
+    with _sessions_lock:
+        if sess is None or _sessions.get(token) is sess:
+            _sessions.pop(token, None)
+        if sess is not None:
+            sess["_revoked"] = True
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+
+
+def _tp_evict_closed_sessions() -> int:
+    """Review L2: evict every in-memory test-profile session whose gate is
+    closed (flag off, account removed from TEST_PROFILE_ACCOUNTS), so the
+    many direct `_sessions` readers never see one. Run by the flag reload and
+    the cleanup loop; `_get_session` evicts on sight too."""
+    with _sessions_lock:
+        dead = [(t, s) for t, s in _sessions.items()
+                if _tp.is_test_profile_id(s.get("user_id"))
+                and not _test_profile_session_allowed(s)]
+    for t, s in dead:
+        _tp_drop_session(t, s)
+    return len(dead)
+
+
+def _test_profile_session_allowed(sess: dict) -> bool:
+    """A test-profile session lives only while its real account is still
+    allowed (flag `dev.test_profile` + TEST_PROFILE_ACCOUNTS). Turning either
+    off makes every test-profile token read as expired. Real sessions: True."""
+    uid = sess.get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return True
+    return _tp.enabled_for(_tp.real_id_of(uid), is_enabled)
 
 
 class _RequestSession(collections.UserDict):
@@ -2831,6 +2893,27 @@ def _active_format(sess: dict) -> str:
     """Return the format that `_require_session` resolved for this request."""
     return (sess.get("_effective_format") if isinstance(sess, _RequestSession)
             else None) or sess.get("active_format") or "1qb_ppr"
+
+
+def _sleeper_identity(sess) -> str:
+    """THE Sleeper user id of a session, for READ-ONLY Sleeper calls (the
+    username step, league discovery, roster resolution). For every real
+    session it is the session's own user id — byte-identical to before, which
+    tests/test_test_profile_sleeper.py pins over every such site. For the
+    onboarding test profile `qa_tp_X` it is the real account's own Sleeper id
+    (X itself, or the Sleeper id bound to account X); the app identity stays
+    `qa_tp_X` and nothing keyed by this id is ever written for it."""
+    uid = str((sess or {}).get("user_id") or "")
+    if not _tp.is_test_profile_id(uid):
+        return uid
+    real = _tp.real_id_of(uid) or ""
+    if real.isdigit():
+        return real
+    from . import accounts as _accounts
+    if _accounts.is_account_user_id(real):
+        acct = _accounts.get_account(real[len(_accounts.ACCOUNT_USER_PREFIX):]) or {}
+        return str(acct.get("sleeper_user_id") or "")
+    return ""
 
 
 def _league_user_id(sess: dict) -> str:
@@ -3166,6 +3249,11 @@ def _cleanup_loop() -> None:
         _sweep_orphaned_overhauls_once()
 
         try:
+            _tp_evict_closed_sessions()
+        except Exception:
+            log.exception("test-profile session sweep failed")
+
+        try:
             _prune_deleted_partner_ids()
         except Exception as err:      # the class only: its text may quote ids
             log.error("cleanup: deleted-id prune failed: %s", type(err).__name__)
@@ -3410,8 +3498,8 @@ from . import user_data_lifecycle as _user_data_lifecycle
 @app.before_request
 def _acquire_user_data_lease():
     g._user_data_started = _user_data_lifecycle.snapshot()
-    if request.endpoint == "delete_account_route":
-        return  # deletion acquires all account aliases in sorted order
+    if request.endpoint in ("delete_account_route", "test_profile_reset"):
+        return  # deletion (and the test-profile reset's drain) acquires the aliases itself
     token = request.headers.get("X-Session-Token", "")
     if not token:
         return
@@ -16442,7 +16530,8 @@ def get_rankings_progress():
                 _league_obj  = sess.get("league")
                 _league_id   = getattr(_league_obj, "league_id", None)
                 _league_name = getattr(_league_obj, "name", "") or ""
-                if _league_id:
+                # A test profile's unlock is never announced to anyone.
+                if _league_id and not _tp.is_test_profile_id(g_user_id):
                     _members  = load_league_member_unlock_states(
                         _league_id, exclude_user_id=g_user_id,
                     )
@@ -26968,6 +27057,8 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
     when the fetch fails, so a verdict that just flipped to `drafted` still
     drops the stale season's rows.
     """
+    if _tp.is_test_league_id(league_id):
+        return None   # a test-profile snapshot keeps the copied verdict; no platform read
     try:
         ctx = get_league_draft_context(league_id)
         if not ctx:
@@ -27445,6 +27536,8 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     route wrapper repeats its own prefix checks first so its ordering is
     byte-identical; on that path these re-checks are no-ops.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
     if not is_enabled("trade.send_in_sleeper"):
@@ -28886,6 +28979,15 @@ def submit_rankings():
     body      = request.get_json(force=True) or {}
     user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
+    # Review M1 (2026-11-12): publishing into a league marks every member's
+    # stored decks stale and feeds their trade generation, so the caller must
+    # be IN it: the session's own league, or a stored league_members row. No
+    # client sends another league today (mobile, web and extension never call
+    # this route), so this changes nothing for a real flow.
+    if str(league_id) != str(getattr(g_league, "league_id", "")):
+        member_ids = {str(m.get("user_id")) for m in (load_league_members(str(league_id)) or [])}
+        if str(g_user_id) not in member_ids:
+            return jsonify({"error": "league_membership_required"}), 403
 
     with service._lock:
         all_rankings = service.get_rankings(position=None)
@@ -29862,11 +29964,23 @@ def sleeper_user(username):
 @app.route("/api/sleeper/leagues/<user_id>")
 def sleeper_leagues(user_id):
     """Fetch NFL leagues for a Sleeper user (2026 season) + local DB leagues."""
-    url = f"https://api.sleeper.app/v1/user/{user_id}/leagues/nfl/2026"
+    fetch_uid = user_id
+    if _tp.is_test_profile_id(user_id):
+        # Onboarding test profile: the SAME discovery read, made with the
+        # real account's Sleeper id, ids returned in the profile's namespace.
+        # Only the profile's own session may ask.
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if not caller or caller.get("user_id") != user_id:
+            return jsonify([])
+        fetch_uid = _sleeper_identity(caller)
+    url = f"https://api.sleeper.app/v1/user/{fetch_uid}/leagues/nfl/2026"
     log.info("=== /api/sleeper/leagues  user_id=%r", user_id)
     sleeper_failed = False
     try:
         sleeper_data = _sleeper_get(url) or []
+        if fetch_uid != user_id:
+            sleeper_data = [{**lg, "league_id": _tp.storage_league_id(user_id, str(lg.get("league_id")))}
+                            for lg in sleeper_data if isinstance(lg, dict) and lg.get("league_id")]
     except Exception as e:
         log.error("  leagues error: %s", e)
         sleeper_data = []
@@ -29875,6 +29989,9 @@ def sleeper_leagues(user_id):
     # Append any locally-stored leagues where this user is a member
     try:
         local = load_local_leagues_for_user(user_id)
+        if fetch_uid != user_id:   # a namespaced Sleeper league is listed once
+            _seen = {str(lg.get("league_id")) for lg in sleeper_data}
+            local = [lg for lg in local if str(lg.get("league_id")) not in _seen]
         if local:
             log.info("  appending %d local league(s) for user %s", len(local), user_id)
         sleeper_data = list(sleeper_data) + local
@@ -29929,6 +30046,25 @@ def sleeper_leagues(user_id):
 def sleeper_rosters(league_id):
     """Fetch all rosters for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/rosters  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "rosters" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "rosters" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Platform-imported leagues (ESPN/MFL/Fleaflicker) have NUMERIC
         # platform-native ids, so the isdigit() split alone would misroute
@@ -29963,6 +30099,25 @@ def sleeper_rosters(league_id):
 def sleeper_league_users(league_id):
     """Fetch all users for a league — serves DB data for local non-Sleeper leagues."""
     log.info("=== /api/sleeper/league_users  league_id=%r", league_id)
+    if _tp.is_test_league_id(league_id) and not is_linked_platform_league(league_id):
+        caller = _get_session(request.headers.get("X-Session-Token", ""))
+        if caller and _tp.owns_test_league(caller.get("user_id"), league_id):
+            # Onboarding test profile, a Sleeper league: the SAME live read,
+            # with the native id, re-keyed before it leaves the server.
+            native = _tp.native_league_id(league_id)
+            try:
+                rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{native}/rosters") or []
+                users = (_sleeper_get(f"https://api.sleeper.app/v1/league/{native}/users") or []
+                         if "users" == "users" else [])
+            except Exception:
+                return jsonify({"error": "sleeper_unavailable",
+                                "message": "Sleeper is unavailable — try again shortly."}), 503
+            from .sleeper_roster import find_user_roster as _fur
+            mine = _fur(rosters, _sleeper_identity(caller))
+            own = (mine or {}).get("owner_id")
+            if "users" == "users":
+                return jsonify(_tp.mask_sleeper_users(league_id, users, own))
+            return jsonify(_tp.mask_sleeper_rosters(league_id, rosters, own))
     try:
         # Same platform-imported split as /api/sleeper/rosters (#149/#150).
         if not league_id.isdigit() or is_linked_platform_league(league_id):
@@ -30617,7 +30772,11 @@ def session_init():
     from .session_input import resolve_session_input, SessionInputError
     _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
+        # The Sleeper identity differs from the session user only for the
+        # onboarding test profile; a real session's call is unchanged.
+        _tp_kw = ({"sleeper_identity": _sleeper_identity(existing_sess)}
+                  if _tp.is_test_profile_id((existing_sess or {}).get("user_id")) else {})
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw, **_tp_kw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
@@ -30637,6 +30796,10 @@ def session_init():
     avatar            = body.get("avatar", None)
     # Referrer attribution (set only on user INSERT)
     invited_by        = body.get("invited_by") or None
+    if _tp.is_test_profile_id(user_id):
+        # A test profile never credits a referral or notifies an inviter.
+        invited_by = None
+        body = {**body, "invite_id": None}
 
     # ── League identity vs account identity (co-owner support) ───────────
     # `user_id` is WHO IS LOGGED IN (rankings, swipes, entitlements,
@@ -31109,7 +31272,8 @@ def session_init():
                     # read (no extra call); None for a platform league.
                     median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
                 )
-                if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
+                if (authoritative["platform"] == "sleeper" and is_enabled("league.projections")
+                        and not _tp.is_test_league_id(league_id)):
                     try:
                         from .league_projections.batch import register as _register_projection_target
                         _projection_season = (_s0_raw.get("meta") or {}).get("season")
@@ -31173,8 +31337,9 @@ def session_init():
                 # pair on the joining user's first session. Doesn't ping
                 # the joiner. Capped implicitly by the dedup_key — a
                 # returning user re-init won't re-fire because
-                # _is_new_user is False.
-                if _is_new_user:
+                # _is_new_user is False. Never for a test profile: its
+                # snapshot league has no real members, and this pins it.
+                if _is_new_user and not _tp.is_test_profile_id(user_id):
                     try:
                         _new_username = username or display_name or user_id
                         _peers = load_league_member_unlock_states(
@@ -32048,6 +32213,9 @@ def _send_typed_push(
          and exit. The 8am cron drains and bundles.
       5. Otherwise: load device tokens, send via Expo, log + record_event.
     """
+    if _tp.outbound_blocked(user_id, payload=data, kind=f"push:{kind}"):
+        log.info("push dropped (test profile): kind=%s", kind)
+        return
     started = g.get("_user_data_started") if has_request_context() else None
     with _user_data_lifecycle.capture(user_id, started=started).active() as active:
         if not active:
@@ -32619,6 +32787,10 @@ def _do_league_history_snapshot(league_id: str, platform: str,
     two can never disagree about a team. `live_user`: both writes run under
     that account's users-row lock (AccountGone when it's gone)."""
     from . import roster_history as _rh
+    if _tp.is_test_league_id(league_id):
+        # Onboarding test profile (review M2): every trigger's shared tail
+        # refuses a namespaced league — no history row, no platform read.
+        return {"rosters": {"skipped": "test_profile"}, "boards": {}}
     fmt = get_league_scoring(league_id) or "1qb_ppr"
     pool_players, seed = _get_universal_pool(fmt)
     players_meta = {p.id: p for p in pool_players}
@@ -32643,6 +32815,8 @@ def _sleeper_roster_history_on_sync(league_id: str, members: list[dict],
     rosters fetch, whose roster_id → owner_id map is what makes team_key
     platform-native. No map ⇒ weak keys, stamped as such — the recap
     declines to chart weak-keyed teams rather than fragmenting silently."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     owner_map: dict[str, tuple] = {}
     for r in roster_rows or []:
         oid = str(r.get("owner_id") or "")
@@ -32684,6 +32858,8 @@ def _platform_roster_history_on_sync(league_id: str, platform: str,
     Also the late-joiner re-stamp: at link time we know the joining user's
     native team, so their team's whole recorded season resolves to them in
     one idempotent UPDATE — no mapping table."""
+    if _tp.is_test_league_id(league_id):
+        return None   # no league-history capture for the onboarding test profile
     if not is_enabled("market.roster_history"):
         return
     try:
@@ -32751,6 +32927,8 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
     one."""
     platform = lg.get("platform") or "sleeper"
     lid = str(lg["league_id"])
+    if _tp.is_test_league_id(lid):
+        return None, "test_profile"   # never read a platform with a test profile's cookies
 
     if platform == "sleeper":
         rows = _fetch_league_rosters(lid)
@@ -34894,8 +35072,14 @@ def _verify_retry_response():
 def _extension_build_session(user_id: str, username: str,
                              display_name: str, avatar: str | None,
                              token: str | None = None,
-                             load_history: bool = True) -> tuple[str, dict]:
+                             load_history: bool = True,
+                             test_profile: bool = False) -> tuple[str, dict]:
     """Build a user-scoped session for the browser extension.
+
+    `test_profile` must be True exactly when `user_id` is an onboarding
+    test-profile id (backend/test_profile.py): only the test-profile switch
+    and its durable restore pass it, so no sign-in path that takes its id
+    from Sleeper or an account can ever mint or claim a `qa_tp_` session.
 
     `token` re-registers the session under an existing bearer token —
     used only by the persistent-session restore path (teardown 06-03),
@@ -34916,6 +35100,8 @@ def _extension_build_session(user_id: str, username: str,
 
     Returns (token, session_payload).
     """
+    if _tp.is_test_profile_id(user_id) != bool(test_profile):
+        raise ValueError("test-profile ids are minted only by the test-profile switch")
     # Durable restore already holds _session_restore_lock; never invert its
     # order with deletion's user gates. Fresh auth keeps this lease to teardown.
     if token is None:
@@ -34963,7 +35149,11 @@ def _extension_build_session(user_id: str, username: str,
     if not load_history:
         payload["_history_pending"] = True
         payload["_history_lock"] = threading.Lock()   # hydrate single-flight
-    token = token or secrets.token_urlsafe(32)
+    # Test-profile tokens carry `_TP_TOKEN_PREFIX` ('.' is outside
+    # token_urlsafe's alphabet, so no real token can start with it): the
+    # request fence and extension_auth tell a test token from a real one
+    # without a lookup (review L7, M3).
+    token = token or ((_TP_TOKEN_PREFIX if test_profile else "") + secrets.token_urlsafe(32))
     with _sessions_lock:
         _sessions[token] = payload
     return token, payload
@@ -35022,6 +35212,39 @@ def extension_auth():
         ]
     except Exception as e:
         log.info("extension_auth: leagues fetch failed (non-fatal): %s", e)
+
+    # Onboarding test profile: the username step above ran unchanged; a test
+    # session is NOT replaced by a new identity — it keeps qa_tp_X and gets
+    # the league list in its own namespace. Only the real account's own
+    # Sleeper user is accepted (a test session is already verified, so it may
+    # not borrow another person's Sleeper identity).
+    _tp_token = request.headers.get("X-Session-Token", "")
+    _tp_caller = _get_session(_tp_token)
+    if _tp_token.startswith(_TP_TOKEN_PREFIX) and not (
+            _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id"))):
+        # Review M3: a test-profile token that no longer resolves (reset or
+        # exit elsewhere, the gate closed, a restart without durable
+        # sessions) must never fall through to minting a REAL session that a
+        # phone still showing TEST PROFILE would store.
+        return jsonify({"error": "test_profile_ended",
+                        "message": "The test profile has ended. Tap “Back to my profile”."}), 401
+    if _tp_caller is not None and _tp.is_test_profile_id(_tp_caller.get("user_id")):
+        if str(user_id) != _sleeper_identity(_tp_caller):
+            return jsonify({"error": "not_your_sleeper_account",
+                            "message": "Use your own Sleeper username — the test "
+                                       "profile reads your linked Sleeper account."}), 403
+        _pid = _tp_caller["user_id"]
+        return jsonify({
+            "stage":         "connected",
+            "session_token": request.headers.get("X-Session-Token", ""),
+            "expires_at":    int(time.time()) + 4 * 3600,
+            "user_id":       _pid,
+            "username":      username,
+            "display_name":  display_name,
+            "avatar":        avatar,
+            "leagues":       [{**lg, "league_id": _tp.storage_league_id(_pid, lg["league_id"])}
+                              for lg in leagues_compact],
+        })
 
     # Mint session immediately. Unverified, so history waits for the verify
     # (R28.17: loading it here made the response time reveal whether this
@@ -36484,6 +36707,10 @@ def feature_flags_reload_route():
     """
     _require_cron_auth()
     flags = reload_flags()
+    try:
+        _tp_evict_closed_sessions()  # a flag turned off ends test-profile sessions now
+    except Exception:
+        log.exception("test-profile session sweep failed")   # never fails the reload
     return jsonify({"ok": True, "flags": flags})
 
 
@@ -37134,6 +37361,330 @@ def delete_test_user_route(user_id: str):
     except Exception as e:
         log.error("test-users delete failed: %s\n%s", e, traceback.format_exc())
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Onboarding test profile (docs/plans/onboarding-test-profile/) ─────────
+# The operator becomes a brand-new app user (`qa_tp_<real working key>`) to
+# test onboarding, then flips back. Logic and the identity rules live in
+# backend/test_profile.py. Gate, every route: flag `dev.test_profile` AND the
+# authenticated session's real working key listed in TEST_PROFILE_ACCOUNTS —
+# never the tester allow-list, never a device id, never a client-supplied id.
+# Anything else ⇒ 404, no existence signal. The only switch is a session's own
+# real account ↔ that account's own test profile.
+
+_TP_BLOCKED_MESSAGE = ("Not available in the test profile. Tap “Back to my "
+                       "profile” to do this with your real account.")
+
+# Non-GET calls a test-profile session may never make: platform writes
+# (trades, free-agent moves, overhaul sends), Sleeper linking (the Sleeper id
+# IS the app identity) and the dark Fleaflicker linking, identity
+# minting/binding, account deletion (Reset is the test profile's delete),
+# referral and public-profile surfaces. ESPN and MFL LINKING are NOT here: the
+# operator tests them through the real routes (ruling 2026-11-11), whose
+# storage goes through `_tp.storage_league_id` (design.md §11).
+_TP_BLOCKED_ENDPOINTS = frozenset({
+    "propose_trade_to_sleeper", "propose_trade_to_mfl", "respond_trade_in_mfl",
+    "propose_trade_to_espn", "league_free_agents_move_route", "overhaul_send_route",
+    "sleeper_link", "fleaflicker_link", "fleaflicker_import", "fleaflicker_discover",
+    "platform_write_consent_route", "sleeper_offer_import_route",
+    "link_sleeper_source", "auth_apple", "auth_google", "entry_platform",
+    "session_demo", "spawn_test_user", "delete_test_user_route",
+    "delete_account_route", "mint_invite_token", "profile_visibility",
+})
+
+
+_TP_LEAGUE_KEY = re.compile(r"(?:^|_)league_?ids?$", re.I)
+
+# Platform-native league inputs of the real LINKING routes (design.md §11):
+# they name a league on ESPN/MFL by its own id, and the route stores it under
+# the namespace through `_tp.storage_league_id`. Exempt only on these routes.
+_TP_LINK_INPUT_KEYS = {
+    "espn_link": {"espn_league_id"},
+    "mfl_link": {"mfl_league_id", "mfl_league_url"},
+    "mfl_auth_import": {"league_ids"},
+}
+
+# The fence never reads a body larger than the SMALLEST Content-Length cap any
+# route checks before reading (today POST /api/leagues/<id>/projection-runs,
+# 8192 bytes, league_projections/api.py): those routes answer 413 before ANY
+# read, and a read here would break that. Larger bodies are left to the route
+# (and, for a test session, to the database write fence).
+# tests/test_test_profile_review.py walks every route cap in backend/ and
+# fails if one is ever smaller than this.
+_TP_BODY_SCAN_LIMIT = 8192
+
+
+def _tp_collect_league_ids(obj, out: list, exempt=frozenset()) -> None:
+    """Every value under a league-id key (`league_id`, `league_ids`,
+    `*_league_id(s)`, camelCase too) at any depth of a dict/list body."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if _TP_LEAGUE_KEY.search(str(k)) and str(k) not in exempt:
+                many = str(k).lower().endswith("ids")
+                for x in (v if isinstance(v, (list, tuple)) else [v]):
+                    # `league_ids` also arrives comma-joined (?league_ids=a,b).
+                    out.extend(x.split(",") if many and isinstance(x, str) else [x])
+            if isinstance(v, (dict, list, tuple)):
+                _tp_collect_league_ids(v, out, exempt)
+    elif isinstance(obj, (list, tuple)):
+        for x in obj:
+            _tp_collect_league_ids(x, out, exempt)
+
+
+def _tp_request_league_ids(exempt=frozenset()) -> list[str]:
+    """Every league id this request names, from EVERY request source: path
+    args, the query string, form fields and the body parsed the way the
+    routes parse it (`get_json(force=True)`: any content type). Review M1."""
+    ids: list = [v for k, v in (request.view_args or {}).items() if "league" in k]
+    args = {k: request.args.getlist(k) for k in request.args.keys()}
+    _tp_collect_league_ids(args, ids, exempt)
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT:
+        if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):
+            form = {k: request.form.getlist(k) for k in request.form.keys()}
+            _tp_collect_league_ids(form, ids, exempt)
+        else:
+            # Parse the raw bytes ourselves: get_json(force=True) would leave
+            # its parse in Werkzeug's JSON cache, where a route's own
+            # non-forced get_json() would then read it, and cache=False would
+            # consume the stream. The BYTES are cached (get_data(cache=True)),
+            # which is what every later get_json/get_data reads anyway.
+            try:
+                parsed = json.loads(request.get_data(cache=True) or b"null")
+            except ValueError:
+                parsed = None
+            _tp_collect_league_ids(parsed, ids, exempt)
+    return [str(x).strip() for x in ids if x not in (None, "") and str(x).strip()]
+
+
+def _tp_request_mentions_namespace() -> bool:
+    """Cheap pre-filter for a real or anonymous request: could it name a
+    `qa_tp:` league at all? Raw bytes only; the decision is structural."""
+    if "qa_tp" in request.path or b"qa_tp" in (request.query_string or b""):
+        return True
+    n = request.content_length or 0
+    if 0 < n <= _TP_BODY_SCAN_LIMIT and request.mimetype != "multipart/form-data":
+        return b"qa_tp" in request.get_data(cache=True)
+    return False                    # never read past the smallest route cap
+
+
+@app.teardown_request
+def _test_profile_actor_reset(exc):
+    token = g.pop("_tp_actor_token", None)
+    if token is not None:
+        _tp.ACTOR.reset(token)
+
+
+@app.before_request
+def _test_profile_request_guard():
+    """Fences every request against the onboarding test profile.
+
+    A real or anonymous request may never name a `qa_tp:` league (review L6:
+    nobody but its owner reads or writes a test league). A test-profile
+    session (its token carries `_TP_TOKEN_PREFIX`, review L7: real tokens are
+    decided without a lookup): blocked endpoints refuse with a message the
+    app shows, the push-token registration is skipped, and any league id from
+    any request source outside its own namespace is refused (default-deny;
+    the database write fence in test_profile.check_write backs it)."""
+    token = request.headers.get("X-Session-Token", "")
+    if not token.startswith(_TP_TOKEN_PREFIX):
+        if _tp_request_mentions_namespace() and any(
+                _tp.is_test_league_id(x) for x in _tp_request_league_ids()):
+            return _tp_not_found()
+        return None
+    sess = _get_session(token)
+    uid = (sess or {}).get("user_id")
+    if not _tp.is_test_profile_id(uid):
+        return None                       # a dead test token: routes see no session
+    g._tp_actor_token = _tp.ACTOR.set(uid)   # read by the outbound chokepoint + write fence
+    endpoint = request.endpoint or ""
+    if endpoint == "register_device_for_push":
+        return jsonify({"ok": True, "skipped": "test_profile"})
+    if endpoint in _TP_BLOCKED_ENDPOINTS and request.method != "GET":
+        return jsonify({"error": "test_profile_blocked",
+                        "message": _TP_BLOCKED_MESSAGE}), 403
+    exempt = frozenset(_TP_LINK_INPUT_KEYS.get(endpoint, ()))
+    for lid in _tp_request_league_ids(exempt):
+        if lid != "no_league" and not _tp.owns_test_league(uid, lid):
+            return jsonify({"error": "test_profile_league",
+                            "message": "The test profile only uses its own "
+                                       "copies of your leagues."}), 403
+    return None
+
+
+def _tp_caller():
+    """(session, user_id) for the request's session, or (None, None)."""
+    sess = _get_session(request.headers.get("X-Session-Token", ""))
+    return (sess, str(sess.get("user_id") or "")) if sess else (None, None)
+
+
+def _tp_not_found():
+    return jsonify({"error": "not_found"}), 404
+
+
+def _tp_mint_session(profile_uid: str) -> tuple[str, dict]:
+    """A fresh verified session for the test profile. Verified because it is
+    derived from the real account's verified session; persisted like any
+    verified session, so it survives restarts and deploys."""
+    token, payload = _extension_build_session(
+        user_id=profile_uid, username=profile_uid,
+        display_name=_tp.DISPLAY_NAME, avatar=None, test_profile=True)
+    payload.pop("extension", None)
+    payload["verified"] = True
+    payload["verified_via"] = "test_profile"
+    _persist_session_if_eligible(token, payload)
+    return token, payload
+
+
+def _tp_session_body(token: str, profile_uid: str) -> dict:
+    return {"session_token": token, "user_id": profile_uid,
+            "username": profile_uid, "display_name": _tp.DISPLAY_NAME}
+
+
+# Module caches keyed by a league id or a user id (alone or inside a tuple
+# key). Reset drops the profile's entries so a fresh onboarding never reads a
+# cached answer from before it (review L4). Each cache is purged under the
+# lock its own readers and writers hold (None: they take none), so a purge can
+# never land between another thread's `get(key) == x` and its `pop(key)`.
+_TP_KEYED_CACHES = (
+    ("_OUTLOOK_IMPACT_CACHE", "_OUTLOOK_IMPACT_LOCK"), ("_DRAFT_CONTEXT_CACHE", None),
+    ("_LEADERBOARD_CACHE", None), ("_LEAGUE_MEMBERS_CACHE", None),
+    ("_slot_order_cache", "_slot_order_lock"), ("_pick_projection_cache", "_pick_projection_lock"),
+    ("_trade_block_cache", "_trade_block_cache_lock"), ("_SUGGESTED_ORDER_CACHE", None),
+    ("_ROS_CACHE", None), ("_rank_chip_cache", None),
+    ("_OUTLOOK_WEEK_SETTLED", "_outlook_cache_lock"), ("_OUTLOOK_WEEK_LIVE", "_outlook_cache_lock"),
+    ("_OUTLOOK_WEEK_HIGHWATER", "_outlook_cache_lock"),
+    ("_OUTLOOK_SEASON_BY_LEAGUE", "_outlook_cache_lock"), ("_FA_LEAGUE_META_CACHE", None),
+    ("_usage_cache", "_usage_lock"), ("_gate_miss_tests", "_gate_miss_tests_lock"),
+    ("_roster_moved_reads", "_trade_jobs_lock"), ("_trade_jobs_by_key", "_trade_jobs_lock"),
+)
+
+
+from contextlib import nullcontext as _tp_nullcontext
+
+
+def _tp_purge_caches(profile_uid: str) -> int:
+    prefix = _tp.league_prefix(profile_uid)
+
+    def names(key):
+        parts = key if isinstance(key, tuple) else (key,)
+        return any(str(p) == profile_uid or str(p).startswith(prefix) for p in parts)
+    n = 0
+    for name, lock_name in _TP_KEYED_CACHES:
+        cache = globals().get(name)
+        if not isinstance(cache, dict):
+            continue
+        lock = globals().get(lock_name) if lock_name else None
+        with (lock if lock is not None else _tp_nullcontext()):
+            for k in [k for k in list(cache.keys()) if names(k)]:
+                cache.pop(k, None)
+                n += 1
+    try:
+        from .outlook_result_cache import OUTLOOK_RESULTS
+        OUTLOOK_RESULTS.purge_callers({profile_uid})
+    except Exception:
+        pass
+    return n
+
+
+def _tp_revoke_sessions(profile_uid: str) -> int:
+    with _sessions_lock:
+        stale = [t for t, s in _sessions.items() if s.get("user_id") == profile_uid]
+        for t in stale:
+            _sessions[t]["_revoked"] = True
+            _sessions.pop(t, None)
+    try:
+        delete_persisted_sessions_for_user(profile_uid)
+    except Exception:
+        log.warning("test-profile: durable session cleanup failed")
+    return len(stale)
+
+
+@app.route("/api/test-profile", methods=["GET"])
+def test_profile_status():
+    """GET — {available, active}: whether this account may use a test profile
+    and whether this session IS one. 404 for everyone else."""
+    sess, uid = _tp_caller()
+    if sess is None:
+        return _tp_not_found()
+    if _tp.is_test_profile_id(uid):   # _get_session already enforced the gate
+        return jsonify({"available": True, "active": True,
+                        "user_id": uid, "display_name": _tp.DISPLAY_NAME})
+    # Review L3: an unverified session never learns whether its id is the
+    # operator's — the same 404 as everyone else.
+    if sess.get("verified") and _tp.enabled_for(uid, is_enabled):
+        return jsonify({"available": True, "active": False})
+    return _tp_not_found()
+
+
+@app.route("/api/test-profile/enter", methods=["POST"])
+def test_profile_enter():
+    """POST — from a verified real session of an allowed account, mint a
+    session for that account's own test profile. The real session is left
+    untouched; the app keeps its token to switch back."""
+    sess, uid = _tp_caller()
+    if (sess is None or _tp.is_test_profile_id(uid) or not sess.get("verified")
+            or not _tp.enabled_for(uid, is_enabled)):
+        return _tp_not_found()          # review L3: unverified ⇒ 404, never 403
+    profile_uid = _tp.profile_id(uid)
+    token, _ = _tp_mint_session(profile_uid)
+    log.info("test-profile: entered (account %s)", uid)
+    return jsonify(_tp_session_body(token, profile_uid))
+
+
+@app.route("/api/test-profile/exit", methods=["POST"])
+def test_profile_exit():
+    """POST — end THIS test-profile session (memory + durable row). The app
+    restores the real token it kept; nothing here touches the real account."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    token = request.headers.get("X-Session-Token", "")
+    with _sessions_lock:
+        _sessions.pop(token, None)
+    try:
+        delete_persisted_session(token)
+    except Exception:
+        log.warning("test-profile: durable session delete failed")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/test-profile/reset", methods=["POST"])
+def test_profile_reset():
+    """POST — wipe every row the test profile wrote (test_profile.reset_profile:
+    its own id and its own `qa_tp:` league copies only), end all of its
+    sessions, and hand back a fresh session so onboarding starts from zero."""
+    sess, uid = _tp_caller()
+    if sess is None or not _tp.is_test_profile_id(uid):
+        return _tp_not_found()
+    # Review L4: the account-deletion drain. `deletion_scope` stops new work for
+    # the profile and waits for in-flight work holding its user-data lease
+    # (session-init daemons, trade jobs); `invalidate` then fails any queued
+    # work captured before the reset, so nothing finishes into the new
+    # incarnation. Caches keyed by the profile or its leagues are purged.
+    known = {lid for s2 in list(_sessions.values()) if s2.get("user_id") == uid
+             for lid in [getattr(s2.get("league"), "league_id", None)] if lid}
+    try:
+        with _accounts.deletion_scope(uid, None) as (user_ids, _acct_ids):
+            leagues = _tp.profile_league_ids(uid, known)
+            evicted = _tp_revoke_sessions(uid)
+            deleted = _tp.reset_profile(uid, leagues)
+            _user_data_lifecycle.invalidate(user_ids)
+    except _user_data_lifecycle.UserDataBusy:
+        return jsonify({"error": "test_profile_busy",
+                        "message": "Still finishing the last step. Try Reset again in a moment."}), 409
+    try:
+        _revoke_trade_jobs_naming({uid}, leagues)
+    except Exception as err:
+        log.error("test-profile reset: trade job revoke failed: %s", type(err).__name__)
+    _tp_purge_caches(uid)
+    # The fresh incarnation's work starts after the invalidation, not at the
+    # request's start (its lease would otherwise read as pre-reset work).
+    g._user_data_started = _user_data_lifecycle.snapshot()
+    token, _ = _tp_mint_session(uid)
+    log.info("test-profile: reset %s — %s", uid, deleted)
+    return jsonify({**_tp_session_body(token, uid),
+                    "deleted": deleted, "sessions_evicted": evicted})
 
 
 # ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
@@ -38493,6 +39044,8 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
         linked = load_espn_leagues_for_user(user_id)
     except Exception:
         log.exception("espn verify: linked-league lookup failed for %s", user_id)
+    for lg in linked:   # test-profile READ seam: stored qa_tp: ids → ESPN's own
+        lg["league_id"] = _tp.native_league_id(lg.get("league_id"))
 
     # 1. Strong oracle: an already-linked league ESPN only serves to a
     #    signed-in member. PUBLIC links are skipped on purpose.
@@ -38995,6 +39548,7 @@ def espn_link():
                 # public league doesn't need.
                 auth_mode = "public"
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for t in league["teams"]:
         mid = user_id if t.team_id == team_id else _espn_member_id(league_id, t)
@@ -39009,7 +39563,7 @@ def espn_link():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
+            league_id       = store_lid,
             user_id         = user_id,
             name            = league["name"] or f"ESPN league {league_id}",
             espn_season     = league["season"] or season,
@@ -39017,14 +39571,14 @@ def espn_link():
             espn_my_team_id = team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — AFTER the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{team_id}")
 
     r = mapped["report"]
@@ -39034,7 +39588,7 @@ def espn_link():
              r["match_rate"] * 100, len(r["unmatched"]))
     resp = {
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -39167,12 +39721,14 @@ def espn_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_espn_league(league_id) if league_id else None
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_espn_league(store_lid) if league_id else None
     # Per-user binding: a re-sync refreshes the CALLER's own team only; a
     # caller with no binding (never linked, or a pre-fix binding that was
-    # overwritten) is told to link — never handed the row's team.
-    binding = get_platform_binding(user_id, league_id, "espn") if row else None
+    # overwritten) is told to link — never handed the row's team. Read under
+    # the STORED id, the same key the link wrote it under.
+    binding = get_platform_binding(user_id, store_lid, "espn") if row else None
     if not row or binding is None:
         return jsonify({"error": "espn_not_linked",
                         "message": "Link this ESPN league first."}), 404
@@ -39235,7 +39791,7 @@ def espn_import():
         })
     try:
         upsert_espn_league(
-            league_id       = league_id,
+            league_id       = store_lid,
             user_id         = user_id,
             name            = league["name"] or row.get("name") or "",
             espn_season     = league["season"] or season,
@@ -39243,19 +39799,19 @@ def espn_import():
             espn_my_team_id = my_team_id,
             total_rosters   = league["total_teams"],
         )
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("espn_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "espn", members,
+        store_lid, "espn", members,
         my_user_id=user_id, my_team_key=f"espn:{league_id}.t{my_team_id}")
 
     return jsonify({
         "ok": True,
-        "league_id":      league_id,
+        "league_id":      store_lid,
         "name":           league["name"],
         "platform":       "espn",
         "season":         league["season"] or season,
@@ -40817,7 +41373,9 @@ def league_free_agents_route():
         "drop_candidates": {"players": [{"id","name","position","value",
                                          "tier"},...],
                             "untouchables_excluded": int} | null
-          # #179 claim sheet — Sleeper leagues only. The caller's roster
+          # #179 claim sheet — Sleeper leagues, and MFL leagues while their
+          # moves are live (D1 Update 1; roster_capacity then carries a null
+          # limit). The caller's roster
           # priced on their board, value-ASCENDING (least valuable first),
           # capped at 8; untouchables (asset_prefs) never appear, and the
           # count tells the sheet they were withheld.
@@ -41009,6 +41567,30 @@ def league_free_agents_route():
                 "players":                cand_rows,
                 "untouchables_excluded":  cand_excluded,
             }
+        elif _fa_move_live("mfl") and _fa_move_league_platform(league_id) == "mfl":
+            # D1 Update 1 (in-app-claims design.md §4): a live MFL league gets
+            # the drop list too, from the caller's franchise row; its roster
+            # limit and waiver settings aren't stored, so both stay unknown
+            # (null) and MFL decides. Unreachable while `mfl.send_add_drop`
+            # is off or the MFL shapes are unverified.
+            _cred, _row, mfl_fid = _fa_move_mfl_binding(str(g_user_id), league_id)
+            mfl_roster = _fa_move_mfl_my_roster(league_id, mfl_fid) if mfl_fid else None
+            if mfl_roster is not None:
+                roster_capacity = {"my_count": len(mfl_roster), "limit": None,
+                                   "open_slots": None}
+                untouchable_ids = set()
+                try:
+                    ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+                    untouchable_ids = {str(x) for x in ap.get("untouchables", [])}
+                except Exception as ap_err:
+                    log.warning("free-agents: asset-prefs read failed for %s "
+                                "(drop candidates unfiltered): %s", league_id, ap_err)
+                cand_rows, cand_excluded = compute_drop_candidates(
+                    pool_players=pool_players, seed_elo=seed, user_elo=user_elo,
+                    user_roster=mfl_roster, exclude_ids=untouchable_ids,
+                    tier_fn=fa_tier_fn)
+                drop_candidates = {"players": cand_rows,
+                                   "untouchables_excluded": cand_excluded}
 
         free_agents = compute_free_agents(
             pool_players = pool_players,
@@ -41078,8 +41660,10 @@ _FA_MOVE_SURFACES = ("free_agents", "usage_trends")
 _FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
 # Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
 _FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
-# Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
-_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
+# Each platform's server-only kill switch. MFL's is Update 1
+# (docs/plans/in-app-claims/design.md); ESPN has none until its write shapes
+# are captured, so an ESPN league stays `unsupported`.
+_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop", "mfl": "mfl.send_add_drop"}
 
 # Contract §5: request receipt to response is at most 76 s. A 30 s preflight
 # budget, checked immediately before the platform write (the
@@ -41127,6 +41711,9 @@ def _fa_move_live(platform: str) -> bool:
         return False
     if platform == "sleeper":
         return bool(_sleeper_write.FA_MOVE_SHAPES_CAPTURED)
+    if platform == "mfl":
+        from . import mfl_write as _mfl_write
+        return bool(_mfl_write.FA_MOVE_SHAPES_VERIFIED)
     return False
 
 
@@ -41299,6 +41886,8 @@ def _fa_move_capability(sess, league_id: str, live_rosters) -> tuple[dict, dict]
     and local leagues → 'unsupported'. `claims` only under R15.8 D5. Draft
     copy is served only in 'submit' mode (fa_move_copy's docstring)."""
     platform = _fa_move_league_platform(league_id)
+    if platform == "mfl" and _fa_move_live(platform):
+        return _fa_move_capability_mfl(sess, league_id)
     if platform != "sleeper":
         return {"mode": "unsupported", "claims": False,
                 "league_platform": platform if platform in _FA_MOVE_PLATFORMS else None,
@@ -41712,6 +42301,8 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
        `complete`, the roster save → event → response (the stamp starts off
        the request thread).
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     t0 = _fa_move_clock()
     user_id = str(sess.get("user_id") or "")
     # 3. A verified session (the hard write gate). `_verified_write_denial`
@@ -41755,6 +42346,10 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message(key, platform, add=names.get(add_id)),
                               title=_fa_copy.UNKNOWN_TITLE)
+    if platform == "mfl":
+        # Steps 8-13 for MFL (in-app-claims design.md §4): its own credential,
+        # league binding and roster read, the same consent and move record.
+        return _fa_move_core_mfl(sess, req, now, t0)
     # 8. The credential.
     cred = get_sleeper_credential(user_id)
     if not cred:
@@ -41969,6 +42564,337 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
                 _invalidate_league_members_cache(league_id)
         except Exception:
             log.exception("fa move: roster save failed (league %s)", league_id)
+            stamp = False
+    if status == 200:
+        _fa_move_event(user_id, "fa_move_write_succeeded", {
+            "move_kind": kind, "has_drop": bool(drop_id), "has_bid": bid is not None,
+            "result": result, "attempt_id": attempt_id, "league_platform": platform,
+        }, league_id=league_id)
+    if stamp:
+        _fa_move_stamp_async(league_id)
+    return payload, status
+
+
+# ── D1 Update 1: MFL free-agent moves (docs/plans/in-app-claims/design.md) ──
+# Reached only when `_fa_move_live("mfl")`: `mfl.send_add_drop` on AND
+# mfl_write.FA_MOVE_SHAPES_VERIFIED (False until one supervised real MFL
+# transaction is recorded). Until then the capability answers `unsupported`
+# for an MFL league and the move route 404s at step 6, exactly as before
+# Update 1. The MFL path reuses everything platform-neutral (the attempt_id
+# replay, the double-move block, consent, the `sent`/`result` rows, the
+# outcome classification, the roster save); what differs is the credential
+# (the MFL session cookie, bound to `mfl_username`), the league binding (the
+# CALLER's own franchise from platform_league_bindings, D-246), the live
+# `rosters` export and the crosswalk from FTF (Sleeper) ids to MFL ids.
+
+def _fa_move_mfl_binding(user_id: str, league_id: str):
+    """(cred, row, my_fid): the caller's stored MFL credential, the league
+    row, and the caller's OWN franchise id from their per-user binding
+    (`get_platform_binding`), else None. Never the leagues row's
+    `platform_my_team` / `user_id`: those hold the last linker (D-246)."""
+    from .database import get_mfl_credential, get_platform_league
+    cred = get_mfl_credential(user_id)
+    row = get_platform_league(league_id, "mfl")
+    binding = get_platform_binding(user_id, league_id, "mfl") if row else None
+    my_fid = str((binding or {}).get("team_id") or "").strip() or None
+    return cred, row, my_fid
+
+
+def _fa_move_mfl_account(cred) -> str:
+    """The platform account a grant is bound to: the MFL username, lowered,
+    so a re-link that only changes its case keeps the grant (assumes MFL
+    usernames are case-insensitive; UNVERIFIED). Empty when unknown."""
+    return str((cred or {}).get("mfl_username") or "").strip().lower()
+
+
+def _fa_move_mfl_my_member(league_id: str, my_fid: str) -> tuple[str, list[str] | None]:
+    """(member_id, roster): the franchise's row in the shared league_members
+    snapshot and its stored roster (FTF ids), or roster None when no row is
+    stored. The row is labelled with the app user bound to the franchise (its
+    EARLIEST binder, so possibly a co-owner rather than the caller), else the
+    synthetic `mfl:{league}.f{fid}` id: the map the owned-pick sync and the
+    roster sweep use (`platform_bound_teams`). A snapshot written before the
+    label still carries the synthetic id, so that is tried second."""
+    synthetic = _mfl_member_id(league_id, my_fid)
+    label = platform_bound_teams(league_id, "mfl").get(str(my_fid))
+    rows = {str(r.get("user_id")): r for r in load_league_members(league_id)}
+    for member in ([label] if label else []) + [synthetic]:
+        if member in rows:
+            return member, [str(p) for p in (rows[member].get("player_ids") or [])
+                            if p not in (None, "")]
+    return label or synthetic, None
+
+
+def _fa_move_mfl_my_roster(league_id: str, my_fid: str) -> list[str] | None:
+    """The caller's stored roster (FTF ids): `_fa_move_mfl_my_member`'s."""
+    return _fa_move_mfl_my_member(league_id, my_fid)[1]
+
+
+def _fa_move_capability_mfl(sess, league_id: str) -> tuple[dict, dict]:
+    """Contract §1 for a live MFL league. The 11-06 binary has no MFL connect
+    screen (contract §6), so anything but `connect: ok` answers `unsupported`
+    (scope §E: never `submit` to an MFL user who can't connect from the sheet).
+    `claims` stays false: MFL claims need their own consent version and a
+    verified claim shape (design.md §5)."""
+    user_id = str(sess.get("user_id") or "")
+    now = _fa_move_now()
+    cred, _row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    if not cred or not account:
+        connect = "not_linked"
+    elif not my_fid:
+        connect = "other_account"
+    elif not (sess.get("verified") or _synthetic_demo_session(sess)):
+        connect = "unverified"
+    else:
+        connect = "ok"
+    grant = _fa_move_grant(user_id, "mfl", account, now) if account else None
+    rows = {pid: {"move_mode": "handoff", "move_line": _fa_copy.row_line(reason, "mfl")}
+            for pid, reason in _fa_move_blocks(user_id, str(league_id), now).items()}
+    return {
+        "mode": "submit" if connect == "ok" else "unsupported",
+        "claims": _fa_move_claims_enabled("mfl"),
+        "league_platform": "mfl",
+        "connect": connect,
+        "consent_until": grant["expires_at"] if grant else None,
+        "copy": _fa_copy.move_copy("mfl", include_drafts=True),
+    }, rows
+
+
+def _fa_move_drop_mfl_credential(user_id: str, sess, via: str) -> None:
+    """A dead or rejected MFL cookie: delete it (the trade send's treatment)
+    and end any open MFL roster-move grant, so a reconnect means re-consent
+    (consent.md §4.4, the Sleeper rule). Never raises."""
+    from .database import delete_mfl_credential
+    sess.pop("mfl_cookie", None)
+    try:
+        if delete_mfl_credential(user_id, withdrawn_via=via):
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": via, "league_platform": "mfl"}, touch_user=False)
+    except Exception:
+        log.exception("fa move (mfl): credential delete failed")
+
+
+def _fa_move_core_mfl(sess, req: dict, now: datetime, t0: float) -> tuple[dict, int]:
+    """Steps 8-13 of `_fa_move_core` for an MFL league (scope §B3's order):
+    8 credential + league binding → 9 consent (committed before any MFL
+    call) → 10 pre-write reads (crosswalk, host, the live rosters export,
+    ownership, availability) → 11 the claim gate → the preflight budget →
+    12-13 `_fa_move_send`. MFL's roster limit isn't stored, so a full roster
+    is MFL's to refuse (10f), never guessed here."""
+    from . import mfl_service as _mfl
+    from . import mfl_write as _mfl_write
+    platform = "mfl"
+    user_id = str(sess.get("user_id") or "")
+    league_id = req["league_id"]
+    add_id, drop_id, kind = req["add_player_id"], req["drop_player_id"], req["move_kind"]
+    # 8. The credential and the league binding.
+    cred, row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    cookie = _mfl_cookie_for(sess, user_id) if cred else None
+    if not cred or not account or not cookie:
+        return _fa_move_error(f"{platform}_not_linked", 409,
+                              _fa_copy.message("not_linked", platform))
+    # The league row's name: never `_fa_league_meta`, a Sleeper read.
+    league_name = str((row or {}).get("name") or "").strip() or None
+    if not my_fid:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    # 9. Consent: a grant is committed here, before any MFL call.
+    refusal, grant = _fa_move_consent_step(user_id, platform, account, req, now)
+    if refusal is not None:
+        return refusal
+    # 10. Pre-write reads. Nothing is sent if any of them fails or refuses.
+    names = _player_names_by_id([p for p in (add_id, drop_id) if p])
+    add_name, drop_name = names.get(add_id), names.get(drop_id) if drop_id else None
+    inverse = _sleeper_to_mfl_map()
+    mfl_add, mfl_drop = inverse.get(add_id), inverse.get(drop_id) if drop_id else None
+    if mfl_add is None or (drop_id and mfl_drop is None):
+        missing = add_name if mfl_add is None else drop_name
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unmapped", platform, add=missing))
+
+    def _read_failed():
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+
+    year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    host = row.get("platform_host")
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+    except _mfl.MflAuthError as e:
+        log.warning("fa move (mfl): rosters read auth-rejected: %s", type(e).__name__)
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_expired")
+        return _fa_move_error(f"{platform}_expired", 409, _fa_copy.message("expired", platform))
+    except Exception as e:
+        log.warning("fa move (mfl): rosters read failed: %s", type(e).__name__)
+        return _read_failed()
+    if not isinstance(raw, dict) or "rosters" not in raw:
+        return _read_failed()
+    norm = _mfl_write.normalize_franchise_id
+    held_by: dict[str, set] = {}
+    for fid, ids in _mfl.parse_roster_ids(raw).items():
+        try:
+            held_by[norm(fid)] = {str(i) for i in ids}
+        except _mfl_write.MflWriteError:
+            continue
+    try:
+        mine_mfl = held_by.get(norm(my_fid))
+    except _mfl_write.MflWriteError:
+        mine_mfl = None
+    if mine_mfl is None:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    if str(mfl_add) in mine_mfl:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_already_yours", platform, add=add_name))
+    if any(str(mfl_add) in ids for ids in held_by.values()):
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unavailable", platform, add=add_name))
+    if drop_id and str(mfl_drop) not in mine_mfl:
+        return _fa_move_error("asset_not_owned", 422, _fa_copy.message(
+            "asset_not_owned", platform, drop=drop_name))
+    # 11. The claim gate: MFL claims stay off (design.md §5). Waiver status
+    # can't be read before the tap, so an add of a player MFL holds on
+    # waivers is MFL's to refuse (10f), never sent as a claim.
+    if kind == "claim" and not _fa_move_claims_enabled(platform):
+        return _fa_move_error("waiver_claim_unsupported", 422, _fa_copy.message(
+            "waiver_claim_unsupported", platform, add=add_name))
+    if _fa_move_preflight_over_budget(t0):
+        return _read_failed()
+    fa_req = _mfl_write.FaMoveRequest(
+        league_id=league_id, add_player_id=str(mfl_add),
+        drop_player_id=str(mfl_drop) if drop_id else None,
+        move_kind=kind, faab_bid=req["faab_bid"])
+
+    def _write():
+        return _mfl_write.fa_move(cookie, host, year, fa_req)
+
+    def _on_auth():
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_rejected")
+
+    member_id, my_players = _fa_move_mfl_my_member(league_id, my_fid)
+    return _fa_move_send(
+        sess=sess, req=req, platform=platform, platform_user_id=account, now=now,
+        grant=grant, write=_write, auth_error=_mfl_write.MflWriteAuthError,
+        write_error=_mfl_write.MflWriteError, on_auth=_on_auth,
+        add_name=add_name, drop_name=drop_name, league_name=league_name,
+        member_id=member_id, my_players=my_players)
+
+
+def _fa_move_send(*, sess, req: dict, platform: str, platform_user_id: str, now: datetime,
+                  grant, write, auth_error, write_error, on_auth, add_name, drop_name,
+                  league_name, member_id: str, my_players: list[str] | None) -> tuple[dict, int]:
+    """Steps 12-13 for a platform past its pre-write reads: the grant re-read,
+    the `sent` row (atomic double-move block), the ONE platform call, the
+    `result` row, the roster save on `complete`, the event. The same rules as
+    `_fa_move_core`'s Sleeper tail, which keeps its own copy until the Sleeper
+    capture lands (design.md §4: one refactor, one review). `write()` returns
+    the adapter's neutral result; it is called at most once and never retried.
+    `my_players` is the caller's stored roster (FTF ids), or None (no save)."""
+    user_id = str(sess.get("user_id") or "")
+    league_id, attempt_id = req["league_id"], req["attempt_id"]
+    add_id, drop_id, kind, bid = (req["add_player_id"], req["drop_player_id"],
+                                  req["move_kind"], req["faab_bid"])
+    # The grant again, right before the `sent` row: a withdrawal during the
+    # preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
+    record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
+              "platform_user_id": platform_user_id, "league_id": league_id,
+              "consent_id": grant["consent_id"], "move_kind": kind,
+              "add_player_ids": json.dumps([add_id]),
+              "drop_player_ids": json.dumps([drop_id] if drop_id else []),
+              "faab_bid": bid}
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival or not sent_id:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
+    reported = None
+    try:
+        reported = write()
+    except auth_error as e:
+        log.warning("fa move (%s) auth-rejected: %s", platform,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        try:
+            on_auth()
+        except Exception:
+            log.exception("fa move (%s): dropping the rejected credential failed", platform)
+        payload, status = _fa_move_error(f"{platform}_rejected", 409,
+                                         _fa_copy.message("rejected", platform))
+        result = "error"
+    except write_error as e:
+        log.warning("fa move (%s) write-failed [%s]: %s", platform, e.kind,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        # 'input' is decided before any byte is sent, like 'config'.
+        payload, status, result = _fa_move_write_failure(
+            "config" if e.kind == "input" else e.kind, platform)
+    except Exception:
+        log.exception("fa move (%s): unexpected error during the platform write", platform)
+        payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN, platform)
+    if reported is not None:
+        move_status, result = reported.get("status"), reported.get("result")
+        if move_status not in ("complete", "pending") or result not in ("accepted", "partial"):
+            log.warning("fa move (%s): unreadable adapter result; outcome unknown", platform)
+            payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN,
+                                                             platform)
+            reported = None
+    added = dropped = []
+    if reported is not None:
+        fallback = result == "accepted"
+        added = [str(p) for p in (reported.get("added") or ([add_id] if fallback else []))]
+        dropped = [str(p) for p in (reported.get("dropped")
+                                    or ([drop_id] if fallback and drop_id else []))]
+        title, lines = _fa_copy.result_copy(
+            status=move_status, result=result, platform=platform,
+            add=add_name or "This player", drop=(drop_name or "That player") if drop_id else None,
+            league=league_name or "your league", added=added, dropped=dropped, bid=bid)
+        payload = {"status": move_status, "move_kind": kind, "result": result,
+                   "league_platform": platform, "attempt_id": attempt_id,
+                   "title": title, "lines": lines}
+        if reported.get("transaction_id"):
+            payload["platform_transaction_id"] = str(reported["transaction_id"])
+        status = 200
+    try:
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": result,
+            "status": payload.get("status") if status == 200 else None,
+            "platform_transaction_id": payload.get("platform_transaction_id"),
+            "error_code": None if status == 200 else payload.get("error"),
+            "response_status": status, "response_json": json.dumps(payload)})
+    except Exception:
+        log.exception("fa move (%s): the result row failed (attempt %s)", platform, attempt_id)
+    stamp = False
+    if status == 200 and payload["status"] == "complete" and my_players is not None:
+        try:
+            held = set(my_players)
+            new_roster = ([p for p in my_players if p not in set(dropped)]
+                          + [p for p in added if p not in held])
+            stamp = _fa_db.set_league_member_roster(league_id, member_id, new_roster)
+            if stamp:
+                _invalidate_league_members_cache(league_id)
+        except Exception:
+            log.exception("fa move (%s): roster save failed (league %s)", platform, league_id)
             stamp = False
     if status == 200:
         _fa_move_event(user_id, "fa_move_write_succeeded", {
@@ -43037,6 +43963,7 @@ def mfl_link():
         return jsonify({"error": "mfl_bad_team_id",
                         "message": "That franchise isn't in this league."}), 400
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -43047,19 +43974,19 @@ def mfl_link():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=user_id,
+            league_id=store_lid, user_id=user_id,
             name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
             season=year, auth="public", my_team=franchise_id,
             total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_link: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — normalize MFL owned picks into draft_picks (same store Sleeper
@@ -43067,20 +43994,20 @@ def mfl_link():
     # persisted so franchise→user name resolution has the member snapshot.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_link: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_link: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_link")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_link")
 
     r = mapped["report"]
     log.info("mfl_link: user=%s league=%s year=%s teams=%d match_rate=%.1f%% "
              "unmatched=%d picks=%d", user_id, league_id, year, len(members),
              r["match_rate"] * 100, len(r["unmatched"]), len(parsed["future_picks"]))
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": franchise_id,
@@ -43155,10 +44082,12 @@ def mfl_import():
         return jsonify({"error": "no_user"}), 401
 
     body = request.get_json(force=True) or {}
-    league_id = str(body.get("league_id") or "").strip()
-    row = get_platform_league(league_id, "mfl") if league_id else None
-    # Per-user binding (see espn_import): the caller's own franchise only.
-    binding = get_platform_binding(user_id, league_id, "mfl") if row else None
+    league_id = _tp.native_league_id(str(body.get("league_id") or "").strip())
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
+    row = get_platform_league(store_lid, "mfl") if league_id else None
+    # Per-user binding (see espn_import): the caller's own franchise only,
+    # read under the stored id.
+    binding = get_platform_binding(user_id, store_lid, "mfl") if row else None
     if not row or binding is None:
         return jsonify({"error": "mfl_not_linked",
                         "message": "Link this MFL league first."}), 404
@@ -43194,35 +44123,35 @@ def mfl_import():
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     try:
         upsert_platform_league(
-            league_id=league_id, user_id=user_id,
+            league_id=store_lid, user_id=user_id,
             name=parsed["name"] or row.get("name") or "", platform="mfl",
             season=year, auth=row.get("platform_auth") or "public",
             my_team=my_team, total_rosters=parsed["total_teams"], host=host,
             future_picks=parsed["future_picks"])
-        replace_espn_league_members(league_id, members)
+        replace_espn_league_members(store_lid, members)
     except Exception:
         log.exception("mfl_import: persistence failed")
         return jsonify({"error": "store_failed"}), 500
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{my_team}")
 
     # #158 — re-normalize MFL owned picks on manual refresh (see mfl_link).
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_import: normalized %d owned picks", _npk)
         except Exception as _mpk_err:
             log.warning("mfl_import: owned-pick normalization failed (continuing): %s", _mpk_err)
 
     # #201 — re-detect on every re-sync. This is also the manual fix-up path
     # for leagues linked before format detection existed.
-    _mfl_store_scoring_format(league_id, raw, "mfl_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_import")
 
     return jsonify({
-        "ok": True, "league_id": league_id, "name": parsed["name"],
+        "ok": True, "league_id": store_lid, "name": parsed["name"],
         "platform": "mfl", "season": year, "auth": row.get("platform_auth") or "public",
         "total_teams": parsed["total_teams"], "teams_imported": len(members),
         "my_team_id": my_team, "my_roster": mapped["rosters"].get(my_team, []),
@@ -43292,6 +44221,7 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
         raise _mfl.MflError(
             "couldn't match your franchise in this league", kind="franchise")
 
+    store_lid = _tp.storage_league_id(user_id, league_id)   # test-profile WRITE seam
     members = []
     for fr in parsed["franchises"]:
         fid = fr["franchise_id"]
@@ -43301,22 +44231,22 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "player_ids": mapped["rosters"].get(fid, []),
                         "team_key": f"mfl:{league_id}.f{fid}"})   # ADR-011
     upsert_platform_league(
-        league_id=league_id, user_id=user_id,
+        league_id=store_lid, user_id=user_id,
         name=parsed["name"] or f"MFL league {league_id}", platform="mfl",
         season=year, auth="cookie", my_team=franchise_id,
         total_rosters=parsed["total_teams"], host=host,
         future_picks=parsed["future_picks"])
-    replace_espn_league_members(league_id, members)
+    replace_espn_league_members(store_lid, members)
 
     # ADR-011 Writer A — after the membership transaction committed.
     _platform_roster_history_on_sync(
-        league_id, "mfl", members,
+        store_lid, "mfl", members,
         my_user_id=user_id, my_team_key=f"mfl:{league_id}.f{franchise_id}")
 
     # #158 — same best-effort owned-pick normalization as the public path.
     if is_enabled("picks.owned_sync"):
         try:
-            _npk = _sync_mfl_owned_picks(league_id)
+            _npk = _sync_mfl_owned_picks(store_lid)
             log.info("mfl_auth_import: normalized %d owned picks (league=%s)",
                      _npk, league_id)
         except Exception as _mpk_err:
@@ -43324,11 +44254,11 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
                         "(continuing): %s", _mpk_err)
 
     # #201 — detect + store the league's scoring format from the bundle.
-    _mfl_store_scoring_format(league_id, raw, "mfl_auth_import")
+    _mfl_store_scoring_format(store_lid, raw, "mfl_auth_import")
 
     r = mapped["report"]
     return {
-        "league_id": league_id, "name": parsed["name"], "season": year,
+        "league_id": store_lid, "name": parsed["name"], "season": year,
         "my_team_id": franchise_id, "teams_imported": len(members),
         "total_teams": parsed["total_teams"],
         "future_picks_stored": len(parsed["future_picks"]),
@@ -44351,6 +45281,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     byte-identical; on that path these re-checks are no-ops. Extracted
     2026-09-07 exactly the way `_sleeper_propose_core` was.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599
@@ -44970,6 +45902,8 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     `espn_pick_unsupported`); the overhaul refuses them earlier, at
     prepare-send, so nothing is half-sent.
     """
+    if _tp.outbound_blocked("platform", payload=sess.get("user_id"), kind="platform_write"):
+        return {"error": "test_profile_blocked", "message": _TP_BLOCKED_MESSAGE}, 403
     _t0 = _send_clock()      # the send pre-flight budget starts here
     if _TEST_MODE:
         return {"error": "test_mode_propose_disabled"}, 599

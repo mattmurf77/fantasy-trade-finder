@@ -12,6 +12,20 @@
 ---
 
 
+## 2026-11-12 — In-app add/drop: MFL path merged, switched off (D-248)
+
+- **What landed:** the server can build and send an MFL free-agent add or add+drop from the existing claim sheet. It is behind flag `mfl.send_add_drop` (false) and a second lock that opens only after one supervised real MFL transaction is recorded.
+- **What users see:** no change on any platform. The claim sheet still hands off to the platform.
+- **Sleeper and ESPN:** unchanged. Sleeper still needs its capture session; ESPN has no known write shape.
+- **Next:** the operator decisions in `docs/plans/in-app-claims/design.md` §9.
+
+## 2026-11-12 — Onboarding test profile: be a new user with your own leagues, then switch back (D-247)
+
+- **What it is:** Settings › Testing gains "Test profile" for allow-listed accounts. It signs the device in as a brand-new user whose only link to the real account is that it can reach the same ESPN, MFL and Sleeper leagues. A banner shows while it is active, with Switch back and Reset.
+- **Real data:** untouched. The test profile's rows live under their own ids; tests compare the real account's rows byte for byte before and after a full onboarding.
+- **Linking** runs the production flows on all three platforms. Nothing is sent to a platform and no league-mate is notified from a test profile.
+- **State:** flag `dev.test_profile` on; env `TEST_PROFILE_ACCOUNTS` holds the operator's account only. Two independent reviews; all findings fixed. Needs the next app build. Not verified on a device or against live platforms: the checklist is design.md §9.3.
+
 ## 2026-11-12 — Win-now engine: Tanking and Rebuilding teams are steered to move older producers (D-243, D-244)
 
 - **Label fit:** for a Tanking or Rebuilding manager's own side the engine reads the player labels, and for win-now pieces and older cornerstones uses whichever of the label and the age rule is the stronger sell.

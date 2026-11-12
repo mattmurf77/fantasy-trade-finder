@@ -79,6 +79,31 @@ engine   = create_engine(DATABASE_URL, echo=False, future=True,
                             else _pg_engine_kwargs()))
 metadata = MetaData()
 
+from . import test_profile as _tp   # onboarding test profile: storage re-key + outbound chokepoint
+
+
+from sqlalchemy.engine import Engine as _SAEngine
+
+
+@sa_event.listens_for(_SAEngine, "before_execute")
+def _tp_write_fence(conn, clauseelement, multiparams, params, execution_options):
+    """Onboarding test profile, review M1: default-deny any write a test-profile
+    request makes under a league outside its namespace (test_profile.check_write).
+    Registered on the Engine CLASS so every engine — the three here and any a
+    test builds — carries it; a real request pays one contextvar read."""
+    _tp.check_write(clauseelement, multiparams, params)
+
+
+def _not_test_league(col):
+    """Background loaders over leagues never return an onboarding test
+    profile's `qa_tp:` league unless a caller asks for it by id (review M2)."""
+    return ~col.startswith(_tp.LEAGUE_PREFIX, autoescape=True)
+
+
+def _not_test_user(col):
+    """…nor a synthetic `qa_` user (Test Stages and the test profile)."""
+    return ~col.startswith("qa_", autoescape=True)
+
 # Silent prepared offers are private artifacts, not shown impressions. The
 # participant index covers every consumed manager, including non-app members.
 # Store operations live in prepared_trade_store; these additive tables are
@@ -5912,10 +5937,14 @@ def load_leaderboard(
             return {"metric": metric, "window": window, "league_id": league_id,
                     "rows": [], "self_row": None}
 
+    # Synthetic QA users (qa_*: Test Stages, the onboarding test profile) are
+    # never on a board; over-fetch a little so dropping them keeps `limit`.
+    fetch = limit + 10
     if metric == "streak":
-        top = _streak_top(league_user_ids, limit)
+        top = _streak_top(league_user_ids, fetch)
     else:
-        top = _rank_count_top(_window_since(window), league_user_ids, limit)
+        top = _rank_count_top(_window_since(window), league_user_ids, fetch)
+    top = [(uid, val) for uid, val in top if not str(uid).startswith("qa_")][:limit]
 
     if not top:
         return {"metric": metric, "window": window, "league_id": league_id,
@@ -8112,7 +8141,9 @@ def load_active_deck_user_leagues(days: int = 30) -> list[dict]:
             rows = conn.execute(
                 select(tbl.c.user_id, tbl.c.league_id)
                 .where(and_(ts_col >= cutoff,
-                            tbl.c.league_id != "league_demo"))
+                            tbl.c.league_id != "league_demo",
+                            _not_test_league(tbl.c.league_id),
+                            _not_test_user(tbl.c.user_id)))
                 .distinct()
             ).fetchall()
             for r in rows:
@@ -10224,6 +10255,9 @@ def load_global_like_rate(days: int = 30) -> tuple[int, int]:
         .where(and_(
             trade_decisions_table.c.decision.in_(("like", "pass")),
             trade_decisions_table.c.created_at >= cutoff,
+            # Synthetic QA users (qa_*: Test Stages, the onboarding test
+            # profile) never move a product-wide learning signal.
+            ~trade_decisions_table.c.user_id.startswith("qa_", autoescape=True),
         ))
         .group_by(trade_decisions_table.c.decision)
     )
@@ -10685,7 +10719,9 @@ def count_archetype_engagement(
             like_alias.c.action == "like",
         )).exists()
     )
-    conds = [deck_impressions_table.c.archetype == archetype, has_viewed]
+    conds = [deck_impressions_table.c.archetype == archetype, has_viewed,
+             # Synthetic QA users (qa_*) never move the global audition pool.
+             ~deck_impressions_table.c.user_id.startswith("qa_", autoescape=True)]
     if since_iso:
         conds.append(deck_impressions_table.c.served_at >= since_iso)
     q_viewed = (select(func.count())
@@ -10927,7 +10963,7 @@ def upsert_league_members(league_id: str, members: list[dict]) -> None:
     rows = [
         {
             "league_id":    league_id,
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -11135,7 +11171,8 @@ def write_session_init_members(league_id: str, members: list[dict], *, user_id: 
     writes again (the deletion matrix).
     """
     now = _now()
-    rows = [{"league_id": str(league_id), "user_id": str(m["user_id"]),
+    rows = [{"league_id": str(league_id),
+             "user_id": _tp.masked_member_id(league_id, str(m["user_id"])),
              "username": m.get("username", ""),
              "display_name": m.get("display_name") or m.get("username", ""),
              "roster_data": json.dumps(m.get("player_ids", [])), "updated_at": now}
@@ -12527,6 +12564,9 @@ def create_trade_match(
     the match itself is the product event and must not fail on an audit
     field.
     """
+    for _uid in (user_a_id, user_b_id):
+        if _tp.outbound_blocked(_uid, league_id=league_id, payload=user_a_id, kind="trade_match"):
+            raise _tp.OutboundBlocked("trade match touching the onboarding test profile")
     now = _now()
     latency = None
     if first_like_at:
@@ -13926,7 +13966,8 @@ def load_league_ids_for_draft_status_refresh(
     ACTIVE_LEAGUE_WINDOW_DAYS); pass `active_within_days=None` for all of them.
     """
     cutoff = _active_league_cutoff(active_within_days)
-    q = select(leagues_table.c.sleeper_league_id)
+    q = select(leagues_table.c.sleeper_league_id).where(
+        _not_test_league(leagues_table.c.sleeper_league_id))
     if cutoff is not None:
         q = q.where(leagues_table.c.updated_at >= cutoff)
     with engine.connect() as conn:
@@ -15056,6 +15097,8 @@ def create_notification(
     -------
     Dict with the inserted row data including the new id.
     """
+    if _tp.outbound_blocked(user_id, payload=metadata, kind=type_):
+        return {"id": None, "user_id": user_id, "type": type_, "blocked": True}
     supplied_conn = conn
     row = {
         "user_id":       user_id,
@@ -15152,6 +15195,8 @@ def create_or_coalesce_league_join_notification(
     Returns the row dict, or None on failure (never raises — an inbox
     write must not be able to fail a session_init).
     """
+    if _tp.outbound_blocked(user_id, league_id=league_id, kind="league_member_joined"):
+        return None
     if not user_id or not league_id:
         return None
     day_start = datetime.now(timezone.utc).replace(
@@ -15752,6 +15797,9 @@ def claim_referral(referral_id: int, referred_user_id: str, method: str, *, conn
     One conditional UPDATE, so two concurrent first sessions can't both
     claim it. False when the row was already claimed (or isn't pending), or
     when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    if _tp.is_test_profile_id(referred_user_id) or _tp.is_test_profile_id(_tp.ACTOR.get()):
+        _tp.outbound_blocked("referrer", payload=referred_user_id, kind="referral_credit")
+        return False
     supplied_conn = conn
     from sqlalchemy.exc import IntegrityError
     r = referrals_table
@@ -16229,6 +16277,7 @@ def load_history_sweep_leagues(
                     lt.c.platform_host)
         if cutoff is not None:
             lq = lq.where(lt.c.updated_at >= cutoff)
+        lq = lq.where(_not_test_league(lt.c.sleeper_league_id))
         with engine.connect() as conn:
             leagues = conn.execute(lq).fetchall()
             done = {
@@ -17199,15 +17248,25 @@ def get_mfl_credential(user_id: str) -> dict | None:
     return d
 
 
-def delete_mfl_credential(user_id: str) -> None:
-    """Remove a user's stored MFL cookie (disconnect / dead-cookie cleanup)."""
+def delete_mfl_credential(user_id: str, *, withdrawn_via: str = "disconnect") -> int:
+    """Remove a user's stored MFL cookie (disconnect / dead-cookie cleanup).
+
+    D1 Update 1 (in-app-claims design.md §4), the Sleeper rule
+    (`delete_sleeper_credential`): the deletion also ends any open MFL
+    roster-move grant in the SAME transaction, so a reconnect always means
+    re-consent. `withdrawn_via`: 'disconnect' (the default, every pre-Update-1
+    caller) | 'credential_expired' | 'credential_rejected'. Returns the
+    number of withdrawal rows appended (0 when no grant was open, which is
+    always the case until MFL has a consent version)."""
     if not user_id:
-        return
+        return 0
     with engine.begin() as conn:
         conn.execute(
             delete(mfl_credentials_table)
             .where(mfl_credentials_table.c.user_id == user_id)
         )
+        return withdraw_platform_write_grants(
+            user_id, "mfl", withdrawn_via, datetime.now(timezone.utc), conn=conn)
 
 
 def upsert_espn_league(league_id: str, user_id: str, name: str,
@@ -17299,7 +17358,7 @@ def replace_espn_league_members(league_id: str, members: list[dict]) -> None:
     rows = [
         {
             "league_id":    str(league_id),
-            "user_id":      str(m.get("user_id", "")),
+            "user_id":      _tp.masked_member_id(league_id, str(m.get("user_id", ""))),
             "username":     m.get("username", ""),
             "display_name": m.get("display_name") or m.get("username", ""),
             "roster_data":  json.dumps(m.get("player_ids", [])),
@@ -17551,9 +17610,20 @@ def _labels_from_binding_rows(league_id, rows) -> dict:
     (created_at, then user_id): one stable member row per team even when two
     app accounts co-own it (backend/CLAUDE.md § Identity)."""
     labels: dict = {}
+    # Onboarding test profile: member dicts carry the platform-NATIVE team
+    # key in a namespaced league too (`espn:<native>.t<n>`), so the label is
+    # keyed by the native id. A label never crosses worlds: a namespaced
+    # league is labelled only with its own test profile, a real league never
+    # with a test-world id (test_profile_linking pins both).
+    native = _tp.native_league_id(str(league_id))
+    owner = _tp.profile_of_league(league_id)
     for r in sorted(rows, key=lambda r: (r.created_at or "", r.user_id)):
+        if owner is not None and r.user_id != owner:
+            continue
+        if owner is None and _tp.is_test_world_id(r.user_id):
+            continue
         if r.platform in _TEAM_KEY_FORMAT:
-            labels.setdefault(platform_team_key(r.platform, league_id, r.team_id),
+            labels.setdefault(platform_team_key(r.platform, native, r.team_id),
                               r.user_id)
     return labels
 
@@ -17893,6 +17963,8 @@ def queue_notification(
     `dedup_key` is the original key from _send_typed_push; it gets
     threaded through the bundle drain so frequency caps remain accurate.
     """
+    if _tp.outbound_blocked(user_id, payload=data, kind=kind):
+        return
     if not user_id or not kind or not deliver_after:
         return
     try:
@@ -17969,6 +18041,7 @@ def load_pending_matches_older_than(cutoff_iso: str) -> list[dict]:
                 )
                 .where(trade_matches_table.c.status == "pending")
                 .where(trade_matches_table.c.matched_at < cutoff_iso)
+                .where(_not_test_league(trade_matches_table.c.league_id))
             ).fetchall()
         for r in rows:
             out.append(dict(r._mapping))
@@ -18022,6 +18095,9 @@ def load_all_signed_up_users() -> list[dict]:
                     users_table.c.last_rank_at,
                     users_table.c.unlocked_formats,
                 ).where(users_table.c.signup_at.is_not(None))
+                # Synthetic QA users (test_users.py qa_*, the onboarding test
+                # profile qa_tp_*) never get digests, reviews or re-engagement.
+                .where(~users_table.c.sleeper_user_id.startswith("qa_", autoescape=True))
             ).fetchall()
         for r in rows:
             d = dict(r._mapping)

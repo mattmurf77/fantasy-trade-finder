@@ -1843,6 +1843,8 @@ Interim home; folds into the auth epic's `linked_sources` when that lands.
 
 D1 free-agent moves ([contract](plans/sleeper-fa-write/contract.md); legal R15.3; flag `sleeper.send_add_drop`). The user's authorization for Fleeced to make roster moves in their platform league, and every end of it. **Append-only:** rows are inserted, never updated or deleted (except by account deletion). A grant is one row; ending it is a new `withdrawal` row whose `refers_to` names the grant. Never holds a token or credential. Written by `record_platform_write_grant` (the move route, committed before any platform call) and `withdraw_platform_write_grants` (Settings, disconnect, credential expiry or rejection); read by `active_platform_write_grant`.
 
+**Credential deletion withdraws.** `delete_sleeper_credential` and (D1 Update 1) `delete_mfl_credential` each append a withdrawal for every open grant of their platform in the same transaction (`withdrawn_via` `disconnect` | `credential_expired` | `credential_rejected`), so a reconnect always means re-consent. MFL grants are bound to the lowered `mfl_username`.
+
 **Validity is computed at read time:** the latest grant for (user, platform, `platform_user_id`) is valid while its `copy_version` equals the server's current one (`fa_move_copy.CURRENT_CONSENT_VERSION`), no withdrawal refers to it, and now < `expires_at`. Moves never extend it. Keyed by user and platform account, never by league (R15.8 D11).
 
 | Column | Type | Notes |

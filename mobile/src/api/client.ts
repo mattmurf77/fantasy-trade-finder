@@ -660,10 +660,71 @@ function _reportApiFailure(
   }
 }
 
+// ── Onboarding test profile (state/testProfile.ts) ───────────────────────
+// While the device is in the operator's test profile, a call that would mint
+// or bind a DIFFERENT identity (a real sign-in, Apple/Google, the sessionless
+// ESPN/MFL entry, demo, Test Stages) must never run: its token would silently
+// replace the test token while the banner still says "test profile". The
+// server refuses these for a test session too; this catches the token-less
+// ones. Set by state/testProfile.ts — this layer imports no state.
+let _testProfileActive = false;
+export function setTestProfileActive(active: boolean): void {
+  _testProfileActive = active;
+}
+export function isTestProfileActive(): boolean {
+  return _testProfileActive;
+}
+export const TEST_PROFILE_BLOCKED_PATHS: readonly string[] = [
+  '/api/auth/apple', '/api/auth/google', '/api/entry/platform',
+  '/api/session/demo', '/api/account/link-sleeper', '/api/test-users',
+];
+/** The Sleeper username step: allowed in the test profile ONLY when the
+ *  request carries the test session's token (the server then keeps the test
+ *  identity); without it the server would mint a REAL session. */
+const TEST_PROFILE_TOKEN_REQUIRED_PATH = '/api/extension/auth';
+
+let _onTestProfileEnded: (() => void) | null = null;
+/** state/testProfile registers this: the server no longer accepts the test
+ *  session, so the banner offers only "Back to my profile" (review M3). */
+export function setOnTestProfileEnded(fn: () => void): void {
+  _onTestProfileEnded = fn;
+}
+export const TEST_PROFILE_ENDED_MESSAGE =
+  'The test profile has ended. Tap “Back to my profile”.';
+function testProfileEnded(): ApiError {
+  try { _onTestProfileEnded?.(); } catch { /* never mask the error */ }
+  return new ApiError(401, { error: 'test_profile_ended' }, TEST_PROFILE_ENDED_MESSAGE);
+}
+
+/** Headers that make the Sleeper username step run inside the test profile
+ *  (api/auth.ts signIn). Empty outside it. Inside it, sign-in is refused
+ *  unless the server still says this session IS the test profile — a dead
+ *  test token must never lead to a real session (review M3). */
+export async function testProfileAuthHeaders(): Promise<Record<string, string>> {
+  if (!_testProfileActive) return {};
+  const tok = await getSessionToken();
+  if (!tok) throw testProfileEnded();
+  let status: { active?: boolean } | null = null;
+  try {
+    status = await apiRequest<{ active?: boolean }>('/api/test-profile', { quietStatuses: [401, 404] });
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 401 || e.status === 404)) throw testProfileEnded();
+    throw e;
+  }
+  if (!status?.active) throw testProfileEnded();
+  return { 'X-Session-Token': tok };
+}
+export const TEST_PROFILE_BLOCKED_MESSAGE =
+  'Not available in the test profile. Tap “Back to my profile” to do this with your real account.';
+
 export async function apiRequest<T = unknown>(
   path: string,
   opts: RequestOptions = {},
 ): Promise<T> {
+  if (_testProfileActive && (TEST_PROFILE_BLOCKED_PATHS.some((p) => path.split('?')[0] === p)
+      || (path.split('?')[0] === TEST_PROFILE_TOKEN_REQUIRED_PATH && !opts.headers?.['X-Session-Token']))) {
+    throw new ApiError(403, { error: 'test_profile_blocked' }, TEST_PROFILE_BLOCKED_MESSAGE);
+  }
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
   const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + (opts.timeoutMs ?? timeoutForRequest(path, opts.method || 'GET')));
@@ -822,6 +883,9 @@ async function _apiRequestInner<T = unknown>(
             // still the stored one — a background revalidateSession() may
             // have minted a fresh token while this request was in flight,
             // and a stale 401 must not destroy it.
+            if (res!.status === 401 && _testProfileActive) {
+              try { _onTestProfileEnded?.(); } catch { /* never mask the error */ }
+            }
             if (res!.status === 401) {
               const sent = headers['X-Session-Token'];
               const current = await getSessionToken();

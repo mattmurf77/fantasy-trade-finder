@@ -162,6 +162,20 @@ function ensureInit(): Promise<void> {
   return initPromise;
 }
 
+/** Onboarding test-profile switch (state/testProfile.ts): optionally send what
+ *  is queued under the CURRENT token, then drop the rest, so no event is ever
+ *  sent under the other profile's token (the server attributes by token). */
+export async function settleQueueForProfileSwitch(sendFirst: boolean): Promise<void> {
+  try {
+    await ensureInit();
+    if (sendFirst) await flush();
+  } catch {
+    /* best effort — whatever is left is dropped below */
+  }
+  queue = [];
+  persistQueue();
+}
+
 /** Boot hook (App.tsx): restore the offline queue and start the flush loop
  *  without waiting for the first track() call. Fire-and-forget. */
 export function initAnalytics(): void {

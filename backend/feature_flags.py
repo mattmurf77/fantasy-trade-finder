@@ -157,6 +157,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # in mobile LAUNCHED_FLAG_DEFAULTS; no client reads it. Supersedes the
     # never-shipped `sleeper.fa_write`. MFL/ESPN get their own keys in Update 1.
     "sleeper.send_add_drop",
+    # D1 Update 1 (docs/plans/in-app-claims/design.md): the same for MFL
+    # leagues, over MFL's documented import API (fcfsWaiver). SERVER-ONLY,
+    # default off. Even on, nothing is sent until mfl_write.
+    # FA_MOVE_SHAPES_VERIFIED is set by the verification commit; until then
+    # an MFL league's capability stays `unsupported` and the route 404s.
+    "mfl.send_add_drop",
     # FB-147 engine hook — SOFT, acquire-side trade-block boost. A card whose
     # ACQUIRE side holds a player the counterparty flagged "on the block" gets
     # a bounded composite bump (knob block_boost_weight). Applied AFTER all
@@ -477,6 +483,9 @@ FLAG_KEYS: tuple[str, ...] = (
                              # spawner for onboarding QA (backend/test_users.py)
     "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
                                # readout (mobile TimingReadoutRow, ruling 11)
+    "dev.test_profile",      # /api/test-profile/* — the operator's onboarding test
+                             # profile (backend/test_profile.py). Also needs the
+                             # real account in env TEST_PROFILE_ACCOUNTS.
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL
