@@ -178,7 +178,12 @@ class Scan:
             tree = ast.parse(source)
         for node in ast.walk(tree):
             for child in ast.iter_child_nodes(node):
-                child._t10_parent = node
+                # ast.Load/Store/Del are process-wide singletons in CPython:
+                # a parent link on one leaks into every later AST, and any
+                # later copy.deepcopy of an AST follows it into this tree
+                # (test_research_trade_pipeline hit RecursionError).
+                if not isinstance(child, ast.expr_context):
+                    child._t10_parent = node
         self.imports = {a.asname or a.name: a.name for n in ast.walk(tree)
                         if isinstance(n, ast.ImportFrom) for a in n.names}
         self._scope(tree, "<module>", "module", _State())

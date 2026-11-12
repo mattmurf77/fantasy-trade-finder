@@ -24,6 +24,7 @@ Line numbers are from `fa83f57b`. `server.py` is 44.7k lines, so every claim her
 11. [Option A: real ESPN / MFL linking](#11-option-a-real-espn--mfl-linking)
 12. [Operator ruling 2026-11-12: real Sleeper linking](#12-operator-ruling-2026-11-12-real-sleeper-linking)
 13. [Review findings and fixes (2026-11-12)](#13-review-findings-and-fixes-2026-11-12)
+14. [Second review, and the per-user binding merge (#666)](#14-second-review-and-the-per-user-binding-merge-666)
 
 ---
 
@@ -658,8 +659,8 @@ Tests are in `backend/tests/test_test_profile_review.py` (R) unless named otherw
 | **L3** existence signal | `GET /api/test-profile` and `/enter` are 404 unless the session is verified AND allow-listed | `test_test_profile.py::test_enter_requires_a_verified_real_session` |
 | **L4** reset races and cost | Reset runs inside `accounts.deletion_scope` (the account-deletion drain, `:37283`): it waits for in-flight leases and then `invalidate`s, so pre-reset work can never write. Trade jobs naming the profile are revoked; module caches are purged (`_TP_KEYED_CACHES`, `:37172`). **Postgres cost:** the old one-transaction, 60-table `LIKE` scan is gone. The profile's leagues are listed once from `leagues` + `league_members` (the only prefix scan, on two small tables); every table is then deleted by `=` / `IN`, which uses indexes such as `ix_user_events_user_occurred`, in its own short transaction, so no lock outlives one table's DELETE. Not measured on Postgres (no production access); reasoned from the predicates and indexes | `test_reset_invalidates_pre_reset_work_and_purges_caches`; `test_test_profile.py::test_reset_deletes_only_test_rows_across_every_table` (look-alike ids survive) |
 | **L5** real identifiers in test rows | **Fixed:** history rows (`team_key` with the real league id, ESPN `espn:<SWID>` member keys) are no longer written for a test league (M2). **Acceptable, stated:** league-mates' usernames and display names (`mask_sleeper_users`, `league_members.username` / `display_name`, ESPN `owner_display`, usage-trends owner rows) stay in the test profile's own rows and responses. They are the operator's own league-mates, the same names the operator sees in the real profile, and no one else can reach them: every read of a `qa_tp:` league by anyone but its owner is now refused (L6) | — |
-| **L6** unauthenticated proxies | The fence refuses any real or anonymous request that names a `qa_tp:` league (404) in its path, query, or a body of at most 64 KB. A raw-bytes pre-filter keeps it free for every other request. The fence never reads a larger body, because capped routes (feedback 64 KB, events 128 KB) must answer 413 before any read. A larger body naming a test league from a real caller is not refused here; `session_input` refuses entering it and `submit_rankings` requires membership | `test_real_and_anonymous_callers_cannot_name_a_test_league` |
-| **L7** per-request cost | A non-prefixed token is decided without a lookup. **Cost now:** a real request's fence is one `startswith`, a substring check on the path and query, and, for a body ≤512 KB, one substring check on the cached body bytes (Werkzeug reuses them for the route's own parse), and only for a body of at most 64 KB (`_TP_BODY_SCAN_LIMIT`, the smallest route cap); a larger body is never read by the fence. The pre-existing `_acquire_user_data_lease` hook still does its own `_get_session`, as before this feature | `test_the_fence_never_looks_up_a_real_token`, `test_the_fence_never_reads_a_body_past_the_smallest_route_cap` |
+| **L6** unauthenticated proxies | The fence refuses any real or anonymous request that names a `qa_tp:` league (404) in its path, query, or a body of at most 8 KB. A raw-bytes pre-filter keeps it free for every other request. The fence never reads a larger body, because capped routes (projection runs 8 KB, feedback 64 KB, events 128 KB) must answer 413 before any read. A test walks every route cap in `backend/` and fails if one is ever smaller than the limit. A larger body naming a test league from a real caller is not refused here; `session_input` refuses entering it and `submit_rankings` requires membership | `test_real_and_anonymous_callers_cannot_name_a_test_league` |
+| **L7** per-request cost | A non-prefixed token is decided without a lookup. **Cost now:** a real request's fence is one `startswith`, a substring check on the path and query, and one substring check on the cached body bytes (Werkzeug reuses them for the route's own parse), and only for a body of at most 8 KB (`_TP_BODY_SCAN_LIMIT`, the smallest route cap); a larger body is never read by the fence. The fence parses the cached bytes itself and never leaves a JSON parse in Werkzeug's cache, so a route's own non-forced `get_json()` behaves exactly as without the feature. The pre-existing `_acquire_user_data_lease` hook still does its own `_get_session`, as before this feature | `test_the_fence_never_looks_up_a_real_token`, `test_the_fence_never_reads_a_body_past_the_smallest_route_cap` |
 
 ### Tests now match production
 
@@ -676,3 +677,30 @@ Three removals leave their test green because another layer still holds. They ar
 - **Chokepoint alone** (P2a): the outer guards and the re-key hold.
 - **Join fan-out outer guard alone** (S12): the inbox and push chokepoints drop the delivery. S12b removes both and goes red.
 - **Exit's "dropped" phase marker** (M17): the stash outlives the restore, so a replayed drop is re-restored.
+
+## 14. Second review, and the per-user binding merge (#666)
+
+**Second review (real users), four low fixes:**
+- **Body scan limit.** `_TP_BODY_SCAN_LIMIT` is now 8192 bytes, the projection-runs route's cap (`league_projections/api.py`). `test_the_body_scan_limit_is_at_most_every_route_cap` walks every `content_length` cap in `backend/` and fails if a future cap is smaller.
+- **No cached parse.** The fence parses `get_data(cache=True)` with `json.loads` itself. A route's own non-forced `get_json()` on a wrong content type still returns None or 415. Pinned by `test_a_wrong_content_type_request_behaves_as_without_the_feature`.
+- **Purge locking.** `_TP_KEYED_CACHES` pairs each cache with the lock its own readers and writers hold: `_trade_jobs_lock` for `_trade_jobs_by_key` and `_roster_moved_reads`, plus the outlook, usage, slot-order, pick-projection, trade-block and gate-miss locks. `_session_init_inflight` was dropped: its keys are tokens, so the purge never matched it. Pinned by `test_the_cache_purge_takes_each_caches_own_lock`.
+- **Flag reload.** `feature_flags_reload_route` wraps the eviction like the cleanup loop does. Pinned by `test_a_failing_sweep_never_fails_the_flag_reload`.
+
+**The #666 merge.** #666 is the fix for the "league already linked" finding (§11). It adds `platform_league_bindings` (user, league) → team.
+
+Conflict resolutions in `server.py`:
+- In `espn_import` and `mfl_import`, both intents are kept. The native id comes from the body, the row is read under `store_lid`, and `get_platform_binding(user_id, store_lid, …)` is read under the same stored id the link wrote it under. The league upsert keeps `league_id=store_lid` and takes #666's `user_id=user_id`.
+- `docs/plans/README.md` keeps both rows.
+
+Making the two features correct together:
+- A test profile's link writes its own binding `(qa_tp_X, qa_tp:X:<native>)` through the existing write seam. The database write fence refuses any binding a test request would write under a real league id.
+- `_labels_from_binding_rows` keys labels by the native id, because member dicts carry the platform-native `team_key` in a namespaced league too. The profile's own team is therefore labelled with the profile's id. A label never crosses worlds: a namespaced league takes only its own profile's label, and a real league never takes a test-world id.
+- Reset covers the new table automatically: it has `user_id` and `league_id` columns. Sabotage B5/B5b (excluding the table from `reset_scope`) turn the reset test and the schema-driven coverage test red.
+- The reset's `_by` rule now covers `founder_label_overrides.set_by` (from `main`). `invited_by` is excluded on purpose: it names the referrer on the invited user's own row.
+
+Tests:
+- `test_founder_bound_in_the_real_league_then_the_test_profile_links_it` (the two-user case);
+- `test_binding_labels_never_cross_worlds`;
+- `test_reset_removes_the_profiles_binding_rows_only`;
+- the AST seam test, which now also requires binding reads in the linking routes to use `store_lid`;
+- the ESPN/MFL scan, which now asserts the binding rows.

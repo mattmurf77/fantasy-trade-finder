@@ -333,7 +333,11 @@ _EXTRA_USER_COLUMNS = frozenset({"owner_id", "actor", "user_a_id", "user_b_id",
 
 
 def _is_user_column(name: str) -> bool:
-    return name.endswith("user_id") or name in _EXTRA_USER_COLUMNS
+    # `*_by` (created_by, recorded_by, set_by, …) names who acted. Not
+    # `invited_by`: it names the REFERRER on the invited user's own row, so
+    # matching it would delete a real user's account row.
+    return (name.endswith("user_id") or name in _EXTRA_USER_COLUMNS
+            or (name.endswith("_by") and name != "invited_by"))
 
 
 def reset_scope() -> list[tuple[str, list[str], list[str]]]:

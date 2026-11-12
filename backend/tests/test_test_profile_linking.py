@@ -279,6 +279,13 @@ def test_every_linking_write_site_goes_through_the_write_seam():
             arg = _league_arg(call)
             assert isinstance(arg, ast.Name) and arg.id == "store_lid", \
                 f"{name}: {call.func.id} writes {ast.unparse(arg) if arg else None}, not store_lid"
+        # #666's per-user binding is read under the SAME stored id it was
+        # written under (the read seam for get_platform_binding).
+        for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Name) and n.func.id == "get_platform_binding"):
+            arg = call.args[1] if len(call.args) > 1 else None
+            assert isinstance(arg, ast.Name) and arg.id == "store_lid", \
+                f"{name}: get_platform_binding reads {ast.unparse(arg) if arg else None}, not store_lid"
         # The id handed back to the client is the stored one.
         for d in (n for n in ast.walk(fn) if isinstance(n, ast.Dict)):
             for k, v in zip(d.keys, d.values):
@@ -418,6 +425,76 @@ def test_linking_the_same_leagues_writes_nothing_real(world):
     assert w["client"].get("/api/mfl/auth-link", headers=_h(REAL)).get_json()["connected"] is True
 
 
+def test_founder_bound_in_the_real_league_then_the_test_profile_links_it(world):
+    """#666 × test profile, the two-user case: the founder is bound to their
+    team in the REAL league; the test profile links the same native league.
+    The founder's binding, league row and member rows are byte-identical; the
+    test profile gets its own binding in its namespace; labels never cross."""
+    w = world
+    _seed_real_links(w)
+    bt, lt, mt = db.platform_league_bindings_table, db.leagues_table, db.league_members_table
+
+    def real_state():
+        with w["engine"].connect() as conn:
+            return (sorted(tuple(r) for r in conn.execute(select(bt).where(bt.c.user_id == REAL))),
+                    sorted(tuple(r) for r in conn.execute(
+                        select(lt).where(lt.c.sleeper_league_id.in_([ESPN_LG, MFL_LG])))),
+                    sorted(tuple(r) for r in conn.execute(
+                        select(mt).where(mt.c.league_id.in_([ESPN_LG, MFL_LG])))))
+    before = real_state()
+    assert db.get_platform_binding(REAL, ESPN_LG, "espn") is not None
+    r = _espn_import(w, PID)
+    assert r.status_code == 200, r.get_json()
+    store_e = r.get_json()["league_id"]
+    assert store_e == f"qa_tp:{REAL}:{ESPN_LG}"
+    _post(w, PID, "/api/mfl/auth-link", {"username": "m", "password": "pw", "year": 2026})
+    store_m = _post(w, PID, "/api/mfl/auth-import", {"year": 2026}).get_json()["imported"][0]["league_id"]
+    # Re-syncs find the profile's binding through the stored id (read seam).
+    assert _post(w, PID, "/api/espn/import", {"league_id": store_e}).status_code == 200
+    assert _post(w, PID, "/api/mfl/import", {"league_id": store_m}).status_code == 200
+    assert real_state() == before
+    assert db.get_platform_binding(PID, ESPN_LG) is None          # never under the real id
+    assert db.get_platform_binding(REAL, store_e) is None         # never the real user's
+    b = db.get_platform_binding(PID, store_e, "espn")
+    assert b is not None and b["team_id_int"] == 1
+    assert db.get_platform_binding(PID, store_m, "mfl") is not None
+    mine = [m for m in db.load_league_members(store_e) if m["user_id"] == PID]
+    assert len(mine) == 1                                          # labelled with the profile
+    # A real re-sync of the real league never picks up a test-world label.
+    assert _post(w, REAL, "/api/espn/import", {"league_id": ESPN_LG}).status_code == 200
+    assert not [m for m in db.load_league_members(ESPN_LG) if "qa_tp" in m["user_id"]]
+
+
+def test_binding_labels_never_cross_worlds(world):
+    """Even with a stray binding row (a missed seam), the member labeller
+    writes no real binder into a namespaced league and no test id into a
+    real one."""
+    store = f"qa_tp:{REAL}:{ESPN_LG}"
+    with world["engine"].begin() as conn:
+        for uid, lid in ((REAL, store), (PID, ESPN_LG), (PID, store)):
+            db._upsert_platform_binding(conn, uid, lid, "espn", 1)
+    members = [{"user_id": "espn:x1", "username": "a", "team_key": f"espn:{ESPN_LG}.t1",
+                "player_ids": []},
+               {"user_id": "espn:x2", "username": "b", "team_key": f"espn:{ESPN_LG}.t2",
+                "player_ids": []}]
+    db.replace_espn_league_members(store, [dict(m) for m in members])
+    ids = {m["user_id"] for m in db.load_league_members(store)}
+    assert PID in ids and REAL not in ids
+    db.replace_espn_league_members(ESPN_LG, [dict(m) for m in members])
+    ids = {m["user_id"] for m in db.load_league_members(ESPN_LG)}
+    assert not [i for i in ids if i.startswith("qa_tp")]
+
+
+def test_reset_removes_the_profiles_binding_rows_only(world):
+    w = world
+    _seed_real_links(w)
+    store_e = _espn_import(w, PID).get_json()["league_id"]
+    assert db.get_platform_binding(PID, store_e, "espn") is not None
+    tp.reset_profile(PID)
+    assert db.get_platform_binding(PID, store_e, "espn") is None
+    assert db.get_platform_binding(REAL, ESPN_LG, "espn") is not None
+
+
 # ── failure paths: the test profile gets what a new real user gets ────────
 
 def _wire(r):
@@ -552,5 +629,15 @@ def test_espn_and_mfl_onboarding_scan(init_world):
         assert leaks == []                                                     # (a)
         assert {t: r for t, r in _not_test(after).items() if t in keyed} == before   # (b)
         assert sends == []                                                     # (c)
+        # #666 bindings: the profile's own, only in its namespace, only for itself.
+        assert "platform_league_bindings" in keyed
+        bt = db.platform_league_bindings_table
+        with w["engine"].connect() as conn:
+            pid_rows = {(r.league_id, r.platform) for r in conn.execute(
+                select(bt).where(bt.c.user_id == PID))}
+            ns_rows = {r.user_id for r in conn.execute(
+                select(bt).where(bt.c.league_id.startswith("qa_tp:", autoescape=True)))}
+        assert pid_rows == {(lid_e, "espn"), (lid_m, "mfl")}
+        assert ns_rows == {PID}
     finally:
         server._send_expo_push = server_send

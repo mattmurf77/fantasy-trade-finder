@@ -36448,7 +36448,10 @@ def feature_flags_reload_route():
     """
     _require_cron_auth()
     flags = reload_flags()
-    _tp_evict_closed_sessions()      # a flag turned off ends test-profile sessions now
+    try:
+        _tp_evict_closed_sessions()  # a flag turned off ends test-profile sessions now
+    except Exception:
+        log.exception("test-profile session sweep failed")   # never fails the reload
     return jsonify({"ok": True, "flags": flags})
 
 
@@ -37142,11 +37145,14 @@ _TP_LINK_INPUT_KEYS = {
     "mfl_auth_import": {"league_ids"},
 }
 
-# The fence never reads a body larger than the smallest route cap
-# (FEEDBACK_MAX_BODY_BYTES): capped routes answer 413 before ANY read, and a
-# read here would break that contract. Larger bodies are left to the route
+# The fence never reads a body larger than the SMALLEST Content-Length cap any
+# route checks before reading (today POST /api/leagues/<id>/projection-runs,
+# 8192 bytes, league_projections/api.py): those routes answer 413 before ANY
+# read, and a read here would break that. Larger bodies are left to the route
 # (and, for a test session, to the database write fence).
-_TP_BODY_SCAN_LIMIT = 64 * 1024
+# tests/test_test_profile_review.py walks every route cap in backend/ and
+# fails if one is ever smaller than this.
+_TP_BODY_SCAN_LIMIT = 8192
 
 
 def _tp_collect_league_ids(obj, out: list, exempt=frozenset()) -> None:
@@ -37179,7 +37185,16 @@ def _tp_request_league_ids(exempt=frozenset()) -> list[str]:
             form = {k: request.form.getlist(k) for k in request.form.keys()}
             _tp_collect_league_ids(form, ids, exempt)
         else:
-            _tp_collect_league_ids(request.get_json(force=True, silent=True), ids, exempt)
+            # Parse the raw bytes ourselves: get_json(force=True) would leave
+            # its parse in Werkzeug's JSON cache, where a route's own
+            # non-forced get_json() would then read it, and cache=False would
+            # consume the stream. The BYTES are cached (get_data(cache=True)),
+            # which is what every later get_json/get_data reads anyway.
+            try:
+                parsed = json.loads(request.get_data(cache=True) or b"null")
+            except ValueError:
+                parsed = None
+            _tp_collect_league_ids(parsed, ids, exempt)
     return [str(x).strip() for x in ids if x not in (None, "") and str(x).strip()]
 
 
@@ -37269,16 +37284,24 @@ def _tp_session_body(token: str, profile_uid: str) -> dict:
 
 # Module caches keyed by a league id or a user id (alone or inside a tuple
 # key). Reset drops the profile's entries so a fresh onboarding never reads a
-# cached answer from before it (review L4).
+# cached answer from before it (review L4). Each cache is purged under the
+# lock its own readers and writers hold (None: they take none), so a purge can
+# never land between another thread's `get(key) == x` and its `pop(key)`.
 _TP_KEYED_CACHES = (
-    "_OUTLOOK_IMPACT_CACHE", "_DRAFT_CONTEXT_CACHE", "_LEADERBOARD_CACHE",
-    "_LEAGUE_MEMBERS_CACHE", "_slot_order_cache", "_pick_projection_cache",
-    "_trade_block_cache", "_SUGGESTED_ORDER_CACHE", "_ROS_CACHE", "_rank_chip_cache",
-    "_OUTLOOK_WEEK_SETTLED", "_OUTLOOK_WEEK_LIVE", "_OUTLOOK_WEEK_HIGHWATER",
-    "_OUTLOOK_SEASON_BY_LEAGUE", "_FA_LEAGUE_META_CACHE", "_usage_cache",
-    "_gate_miss_tests", "_roster_moved_reads", "_trade_jobs_by_key",
-    "_session_init_inflight",
+    ("_OUTLOOK_IMPACT_CACHE", "_OUTLOOK_IMPACT_LOCK"), ("_DRAFT_CONTEXT_CACHE", None),
+    ("_LEADERBOARD_CACHE", None), ("_LEAGUE_MEMBERS_CACHE", None),
+    ("_slot_order_cache", "_slot_order_lock"), ("_pick_projection_cache", "_pick_projection_lock"),
+    ("_trade_block_cache", "_trade_block_cache_lock"), ("_SUGGESTED_ORDER_CACHE", None),
+    ("_ROS_CACHE", None), ("_rank_chip_cache", None),
+    ("_OUTLOOK_WEEK_SETTLED", "_outlook_cache_lock"), ("_OUTLOOK_WEEK_LIVE", "_outlook_cache_lock"),
+    ("_OUTLOOK_WEEK_HIGHWATER", "_outlook_cache_lock"),
+    ("_OUTLOOK_SEASON_BY_LEAGUE", "_outlook_cache_lock"), ("_FA_LEAGUE_META_CACHE", None),
+    ("_usage_cache", "_usage_lock"), ("_gate_miss_tests", "_gate_miss_tests_lock"),
+    ("_roster_moved_reads", "_trade_jobs_lock"), ("_trade_jobs_by_key", "_trade_jobs_lock"),
 )
+
+
+from contextlib import nullcontext as _tp_nullcontext
 
 
 def _tp_purge_caches(profile_uid: str) -> int:
@@ -37288,13 +37311,15 @@ def _tp_purge_caches(profile_uid: str) -> int:
         parts = key if isinstance(key, tuple) else (key,)
         return any(str(p) == profile_uid or str(p).startswith(prefix) for p in parts)
     n = 0
-    for name in _TP_KEYED_CACHES:
+    for name, lock_name in _TP_KEYED_CACHES:
         cache = globals().get(name)
         if not isinstance(cache, dict):
             continue
-        for k in [k for k in list(cache.keys()) if names(k)]:
-            cache.pop(k, None)
-            n += 1
+        lock = globals().get(lock_name) if lock_name else None
+        with (lock if lock is not None else _tp_nullcontext()):
+            for k in [k for k in list(cache.keys()) if names(k)]:
+                cache.pop(k, None)
+                n += 1
     try:
         from .outlook_result_cache import OUTLOOK_RESULTS
         OUTLOOK_RESULTS.purge_callers({profile_uid})

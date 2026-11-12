@@ -17579,9 +17579,20 @@ def _labels_from_binding_rows(league_id, rows) -> dict:
     (created_at, then user_id): one stable member row per team even when two
     app accounts co-own it (backend/CLAUDE.md § Identity)."""
     labels: dict = {}
+    # Onboarding test profile: member dicts carry the platform-NATIVE team
+    # key in a namespaced league too (`espn:<native>.t<n>`), so the label is
+    # keyed by the native id. A label never crosses worlds: a namespaced
+    # league is labelled only with its own test profile, a real league never
+    # with a test-world id (test_profile_linking pins both).
+    native = _tp.native_league_id(str(league_id))
+    owner = _tp.profile_of_league(league_id)
     for r in sorted(rows, key=lambda r: (r.created_at or "", r.user_id)):
+        if owner is not None and r.user_id != owner:
+            continue
+        if owner is None and _tp.is_test_world_id(r.user_id):
+            continue
         if r.platform in _TEAM_KEY_FORMAT:
-            labels.setdefault(platform_team_key(r.platform, league_id, r.team_id),
+            labels.setdefault(platform_team_key(r.platform, native, r.team_id),
                               r.user_id)
     return labels
 

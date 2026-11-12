@@ -297,3 +297,91 @@ def test_the_fence_never_reads_a_body_past_the_smallest_route_cap(world, monkeyp
             with patch.object(server.app.request_class, "get_data",
                               side_effect=AssertionError("body read by the fence")):
                 assert server._test_profile_request_guard() is None
+
+
+# ── second review (2026-11-12) ─────────────────────────────────────────────
+
+def _route_body_caps():
+    """Every Content-Length cap a route in backend/ checks before reading,
+    resolved to bytes: `content_length … > N` and `max_content_length = N`."""
+    import importlib
+    import pathlib
+    import re
+    root = pathlib.Path(server.__file__).parent
+    caps = []
+    pat = re.compile(r"content_length[^\n]*?(?:>|=)\s*([A-Z_][A-Z0-9_]*|\d[\d_]*)(\s*\+\s*1)?")
+    for path in root.rglob("*.py"):
+        if "tests" in path.parts:
+            continue
+        mod = None
+        for m in pat.finditer(path.read_text()):
+            tok = m.group(1)
+            if tok[0].isdigit():
+                val = int(tok.replace("_", ""))
+            else:
+                if mod is None:
+                    rel = path.relative_to(root.parent).with_suffix("")
+                    mod = importlib.import_module(".".join(rel.parts))
+                val = getattr(mod, tok, None)
+                if not isinstance(val, int):
+                    continue
+            caps.append((f"{path.name}:{tok}", val))
+    return caps
+
+
+def test_the_body_scan_limit_is_at_most_every_route_cap():
+    """A route that answers 413 from Content-Length must never have its body
+    read by the fence first, so the fence's limit is the smallest cap."""
+    caps = _route_body_caps()
+    names = {n for n, _ in caps}
+    assert any("api.py:8192" in n for n in names), names          # projection runs
+    assert any("FEEDBACK_MAX_BODY_BYTES" in n for n in names), names
+    assert any("MAX_CONTENT_LENGTH" in n for n in names), names
+    too_small = [(n, v) for n, v in caps if v < server._TP_BODY_SCAN_LIMIT]
+    assert too_small == [], f"a route cap is below the fence's scan limit: {too_small}"
+
+
+def test_a_wrong_content_type_request_behaves_as_without_the_feature(world):
+    """The fence parses with cache=False: a route's own non-forced get_json()
+    on a text/plain request still sees no JSON, marker text or not."""
+    from werkzeug.exceptions import UnsupportedMediaType
+    for body in ('{"league_id": "900100", "note": "a qa_tp league"}',
+                 '{"league_id": "900100", "note": "plain"}'):
+        for tok in (REAL_TOKEN, ""):
+            with server.app.test_request_context(
+                    "/api/rankings/submit", method="POST", data=body,
+                    headers={"X-Session-Token": tok}, content_type="text/plain"):
+                assert server._test_profile_request_guard() is None
+                assert server.request.get_json(silent=True) is None
+                with pytest.raises(UnsupportedMediaType):
+                    server.request.get_json()
+
+
+def test_the_cache_purge_takes_each_caches_own_lock(world):
+    """A purge can never land between another thread's get(key) == job and
+    its pop(key): it waits for _trade_jobs_lock."""
+    import threading
+    key = (PID, NS + "1", "1qb_ppr")
+    server._trade_jobs_by_key[key] = "job-1"
+    done = threading.Event()
+    with server._trade_jobs_lock:
+        t = threading.Thread(target=lambda: (server._tp_purge_caches(PID), done.set()))
+        t.start()
+        assert not done.wait(0.3)                  # blocked behind the lock
+        assert server._trade_jobs_by_key.get(key) == "job-1"
+        server._trade_jobs_by_key.pop(key)         # the finishing thread's own pop
+    t.join(5)
+    assert done.is_set()
+    for name, lock_name in server._TP_KEYED_CACHES:
+        assert isinstance(getattr(server, name), dict), name
+        assert lock_name is None or hasattr(getattr(server, lock_name), "acquire"), lock_name
+
+
+def test_a_failing_sweep_never_fails_the_flag_reload(world, monkeypatch):
+    def boom():
+        raise RuntimeError("sweep broke")
+    monkeypatch.setattr(server, "_tp_evict_closed_sessions", boom)
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3")
+    monkeypatch.setattr(server, "reload_flags", lambda: {})
+    r = world["client"].post("/api/feature-flags/reload", headers={"X-Cron-Secret": "s3"})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
