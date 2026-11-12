@@ -263,11 +263,11 @@ def test_match_strength_is_constant_on_rules_first_cards():
 _SEASON_WORLDS = {}
 
 
-def season_world(league, teams, seed, outlook, matching=0.0, state="usable", label_fit=1.0):
+def season_world(league, teams, seed, outlook, matching=0.0, state="usable", label_fit=1.0, sell=None):
     """(request, today's full solve, rules-first deck, its info, gated deck), cached.
     ``league``: "fixture" (12 teams) or "synthetic". ``label_fit``: the viewer's label
     fit (``season_viewer_label_fit``, 2026-11-12)."""
-    key = league, teams, seed, outlook, matching, state, label_fit
+    key = league, teams, seed, outlook, matching, state, label_fit, sell
     if key not in _SEASON_WORLDS:
         if league == "fixture":
             context, slots = season_fixture.world(outlook, seed=seed), list(season_fixture.SLOTS)
@@ -277,6 +277,8 @@ def season_world(league, teams, seed, outlook, matching=0.0, state="usable", lab
             evidence = season_evidence(context, seed)
         evidence = {"usable": evidence, "absent": None, "unavailable": sv.unavailable("stale")}[state]
         config = {"season_partner_matching": matching, "season_viewer_label_fit": label_fit,
+                  **({} if sell is None else {"season_sell_bonus_tanking": sell,
+                                              "season_sell_bonus_rebuilding": sell}),
                   **({"owner_total_budget": 200000} if teams >= 16 else {})}
         context = {**context, "season_evidence": evidence, "config": config}
         request = replay.Request(context, slots)
@@ -298,19 +300,27 @@ _I18 = ([(*case, 1.0) for case in _I18]
         # The viewer's label fit (2026-11-12): more Rebuilding / Tanking seeds, and off.
         + [("fixture", 12, 1, "rebuilder", 0.0, 1.0), ("synthetic", 12, 6, "jets", 0.0, 1.0),
            ("synthetic", 12, 7, "rebuilder", 0.0, 1.0), ("fixture", 12, 0, "jets", 0.0, 0.0)])
+# The sell bonus (2026-11-12) is at its defaults above; explicitly off, and on with and
+# without the label fit, at its ceiling, in a 14-team league.
+_I18 = ([(*case, None) for case in _I18]
+        + [("fixture", 12, 0, "jets", 0.0, 1.0, 0.0), ("fixture", 12, 0, "rebuilder", 0.0, 0.0, None),
+           ("synthetic", 12, 8, "jets", 0.0, 0.0, None), ("synthetic", 14, 9, "rebuilder", 0.0, 1.0, .15),
+           ("synthetic", 14, 10, "jets", 0.0, 1.0, None)])
 
 
-@pytest.mark.parametrize("league,teams,seed,outlook,matching,label_fit", _I18)
-def test_revision_5_page_equals_gated_equals_rank_of_admitted(league, teams, seed, outlook, matching, label_fit):
+@pytest.mark.parametrize("league,teams,seed,outlook,matching,label_fit,sell", _I18)
+def test_revision_5_page_equals_gated_equals_rank_of_admitted(league, teams, seed, outlook, matching, label_fit,
+                                                             sell):
     """I18: with usable evidence, for All-in, Contending, Rebuilding and Tanking viewers
     (and stage 2), the page path to exhaustion = the gated full solve = revision 5's
     ranker over the admitted survivors, card for card and proof for proof; and a
     finite page's first k (where the bounds decide the stop) is the gated deck's
-    first k. Rebuilding / Tanking run with the viewer's label fit on (and once off).
+    first k. Rebuilding / Tanking run with the viewer's label fit on (and once off) and
+    the sell bonus at its defaults (and off, and at its ceiling).
     Sabotages: bound a season team's lineup from ``_lineup_assets``; ignore the shed
     term in the bounds; bound a label-fit viewer's plan from ``_plan_asset``."""
     request, full, built, info, gated = season_world(league, teams, seed, outlook, matching,
-                                                     label_fit=label_fit)
+                                                     label_fit=label_fit, sell=sell)
     assert (info["path"], info["fallback"]) == ("page", None)
     assert len(built) >= 30
     assert identities(built) == identities(gated)

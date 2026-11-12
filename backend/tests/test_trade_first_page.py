@@ -828,10 +828,12 @@ def season_evidence(context, seed, *, fill=FREE_AGENT_LEVEL):
             "digest": "synthetic-%d" % seed}
 
 
-def season_small(outlook, seed, matching=0.0, label_fit=1.0, **overrides):
+def season_small(outlook, seed, matching=0.0, label_fit=1.0, sell=None, **overrides):
+    """``sell``: both sell-bonus knobs at this value (None: the defaults, 0.05 / 0.03)."""
     context = small(seed=seed, viewer_outlook=outlook, **overrides)
+    sells = {} if sell is None else {"season_sell_bonus_tanking": sell, "season_sell_bonus_rebuilding": sell}
     return {**context, "season_evidence": season_evidence(context, seed),
-            "config": {"season_partner_matching": matching, "season_viewer_label_fit": label_fit}}
+            "config": {"season_partner_matching": matching, "season_viewer_label_fit": label_fit, **sells}}
 
 
 # (viewer outlook, seed, season_partner_matching, season_viewer_label_fit): every scored
@@ -841,16 +843,24 @@ _SEASON_AUDIT = [("championship", 1, 0.0, 1.0), ("contender", 2, 0.0, 1.0), ("re
                  ("jets", 4, 0.0, 1.0), ("championship", 5, 1.0, 1.0), ("jets", 6, 1.0, 1.0),
                  ("not_sure", 7, 1.0, 1.0), ("rebuilder", 8, 0.0, 1.0), ("jets", 9, 0.0, 1.0),
                  ("jets", 4, 0.0, 0.0)]
+# The sell bonus (2026-11-12) is on at its defaults in every case above (Rebuilding /
+# Tanking viewers); explicitly: off, on with and without the label fit, at its premise's
+# ceiling, and in stage 2.
+_SEASON_AUDIT = ([(*case, None) for case in _SEASON_AUDIT]
+                 + [("jets", 4, 0.0, 1.0, 0.0), ("jets", 10, 0.0, 0.0, None), ("rebuilder", 11, 0.0, 0.0, None),
+                    ("rebuilder", 3, 0.0, 1.0, .15), ("rebuilder", 12, 1.0, 1.0, None)])
 
 
-@pytest.mark.parametrize("outlook,seed,matching,label_fit", _SEASON_AUDIT)
-def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, seed, matching, label_fit, crown):
+@pytest.mark.parametrize("outlook,seed,matching,label_fit,sell", _SEASON_AUDIT)
+def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, seed, matching, label_fit, sell,
+                                                                         crown):
     """I18's direct form: every level of every candidate bounds the exact weaker support
-    of the proof the generator returns, after the shed term and the demotion; the
-    support level is exact unless the demotion fired. Sabotages: bound a season team's
-    lineup from ``_lineup_assets``; ignore the shed term in the bounds; bound a
-    label-fit viewer's plan from ``_plan_asset`` (2026-11-12)."""
-    search = season._GenerationSearch(**season_small(outlook, seed, matching, label_fit))
+    of the proof the generator returns, after the shed term, the sell bonus and the
+    demotion; the support level is exact unless the demotion fired (or the sell bonus
+    exceeds it). Sabotages: bound a season team's lineup from ``_lineup_assets``; ignore
+    the shed term in the bounds; bound a label-fit viewer's plan from ``_plan_asset``
+    (2026-11-12); leave the sell bonus out of ``pre``; out of the support level."""
+    search = season._GenerationSearch(**season_small(outlook, seed, matching, label_fit, sell))
     eligible, moved = 0, Counter()
     with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
         for (screened, pre, priced, support), give, receive, member in fp.screened_universe(search):
@@ -863,7 +873,10 @@ def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, 
             data = proof.as_dict()
             weaker = data["bilateral"]["weaker_support"]
             assert weaker <= support + 1e-9, (give, receive)
-            if not data["season_signal"]["conflict"]["demotion"]:
+            selling = data["season_signal"].get("sell")
+            moved["sell"] += bool(selling and selling["bonus"])
+            if not data["season_signal"]["conflict"]["demotion"] and not (
+                    selling and selling["bonus"] < -search.season_conflict_demotion):
                 assert support - weaker <= 1e-9  # the support level is the exact score
             else:
                 moved["demoted"] += 1
@@ -882,6 +895,8 @@ def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, 
         assert moved["season_need"] > 0
     # The viewer's label fit is on exactly for a Rebuilding / Tanking viewer without stage 2.
     assert (moved["label_fit"] > 0) == (outlook in ("rebuilder", "jets") and not matching and label_fit == 1.0)
+    # The sell bonus moves supports for a Rebuilding / Tanking viewer exactly when it is on.
+    assert (moved["sell"] > 0) == (outlook in ("rebuilder", "jets") and sell != 0.0)
 
 
 def test_revision_5_screen_uses_the_season_terms_and_the_inlined_screen_stays_revision_2s():

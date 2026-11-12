@@ -73,7 +73,7 @@ built on revision 2. Exactly 1 selects it while `owner_bilateral_enabled=1` and
 other value leaves the revision 2/3/4 selection exactly as before. Revision 5 reads the season
 evidence (flag `trade.season_signal`, above); without usable evidence its cards, terms and
 order are revision 2's. Presentment reads proofs under `bakeoff_runner.owner_presentment_version`.
-Five more revision-5-only knobs: `season_conflict_demotion` (**0.10**; support taken from both
+Seven more revision-5-only knobs: `season_conflict_demotion` (**0.10**; support taken from both
 sides of a card that works against the viewer's saved plan and qualified through the viewer's
 own rankings, order only; 0 = flagged and stated, not pushed down), `season_partner_matching`
 (**0**; 1 = stage 2, partner matching: every league-mate's plan fit reads the season label
@@ -84,12 +84,19 @@ Rebuilding / Tanking viewer's re-scored team plan reads the season label table, 
 out and rebuild pieces, young cornerstones and picks in, Tanking at full strength and Rebuilding
 at 0.6, never milder than the age rule for a win-now piece or an older cornerstone, without
 partner matching; order only, never inventory or terms; any other value = the age
-table, exactly as before; with stage 2 on it changes nothing, stage 2 already reads the table).
-The constructor report and the owner request hash drop all six keys unless revision 5 is
+table, exactly as before; with stage 2 on it changes nothing, stage 2 already reads the table),
+and `season_sell_bonus_tanking` (**0.05**) / `season_sell_bonus_rebuilding` (**0.03**) (the sell
+bonus, 2026-11-12: a Tanking / Rebuilding viewer's card moves on both supports, after
+eligibility and outside the clipped team plan, by this × the card's market share of older
+producers (win-now pieces, older cornerstones) sent minus received; a negative bonus is dropped on
+a card the conflict rule demotes; order only, never inventory or terms; ≤ 0 = off; the page-first
+search needs ≤ 0.15 and otherwise falls back to the gated full solve; independent of the label
+fit; applies in stage 2 too, to the viewer only).
+The constructor report and the owner request hash drop all eight keys unless revision 5 is
 selected, so revisions 2–4 hash and behave exactly as before; with revision 5 selected the
-request hash also drops `season_viewer_label_fit` unless it is exactly 1, so off hashes as
-before it existed.
-Rollback, in order of reach: `season_viewer_label_fit` 0; `season_conflict_demotion` 0; `owner_bilateral_revision_5_enabled`
+request hash also drops `season_viewer_label_fit` unless it is exactly 1 and each sell bonus
+unless it is above 0, so off hashes as before it existed.
+Rollback, in order of reach: both sell bonuses 0; `season_viewer_label_fit` 0; `season_conflict_demotion` 0; `owner_bilateral_revision_5_enabled`
 0 (every deck back to revision 2; stored first pages rebuild once); `trade.season_signal` off.
 See [lld §6](plans/win-now-season-signal/lld.md#6-worker-wiring).
 

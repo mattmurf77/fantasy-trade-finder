@@ -190,6 +190,28 @@ The proof's `season_signal.assets[].plan_lean` carries the per-asset fit the tea
 search's bound reads the same per-asset fit for that side (`_page_bound_terms` →
 `shed["plan"]`; `trade_first_page._Bounds.rows`), so its plan term stays exact.
 
+**Amended 2026-11-12, operator direction: the sell bonus.** For a Rebuilding / Tanking viewer
+(shed-scored: usable evidence; stage 2 or not, the viewer only), with `b` =
+`season_sell_bonus_tanking` (0.05) / `season_sell_bonus_rebuilding` (0.03), any value ≤ 0 off:
+
+```
+share = (Σ market of older producers given − Σ market of older producers received) / gross_market
+bonus = b × share                      # older producer: _mirror_parts "how" in NEVER_MILDER
+                                       # (win_now, cornerstone_old); picks and unlabelled: never
+bonus = 0 if bonus < 0 and the conflict demotion fired      # no double push-down
+support (both sides) += bonus          # after eligibility, outside the clipped team plan; clipped to [0, 1]
+```
+
+Recorded as `support.season_adjustments.season_sell_bonus` on both sides, `season_signal.sell`
+(`weight`, `share`, `bonus`, `sent`, `received`) on the card, and the generator report's
+`season_signal.sell_bonus_weight` with counts `sell_bonus_up` / `_down` /
+`_dropped_for_conflict`. The page search adds it exactly to `pre`, `priced` and the support
+level (`_page_bound_terms` → `sell`; `trade_first_page._Bounds.sell_bonus`), flooring a negative
+bonus at minus the demotion knob (the bound cannot know whether the demotion fires). Premise
+0 ≤ b ≤ 0.15, else the gated full solve. Independent of the label fit: neither knob = the
+2026-11-11 order; label fit only = D-243; bonus only = revision 2's age fit in the team plan plus
+the bonus; both = the combined fit plus the bonus.
+
 ### 3.2 Season lineup
 
 Built once in `__init__` after `owner._Search.__init__` has filled `_lineup_assets` and before

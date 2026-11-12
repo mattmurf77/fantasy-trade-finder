@@ -90,6 +90,18 @@ move it (approximate re-rank, not built): a plan weight of 0.3 on both sides (Ta
 as the demotion is, of 0.05 × the card's market share of older producers sent (14 → 22)
 ([lld §3.1](lld.md)).
 
+**The sell bonus (2026-11-12, operator approved: "Spin up a subagent to… write the sell bonus").**
+Built as recommended: for a Tanking / Rebuilding viewer, both supports move after eligibility by
+b × the card's market share of older producers (win-now pieces, older cornerstones) sent minus
+received, outside the clipped team plan; b = 0.05 Tanking / 0.03 Rebuilding
+(`season_sell_bonus_*`, ≤ 0 off); a negative bonus is dropped on a card the conflict rule
+demotes. Same cards, order only. Measured with the real ranker (first 30, off → defaults):
+fixture Tanking sends a win-now piece 15 → 19 (an older producer 17 → 23), 17 of 30 kept;
+Rebuilding 13 → 19 (14 → 22), 22 kept; a 12-team synthetic league Tanking 13 → 23, 18 kept,
+Rebuilding 18 → 24, 23 kept; a 14-team synthetic league with few older producers barely moves.
+Largest support move 0.029 (Tanking) / 0.018 (Rebuilding). The approximate re-rank had said
+22 of 30 for Tanking at 0.05; the real ranker gives 19 (fixture). ([lld §3.1](lld.md))
+
 **Open:** [open-questions.md](open-questions.md) (seven, two needed before serving).
 
 ## Files

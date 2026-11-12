@@ -536,12 +536,15 @@ def test_r4_bypass_is_thread_local():
 # EXCLUDED, read only by revision 5, dropped from every other owner search's config.
 # The viewer's label fit (`season_viewer_label_fit`, 2026-11-12, operator direction) is the
 # same: EXCLUDED, read only by revision 5, dropped from every other owner search's config.
+# The sell bonus (`season_sell_bonus_tanking` / `_rebuilding`, 2026-11-12, operator direction)
+# is the same: EXCLUDED, read only by revision 5, dropped from every other owner search's config.
 _PINNED_KNOBS = frozenset("""
 simple_player_presentment
 bakeoff_include_owner bakeoff_serve_owner bakeoff_owner_only owner_bilateral_enabled
 owner_bilateral_revision_enabled owner_outlook_evidence_enabled owner_bilateral_revision_4_enabled
 owner_bilateral_revision_5_enabled season_conflict_demotion season_partner_matching
 season_shed_weight_tanking season_shed_weight_rebuilding season_viewer_label_fit
+season_sell_bonus_tanking season_sell_bonus_rebuilding
 owner_untouchable_hard
 owner_pool_size owner_pair_budget owner_total_budget
 significance_mode significance_player_min_tier significance_allow_first_round_pick

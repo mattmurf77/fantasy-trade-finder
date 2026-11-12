@@ -31,6 +31,11 @@ record differ. Usable:
   win-now piece or an older cornerstone (NEVER_MILDER). Still a ranking term only:
   `_plan_asset`, and with it the gates, pools and inventory, stay revision 2's.
   0 = the age table, exactly as before.
+- The sell bonus (`season_sell_bonus_tanking` 0.05 / `_rebuilding` 0.03; amended
+  2026-11-12, operator direction): for a Rebuilding or Tanking viewer, both supports move
+  after eligibility by b x the card's market share of older producers (win-now pieces,
+  older cornerstones) sent minus received, outside the clipped team plan; a negative
+  bonus is dropped on a card the conflict rule demotes. Order only. 0 = off.
 - Plan conflict (`season_value.plan_conflict`, the one predicate): a card that
   works against the viewer's saved plan is flagged; when it qualified through the
   viewer's own rankings, both support scores fall by `season_conflict_demotion`
@@ -82,6 +87,13 @@ LABEL_FIT_KEY = "season_viewer_label_fit"
 NEVER_MILDER = frozenset(("win_now", "cornerstone_old"))
 # The shed term's strength per outlook (model_config knobs; Tanking mirrors All-in).
 SHED_KEYS = {"jets": "season_shed_weight_tanking", "rebuilder": "season_shed_weight_rebuilding"}
+# The sell bonus (2026-11-12, operator direction): b per outlook (model_config knobs; any
+# value <= 0 is off). A Rebuilding / Tanking viewer's card moves on both supports, after
+# eligibility, by b x (market share of older producers sent - received), outside the
+# clipped team-plan term. "Older producers" are the NEVER_MILDER label cases.
+SELL_KEYS = {"jets": "season_sell_bonus_tanking", "rebuilder": "season_sell_bonus_rebuilding"}
+# The page search's premise (trade_first_page): b at most this (supports stay >= 0).
+SELL_BONUS_MAX = .15
 # Conflict kinds: "board" (qualified through the viewer's own rankings) or the
 # viewer's declaration that matched, in this precedence (revision 2's own order):
 # the incoming player is on the target list, the outgoing player is on the trade
@@ -118,6 +130,7 @@ class SeasonLayer:
         self.season_partner_matching = given.get(MATCHING_KEY, ts._c(MATCHING_KEY)) == 1.0
         self.season_shed_weight = {outlook: float(given.get(key, ts._c(key))) for outlook, key in SHED_KEYS.items()}
         self.season_viewer_label_fit = given.get(LABEL_FIT_KEY, ts._c(LABEL_FIT_KEY)) == 1.0
+        self.season_sell_bonus = {outlook: float(given.get(key, ts._c(key))) for outlook, key in SELL_KEYS.items()}
         self._label_fit_cache = {}
         self.season_evidence = season_evidence
         self._season_on = sv.usable(season_evidence)
@@ -304,6 +317,25 @@ class SeasonLayer:
             self._label_fit_cache[key] = fit
         return self._label_fit_cache[key]
 
+    def _sell_weight(self, team):
+        """b of the sell bonus for this team: the viewer's outlook knob when the viewer is
+        shed-scored (Rebuilding / Tanking, usable evidence), else 0. Any value <= 0 is off."""
+        if team["uid"] != self.user_id or not self._season_shed(team):
+            return 0.0
+        return max(self.season_sell_bonus[team["outlook"]], 0.0)
+
+    def _older_producer(self, team, pid):
+        """A win-now piece (RB or not) or an older cornerstone, as the label branch decides
+        it for this team (`_mirror_parts`, NEVER_MILDER); picks and unlabelled players never."""
+        return self._mirror_parts(team, pid)[1] in NEVER_MILDER
+
+    def _sell_share(self, team, give, receive):
+        """Market share of older producers the team sends minus receives, of the card's gross
+        market value (the plan fit's convention): in [-1, 1]."""
+        gross = sum(self.market[p] for p in give + receive)
+        return (sum(self.market[p] for p in give if self._older_producer(team, p))
+                - sum(self.market[p] for p in receive if self._older_producer(team, p))) / gross
+
     def _plan_fit(self, team, give, receive, asset=None):
         """The plan part of team plan (revision 2's plan shift), recorded beside lineup gain.
         `asset`: the per-asset fit read (default `_plan_asset`)."""
@@ -409,6 +441,15 @@ class SeasonLayer:
                 named = sell if kind in ("trade_block", "trade_away") else buy
         demotion = (self.season_conflict_demotion
                     if fired and kind in DEMOTED_KINDS and self.season_conflict_demotion > 0 else 0.0)
+        weight, selling = self._sell_weight(viewer), None  # >= 0: `_sell_weight` floors it
+        if weight:
+            share = self._sell_share(viewer, give, receive)
+            bonus = weight * share
+            if bonus < 0 and demotion:
+                bonus = 0.0  # the conflict demotion already pushes this card down: no double count
+            selling = {"weight": weight, "share": share, "bonus": bonus,
+                    "sent": sorted(p for p in give if self._older_producer(viewer, p)),
+                    "received": sorted(p for p in receive if self._older_producer(viewer, p))}
         if shed:
             plan_fit, lineup_gain, team_plan = self._shed_parts(viewer, give, receive)
         else:
@@ -447,6 +488,8 @@ class SeasonLayer:
                          "threshold": sv.CONFLICT_DROP.get(plan, sv.CONFLICT_ADD.get(plan)), "demotion": demotion},
             "components": {"plan_fit": plan_fit, "lineup_gain": lineup_gain, "team_plan": team_plan,
                            "ranges": {"plan_fit": [-1, 1], "lineup_gain": [-1, 1], "team_plan": [0, 1]}}}
+        if selling is not None:
+            data["season_signal"]["sell"] = selling
         # Order only: every move below comes after utility and eligibility.
         # A shed-scored side's team plan is re-scored (support moves by the team-plan
         # weight times the change); the demotion then takes from both sides, as
@@ -462,6 +505,10 @@ class SeasonLayer:
                     team, outgoing, incoming)[2]
                 moved = incumbent._WEIGHTS["team_plan"] * (rescored - old)
                 adjustment["season_lineup_shed"] = moved
+            if selling is not None and selling["bonus"]:
+                # Both sides, as the demotion: the weaker score moves by the full bonus.
+                moved += selling["bonus"]
+                adjustment["season_sell_bonus"] = selling["bonus"]
             if demotion:
                 moved -= demotion
                 adjustment["plan_conflict_demotion"] = -demotion
@@ -484,6 +531,10 @@ class SeasonLayer:
           team plan `_season_signal` gives this side, "plan": id -> the per-asset plan fit
           that team plan reads when it is not `_plan_asset` (the viewer's label fit), else
           None}; else None.
+        - "sell": for the viewer under the sell bonus, {"weight": b, "demotion": the
+          conflict demotion knob, "older": id -> an older producer}; else None. Both
+          supports move by b x share (share of the card's gross market: older producers
+          sent minus received), a negative bonus dropped on a demoted card.
         - "nonnegative": every projected ppg and free-agent level is >= 0 (the bounds'
           premise; the page search declines the request otherwise).
         Reads only; changes no card, term or order."""
@@ -492,7 +543,7 @@ class SeasonLayer:
             return None
         fill = self.season_evidence.get("free_agent_level") or {}
         levels = {pos: float(fill.get(pos) or 0.0) for pos in owner._POSITIONS}
-        terms = {"lineup": None, "fill": None, "shed": None,
+        terms = {"lineup": None, "fill": None, "shed": None, "sell": None,
                  "nonnegative": all(v >= 0 for v in self._season_ppg.values())
                  and all(v >= 0 for v in levels.values())}
         if scored:
@@ -506,6 +557,9 @@ class SeasonLayer:
                              "team_plan": lambda outgoing, incoming: self._shed_parts(team, outgoing, incoming)[2],
                              "plan": ((lambda pid: self._shed_plan_asset(team, pid))
                                       if self._viewer_label_fit(team) else None)}
+        if self._sell_weight(team):
+            terms["sell"] = {"weight": self._sell_weight(team), "demotion": max(self.season_conflict_demotion, 0.0),
+                             "older": lambda pid: self._older_producer(team, pid)}
         return terms
 
     def _decision(self, card, data, reason, eligible=False):
@@ -574,6 +628,11 @@ def _generation_report(search, cards, raw, started):
             season["conflict_kind:" + conflict["kind"]] += 1
             season["conflict_trigger:" + conflict["trigger"]] += 1
             season["demoted"] += conflict["demotion"] > 0
+        sell = data["season_signal"].get("sell")
+        if sell is not None:
+            season["sell_bonus_up"] += sell["bonus"] > 0
+            season["sell_bonus_down"] += sell["bonus"] < 0
+            season["sell_bonus_dropped_for_conflict"] += sell["share"] < 0 and sell["bonus"] == 0
     evidence = search.season_evidence
     viewer_scored = (search._season_scored(search.teams[search.user_id])
                      or search._season_shed(search.teams[search.user_id]))
@@ -590,6 +649,9 @@ def _generation_report(search, cards, raw, started):
             # Present only when the viewer's label fit applies (knob 0: the report is today's).
             **({"viewer_label_fit": True} if search._season_on
                and search._viewer_label_fit(search.teams[search.user_id]) else {}),
+            # Present only when the sell bonus applies (both knobs 0: the report is today's).
+            **({"sell_bonus_weight": search._sell_weight(search.teams[search.user_id])}
+               if search._season_on and search._sell_weight(search.teams[search.user_id]) else {}),
             "shed_weights": dict(search.season_shed_weight),
             "conflict_demotion": search.season_conflict_demotion, **dict(season)},
         elapsed_seconds=round(perf_counter() - started, 6))

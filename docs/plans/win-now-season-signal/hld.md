@@ -240,6 +240,7 @@ in the season layer assumes their values.
 | `season_conflict_demotion` | `model_config` | 0.10 | support taken from a plan-conflict card (order only). 0 = flag and state, no push-down |
 | `season_partner_matching` | `model_config` | 0 | 1 = stage 2, partner matching: label table on every team's plan fit |
 | `season_shed_weight_tanking` / `_rebuilding` | `model_config` | 1.0 / 0.5 | the shed term's strength (amended 2026-11-11) |
+| `season_sell_bonus_tanking` / `_rebuilding` | `model_config` | 0.05 / 0.03 | the sell bonus: both supports move by this × the market share of older producers sent minus received, after eligibility (amended 2026-11-12); order only; ≤ 0 off |
 | `season_viewer_label_fit` | `model_config` | 1 | exactly 1: a Rebuilding / Tanking viewer's re-scored team plan reads the label table, stage 2 off (amended 2026-11-12); order only |
 | `grading.season_round` | flag | false | Calibration round `outlook-v2-v5-1` (revision 2 beside revision 5) |
 

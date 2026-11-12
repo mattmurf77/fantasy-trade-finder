@@ -65,6 +65,7 @@ FROZEN_PINS = {
     27: "68bb3f499c837968",  # Keep is a hard rule (owner_untouchable_hard, default 1); knob 0: request hash, terms and order unchanged.
     28: "f9dc5f829bcd9a92",  # Founders' review: label overrides join the season evidence and its digest; none reaching the league: unchanged.
     29: "6a7d3e2f2fc9b0af",  # Viewer label fit (season_viewer_label_fit, default 1; revision 5 only); knob 0 or revision 5 not selected: request hash, terms and order unchanged.
+    30: "d2b8bbd6e8e9df63",  # Sell bonus (season_sell_bonus_tanking / _rebuilding, revision 5 only); bonus 0 or revision 5 not selected: request hash, terms and order unchanged.
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
