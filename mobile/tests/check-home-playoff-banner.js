@@ -295,7 +295,7 @@ queryData = data(.8); queryError = true; tree = render();
 assert.match(words(byId(tree, 'home.playoff.explanation'))[1], /^Last saved \S.*\. Update unavailable\.$/);
 queryError = false;
 queryData = incomplete; tree = render();
-assert.deepEqual(words(byId(tree, 'home.playoff.explanation')), [DEFINITION, 'Incomplete: some lineup slots had no projection.']);
+assert.deepEqual(words(byId(tree, 'home.playoff.explanation')), [DEFINITION, "Incomplete: a played starter's score is not recorded yet."]);
 queryData = withRec(recommended('contender', { differs: false })); tree = render();
 assert.deepEqual(words(byId(tree, 'home.playoff.explanation')), [DEFINITION, 'An 80.0% playoff chance is in the Contending range.']);
 flags['league.projection_outlook'] = false; tree = render();

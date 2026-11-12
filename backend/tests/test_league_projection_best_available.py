@@ -6,11 +6,26 @@ feed row still carries the old one):
   succeeds, the player is unpriced as `player_team_changed`, timed by the new
   team's game, and the stale row's stats reach no lineup; a teammate whose
   teams agree is priced as before.
-- test_team_changed_player_alone_for_a_slot_leaves_it_unknown: the slot only
-  he could fill is missing and the league estimate is incomplete.
+- test_team_changed_player_alone_for_a_slot_is_filled_from_free_agents: the
+  slot only he could fill takes the best projected free agent (model v6); the
+  league estimate stays complete.
 - test_team_changed_player_on_new_team_bye_is_a_bye: a verified bye, not
   unpriced and not an error.
 - test_strict_contract_still_refuses_a_team_changed_player.
+
+Free-agent fill (model v6, operator rule 2026-11-11), through the real weekly
+feed adapter:
+- test_empty_rb_slot_takes_the_best_projected_free_agent_rb: the production
+  case (only eligible rostered RB has an empty feed row) is filled, complete,
+  and the outlook suggestion is no longer withheld; the same free agent may
+  fill slots on different teams; Max PF uses the same fill and never drops
+  below the lineup total; coverage records slot, player and points.
+- test_free_agent_on_bye_or_not_pregame_is_not_used.
+- test_feed_never_offers_a_rostered_player_as_a_free_agent (players, taxi,
+  reserve of every team).
+- test_free_agent_never_displaces_a_rostered_starter.
+- test_two_open_slots_take_two_free_agents_in_the_best_assignment.
+- test_a_played_starter_with_no_score_is_not_filled_and_stays_incomplete.
 """
 from copy import deepcopy
 from decimal import Decimal
@@ -74,7 +89,7 @@ def test_direct_idp_kicker_negative_contributions_use_custom_coefficients():
     assert result['missing_keys']==['idp_blk_kick']
 
 
-def test_missing_player_does_not_block_known_team_and_wholly_unpriced_team_stops_the_run():
+def test_missing_player_does_not_block_known_team_and_wholly_unpriced_team_is_zero_filled():
     # A missing player beside a priced teammate: both teams keep a number.
     source,cfg=world();add_priced_teammate(source);drop_projection(source,'p2')
     snapshot=run(source,cfg);teams=snapshot['weeks'][0]['teams']
@@ -89,9 +104,14 @@ def test_missing_player_does_not_block_known_team_and_wholly_unpriced_team_stops
     assert snapshot['coverage']['estimate_status']=='complete' and snapshot['coverage']['unpriced_player_weeks']==1
     assert 'history_fallback_team_weeks' not in snapshot['coverage']
     assert simulation.simulate(snapshot,cfg)['status']=='complete'
-    # The same missing player as the team's only one: no projected lineup, no forecast.
+    # The same missing player as the team's only one. The feed is populated
+    # (p1 is projected), so the slot is filled from free agents; this feed
+    # has none, so it scores a known zero instead of stopping the run (v6).
     source,cfg=world();drop_projection(source,'p2')
-    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
+    snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
+    assert Decimal(detail['modeled_actual_projection'])==Decimal(detail['modeled_maxpf_projection'])==0
+    assert detail['projection_coverage']['zero_filled_slots']==['SUPER_FLEX'] and detail['projection_coverage']['complete']
+    assert snapshot['coverage']['estimate_status']=='complete' and snapshot['coverage']['zero_filled_slots']==1
 
 
 def test_missing_custom_events_yield_partial_contributions_not_league_refusal():
@@ -106,9 +126,10 @@ def test_missing_custom_events_yield_partial_contributions_not_league_refusal():
 
 def test_unknown_nfl_team_is_unpriced_not_a_bye_or_confirmed_zero():
     source,cfg=world();source[f'{provider.API}/players/nfl']['p2']['team']=None
-    # Alone on the roster the player is unknown, so the run stops: a bye or a
-    # confirmed zero would have produced a zero-point lineup instead.
-    assert_missing_weekly_projections(source,cfg,['actual','maxpf'])
+    # Alone on the roster he has no game; the feed is otherwise populated, so
+    # the slot is a known zero with no free agent projected (v6), not a stop.
+    detail=run(source,cfg)['weeks'][0]['teams']['2']
+    assert Decimal(detail['modeled_actual_projection'])==0 and detail['projection_coverage']['zero_filled_slots']==['SUPER_FLEX']
     add_priced_teammate(source)
     snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
     assert detail['projection_coverage']['unpriced_players'][0]['reason']=='unknown_nfl_team'
@@ -138,9 +159,12 @@ def test_empty_successful_feed_stops_the_run_without_a_history_number_and_transp
 def test_missing_taxi_forecast_does_not_invent_actual_lineup_projection():
     source,cfg=world();rosters=source[f'{provider.API}/league/123/rosters']
     rosters[1]['taxi']=['p2'];source['https://api.sleeper.app/projections/nfl/2026/3?season_type=regular'].pop()
-    # Only the Max PF lane is missing: a taxi player is no part of the actual
-    # lineup, so the actual lane is neither reported missing nor invented.
-    assert_missing_weekly_projections(source,cfg,['maxpf'])
+    # A taxi player is no part of the actual lineup. With the feed otherwise
+    # populated, his empty Max PF slot is filled (here: zero, no free agent)
+    # rather than stopping the run (v6).
+    detail=run(source,cfg)['weeks'][0]['teams']['2']
+    assert detail['projection_coverage']['maxpf_zero_filled_slots']==['SUPER_FLEX']
+    assert detail['projection_coverage']['missing_maxpf_slots']==[] and Decimal(detail['modeled_maxpf_projection'])==0
     # With a priced active player, the unprojected taxi player changes nothing
     # in the actual lineup and leaves no actual slot missing.
     source,cfg=world();add_priced_teammate(source);drop_projection(source,'p5')
@@ -363,14 +387,16 @@ def test_team_changed_player_is_unpriced_and_stale_row_scores_nothing():
     assert teams['1']['projection_coverage']['unpriced_players']==[]
 
 
-def test_team_changed_player_alone_for_a_slot_leaves_it_unknown():
+def test_team_changed_player_alone_for_a_slot_is_filled_from_free_agents():
     source,cfg=world();add_priced_teammate(source);change_team(source,stale_stats=HUGE)
     source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','TE']
+    add_free_agent(source,'fte','TE','T6',rec=2)
     snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2']
-    assert detail['projection_coverage']['complete'] is False
-    assert detail['projection_coverage']['missing_actual_slots']==['TE']
-    assert Decimal(detail['modeled_actual_projection'])==4
-    assert snapshot['coverage']['estimate_status']=='incomplete'
+    # He is simply not used; his TE slot takes the free agent like any other.
+    assert detail['projection_coverage']['complete'] is True and detail['projection_coverage']['missing_actual_slots']==[]
+    assert [(f['slot'],f['player_id']) for f in detail['projection_coverage']['free_agent_fills']]==[('TE','fte')]
+    assert Decimal(detail['modeled_actual_projection'])==4+Decimal(detail['projection_coverage']['free_agent_fills'][0]['points'])
+    assert snapshot['coverage']['estimate_status']=='complete'
     assert snapshot['weeks'][0]['teams']['1']['projection_coverage']['complete'] is True
 
 
@@ -397,3 +423,121 @@ def test_strict_contract_still_refuses_a_team_changed_player():
     assert cfg['scoring_contract']!=BEST_AVAILABLE
     with pytest.raises(Unavailable) as error:run(source,cfg)
     assert error.value.reason=='player_team_changed'
+
+
+# ── Free-agent fill (model v6) ──────────────────────────────────────────────
+
+CUTS=(.15,.75)
+
+
+def add_free_agent(source,pid,pos,team,**stats):
+    """A player on no roster, projected for `team`'s week-3 game."""
+    j=int(team[1:])//2;home,away=f'T{2*j}',f'T{2*j+1}'
+    source[f'{provider.API}/players/nfl'][pid]={'fantasy_positions':[pos],'position':pos,'team':team,'full_name':pid.upper()}
+    source[FEED].append({'player_id':pid,'season':'2026','week':3,'season_type':'regular','category':'proj','company':'rotowire',
+                         'game_id':f'w3g{j}','team':team,'opponent':away if team==home else home,'stats':{'gp':1,**stats}})
+
+
+def unprojected_rb(source,roster_index=1,pid='r2',team='T1'):
+    """A rostered RB whose feed row is empty: `no_usable_projection_contribution`."""
+    source[f'{provider.API}/league/123/rosters'][roster_index]['players'].append(pid)
+    source[f'{provider.API}/players/nfl'][pid]={'fantasy_positions':['RB'],'position':'RB','team':team}
+    row=deepcopy(next(r for r in source[FEED] if r['player_id']=='p2'));row.update(player_id=pid,stats={})
+    source[FEED].append(row)
+
+
+def test_empty_rb_slot_takes_the_best_projected_free_agent_rb():
+    from backend.league_projections import recommendation
+    source,cfg=world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','RB']
+    unprojected_rb(source)
+    add_free_agent(source,'fa_lo','RB','T4',rush_yd=50);add_free_agent(source,'fa_hi','RB','T6',rush_yd=80)
+    snapshot=run(source,cfg);detail=snapshot['weeks'][0]['teams']['2'];coverage=detail['projection_coverage']
+    assert [(p['player_id'],p['reason']) for p in coverage['unpriced_players']]==[('r2','no_usable_projection_contribution')]
+    assert coverage['free_agent_fills']==[{'slot_index':1,'slot':'RB','player_id':'fa_hi','name':'FA_HI','points':'8.0','estimate_status':'partial'}]
+    assert coverage['zero_filled_slots']==[] and coverage['complete'] and coverage['missing_actual_slots']==[]
+    assert Decimal(detail['modeled_actual_projection'])==Decimal('15.5')
+    # The same free agent fills team 1's open RB slot too (no league scarcity).
+    assert [f['player_id'] for f in snapshot['weeks'][0]['teams']['1']['projection_coverage']['free_agent_fills']]==['fa_hi']
+    # Max PF: the same fill, never below the lineup total.
+    assert [(f['slot'],f['player_id']) for f in coverage['maxpf_free_agent_fills']]==[('RB','fa_hi')]
+    for team in snapshot['weeks'][0]['teams'].values():
+        assert Decimal(team['modeled_maxpf_projection'])>=Decimal(team['modeled_actual_projection'])
+    league=snapshot['coverage']
+    assert league['estimate_status']=='complete' and league['incomplete_team_weeks']==0 and league['missing_lineup_slots']==0
+    assert (league['fa_filled_slots'],league['zero_filled_slots'],league['maxpf_fa_filled_slots'],league['maxpf_zero_filled_slots'])==(2,0,2,0)
+    # The used free-agent row is a recorded input (hash, kickoff guard).
+    assert [e['player_id'] for e in snapshot['player_week_inputs'] if e.get('free_agent')]==['fa_hi']
+    result=simulation.simulate(snapshot,cfg)
+    assert result['coverage']['estimate_status']=='complete'
+    assert recommendation.build('current',result,None,CUTS)['status']=='available'
+
+
+def test_free_agent_on_bye_or_not_pregame_is_not_used():
+    source,cfg=world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','RB']
+    add_free_agent(source,'fa_lo','RB','T4',rush_yd=50)
+    add_free_agent(source,'fa_bye','RB','T10',rush_yd=900)
+    add_free_agent(source,'fa_live','RB','T12',rush_yd=900)
+    add_free_agent(source,'fa_done','RB','T14',rush_yd=900)
+    # T10/T11 move to week 18 (a bye); T12's game is live; T14's is over.
+    next(g for g in source['https://api.sleeper.app/schedule/nfl/regular/2026'] if g['game_id']=='w3g5')['week']=18
+    scores=source['https://api.sleeper.app/scores/nfl/regular/2026/3'];scores[:]=[g for g in scores if g['game_id']!='w3g5']
+    live=next(g for g in scores if g['game_id']=='w3g6');live['status']='in_progress';live['metadata'].update(has_started=True,is_in_progress=True)
+    done=next(g for g in scores if g['game_id']=='w3g7');done['status']='complete';done['start_time']=1793469600000
+    done['metadata'].update(has_started=True,is_over=True,status='complete')
+    snapshot=run(source,cfg)
+    for team in snapshot['weeks'][0]['teams'].values():
+        assert [f['player_id'] for f in team['projection_coverage']['free_agent_fills']]==['fa_lo']
+
+
+def test_feed_never_offers_a_rostered_player_as_a_free_agent(monkeypatch):
+    source,cfg=world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','RB']
+    rosters=source[f'{provider.API}/league/123/rosters']
+    # Team 1 carries a projected RB on taxi and one on reserve; team 2 one more
+    # on its bench behind nobody. None is a free agent for anyone.
+    for pid,team,key,owner in (('tx','T8','taxi',0),('rs','T10','reserve',0)):
+        add_free_agent(source,pid,'RB',team,rush_yd=600);rosters[owner][key]=[pid]
+    add_free_agent(source,'fa_lo','RB','T4',rush_yd=50)
+    original=provider.SleeperExperimentalFeed.weeks;seen=[]
+    def weeks(self,*args):
+        result=original(self,*args);seen.append(set(result['free_agents']['3']));return result
+    monkeypatch.setattr(provider.SleeperExperimentalFeed,'weeks',weeks)
+    snapshot=run(source,cfg)
+    assert seen==[{'fa_lo'}]
+    for team in snapshot['weeks'][0]['teams'].values():
+        assert [f['player_id'] for f in team['projection_coverage']['free_agent_fills']]==['fa_lo']
+
+
+def test_free_agent_never_displaces_a_rostered_starter():
+    source,cfg=world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','RB']
+    unprojected_rb(source);source[FEED][-1]['stats']={'gp':1,'rush_yd':10}  # r2 projects 1 point
+    add_free_agent(source,'fa_hi','RB','T6',rush_yd=80)
+    detail=run(source,cfg)['weeks'][0]['teams']['2']
+    assert [r['player']['player_id'] for r in detail['actual']['lineup']]==['p2','r2']
+    assert [r['player']['player_id'] for r in detail['maxpf']['lineup']]==['p2','r2']
+    assert detail['projection_coverage']['free_agent_fills']==[]==detail['projection_coverage']['maxpf_free_agent_fills']
+    assert Decimal(detail['modeled_actual_projection'])==Decimal('8.5')
+
+
+def test_two_open_slots_take_two_free_agents_in_the_best_assignment():
+    # Flex listed first: filling it with the best RB would leave RB empty.
+    source,cfg=world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','WRRB_FLEX','RB']
+    add_free_agent(source,'rb_a','RB','T4',rush_yd=100);add_free_agent(source,'wr_b','WR','T6',rec_yd=90)
+    detail=run(source,cfg)['weeks'][0]['teams']['2']
+    assert {(f['slot'],f['player_id']) for f in detail['projection_coverage']['free_agent_fills']}=={('WRRB_FLEX','wr_b'),('RB','rb_a')}
+    assert Decimal(detail['modeled_actual_projection'])==Decimal('7.5')+10+9
+
+
+def test_a_played_starter_with_no_score_is_not_filled_and_stays_incomplete():
+    # Week in progress: p1 played (no score recorded), p4 is still to play.
+    source,cfg=completed_world();source[f'{provider.API}/league/123']['roster_positions']=['SUPER_FLEX','SUPER_FLEX']
+    rows=source[f'{provider.API}/league/123/matchups/3'];rows[0]['starters']=['p1','p4'];rows[1]['starters']=['p2','0']
+    rows[0]['players_points'].pop('p1')
+    add_free_agent(source,'fqb','QB','T4',pass_yd=250)
+    snapshot=run(source,cfg);mine,theirs=(snapshot['weeks'][0]['teams'][rid] for rid in ('1','2'))
+    # The locked slot is a fact: neither filled nor zero, and still unknown.
+    assert mine['actual']['lineup'][0]['player'] is None and mine['projection_coverage']['free_agent_fills']==[]
+    assert mine['projection_coverage']['zero_filled_slots']==[]
+    assert mine['projection_coverage']['missing_actual_slots']==['SUPER_FLEX']
+    assert snapshot['coverage']['estimate_status']=='incomplete' and snapshot['coverage']['incomplete_team_weeks']==1
+    # An open (unlocked) starter slot in the same week is filled as usual.
+    assert [f['player_id'] for f in theirs['projection_coverage']['free_agent_fills']]==['fqb']

@@ -73,7 +73,9 @@ The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-cong
 
 **Outlook suggestion** — The outlook the saved playoff chance points to (Tanking, Rebuilding, Contender, All-in), offered as "Consider …" with a Review outlook action when it differs from the saved outlook. It never changes the saved outlook by itself. Flag `league.projection_outlook`; bands in `docs/cross-client-invariants.md` § Playoff chance → suggested outlook.
 
-**Incomplete forecast** — A saved projection in which a starting slot was left empty while a rostered, slot-eligible player had no projection (`coverage.estimate_status: "incomplete"`). The odds are shown with that label and no outlook suggestion is made. A bye, or having nobody for the slot, is a known zero and does not make a forecast incomplete.
+**Incomplete forecast** — A saved projection in which a starter who has already played has no recorded score (`coverage.estimate_status: "incomplete"`). The odds are shown with that label and no outlook suggestion is made. Since model v6 an empty starting slot is never what makes a forecast incomplete: it takes a **free-agent fill**, or scores zero.
+
+**Free-agent fill** — Model v6's rule for an open starting slot in an unplayed team-week: the best projected free agent for that slot and week (a player on no roster in the league, eligible for the slot, in a game still to be played), or 0 when none is projected. It never replaces a rostered starter; two open slots on one team take two different players; the same free agent may fill slots on different teams. Recorded in `projection_coverage.free_agent_fills` / `zero_filled_slots`.
 
 **Presentment rules** — The G6 layer (flag `trade.presentment_rules`, 2026-08-16; #304 #336 #339 #340 #341) deciding whether a generated trade may be *shown*: three **construction rules** + a need gate run inside every v1 generator's gate stack (killed candidates refill from the enumeration), and one **eligibility rule** applied at dedup/injection time. Never relaxed by the #189 relaxed pass. Per-rule kill switches are `model_config` knobs; the flag is the group revert. See [feedback/items/304-positional-need-filter/](feedback/items/304-positional-need-filter/).
 
@@ -660,10 +662,14 @@ score proven never to be lower than a candidate's true `weaker_support`, verifie
 the unchanged evaluator, and the search stops once no remaining bound can reach the page.
 [ADR-028](adr/adr-028-page-first-trade-search.md).
 
-**Fast deck** (`backend/trade_fast_deck.py`, flag `trade.fast_deck`, ships off) is a deck
-built from the page-first search's proven first 150 cards instead of the full inventory. The
-cards, order and proofs are the full engine's; the deck is shorter. **Fast-deck shadow**
-(`trade.fast_deck_shadow`) serves the full deck and logs how far the fast one agrees.
+**Fast deck** (ADR-028, flag `trade.fast_deck`) was a deck built from the page-first search's
+proven first 150 cards; retired 2026-11-11 (the filters left 2 of them). Its successor is
+**rules-first construction** (ADR-030, flag `deck.rules_first`): the deck's per-card rules
+(significance, breakup, filler, redundant) decide which owner cards exist before ranking, and
+the whole **admitted inventory** (every card that passes them, ranked over admitted cards
+only) is built by the page search, or by the **gated full solve** (the generator's full
+search with failing packages skipped and failing survivors dropped before ranking) when the
+page cannot be proven. `backend/deck_rules.py`, `backend/trade_fast_deck.py`.
 
 ## Window evidence and dynasty roster proxy
 

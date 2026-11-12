@@ -1,5 +1,27 @@
 # Decisions — Fantasy Trade Finder
 
+## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
+
+**Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.
+**Context:** The deck rules ran after generation and ranking and rejected about 93 to 97% of what the generator emitted, which is why a 150-card page left a 2-card deck (D-232) and why the full solve spent most of its time on cards nobody would see.
+**Decision:** Behind `deck.rules_first` (code default false, shipped true), the per-card rules decide which trades are built. The page-first search builds the whole admitted inventory; a rules-gated full solve is the fallback; any failure serves today's full solve. Organic owner-only decks only: pinned, opponent-scoped and intent requests and generators without a parity suite keep today's path. `trade.fast_deck` is retired. `REPEAT_CAP` is 5 on every path. A liked trade the generator did not build is proven on demand by the owner evaluator after generation and gets a full engine card; generation never depends on likes.
+**Consequences:**
+- The served set equals today's on the recorded requests (247 of 247); order changes for everyone. Known differences: leagues large enough for stream budgets to bind get a superset; a heavy-decline user at the five-card floor can get up to five recently declined near-duplicates restored; a fatigue-retest grant can go to a different card.
+- No shadow, so the evidence is the replay, the served-deck acceptance tests and an independent review. The kill switch is the flag; the safety signature keeps cached decks from crossing it.
+- "Match strength" was a deck position divided by 300. On rules-first decks it is a constant 300 (reads 100%), as nearly every card read under the full solve. A stopgap until the bar is replaced or given a real number; `surplus_margin` on these impressions carries no information.
+- The value core's own cap stays 3, so the repeat rule is no longer one shared definition; the per-card rules still are.
+
+## D-234 — Forecast model v6: an empty starting slot takes the best projected free agent, or 0; "incomplete" now means only a played starter with no recorded score
+
+**Date:** 2026-11-11 · **Who:** the operator, on learning that four of the first six v5 forecasts were incomplete for one unprojected RB slot: "This should already be solved. Assume the user will source a player from FA and take the highest FA's projected points. If no FA's with projected points assume a 0 at that position." The IDP fallback order and the Max PF handling are this session's calls.
+**Context:** Under D-230 an empty starting slot that a rostered, unprojected player could fill made the whole league's estimate incomplete and withheld the outlook suggestion. A manager with an empty slot adds a free agent; the model should assume that.
+**Decision:** In best-available scoring, after the lineup is built from the roster, each still-open slot in an unplayed week takes the best projected free agent for that slot and week (not on any roster, taxi or reserve in the league; game still pregame), by an exact best assignment with distinct players per team-week; with none, the slot scores 0. Both the lineup and Max PF lanes. A free agent never displaces a rostered starter. IDP: free agent first, then the existing replacement mean where its rule applies, then 0. `VERSION` is `projected-lineup-universal-sd-v6`, so every baseline re-runs once.
+**Consequences:**
+- A forecast is incomplete only when a starter who has played has no recorded score. This supersedes D-230's and D-231's "unknown slot" consequences: a team-changed player's empty slot is filled like any other.
+- A populated week with an entirely unprojected roster is filled, not stopped. `missing_weekly_projections` now needs a week with no projection anywhere.
+- The same free agent may fill slots on different teams (league-wide scarcity is not modelled).
+- The result records which slots were filled and which scored 0 (`fa_filled_slots`, `zero_filled_slots`, per-week `free_agent_fills`).
+
 ## D-233 — Roster setup's rank step becomes one page of tier placement; the posted players are the scope and nobody else moves
 
 **Date:** 2026-11-11 · **Who:** the operator, on TestFlight 185 ("I thought we would be ranking the entire team (on one page) using the draft pick tier ranker"), then six answers to the scope's questions: "Tap him then tap the tier. Yes drop per position tap order. No need to show picks (other than the keep, move screen). Yes to on/off switch. Show market. At the edge." Reading "the draft pick tier ranker" as the tier ladder, not the Pick Anchor wizard, is this session's call; the operator was asked and did not name one.

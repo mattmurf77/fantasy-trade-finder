@@ -17,7 +17,7 @@ move's anchor a card its response sent first).
 
 Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline), with the synthetic deck giving asset mine0
-on cards 0-2 (the filter's three in the window) and 30-31 (the two it
+on cards 0 to CAP-1 (the filter's CAP in the window) and 30-31 (the two it
 deferred past it). eval's reading of the header is models-eng's #501; the
 tests here check the header against that order rule (_display_key).
 """
@@ -38,7 +38,7 @@ from backend.tests.test_packed_evidence import (
     deck_ids, own_all_but, pack_of, pass_elsewhere, restart, unpack, withdrawals)
 
 W, CAP = dq.REPEAT_WINDOW, dq.REPEAT_CAP
-X_AT = (0, 1, 2, 30, 31)
+X_AT = (*range(CAP), 30, 31)   # the cap's CAP in the window, two deferred past it
 
 
 # ── _served_repeat_cap, pure ─────────────────────────────────────────────────
@@ -212,7 +212,7 @@ def assert_moved(engine, job_id):
     shown = displayed(engine, job_id)
     assert 5 not in shown                                 # W0: removed for eval
     assert shown[28:33] == [29, 32, 30, 31, 33]
-    assert sum(1 for i in shown[:W] if i in X_AT) == CAP  # B-DK-7: X in 3 of the first 30
+    assert sum(1 for i in shown[:W] if i in X_AT) == CAP  # B-DK-7: X in CAP of the first 30
 
 
 @pytest.mark.parametrize("how", ["cut", "i1"])
@@ -327,7 +327,7 @@ def test_a_page_after_the_job_left_counts_a_delivered_then_withdrawn_card(x_deck
     """P1-1 (release-lead's repro): card 5 is cut before page 1 (W0). Card 1,
     carrying X, is delivered, then cut at a re-serve of page 1 (W1), and eval
     keeps it in place. Page 2 is served after the job left. Its window holds
-    one card, and X is at 3 already (0, 1, 2), so card 30 must not land at
+    one card, and X is at the cap already (0 to CAP-1), so card 30 must not land at
     displayed position 29."""
     client, engine, _ = x_deck
     job_id, *_ = de.deferred_deck(120, packed=True, store=True)

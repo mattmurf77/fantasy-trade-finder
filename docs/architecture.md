@@ -188,7 +188,7 @@ is draft/unratified and never automatically approves release. See
 [comparison](plans/model-evaluation-framework/comparison-2026-09-22.md) and
 [remaining model/evidence work](plans/model-evaluation-framework/model-revision-plan.md).
 
-## Page-first trade search and the fast deck (flagged off; 2026-11-10)
+## Page-first trade search and rules-first construction (2026-11-10, 2026-11-11)
 
 `trade_first_page.first_page(k=…, **generator_kwargs)` returns the first k cards of an
 organic or opponent-scoped owner-bilateral search without constructing the inventory.
@@ -208,19 +208,36 @@ lineup assignments (`_LINEUP_MEMO`) and tier coordinates (`_COORDINATE_MEMO`).
 For revision 2 the search also completes each page card's two term-precedence families up to
 that card's cost, so the page is the full generator's first k and not a re-rank of a prefix.
 
-It is a leaf with no server, database, flag or provider access. One serving path uses it:
-`trade_fast_deck.serve`, called from `_run_trade_job`'s owner-generator call when
-`trade.fast_deck` is on and the job is interactive (no `source`, not a preparation run). The
-worker then runs its unchanged final checks, evidence and publication on the proven first
-150 cards as the whole deck. `serve` returns `None`, and the full solve runs, for a generator
-without a parity suite, a pinned or exact-give request, an unproven page or a league whose
-stream budgets would bind; the worker also falls back on any error. `trade.fast_deck_shadow`
-serves the full solve and logs one comparison per job. With both flags off the module is
-never imported. Publishing a page and then appending the inventory would change the owner
-publication contract below and is not built.
-[ADR-028](adr/adr-028-page-first-trade-search.md) ·
-[scope and measurements](plans/realtime-trade-engine/scope.md) ·
-[flags](config-reference.md#flags--fast-deck-adr-028-2026-11-10-ships-off).
+It is a leaf with no server, database, flag or provider access. `PageSearch(admit=…)` takes
+an admission predicate: screened entries whose terms fail are dropped before pricing, family
+completion skips failing members, and only admitted eligible proofs are held; `admit=None` is
+the search as it was.
+
+**Where the deck rules run (rules-first, flag `deck.rules_first`, ADR-030).** For organic
+owner-only decks of bilateral revisions 1 and 2 (no pins, opponent scope or intent),
+`_run_trade_job` builds one predicate per job,
+`deck_rules.DeckRules` (`server._rules_first_deck_rules`), from the inputs the downstream gates
+read: discovery significance through `_evaluate_trade_significance` itself, and
+`deck_quality.card_rule` (the function `filter_deck` calls) with the quality block's market,
+positions, rosters and lineup slots; it never depends on who liked what. The owner-generator
+call then runs
+`trade_fast_deck.serve`: the page search with that predicate, taken to exhaustion (the whole
+admitted inventory, no size cap), or, if the page is not proven within its work limit or the
+request is unsupported, the gated full solve (`trade_fast_deck.gated_full`: the generator's
+search with failing expansions skipped and failing survivors dropped before its own ranker).
+Any failure serves today's full solve. Liked trades stay an overlay after generation: on a
+rules-first job the likes-you injector proves a liked mirror or standing offer the generator
+did not build with the job's owner evaluator (the one owner revalidation runs, without the
+deck rules), so it is a full engine card; not eligible or an error leaves today's consensus
+card. Everything after generation is unchanged and runs on
+the complete admitted inventory: injections, suppression, revalidation, dispositions,
+presentment, the repeat cap, evidence and publication. The downstream significance and
+quality filters stay as guards that must remove nothing (`rules-first guard` warning). With
+the flag off neither module is imported and the generator call is the one it was. The
+150-card fast deck of ADR-028 (`trade.fast_deck*`) is retired.
+[ADR-028](adr/adr-028-page-first-trade-search.md) · [ADR-030](adr/adr-030-rules-first-deck.md) ·
+[design and measurements](plans/realtime-trade-engine/fast-deck-v2-design.md) ·
+[flag](config-reference.md#flags--rules-first-deck-adr-030-2026-11-11-ships-on).
 
 ## First-action trade job publication (2026-09-21)
 
@@ -724,7 +741,7 @@ The stamp never raises and never changes the recorded outcome. A fingerprint err
 | `value_core/` (package) | new (2026-09-30) | **Value-core trade engine (flag `trade.value_core` — default OFF)**, [scope](plans/value-core-engine/scope.md) / [HLD](plans/value-core-engine/hld.md) / [LLD](plans/value-core-engine/lld.md) / [ADR-024](adr/adr-024-value-core-engine.md). Leaf package that never imports `server`: `types.py` (shared contract), `core.py` (value-only fair pool + hard rules), `windows.py` / `ranking.py` / `deck.py` (team windows, three scores, card reasons, variety-capped assembly), `pipeline.py` (one call), `adapter.py` (app objects ↔ contract ↔ `TradeCard` + evidence). Imported lazily by `server._run_value_core_job` only. See [Value-core trade engine](#value-core-trade-engine) |
 | `eval/value_core_bench.py` + `eval/value_core_recall.py` + `eval/blind_grade.py` | new (2026-09-30) | Value-core **operator tooling**, not wired to the server: bench freeze (prod read-only, asserted) / run / five guardrails; historical-trade recall + band calibration from committed fixtures; blind-grade export and import. Outputs are private (mode 0600, new paths only). [Runbook](runbook.md#value-core-bench-freeze--run--recall--blind-grade) |
 | `blind_grading.py` | new (2026-10-02) | **Calibration — in-app blind grading, value-core Gate 2 (flag `grading.blind` — on for every app user; the flag is the kill switch)**, [scope](plans/blind-grading/scope.md) / [PRD](plans/blind-grading/prd.md) / [HLD](plans/blind-grading/hld.md) / [LLD](plans/blind-grading/lld.md) / [specs](plans/blind-grading/specs.md). Leaf service: imports `database` at module level, `eval.value_core_bench` / `value_core.*` / `trade_service` lazily, never `server` or `tools`. Owns arm sourcing (current arm from the caller's served `deck_impressions`; value-core arm from `read_league_inputs` → `league_record` → `snapshot_for_seat` → `pipeline.run` with default config), merge by (partner, give set, receive set), the secret-seed shuffle, **`neutral_trade` — the only producer of `trade_json`**, answer validation (`TAGS`, 1–5 or skip) and scoring (`summarize` / `arm_summaries`, the `blind_grade._score` arithmetic). Two-phase build: `start_session` (request thread, 202 + `building`) and `build_session` (daemon thread; `open` or `failed`, never raises). Routes in `server.py` only gate (`_grading_gate` → 404) and gather `ServerInputs`; `GET /api/admin/grading/report` is the lead's readout and `POST /api/admin/grading/pregenerate` (`blind_grading.pregenerate`) pre-builds a session for every user with a fresh deck. Writes only `grading_sessions` / `grading_cards`. [§ Calibration](#calibration-blind-grading) |
-| `deck_quality.py` | new (2026-10-14) | **Live-deck quality filters** (flag `deck.quality_filters`, D-207). Pure: given the served cards in order, market / position lookups, team rosters and the lineup template, it returns the kept cards plus `{breakup, filler, redundant, deferred}` counts. The rules match the value core's (`value_core/core.py`): breakup 0.70, filler max(450, 25% of the headliner), redundant TE/QB at 0.70 with the superflex slot counted. It adds a repeat cap of 3 per asset in the first 30 cards, deferring rather than dropping. Called once in `server._run_trade_job` after owner presentment, before the served/ghost split. Protected cards are untouched; presentation records follow the re-order (`_records_in_order`). |
+| `deck_quality.py` | new (2026-10-14) | **Live-deck quality filters** (flag `deck.quality_filters`, D-207). Pure: given the served cards in order, market / position lookups, team rosters and the lineup template, it returns the kept cards plus `{breakup, filler, redundant, deferred}` counts. The per-card rules match the value core's (`value_core/core.py`): breakup 0.70, filler max(450, 25% of the headliner), redundant TE/QB at 0.70 with the superflex slot counted. It adds a repeat cap of 5 per asset in the first 30 cards (3 until 2026-11-11), deferring rather than dropping; that cap is the deck's own and no longer matches the value core's per-asset cap (`vc_player_cap`, 3). Its per-card rules are one function, `card_rule`, which rules-first construction (`deck_rules.py`) also calls before ranking. Called once in `server._run_trade_job` after owner presentment, before the served/ghost split. Protected cards are untouched; presentation records follow the re-order (`_records_in_order`). |
 | `fit_engine.py` | new (2026-10-09) | **Fit-first trade generation, two approaches under test** ([scope](plans/fit-scorecard/scope.md), D-200). Every asset gets a **team value** per team; a trade is kept only when both sides gain by their own team value (B: neither loses), and `value_core.core.evaluate_trade` still applies every hard rule. Approach A (`fit_a`): market × window × need × board multipliers. Approach B (`fit_b`): dynasty / redraft grades (redraft = rest-of-season value over replacement from Sleeper's weekly projections) × team profiles (outlook, positional need, redraft/dynasty priority), candidates restricted to each side's sells meeting the other's buys. Pure: no I/O except `fetch_ros_points` (transport injected). Used only by `blind_grading.add_fit_arms` (Calibration arms `fit_a` / `fit_b`) and `eval/fit_scorecard_test.py`; never serves Acquire. |
 | `daily_tick.py` | new (2026-10-22, ~100) | **Daily-tick runner** (S3 fix, [scope](plans/daily-tick-fix/scope.md)): the serial, single-flight step runner behind `POST /api/cron/daily-tick`. `start()` runs the step table it is handed on ONE `daily-tick-runner` daemon thread, isolates each step, and logs one `daily-tick step=` line per step. Imports nothing from `server`; the step table and step bodies stay in `server.py` (§ Cron ticks → Daily-tick runner) |
 | `error_alerts.py` | new (2026-10-31, ~320) | **Server error alerts through Sentry (GNG-1) + the `feedback_received` alert (SUP-M7)**, [scope](plans/server-error-alerts/scope.md); **dark until `SENTRY_DSN`**, with the SDK never imported without it. `init_error_alerts()` runs in `server.py` just before `Flask()`. ERROR+ logs become events through the logging integration, which covers the generic error handler, the `_cleanup_loop` guards and `daily_tick`. A `before_request`/`after_request` pair, registered first, adds one `http_5xx` for a 5xx that logged nothing (never a 501; at most one per route and status per worker per hour). `submit_feedback_route` calls `notify()` for a new note. `scrub_event` builds each event from an allowlist (legal R28.23): the route pattern, the exception type and frames (file, function, line) without their text, locals or source lines, and the log template from our own loggers with every param `[Filtered]`; no trace context, host name or paths. It fails closed. No breadcrumbs or sessions ([runbook](runbook.md#server-error-alerts-sentry)) |
@@ -1078,7 +1095,7 @@ The filter operates on detached copies and does not rewrite stored evidence.
 
 Saved user-facing reads select only public run fields, excluding captured snapshots, execution inputs and worker-control payloads. The latest view reads its unique success/attempt IDs in one owner-and-league-scoped query and shares identical results only within that request. No persistent cache or new computation is introduced. Explicit saved-input scenarios retain their authenticated full-snapshot read. Public JSON still contains both `run` and `attempt` objects for compatibility.
 
-**Model v5 (2026-11-11):** future weekly scores are drawn around each team's projected best-lineup total with one app-wide SD; completed results are facts and never set a future mean; a missing projection is reported (`missing_weekly_projections`, or an `incomplete` estimate), never replaced by team history. `recommendation.py` is a pure reader that turns the saved run into an outlook suggestion for the latest-run route and for Team Review; it writes nothing. Weekly dispatch refreshes each target once after a model change.
+**Model v5 (2026-11-11):** future weekly scores are drawn around each team's projected best-lineup total with one app-wide SD; completed results are facts and never set a future mean; a missing projection is reported (`missing_weekly_projections`, or an `incomplete` estimate), never replaced by team history. `recommendation.py` is a pure reader that turns the saved run into an outlook suggestion for the latest-run route and for Team Review; it writes nothing. Weekly dispatch refreshes each target once after a model change. **Model v6 (2026-11-11):** `provider.capture` builds each team-week's lineup from the roster exactly as before, then `core.free_agent_fill` assigns the open, unlocked slots (exact maximum-weight assignment, distinct players per team-week, ties by projection then player id) from the week's free agents, which `SleeperExperimentalFeed` derives from the projection feed it already downloads (rows for players on no roster in the league, slot-eligible, pregame, scored by the best-available contract). An IDP slot still open falls back to the bye replacement mean (`core.idp_bye_fill`, unchanged), then 0. The same fill runs on the Max PF lane.
 
 `league_projections` is an independent advisory sidecar: authoritative league sync registers durable targets; authenticated scheduled dispatch claims due targets; one bounded worker captures immutable native inputs then runs a joint actual-score/Max PF model. Versioned results feed existing Projected standings and League Summary through read-only routes. Exact scoring/assignment and provider normalization are separate pure seams. Account/target/worker fences and atomic completion prevent stale/deleted work from being republished. Existing trade generation, outlook inference and Win Now inputs are unchanged. Provider/policy launch gates remain off. The versioned sparse-offense interpretation admits populated source-bound rows only after published-total reconciliation, records modeled omissions separately from direct/derived fields, and preserves unknown custom events. Engine `joint-season-scenario-v4` preserves the requested unrounded Max PF expectation with a solved latent positive-gap mean; this is a mathematical mean constraint, not predictive calibration. Actual-score RNG paths remain unchanged. Decoder identity checks do not establish predictive accuracy or full-league coverage. Details: `docs/plans/league-projections/implementation.md`.
 

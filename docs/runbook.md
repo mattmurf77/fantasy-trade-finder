@@ -138,6 +138,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Deletion scrub: other users' decks after an account deletion (legal R28.20 (ii), 2026-10-31)](#deletion-scrub-other-users-decks-after-an-account-deletion-legal-r2820-ii-2026-10-31)
 - [Playoff forecasts: a league's run stops, or needs re-running before its weekly slot (2026-11-11)](#playoff-forecasts-a-leagues-run-stops-or-needs-re-running-before-its-weekly-slot-2026-11-11)
 - [Fast deck: a 150-card page can leave an almost empty deck (2026-11-11)](#fast-deck-a-150-card-page-can-leave-an-almost-empty-deck-2026-11-11)
+- [Rules-first deck (fast deck v2): kill switch, log lines, replay (2026-11-11)](#rules-first-deck-fast-deck-v2-kill-switch-log-lines-replay-2026-11-11)
 
 ---
 
@@ -1982,9 +1983,11 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 | Reason | Meaning | Action |
 |---|---|---|
 | `player_team_changed` | Strict scoring only since D-231. In production (best-available scoring) a team-changed player is left unprojected instead. | None in production. If it appears, the scoring contract in `config/league_projections.json` has changed. |
-| `missing_weekly_projections` | A team has no projected player at all in an upcoming week. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
+| `missing_weekly_projections` | The weekly projection feed has no usable projection for anyone in an upcoming week (empty or not yet published). Since model v6 a team with no projected rostered player in an otherwise populated week is filled from free agents instead. | Wait for the feed; the next weekly run retries. Past scoring is never substituted. |
 | `season_state_mismatch`, `unsupported_divisions_median_bestball_or_manual_seeding` | The league is outside what the model supports (another season; divisions, median games, best ball or manual seeding). | None. |
 | `league_membership_changed` | The account no longer owns a team in that league. | None. |
+
+**Incomplete estimates (model v6, 2026-11-11).** An open starting slot takes the best projected free agent, or scores zero, so it no longer marks a forecast `incomplete`. The one remaining cause is a starter who has already played without a recorded score; it clears once Sleeper records the score and the league is re-run. `coverage.fa_filled_slots` / `zero_filled_slots` count the fills. Before v6, four of six production forecasts were incomplete for a single RB slot whose only rostered RB had an empty feed row.
 
 **What happened on 2026-11-11:** five rostered players changed NFL teams the day model v5 shipped. Sleeper's projection rows for weeks 11 to 14 still carried the old teams, and a guard from 2026-11-07 stopped every affected league's run. All six targets that had a forecast the day before produced none. Fixed by D-231.
 
@@ -2002,6 +2005,25 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 
 **Fix applied:** `trade.fast_deck` set false in `config/features.json` (2026-11-11). Kill without a deploy: set it false in `FTF_FLAGS` and `POST /api/feature-flags/reload`.
 
-**Before turning it back on:** the page has to be deep enough to fill a deck after the filters, or the job has to fall back to the full solve when the filtered deck is thin. Neither exists yet.
+**Resolved by replacement (2026-11-11):** the 150-card fast deck is retired and its flags do nothing; rules-first construction (next section) builds the whole deck the filters would leave.
 
-**Guardrail test:** `backend/tests/test_trade_fast_deck.py::test_flags_default_off_in_code_and_in_config`.
+**Guardrail test:** `backend/tests/test_rules_first_deck.py::test_no_thin_deck_by_placement`.
+
+## Rules-first deck (fast deck v2): kill switch, log lines, replay (2026-11-11)
+
+**What it is:** with `deck.rules_first` on (ships on, ADR-030), an organic owner-only job (bilateral revision 1 or 2) decides each card's significance, breakup, filler and redundant rules *before* ranking and builds the whole admitted inventory with the page search (about 0.3 s of laptop CPU against 3–4 s for the full solve), falling back to the gated full solve. Pinned, opponent-scoped and intent requests keep the full solve. The served deck is the same set of cards as the old "full solve, then filters" pipeline on the recorded requests, except: a superset in leagues where the incumbent's budgets bind (16+ teams); up to 5 recently declined near-duplicates restored for a heavy-decline user at the suppression floor; the fatigue-retest grant can land on a different card. The order differs (first card the same about two times in three; ~25 of the first 30 shared). Liked trades are an overlay after generation: a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator and served as a full engine card (today's bare consensus card if not eligible). Every rules-first card's Match strength reads 100 (`mismatch_score` = 300, constant), so the impression feature `surplus_margin` is constant on these rows: exclude them when training a value model on it.
+
+**Log lines (one per job):**
+- `trade-job <id> rules-first: {"budgets_bind": …, "cards": N, "fallback": null, "ms": …, "path": "page", "rules_rejected": {"filler": …, …}, "rules_version": "deck-rules-1", "verified": …}` (info): the normal case.
+- `trade-job <id> rules-first: page search not proven (<reason>), served the gated full solve {…}` (warning): `over_limit` (more than 12,000 page evaluations), `unsupported_request`, or `error:<Type>`. Expected rarely, mostly in very large leagues; the deck is still complete (in leagues where the incumbent's budgets bind, the gated fallback is the budgeted search and can be smaller).
+- `trade-job <id> rules-first construction failed (full solve)` (exception): an unexpected error; today's full solve served instead.
+- `trade-job <id> rules-first: not built, generator <module> has no rules-first construction (full solve)` (info): expected when revision 3 or 4 is the selected generator; today's full solve, every job.
+- `trade-job <id>: liked cards proven=N consensus=N errors=N ms=…` (info): the likes-you step proved N liked trades the generator did not build (full engine cards); `consensus` were not eligible for the viewer and kept today's bare card; `errors` hit an evaluator failure, each also logged as `liked card proof failed (consensus card): <Type>` (warning) and served as today's card. At most 3 evaluations per job.
+- `trade-job <id> rules-first guard: significance|quality filters removed N admitted cards` (warning): **should never appear**. The downstream copies of the rules removed a card the gate admitted, so the two definitions disagree. Check the job's `deck quality filters {…}` line; consider the kill switch.
+- The existing `deck quality filters {…} served=N` line now shows breakup / filler / redundant at 0 for rules-first decks (the filter follows the job's own capture of `deck.quality_filters`, so a reload mid-job does not change it); `deferred` (the repeat cap, 5 of the first 30) still counts.
+
+**Kill switch (deploy-free):** set `deck.rules_first` false in `FTF_FLAGS` (or `config/features.json`) and `POST /api/feature-flags/reload`. New jobs run today's full solve, then the filters. The flag is in the owner-only safety signature, so cached jobs and stored first pages built with it on stop serving and rebuild once.
+
+**Re-check offline (operator):** `PYTHONHASHSEED=0 python -m backend.eval.served_deck_replay --dir data/prod-requests [--latest] [--limit N]` replays recorded owner requests both ways in one process and prints aggregates only: served-set equality, first card the same, cards shared in the first 30, page = gated, served sizes, CPU per search for both paths, guard removals (must be 0) and fallbacks. Exit 0 when every request has the same served set and page = gated. It cannot replay decline-window suppression, dispositions, likes-you or revised-offer injection, so production serves fewer cards than it shows.
+
+**Guardrail tests:** `backend/tests/test_rules_first_deck.py` (served-deck acceptance, predicate equivalence, page = gated) and `backend/tests/test_trade_fast_deck.py` (worker wiring, flag-off identity, fallback logging).

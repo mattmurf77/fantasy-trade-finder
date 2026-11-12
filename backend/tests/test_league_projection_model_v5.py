@@ -1,8 +1,23 @@
-"""Model v5 acceptance: projected lineup totals only, one app-wide score SD.
+"""Model v5/v6 acceptance: projected lineup totals only, one app-wide score SD.
 
 Future means come from the projected lineup and nothing else; completed
 results stay facts; a missing projection is reported, never replaced by what a
 team has scored so far.
+
+Model v6 (operator rule 2026-11-11): an open starting slot takes the best
+projected free agent for it, else scores 0, and is no longer unknown:
+- test_only_a_week_with_no_projection_anywhere_stops_the_run: an empty feed
+  still stops (`missing_weekly_projections`); a populated feed fills an
+  entirely unprojected roster instead.
+- test_an_empty_slot_an_unprojected_player_could_fill_takes_the_best_free_agent:
+  complete, and the outlook suggestion is no longer withheld.
+- test_capture_never_uses_a_rostered_player_as_a_free_agent (any team, taxi,
+  reserve), even if a feed offers one.
+- IDP: test_idp_slot_takes_a_projected_free_agent_first,
+  test_idp_slot_without_a_free_agent_takes_the_replacement_mean,
+  test_an_empty_idp_slot_with_no_free_agent_or_replacement_mean_scores_zero.
+- free_agent_fill unit: ties break by player id; skipped (locked) slots stay
+  empty.
 """
 from copy import deepcopy
 from decimal import Decimal
@@ -12,7 +27,7 @@ import math
 import pytest
 
 from backend.league_projections import batch
-from backend.league_projections.core import Unavailable, VERSION
+from backend.league_projections.core import Unavailable, VERSION, free_agent_fill, optimize
 from backend.league_projections.provider import API, capture
 from backend.league_projections.scoring import BEST_AVAILABLE
 from backend.league_projections.simulation import config, simulate
@@ -73,7 +88,7 @@ def test_changing_historical_points_cannot_move_future_score_means():
 
 def test_result_has_no_history_term():
     result = simulate(snapshot(), cfg())
-    assert result['model_version'] == VERSION == 'projected-lineup-universal-sd-v5'
+    assert result['model_version'] == VERSION == 'projected-lineup-universal-sd-v6'
     assert 'historical_weight' not in result['config'] and 'persistent_sd' not in result['config']
     assert result['score_sd'] == SD and result['score_model']['sd_status'] == 'provisional_not_calibrated'
     for team in result['teams']:
@@ -224,10 +239,17 @@ def test_capture_projects_the_same_lineups_whatever_teams_scored_before():
     assert 'history_fallback_team_weeks' not in base['coverage']
 
 
-def test_a_team_with_no_projected_player_stops_the_run_instead_of_using_history():
+def test_only_a_week_with_no_projection_anywhere_stops_the_run():
     source, feed = world()
+    # The feed is populated (p1), so team 2's unprojected roster is filled:
+    # no free agent here, so a known zero. History is never consulted.
+    snap = run(source, feed_without(feed, 'p2'))
+    detail = snap['weeks'][0]['teams']['2']
+    assert Decimal(detail['modeled_actual_projection']) == 0 and detail['projection_coverage']['zero_filled_slots'] == ['WR']
+    assert snap['coverage']['estimate_status'] == 'complete'
+    # No usable projection for anyone this week: the run stops as before.
     with pytest.raises(Unavailable) as err:
-        run(source, feed_without(feed, 'p2'))
+        run(source, feed_without(feed, 'p1', 'p2'))
     assert err.value.reason == 'missing_weekly_projections' and err.value.state == 'incomplete_projections'
     assert err.value.details == {'week': 2, 'lanes': ['actual', 'maxpf']}
     # Before the first completed week the answer is the same: there never was
@@ -241,33 +263,68 @@ def test_a_team_with_no_projected_player_stops_the_run_instead_of_using_history(
     class WeekOne:
         def weeks(self, season, weeks, player_ids):
             rows = feed.weeks(season, weeks, player_ids)['weeks']['2']
-            rows.pop('p2')
+            rows.pop('p1'), rows.pop('p2')
             return {'source': 'synthetic', 'captured_at': '2026-11-01T00:00:00+00:00', 'weeks': {'1': rows}}
     with pytest.raises(Unavailable) as early:
         run(source, WeekOne())
     assert early.value.reason == 'missing_weekly_projections'
 
 
-def test_an_empty_slot_an_unprojected_player_could_fill_marks_the_forecast_incomplete():
+KICK = '2026-11-08T18:00:00+00:00'
+
+
+def fa_row(points, key='rec', **extra):
+    return {'phase': 'pregame', 'kickoff_at': KICK, 'availability': 1, 'stats': {key: points}, 'supported_keys': [key], **extra}
+
+
+def with_free_agents(feed, rows):
+    """`feed`, plus week-2 free-agent rows as the real adapter would supply."""
+    class Feed:
+        def weeks(self, season, weeks, player_ids):
+            return {**feed.weeks(season, weeks, player_ids), 'free_agents': {'2': deepcopy(rows)}}
+    return Feed()
+
+
+def test_an_empty_slot_an_unprojected_player_could_fill_takes_the_best_free_agent():
+    from backend.league_projections.recommendation import build
     source, feed = world()
     source[f'{API}/league/123']['roster_positions'] = ['WR', 'WR']
     source[f'{API}/league/123/rosters'][1]['players'] = ['p2', 'p3']
-    source[f'{API}/players/nfl']['p3'] = {'fantasy_positions': ['WR']}
-    snap = run(source, feed)
+    source[f'{API}/players/nfl'].update(p3={'fantasy_positions': ['WR']}, f1={'fantasy_positions': ['WR']},
+                                        f2={'fantasy_positions': ['WR']})
+    snap = run(source, with_free_agents(feed, {'f1': fa_row(3), 'f2': fa_row(4)}))
     mine, theirs = (snap['weeks'][0]['teams'][rid] for rid in ('1', '2'))
-    # Team 1 simply has one receiver: an empty second slot is a fact.
-    assert mine['projection_coverage']['complete'] is True and mine['projection_coverage']['missing_actual_slots'] == []
-    # Team 2 rosters a second receiver with no projection: unknown, not zero,
-    # and not their scoring average either.
-    assert theirs['projection_coverage']['complete'] is False
-    assert theirs['projection_coverage']['missing_actual_slots'] == ['WR']
-    assert Decimal(theirs['modeled_actual_projection']) == 5
-    assert snap['coverage']['estimate_status'] == 'incomplete'
-    assert snap['coverage']['incomplete_team_weeks'] == 1 and snap['coverage']['missing_lineup_slots'] == 1
-    assert snap['coverage']['incomplete_weeks'] == [2]
+    # Team 2's second receiver has no projection; his slot takes the best
+    # free agent: known, not unknown, and not their scoring average either.
+    assert theirs['projection_coverage']['complete'] is True and theirs['projection_coverage']['missing_actual_slots'] == []
+    assert [(f['slot'], f['player_id'], f['points']) for f in theirs['projection_coverage']['free_agent_fills']] == [('WR', 'f2', '4')]
+    assert Decimal(theirs['modeled_actual_projection']) == 9
+    # Team 1 has one receiver: its second slot takes the same free agent.
+    assert Decimal(mine['modeled_actual_projection']) == 14
+    assert snap['coverage']['estimate_status'] == 'complete'
+    assert snap['coverage']['incomplete_team_weeks'] == 0 and snap['coverage']['missing_lineup_slots'] == 0
+    assert snap['coverage']['incomplete_weeks'] == [] and snap['coverage']['fa_filled_slots'] == 2
     result = simulate(snap, capture_cfg())
-    assert result['coverage']['estimate_status'] == 'incomplete'
-    assert result['teams'][1]['weeks'][0]['modeled_score_mean'] == 5
+    assert result['coverage']['estimate_status'] == 'complete'
+    assert result['teams'][1]['weeks'][0]['modeled_score_mean'] == 9
+    assert build('current', result, None, (.15, .75))['status'] == 'available'
+
+
+def test_capture_never_uses_a_rostered_player_as_a_free_agent():
+    source, feed = world()
+    source[f'{API}/league/123']['roster_positions'] = ['WR', 'WR']
+    rosters = source[f'{API}/league/123/rosters']
+    rosters[0].update(taxi=['tx'], reserve=['rs'])
+    rosters[1]['players'] = ['p2', 'b2']
+    for pid in ('tx', 'rs', 'b2', 'f1'):
+        source[f'{API}/players/nfl'][pid] = {'fantasy_positions': ['WR']}
+    # A feed that wrongly offers rostered players: capture still refuses them.
+    offered = {'tx': fa_row(50), 'rs': fa_row(60), 'b2': fa_row(70), 'f1': fa_row(1)}
+    snap = run(source, with_free_agents(feed_without(feed, extra={'b2': fa_row(0)}), offered))
+    for detail in snap['weeks'][0]['teams'].values():
+        coverage = detail['projection_coverage']
+        assert {f['player_id'] for f in coverage['free_agent_fills'] + coverage['maxpf_free_agent_fills']} <= {'f1'}
+    assert [f['player_id'] for f in snap['weeks'][0]['teams']['1']['projection_coverage']['free_agent_fills']] == ['f1']
 
 
 def test_a_verified_bye_is_a_known_zero_not_missing_data():
@@ -283,14 +340,19 @@ def test_a_verified_bye_is_a_known_zero_not_missing_data():
 
 # ── Review fixes: unknown slots are never reported as complete ─────────────
 
-def test_an_empty_idp_slot_with_no_replacement_mean_is_unknown_not_zero():
+def idp_world(dl_history=False):
     source, _ = world()
     source[f'{API}/league/123'].update(roster_positions=['DL', 'WR'], scoring_settings={'rec': 1, 'idp_tkl': 1})
     source[f'{API}/players/nfl'] = {pid: {'fantasy_positions': [pos]} for pid, pos in
                                     (('p1', 'WR'), ('p2', 'WR'), ('d1', 'DL'), ('d2', 'DL'))}
     for roster in source[f'{API}/league/123/rosters']:
         roster['players'] = [f"p{roster['roster_id']}", f"d{roster['roster_id']}"]
-    # The one-slot history cannot give a DL replacement mean.
+    if dl_history:
+        # Week 1 starters in both slots: DL starts of 4 and 6, a mean of 5.
+        for row in source[f'{API}/league/123/matchups/1']:
+            row.update(starters=[f"d{row['roster_id']}", f"p{row['roster_id']}"],
+                       starters_points=[4 if row['roster_id'] == 1 else 6, row['points']])
+    # Otherwise the one-slot history cannot give a DL replacement mean.
 
     class Feed:
         def weeks(self, season, weeks, player_ids):
@@ -299,12 +361,57 @@ def test_an_empty_idp_slot_with_no_replacement_mean_is_unknown_not_zero():
             rows['d1'] = {'kickoff_at': kick, 'availability': 1, 'stats': {'idp_tkl': 6}, 'supported_keys': ['idp_tkl']}
             rows['d2'] = {'bye': True, 'bye_evidence': 'schedule', 'availability': 0, 'stats': {}, 'supported_keys': []}
             return {'source': 'synthetic', 'captured_at': '2026-11-01T00:00:00+00:00', 'weeks': {'2': rows}}
-    snap = run(source, Feed())
-    coverage = snap['weeks'][0]['teams']['2']['projection_coverage']
+    return source, Feed()
+
+
+def test_an_empty_idp_slot_with_no_free_agent_or_replacement_mean_scores_zero():
+    snap = run(*idp_world())
+    detail = snap['weeks'][0]['teams']['2']
+    coverage = detail['projection_coverage']
+    # v5 called this slot unknown; v6 scores it zero and the team-week is known.
     assert coverage['idp_replacement_unavailable'] is True and coverage['actual_lineup_gaps'] == 1
-    assert coverage['complete'] is False and coverage['missing_actual_slots'] == ['DL']
-    assert snap['coverage']['estimate_status'] == 'incomplete'
+    assert coverage['complete'] is True and coverage['missing_actual_slots'] == [] and coverage['zero_filled_slots'] == ['DL']
+    assert Decimal(detail['modeled_actual_projection']) == 5
+    assert snap['coverage']['estimate_status'] == 'complete'
     assert snap['weeks'][0]['teams']['1']['projection_coverage']['complete'] is True
+
+
+def test_idp_slot_without_a_free_agent_takes_the_replacement_mean():
+    snap = run(*idp_world(dl_history=True))
+    detail = snap['weeks'][0]['teams']['2']
+    # The existing rule, unchanged: a DL on bye, no free agent, mean 5.
+    assert detail['replacement_means'] == {'DL': '5'}
+    dl = detail['actual']['lineup'][0]['player']
+    assert dl['hypothetical'] and dl['points'] == '5' and detail['projection_coverage']['free_agent_fills'] == []
+    assert Decimal(detail['modeled_actual_projection']) == 10 and detail['projection_coverage']['complete'] is True
+
+
+def test_idp_slot_takes_a_projected_free_agent_first():
+    source, feed = idp_world(dl_history=True)
+    source[f'{API}/players/nfl']['fdl'] = {'fantasy_positions': ['DL']}
+    snap = run(source, with_free_agents(feed, {'fdl': fa_row(7, key='idp_tkl')}))
+    detail = snap['weeks'][0]['teams']['2']
+    assert [(f['slot'], f['player_id']) for f in detail['projection_coverage']['free_agent_fills']] == [('DL', 'fdl')]
+    assert not any(r['player'].get('hypothetical') for r in detail['actual']['lineup'] if r['player'])
+    assert Decimal(detail['modeled_actual_projection']) == 12
+
+
+# ── free_agent_fill: ties and skipped slots ────────────────────────────────
+
+def test_free_agent_ties_break_by_player_id_and_skipped_slots_stay_empty():
+    built = optimize(['WR', 'WR', 'WR'], [], empty_policy='fill_available')
+    agents = [{'player_id': pid, 'positions': ['WR'], 'points': '4'} for pid in ('fc', 'fa', 'fb')]
+    filled = free_agent_fill(['WR', 'WR', 'WR'], built, agents, empty_policy='fill_available', skip={0: None})
+    assert [r['player'] and r['player']['player_id'] for r in filled['lineup']] == [None, 'fa', 'fb']
+    assert filled['gaps'] == [0] and filled['points'] == '8'
+    # Two slot types: the tied receivers both reach the solver; the lower id wins.
+    mixed = optimize(['RB', 'WR'], [], empty_policy='fill_available')
+    pool = [{'player_id': 'zr', 'positions': ['RB'], 'points': '5'}] + [
+        {'player_id': pid, 'positions': ['WR'], 'points': '4'} for pid in ('wb', 'wa')]
+    assert [r['player']['player_id'] for r in free_agent_fill(['RB', 'WR'], mixed, pool, empty_policy='fill_available')['lineup']] == ['zr', 'wa']
+    single = optimize(['WR'], [], empty_policy='fill_available')
+    assert free_agent_fill(['WR'], single, list(reversed(agents)), empty_policy='fill_available')['lineup'][0]['player']['player_id'] == 'fa'
+
 
 
 def test_players_who_can_never_fill_the_slot_do_not_make_it_unknown():

@@ -1,3 +1,24 @@
+## 2026-11-11 — Rules-first deck construction (D-235, ADR-030), branch `feat/deck-rules-first`
+
+- **Replay of all 247 recorded requests (main session, before the review fixes):** served set equal 247 of 247; page deck equal to the gated full solve 247 of 247; 0 fallbacks; 0 downstream guard removals; deck size min 69, median 196, max 510 on both paths; CPU per search median 0.35 s against 4.0 s. First card the same 167 of 247; first 30 share a median of 25. Re-run on the final merged code: result in the PR.
+- **Builder's step 0** reproduced the design's claims before building (247 of 247 on both). **Synthetic leagues, 12 to 32 teams:** whole deck in 0.56 to 2.6 s; page path every time; at 32 teams 18 more cards than the budgeted solve reaches.
+- **Tests:** `test_rules_first_deck.py` (new) and `test_trade_fast_deck.py` (rewritten): page equals gated in order; rules-first equals today's set; no thin deck where the old 150-card page served 16 of 154; rule agreement card by card between `DeckRules`, `filter_deck`, significance and the eval tool; `admit=None` leaves the page search unchanged; fallback fires with one warning; flag off imports neither module; pinned, opponent-scoped and intent requests and unsupported generators keep today's path; a worker run with likes, fatigue, standing offers and telemetry on; a liked trade that fails a rule reaches the user as an engine card; the inventory and stored-page key do not depend on likes; Match strength constant; repeat cap 5. Full suite by the subagent after the last change: **14,513 passed, 42 skipped, 0 failed**.
+- **Sabotages (32, Opus subagents):** 30 red then restored. Two stayed green and are explained: family completion ignoring admission (those members are never held) and significance `user_elo` from the seed (does not vary in that harness).
+- **Independent review (Opus, read-only):** no path to a wrong, thin or empty deck; flag off identical apart from the repeat cap. Its findings fixed: liked trades, Match strength decay, opponent-scoped scope, the overstated served-set claim, missing worker-level tests.
+- **Cannot be replayed offline:** decline suppression and its floor, dispositions, likes-you and revised-offer injection in production, owner revalidation. No recorded request has pins, an opponent scope or an intent; league sizes are 11 to 13 teams.
+- **Not verified:** production timing; anything on a device. Watch after deploy: `rules-first:` lines (path, fallback, cards, ms), `rules-first guard` warnings (expect none), `suppression floor engaged` counts.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — Forecast model v6: free-agent fill (D-234), branch `feat/projection-fa-fill`
+
+- **`-k league_projection`: 566 passed** (main session re-run; 553 before). Full suite by the subagent: **14,506 passed, 42 skipped, 0 failed** (940 s).
+- **New tests (13):** an empty RB slot takes the best projected free-agent RB and the suggestion is available; none projected scores 0 and stays complete; a free agent never displaces a starter; two open slots take the best assignment of two different free agents; no rostered, taxi or reserve player of any team is offered (feed and capture layers); bye and not-pregame free agents are out; Max PF fills the same way; a played starter with no score is not filled and stays incomplete; IDP free agent first, then the replacement mean, then 0; ties break by player id; a saved v5 result is old-model and made due once. Eight existing tests whose cases are now filled were renamed to say what is true; no unrelated assertion changed.
+- **Sabotages (19, Opus subagent):** 17 red then restored. Two stayed green and are explained: locks ignored only at the fill (re-applied by `idp_bye_fill`; red when ignored at both points) and the tie post-pass removed (the optimizer's own id order already gives it; reversing it is red).
+- **Dry run against Sleeper's live feeds (local, nothing written):** all six real forecasts complete on v6. In the IDP league, 12 slots are filled from free agents and 1 scores 0 over the remaining weeks; the other two leagues need none.
+- **Capture time, synthetic 12-team league:** +0.6 s with full rosters, +1.2 s with 672 forced fills.
+- **Not verified:** anything on a device (D-056); the client wording (below) until its checks run.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Fit block before/after rank table, branch `feat/fit-block-rank-table`
 
 - **`test_fit_block_v3.py`: 73 pass.** `positions` is held ranks plus moves in QB/RB/WR/TE order; a noise-level move is in neither list nor `positions`; `v`, `lead`, `ranks` and `tag` are byte-identical to before for pinned cases; a team with no rank rows has `[]`. Fit, narrative, deck-digest, fast-deck and revised-offer subset: **512 passed** (main session). Full suite by the subagent: 14,481 passed, 42 skipped.
@@ -78,7 +99,7 @@
 
 ## 2026-11-10 — Roster-first setup flag flip (`trades.roster_setup` → true)
 
-- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run (no build includes `9c252819` yet).
+- Flag-only change; the operator asked for it directly. The 8-step TestFlight checklist has not run; 1.22.0 (184) is the first build that includes `9c252819`.
 - Local: the flag mirror tests plus the trade-block, deck-digest, blind-grading and rankings-import suites pass (204 passed). CI on the PR covers the rest. `FTF_SKIP_SIM_GATE=1` (D-056).
 
 ## 2026-11-10 — Offer-learnings integration (branch `feat/offer-learnings`, PR #641, every new flag off)
