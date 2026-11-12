@@ -1298,6 +1298,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # proof supports a specific fit reason (trade_narrative.fit_lines), and the
     # mobile card leads with them. OFF (default) ⇒ no key, byte-identical.
     "trade.fit_first_copy",
+    # 2026-11-11 operator feedback on TestFlight 186 (the position-rank
+    # "value change" content is disorienting and adds little). ON ⇒ the fit
+    # block carries league position ranks: each team's `ranks`, `positions`
+    # and the rank-fact leads (holds/shifts/flat/none), byte-identical to the
+    # block before this flag. OFF (default) ⇒ only outlook tags and reason
+    # leads (plan/need); a team with no reason is left out, and the job skips
+    # the league-wide position-value walk. Read once per job.
+    "trade.fit_position_ranks",
     # docs/plans/offer-learnings/ WS1: owner-v2-bilateral-4 as an additive arm in the round build
     "grading.revision4_arm",
     # docs/plans/offer-learnings/scope-partner-activity.md (WS7, R8). ON and

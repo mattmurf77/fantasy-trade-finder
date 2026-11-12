@@ -457,14 +457,18 @@ class FitLeagueContext:
     `server._position_medians(teams)`; `rosters` maps each team id to its
     non-pick player ids (to check a card's assets sit where the card says);
     `reads` maps each team id to the engine's roster read of its window.
+    `position_ranks` is the job's `trade.fit_position_ranks` (read once per
+    job): False ⇒ the block states no league rank (no `ranks`, `positions`
+    or rank-fact lead), and the job passes no teams (it skips the walk).
     Immutable once built: copies return the same object.
     """
     __slots__ = ("viewer_id", "values", "medians", "player_value", "owner",
-                 "valued", "reads", "ranked")
+                 "valued", "reads", "ranked", "position_ranks")
 
     def __init__(self, *, viewer_id: str, teams: list, medians: dict,
-                 rosters: dict, reads: dict):
+                 rosters: dict, reads: dict, position_ranks: bool = True):
         self.viewer_id = viewer_id
+        self.position_ranks = position_ranks is True
         self.values = {t["user_id"]: {p: float(t["positions"][p]["value"])
                                       for p in _FIT_DEPTH_POSITIONS} for t in teams}
         # Every team's value per position, ascending: a card's rank is then a
@@ -725,7 +729,12 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
     one team has a supported lead (plan, then need) or a rank move; a team
     without a supported lead gets a rank fact (`_fit_rank_fallback`), never
     the card's player list, and is left out when no rank can be stated for
-    it. Pure; raises nothing (any malformed input yields None).
+    it. With `context.position_ranks` False (flag trade.fit_position_ranks
+    off) no rank is stated at all: every team carries `ranks: []` and
+    `positions: []`, a team without a supported lead is left out (its tag
+    with it: installed apps drop a team with no lead), and the block is
+    returned only when some team has a supported lead. Pure; raises nothing
+    (any malformed input yields None).
     """
     try:
         if (not isinstance(proof, dict) or proof.get("generator") != _FIT_ARM
@@ -744,7 +753,8 @@ def fit_block(proof: dict, card, players: dict, context) -> Optional[dict]:
         if any(a is None for a in assets.values()):
             return None
         other = card.target_user_id
-        ranks = _fit_rank_rows(context, other, give, receive, assets)
+        ranks = (_fit_rank_rows(context, other, give, receive, assets)
+                 if context.position_ranks else None)
         teams, shown = [], False
         for side, incoming, outgoing in (("them", give, receive), ("you", receive, give)):
             inc = [assets[p] for p in incoming]

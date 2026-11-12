@@ -326,6 +326,10 @@ function TradeCardComp({
   const fitYou = fitBlockShown?.teams.find((t) => t.side === 'you');
   // The Before / After header shows once, when either team has a table.
   const fitTable = !!(fitThem?.positions?.length || fitYou?.positions?.length);
+  // The block's label names league rank only when the block carries a rank
+  // (a table or rank moves). Without one (server flag trade.fit_position_ranks
+  // off, 2026-11-11) the block is tags and reasons, so it reads "Team fit".
+  const fitRanked = fitTable || !!(fitThem?.ranks?.length || fitYou?.ranks?.length);
   // WS8 revised-offer card — the server's one sentence saying the user's
   // earlier offer was declined and what changed. Double-gated on the flag
   // like the fit block; an edited card hides it (it describes the package
@@ -718,7 +722,7 @@ function TradeCardComp({
           (fitLeadShown). Without it the team renders exactly as before. */}
       {fitThem || fitYou ? (
         <View style={styles.fitBlock} testID="trade-card.fit-block">
-          <ChalklineText style={type.label} numberOfLines={1}>League rank · position value</ChalklineText>
+          <ChalklineText style={type.label} numberOfLines={1}>{fitRanked ? 'League rank · position value' : 'Team fit'}</ChalklineText>
           {fitTable ? (
             <View
               style={styles.fitTeam}

@@ -921,12 +921,21 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // flag on, present only when a team has a supported lead
                                                // or a rank move. Replaces WS4's `fit_lines` (fit-1),
                                                // which is no longer emitted or read.
+                                               // RANK CONTENT is behind trade.fit_position_ranks
+                                               // (default OFF, 2026-11-11; read once per job). OFF:
+                                               // every team carries `ranks: []` and `positions: []`,
+                                               // only plan_* / need.* leads are emitted (no holds.*,
+                                               // shifts.*, flat.*, none.*), a team without one is
+                                               // left out (its tag with it), and the block is present
+                                               // only when some team has a supported lead. ON: the
+                                               // shape below, byte-identical to before the flag.
                        "v": "fit-2",           // trade_narrative.FIT_TMPL_VERSION: the payload shape.
                                                // Clients accept only versions they know and drop
                                                // the block otherwise, so a wording change keeps it
                                                // (TestFlight 184 checks for exactly "fit-2")
                        "teams": [              // "them" first; a team with no supported lead and no
-                                               // rank that can be stated is left out
+                                               // rank that can be stated is left out (flag
+                                               // trade.fit_position_ranks off: no supported lead ⇒ out)
                          { "side": "them"|"you",
                            "tag":  { "code": "rebuilder", "source": "declared"|"roster",
                                      "text": "Looks rebuilding" },   // OPTIONAL — absent when there is
@@ -934,7 +943,8 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                            "lead": { "code": "plan_rebuild.them",
                                      "text": "Rebuild-leaning: adds Eli Brandt, 23" },
                                                // codes: plan_rebuild.*, plan_win_now.*, need.*,
-                                               // and, with no supported gain, a league-rank
+                                               // and (trade.fit_position_ranks on only), with no
+                                               // supported gain, a league-rank
                                                // fact: holds.* ("RB stays 2nd"), shifts.* ("Up
                                                // at RB, down at WR"), flat.*, none.* (2026-11-11;
                                                // never the card's own player list)
@@ -944,7 +954,8 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // (1 + teams strictly above), only positions
                                                // whose value moves ≥ 5% of the league median
                                                // and whose rank changes; [] for picks, fewer
-                                               // than 3 valued teams, or none. Clients render
+                                               // than 3 valued teams, none, or the flag
+                                               // trade.fit_position_ranks off. Clients render
                                                // `text` and the numbers verbatim, never `code`
                                                // (docs/cross-client-invariants.md § Fit block)
                            "positions": [ { "pos": "RB", "before": 5, "after": 5 },
@@ -958,8 +969,9 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // `ranks` and leaves the lead at flat.* (the bar
                                                // governs only `ranks` and the lead). Never makes
                                                // the block shown on its own. Always present on a
-                                               // team; [] when no rank can be stated or only
-                                               // picks move. Older apps ignore it.
+                                               // team; [] when no rank can be stated, only
+                                               // picks move, or trade.fit_position_ranks is off.
+                                               // Older apps ignore it.
   "match_context":   { ... },                  // optional roster-fit context
   "lane":            "window" | "value",       // OPTIONAL — flag trade.lanes; absent when the
                                                // user has no declared/seeded window

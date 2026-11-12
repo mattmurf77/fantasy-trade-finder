@@ -4581,7 +4581,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 22
+DECK_PIPELINE_VERSION = 23
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4732,6 +4732,7 @@ DECK_PIPELINE_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
+    23: "6ac3c24db6f88f81",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -21243,6 +21244,10 @@ def _fit_league_context(owner_context, service):
     each window, exactly as trade_gen_owner._team resolves an undeclared team
     (a stored inferred outlook, else infer_team_outlook over the roster under
     the job's config). A DECLARED outlook is never read here.
+
+    Flag trade.fit_position_ranks (read once here, for the whole job): off ⇒
+    the block states no league rank, so the position-value walk is skipped
+    and the context carries the roster reads alone.
     """
     if owner_context is None or not is_enabled("trade.fit_first_copy"):
         return None
@@ -21257,14 +21262,17 @@ def _fit_league_context(owner_context, service):
         for member in league.members:
             if member.user_id != viewer:
                 rosters[member.user_id] = list(member.roster)
-        seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
-                                         players.values())
-        player_ids = {uid: [pid for pid in roster
-                            if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
-                      for uid, roster in rosters.items()}
-        teams = compute_power_rankings(
-            [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
-            seed, meta)
+        position_ranks = is_enabled("trade.fit_position_ranks")
+        teams, player_ids = [], {}
+        if position_ranks:
+            seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
+                                             players.values())
+            player_ids = {uid: [pid for pid in roster
+                                if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
+                          for uid, roster in rosters.items()}
+            teams = compute_power_rankings(
+                [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
+                seed, meta)
         prefs = owner_context.get("manager_preferences") or {}
         inferred = owner_context.get("inferred_outlooks") or {}
         reads = {}
@@ -21278,8 +21286,9 @@ def _fit_league_context(owner_context, service):
                                                  num_teams=len(rosters))[0]
                 reads[uid] = read
         return FitLeagueContext(viewer_id=viewer, teams=teams,
-                                medians=_position_medians(teams),
-                                rosters=player_ids, reads=reads)
+                                medians=_position_medians(teams) if position_ranks else {},
+                                rosters=player_ids, reads=reads,
+                                position_ranks=position_ranks)
     except Exception:
         log.exception("fit block: league context unavailable (cards carry no block)")
         return None

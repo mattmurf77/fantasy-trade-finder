@@ -58,6 +58,10 @@ def isolated(monkeypatch):
 
 def flag(monkeypatch, on):
     monkeypatch.setitem(feature_flags._flags_cache, "trade.fit_first_copy", on)
+    # This file pins the rank path (flag trade.fit_position_ranks on, the
+    # block before 2026-11-11); the shipped rank-free block is
+    # test_fit_block_no_ranks.py.
+    monkeypatch.setitem(feature_flags._flags_cache, "trade.fit_position_ranks", on)
 
 
 # ── a small league with a hand-checkable shape ─────────────────────────────

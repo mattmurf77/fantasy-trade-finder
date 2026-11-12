@@ -264,6 +264,7 @@
   "trades.roster_tier_rank": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
+  "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
   "trade.sleeper_offer_import": true
 }
