@@ -1,0 +1,1141 @@
+{
+  "question": "are weekly projection errors independent within a team, and what does persistence do to playoff odds",
+  "data": {
+    "season": 2026,
+    "weeks": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "leagues": 9,
+    "teams": 110,
+    "team_weeks": 990,
+    "median_leagues": 5,
+    "head_to_head_games": 495
+  },
+  "step1_reproduction": {
+    "all": {
+      "team_weeks": 990,
+      "mean_error": -5.066762321939388,
+      "rmse": 25.02409450783634
+    },
+    "weeks_1_6": {
+      "team_weeks": 660,
+      "mean_error": -3.045960098060275,
+      "rmse": 24.53724401066663
+    },
+    "weeks_7_9": {
+      "team_weeks": 330,
+      "mean_error": -9.108366769697612,
+      "rmse": 25.970429925848055
+    }
+  },
+  "step2_persistence": {
+    "units": "points squared for variances, points for tau; relative = league-week mean removed",
+    "point": {
+      "team": -15.285243401517867,
+      "league_week": 0.5171719919629306,
+      "residual": 608.220473100526,
+      "tau": 0.0,
+      "team_share_of_relative": -0.02577894285228611,
+      "team_share_of_total": -0.025756477449521496,
+      "lag1": 0.06103636190098451,
+      "lag2": -0.036315869469492314,
+      "lag3": -0.078338140785973,
+      "sum_ratio_3": 1.0237286030389507,
+      "sum_ratio_5": 0.8895364184318436,
+      "sum_ratio_7": 0.7724752934516289,
+      "sum_ratio_9": 0.7937684571817114
+    },
+    "team_bootstrap_95": {
+      "team": [
+        -26.7175884823862,
+        -0.37581567552726036
+      ],
+      "league_week": [
+        25.04706839660101,
+        83.55456922245612
+      ],
+      "residual": [
+        507.6012854415245,
+        613.6887085070525
+      ],
+      "tau": [
+        0.0,
+        0.0
+      ],
+      "team_share_of_relative": [
+        -0.0497250033154396,
+        -0.0006129837499580543
+      ],
+      "team_share_of_total": [
+        -0.045943327153791014,
+        -0.0005671286045266893
+      ],
+      "lag1": [
+        -0.015960603545872334,
+        0.12657452993825102
+      ],
+      "lag2": [
+        -0.11957950860016237,
+        0.03683261400247856
+      ],
+      "lag3": [
+        -0.155601233889055,
+        6.378507592845958e-05
+      ],
+      "sum_ratio_3": [
+        0.9125812777514328,
+        1.121545643366148
+      ],
+      "sum_ratio_5": [
+        0.7591033430894248,
+        1.0109901016806435
+      ],
+      "sum_ratio_7": [
+        0.6158570556827389,
+        0.9220013048045231
+      ],
+      "sum_ratio_9": [
+        0.602199973476483,
+        0.9950961300003354
+      ]
+    },
+    "league_bootstrap_95": {
+      "team": [
+        -28.21231940783733,
+        -2.962670592159721
+      ],
+      "league_week": [
+        -5.612205148919303,
+        7.347647427540183
+      ],
+      "residual": [
+        540.6410221190173,
+        678.9160859077392
+      ],
+      "tau": [
+        0.0,
+        0.0
+      ],
+      "team_share_of_relative": [
+        -0.04900651092442323,
+        -0.00492494093949155
+      ],
+      "team_share_of_total": [
+        -0.0488766085970083,
+        -0.00492494093949155
+      ]
+    },
+    "bootstrap_reps": 1000,
+    "mean_error_drift": {
+      "point": {
+        "by_week": [
+          -0.9212764599864319,
+          -8.040765551875532,
+          0.26176535998574607,
+          -0.4178473708452972,
+          1.0184235350644315,
+          -10.176060100704566,
+          -2.87018555818715,
+          -6.8963800963491755,
+          -17.558534654556514
+        ],
+        "slope_per_week": -1.3189665162984385
+      },
+      "team_bootstrap_95": {
+        "slope_per_week": [
+          -1.9681617284059254,
+          -0.627550789196084
+        ],
+        "week_1": [
+          -5.745556458210972,
+          3.889745363057474
+        ],
+        "week_2": [
+          -13.021798289086252,
+          -2.950260108433367
+        ],
+        "week_3": [
+          -3.958343728692315,
+          4.6629708189090815
+        ],
+        "week_4": [
+          -4.511789194695815,
+          3.4914344382835236
+        ],
+        "week_5": [
+          -3.1528128336050285,
+          5.402730799325785
+        ],
+        "week_6": [
+          -14.359638285690844,
+          -5.953874651983109
+        ],
+        "week_7": [
+          -7.304276475354325,
+          1.616563537743009
+        ],
+        "week_8": [
+          -11.340789187307466,
+          -2.4256491907335684
+        ],
+        "week_9": [
+          -21.405605556391478,
+          -13.382349205863722
+        ]
+      }
+    },
+    "global_week_shock_sd": 5.69771291227031,
+    "same_league_week_cross_team_correlation": {
+      "opponents": {
+        "pairs": 495,
+        "correlation": -0.1271238813092078
+      },
+      "other_pairs": {
+        "pairs": 5076,
+        "correlation": -0.038722081460985554
+      }
+    },
+    "note": "league_week from the team bootstrap is biased upward (duplicated teams inflate league-week means); use the league bootstrap"
+  },
+  "projection_spread_slope": {
+    "point": {
+      "weekly": 1.0299894410743335,
+      "nine_week_total": 1.11968997774762
+    },
+    "team_bootstrap_95": {
+      "weekly": [
+        0.9659413563052015,
+        1.0950913751306142
+      ],
+      "nine_week_total": [
+        1.0503028200840896,
+        1.193577622344997
+      ]
+    },
+    "sd_across_teams_of_9_week_mean_projection": 18.523072376527775,
+    "sd_across_teams_of_last_3_week_mean_projection": 21.38496916710415
+  },
+  "projection_drift": {
+    "point": {
+      "step_variance": 14.7944241799942,
+      "step_variance_weeks_1_4": 43.43331463975535,
+      "gamma_lag_1": 57.57669606336883,
+      "gamma_lag_2": 66.30211805382979,
+      "gamma_lag_3": 75.49629946546868,
+      "gamma_lag_4": 74.79147491476814,
+      "gamma_lag_5": 90.31807808288515,
+      "gamma_weeks_1_4_lag_1": 32.89491923749108,
+      "gamma_weeks_1_4_lag_2": 61.42722465363847,
+      "gamma_weeks_1_4_lag_3": 76.32823387724643
+    },
+    "team_bootstrap_95": {
+      "step_variance": [
+        7.744286620750074,
+        19.974392349288408
+      ],
+      "step_variance_weeks_1_4": [
+        25.053907580004783,
+        55.015829155130916
+      ],
+      "gamma_lag_1": [
+        45.716750528131506,
+        60.25883901521576
+      ],
+      "gamma_lag_2": [
+        52.958067658899985,
+        68.51541932324443
+      ],
+      "gamma_lag_3": [
+        59.824402524100336,
+        78.3419946957299
+      ],
+      "gamma_lag_4": [
+        58.29661022699918,
+        79.37165487857126
+      ],
+      "gamma_lag_5": [
+        68.86573839512128,
+        97.0460181152305
+      ],
+      "gamma_weeks_1_4_lag_1": [
+        24.411110039133597,
+        35.92241015276597
+      ],
+      "gamma_weeks_1_4_lag_2": [
+        45.18539963320194,
+        68.03298066744861
+      ],
+      "gamma_weeks_1_4_lag_3": [
+        52.148132321446475,
+        88.49141688103384
+      ]
+    },
+    "drift_sd_per_week": 3.846352061368564,
+    "drift_sd_per_week_95": [
+      2.7828558390168316,
+      4.469272015584687
+    ],
+    "drift_sd_per_week_weeks_1_4": 6.590395636056712
+  },
+  "step3_independence": {
+    "points_sum_ratio": {
+      "window_3": {
+        "ratio": 1.0237286030389507,
+        "observed_sd": 40.890367901241895,
+        "independent_sd": 40.41369869001435,
+        "weekly_sd": 23.33285981762821,
+        "windows": 770,
+        "team_bootstrap_95": [
+          0.9125812777514328,
+          1.121545643366148
+        ]
+      },
+      "window_5": {
+        "ratio": 0.8895364184318436,
+        "observed_sd": 49.20790103753679,
+        "independent_sd": 52.17386066169003,
+        "weekly_sd": 23.33285981762821,
+        "windows": 550,
+        "team_bootstrap_95": [
+          0.7591033430894248,
+          1.0109901016806435
+        ]
+      },
+      "window_7": {
+        "ratio": 0.7724752934516289,
+        "observed_sd": 54.25743900404994,
+        "independent_sd": 61.73294445337614,
+        "weekly_sd": 23.33285981762821,
+        "windows": 330,
+        "team_bootstrap_95": [
+          0.6158570556827389,
+          0.9220013048045231
+        ]
+      },
+      "window_9": {
+        "ratio": 0.7937684571817114,
+        "observed_sd": 62.364313351653905,
+        "independent_sd": 69.99857945288463,
+        "weekly_sd": 23.33285981762821,
+        "windows": 110,
+        "team_bootstrap_95": [
+          0.602199973476483,
+          0.9950961300003354
+        ]
+      }
+    },
+    "wins_overdispersion_sd25": {
+      "win_ratio_3": {
+        "ratio": 1.0670131824733973,
+        "team_bootstrap_95": [
+          0.94825942968566,
+          1.1912339778846448
+        ]
+      },
+      "win_ratio_5": {
+        "ratio": 1.1280489198024866,
+        "team_bootstrap_95": [
+          0.9289480048595186,
+          1.3441375012666605
+        ]
+      },
+      "win_ratio_7": {
+        "ratio": 1.1300015971283202,
+        "team_bootstrap_95": [
+          0.8688119804656292,
+          1.4053338080265694
+        ]
+      },
+      "win_ratio_9": {
+        "ratio": 1.1634028942797616,
+        "team_bootstrap_95": [
+          0.8933108868367858,
+          1.4382726961452068
+        ]
+      }
+    },
+    "single_game_reliability_sd25": {
+      "games": 495,
+      "mean_model_favourite_probability": 0.7178447716218131,
+      "favourite_win_rate": 0.7111111111111111,
+      "favourite_win_rate_95": [
+        0.669678027984692,
+        0.7492927617902888
+      ],
+      "bins": [
+        {
+          "model_says": [
+            0.5,
+            0.6
+          ],
+          "games": 116,
+          "mean_model_probability": 0.5503813626251549,
+          "favourite_won": 0.5,
+          "wilson_95": [
+            0.4104811374777458,
+            0.5895188625222542
+          ]
+        },
+        {
+          "model_says": [
+            0.6,
+            0.7
+          ],
+          "games": 127,
+          "mean_model_probability": 0.6494258665142463,
+          "favourite_won": 0.6299212598425197,
+          "wilson_95": [
+            0.5432884364259772,
+            0.7089251989320539
+          ]
+        },
+        {
+          "model_says": [
+            0.7,
+            0.8
+          ],
+          "games": 112,
+          "mean_model_probability": 0.7522993855670738,
+          "favourite_won": 0.8303571428571429,
+          "wilson_95": [
+            0.7501831320940571,
+            0.8886209775453822
+          ]
+        },
+        {
+          "model_says": [
+            0.8,
+            0.9
+          ],
+          "games": 79,
+          "mean_model_probability": 0.8476488902762059,
+          "favourite_won": 0.8607594936708861,
+          "wilson_95": [
+            0.767626683259538,
+            0.9204345939045404
+          ]
+        },
+        {
+          "model_says": [
+            0.9,
+            1.0
+          ],
+          "games": 61,
+          "mean_model_probability": 0.9473777922235657,
+          "favourite_won": 0.8688524590163934,
+          "wilson_95": [
+            0.7619811970731857,
+            0.9320192275992546
+          ]
+        }
+      ]
+    },
+    "best_fit_single_game_sd": {
+      "point": 26.0,
+      "game_bootstrap_95": [
+        21.5,
+        31.0
+      ]
+    },
+    "wins_overdispersion_best_fit_sd": {
+      "win_ratio_3": {
+        "ratio": 1.050106036390273,
+        "team_bootstrap_95": [
+          0.9381359331954177,
+          1.169493039568919
+        ]
+      },
+      "win_ratio_5": {
+        "ratio": 1.1099652219046396,
+        "team_bootstrap_95": [
+          0.9182446133058448,
+          1.3152962482045212
+        ]
+      },
+      "win_ratio_7": {
+        "ratio": 1.112381143304953,
+        "team_bootstrap_95": [
+          0.852410179856773,
+          1.386211954006656
+        ]
+      },
+      "win_ratio_9": {
+        "ratio": 1.1482211374005629,
+        "team_bootstrap_95": [
+          0.8696976483119889,
+          1.4233136142011444
+        ]
+      }
+    },
+    "placebo_within_team_week_shuffle": {
+      "team_share_of_relative": {
+        "mean": -0.025885221958924176,
+        "95": [
+          -0.02816507271878673,
+          -0.023544600847487038
+        ]
+      },
+      "tau": {
+        "mean": 0.0,
+        "95": [
+          0.0,
+          0.0
+        ]
+      },
+      "lag1": {
+        "mean": -0.02586459345303386,
+        "95": [
+          -0.08923715829238145,
+          0.03332666307648897
+        ]
+      },
+      "lag2": {
+        "mean": -0.023255298105361553,
+        "95": [
+          -0.08788635594236417,
+          0.03958198127493788
+        ]
+      },
+      "sum_ratio_5": {
+        "mean": 0.9021304145806571,
+        "95": [
+          0.7920145662356511,
+          1.0156285688064017
+        ]
+      },
+      "sum_ratio_9": {
+        "mean": 0.7929182243286067,
+        "95": [
+          0.7746794182497064,
+          0.8116431932201039
+        ]
+      }
+    },
+    "placebo_across_teams_within_league_week": {
+      "team_share_of_relative": {
+        "mean": -0.00043684609910658477,
+        "95": [
+          -0.031651016748934044,
+          0.03297082880861094
+        ]
+      },
+      "tau": {
+        "mean": 1.312136947496598,
+        "95": [
+          0.0,
+          4.421489110356419
+        ]
+      },
+      "lag1": {
+        "mean": -0.00011275865160774357,
+        "95": [
+          -0.0697078896211569,
+          0.07328761172573128
+        ]
+      },
+      "lag2": {
+        "mean": -0.0008013064348696557,
+        "95": [
+          -0.07550637787212021,
+          0.07102515950418734
+        ]
+      },
+      "sum_ratio_5": {
+        "mean": 0.952660212013153,
+        "95": [
+          0.7975759721201359,
+          1.1165493860558777
+        ]
+      },
+      "sum_ratio_9": {
+        "mean": 0.9965052312071474,
+        "95": [
+          0.7467918660085278,
+          1.2637666304688875
+        ]
+      },
+      "win_ratio_5": {
+        "mean": 1.0353037132916074,
+        "95": [
+          0.8726349574287282,
+          1.2341351605097886
+        ]
+      },
+      "win_ratio_9": {
+        "mean": 0.9970971155302373,
+        "95": [
+          0.7267913693585559,
+          1.2737909056463876
+        ]
+      }
+    },
+    "tau_upper_bound_by_inversion": {
+      "share_of_planted_copies_as_low_as_observed": {
+        "0.0": 0.04,
+        "1.0": 0.04,
+        "2.0": 0.025,
+        "3.0": 0.01,
+        "4.0": 0.005,
+        "5.0": 0.0,
+        "6.0": 0.0,
+        "8.0": 0.0
+      },
+      "smallest_tau_rejected_at_1pct": 3.0,
+      "reading": "a fraction under .05 means a persistent team SD that large is inconsistent with the data; even 0 sits near .05 because the observed errors lean mean-reverting"
+    },
+    "permutation_p_values": {
+      "team_share_at_or_below_observed": 0.05472636815920398,
+      "team_share_at_or_above_observed": 0.9502487562189055,
+      "sum_ratio_9_at_or_below_observed": 0.05472636815920398,
+      "sum_ratio_5_at_or_below_observed": 0.23880597014925373,
+      "win_ratio_9_at_or_above_observed": 0.13432835820895522,
+      "win_ratio_5_at_or_above_observed": 0.16417910447761194
+    },
+    "shuffles": 200
+  },
+  "step4_season_simulation": {
+    "schedule": "NOT CACHED: a fresh random pairing each remaining week of each simulated season (illustration, not the leagues' odds)",
+    "future_means": "each team's average projected best-lineup total over weeks 7-9 (future-week projections not cached)",
+    "state": "records, PF and PA after week 9 from the cached matchups; median game included where the league has one",
+    "tiebreak": "record, then PF, then PA, then random (the app's seeding)",
+    "remaining_weeks": [
+      5
+    ],
+    "iterations_per_league_per_scenario": 40000,
+    "scenarios": {
+      "a_independent_25": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "total_weekly_sd": 25.0
+      },
+      "b_tau_point": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "total_weekly_sd": 25.0
+      },
+      "b_tau_low": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "total_weekly_sd": 25.0
+      },
+      "b_tau_high": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "total_weekly_sd": 25.0
+      },
+      "b_v4_persistent_5": {
+        "tau": 5.0,
+        "weekly_sd": 24.49489742783178,
+        "total_weekly_sd": 25.0
+      },
+      "b_tau_3_largest_plausible": {
+        "tau": 3.0,
+        "weekly_sd": 24.819347291981714,
+        "total_weekly_sd": 25.0
+      },
+      "b_hypothetical_tau_10": {
+        "tau": 10.0,
+        "weekly_sd": 22.9128784747792,
+        "total_weekly_sd": 25.0
+      },
+      "c_data_matched": {
+        "tau": 0.0,
+        "weekly_sd": 24.662126289120447,
+        "total_weekly_sd": 24.662126289120447
+      },
+      "d_drift_point": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "drift_sd_per_week": 3.846352061368564
+      },
+      "d_drift_low": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "drift_sd_per_week": 2.7828558390168316
+      },
+      "d_drift_high": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "drift_sd_per_week": 4.469272015584687
+      },
+      "d_drift_weeks_1_4": {
+        "tau": 0.0,
+        "weekly_sd": 25.0,
+        "drift_sd_per_week": 6.590395636056712
+      }
+    },
+    "comparisons_vs_a": [
+      {
+        "scenario": "b_tau_point",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 36
+        },
+        "mean_abs_change_pts": 0.0,
+        "largest_abs_change_pts": 0.0,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.930875,
+        "those_teams_change_range_pts": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "scenario": "b_tau_low",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 36
+        },
+        "mean_abs_change_pts": 0.0,
+        "largest_abs_change_pts": 0.0,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.930875,
+        "those_teams_change_range_pts": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "scenario": "b_tau_high",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 36
+        },
+        "mean_abs_change_pts": 0.0,
+        "largest_abs_change_pts": 0.0,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.930875,
+        "those_teams_change_range_pts": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "scenario": "b_v4_persistent_5",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 35
+        },
+        "mean_abs_change_pts": 0.34118181818181814,
+        "largest_abs_change_pts": 1.672499999999999,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9231911764705882,
+        "those_teams_change_range_pts": [
+          -1.672499999999999,
+          -0.2475000000000005
+        ]
+      },
+      {
+        "scenario": "b_tau_3_largest_plausible",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 36
+        },
+        "mean_abs_change_pts": 0.11863636363636362,
+        "largest_abs_change_pts": 0.6599999999999995,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.928114705882353,
+        "those_teams_change_range_pts": [
+          -0.5674999999999986,
+          -0.11250000000000426
+        ]
+      },
+      {
+        "scenario": "b_hypothetical_tau_10",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 35
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 33
+        },
+        "mean_abs_change_pts": 1.326272727272727,
+        "largest_abs_change_pts": 5.815000000000003,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9027382352941177,
+        "those_teams_change_range_pts": [
+          -5.815000000000003,
+          -1.6625
+        ]
+      },
+      {
+        "scenario": "c_data_matched",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 36
+        },
+        "mean_abs_change_pts": 0.05109090909090917,
+        "largest_abs_change_pts": 0.38249999999999673,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9316147058823528,
+        "those_teams_change_range_pts": [
+          -0.004999999999999449,
+          0.16500000000000403
+        ]
+      },
+      {
+        "scenario": "d_drift_point",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 36
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 35
+        },
+        "mean_abs_change_pts": 0.49181818181818204,
+        "largest_abs_change_pts": 2.404999999999999,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9207911764705883,
+        "those_teams_change_range_pts": [
+          -2.0075000000000065,
+          -0.5550000000000055
+        ]
+      },
+      {
+        "scenario": "d_drift_low",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 37
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 35
+        },
+        "mean_abs_change_pts": 0.2700000000000003,
+        "largest_abs_change_pts": 1.31,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9254823529411764,
+        "those_teams_change_range_pts": [
+          -0.9624999999999995,
+          -0.2500000000000058
+        ]
+      },
+      {
+        "scenario": "d_drift_high",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 36
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 33
+        },
+        "mean_abs_change_pts": 0.6430000000000005,
+        "largest_abs_change_pts": 3.159999999999999,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9176661764705882,
+        "those_teams_change_range_pts": [
+          -2.6325000000000043,
+          -0.7199999999999984
+        ]
+      },
+      {
+        "scenario": "d_drift_weeks_1_4",
+        "teams": 110,
+        "at_or_above_95": {
+          "a": 37,
+          "b": 36
+        },
+        "at_or_below_5": {
+          "a": 36,
+          "b": 33
+        },
+        "mean_abs_change_pts": 1.280454545454546,
+        "largest_abs_change_pts": 6.0775,
+        "teams_85_to_99_under_a": 17,
+        "those_teams_mean_a": 0.930875,
+        "those_teams_mean_b": 0.9037499999999999,
+        "those_teams_change_range_pts": [
+          -4.9900000000000055,
+          -1.627500000000004
+        ]
+      }
+    ],
+    "monte_carlo_noise_floor": {
+      "scenario": "a_vs_a_other_seed",
+      "teams": 110,
+      "at_or_above_95": {
+        "a": 37,
+        "b": 37
+      },
+      "at_or_below_5": {
+        "a": 36,
+        "b": 36
+      },
+      "mean_abs_change_pts": 0.08481818181818206,
+      "largest_abs_change_pts": 0.4824999999999968,
+      "teams_85_to_99_under_a": 17,
+      "those_teams_mean_a": 0.930875,
+      "those_teams_mean_b": 0.930835294117647,
+      "those_teams_change_range_pts": [
+        -0.40249999999999453,
+        0.40999999999999925
+      ]
+    },
+    "engine_validation_vs_production_simulator": [
+      {
+        "teams": 12,
+        "median_league": true,
+        "iterations_each": 20000,
+        "max_abs_difference": 0.0037500000000000033,
+        "max_z": 1.7179721603527076
+      },
+      {
+        "teams": 12,
+        "median_league": false,
+        "iterations_each": 20000,
+        "max_abs_difference": 0.00924999999999998,
+        "max_z": 1.9969098907533542
+      }
+    ],
+    "missing_for_exact_run": {
+      "count": 50,
+      "templates": [
+        "https://api.sleeper.app/projections/nfl/2026/10?season_type=regular",
+        "https://api.sleeper.app/projections/nfl/2026/11?season_type=regular",
+        "https://api.sleeper.app/projections/nfl/2026/12?season_type=regular",
+        "https://api.sleeper.app/projections/nfl/2026/13?season_type=regular",
+        "https://api.sleeper.app/projections/nfl/2026/14?season_type=regular",
+        "https://api.sleeper.app/v1/league/{league_id}/matchups/10",
+        "https://api.sleeper.app/v1/league/{league_id}/matchups/11",
+        "https://api.sleeper.app/v1/league/{league_id}/matchups/12",
+        "https://api.sleeper.app/v1/league/{league_id}/matchups/13",
+        "https://api.sleeper.app/v1/league/{league_id}/matchups/14"
+      ]
+    }
+  },
+  "step5_one_game_over_500": {
+    "head_to_head_5_4": {
+      "a_independent_25": {
+        "teams": 9,
+        "min": 0.181925,
+        "median": 0.580025,
+        "max": 0.971525,
+        "at_or_above_95": 1
+      },
+      "b_tau_point": {
+        "teams": 9,
+        "min": 0.181925,
+        "median": 0.580025,
+        "max": 0.971525,
+        "at_or_above_95": 1
+      },
+      "b_tau_low": {
+        "teams": 9,
+        "min": 0.181925,
+        "median": 0.580025,
+        "max": 0.971525,
+        "at_or_above_95": 1
+      },
+      "b_tau_high": {
+        "teams": 9,
+        "min": 0.181925,
+        "median": 0.580025,
+        "max": 0.971525,
+        "at_or_above_95": 1
+      },
+      "b_v4_persistent_5": {
+        "teams": 9,
+        "min": 0.183575,
+        "median": 0.57435,
+        "max": 0.967325,
+        "at_or_above_95": 1
+      },
+      "b_tau_3_largest_plausible": {
+        "teams": 9,
+        "min": 0.18195,
+        "median": 0.57795,
+        "max": 0.97025,
+        "at_or_above_95": 1
+      },
+      "b_hypothetical_tau_10": {
+        "teams": 9,
+        "min": 0.194875,
+        "median": 0.552975,
+        "max": 0.9549,
+        "at_or_above_95": 1
+      },
+      "c_data_matched": {
+        "teams": 9,
+        "min": 0.17885,
+        "median": 0.5797,
+        "max": 0.972225,
+        "at_or_above_95": 1
+      },
+      "d_drift_point": {
+        "teams": 9,
+        "min": 0.191925,
+        "median": 0.572625,
+        "max": 0.965875,
+        "at_or_above_95": 1
+      },
+      "d_drift_low": {
+        "teams": 9,
+        "min": 0.186875,
+        "median": 0.5749,
+        "max": 0.968725,
+        "at_or_above_95": 1
+      },
+      "d_drift_high": {
+        "teams": 9,
+        "min": 0.196175,
+        "median": 0.57135,
+        "max": 0.9636,
+        "at_or_above_95": 1
+      },
+      "d_drift_weeks_1_4": {
+        "teams": 9,
+        "min": 0.212525,
+        "median": 0.565825,
+        "max": 0.9537,
+        "at_or_above_95": 1
+      }
+    },
+    "median_10_8": {
+      "a_independent_25": {
+        "teams": 3,
+        "min": 0.153475,
+        "median": 0.4164,
+        "max": 0.959675,
+        "at_or_above_95": 1
+      },
+      "b_tau_point": {
+        "teams": 3,
+        "min": 0.153475,
+        "median": 0.4164,
+        "max": 0.959675,
+        "at_or_above_95": 1
+      },
+      "b_tau_low": {
+        "teams": 3,
+        "min": 0.153475,
+        "median": 0.4164,
+        "max": 0.959675,
+        "at_or_above_95": 1
+      },
+      "b_tau_high": {
+        "teams": 3,
+        "min": 0.153475,
+        "median": 0.4164,
+        "max": 0.959675,
+        "at_or_above_95": 1
+      },
+      "b_v4_persistent_5": {
+        "teams": 3,
+        "min": 0.169225,
+        "median": 0.43235,
+        "max": 0.953725,
+        "at_or_above_95": 1
+      },
+      "b_tau_3_largest_plausible": {
+        "teams": 3,
+        "min": 0.159975,
+        "median": 0.423,
+        "max": 0.956825,
+        "at_or_above_95": 1
+      },
+      "b_hypothetical_tau_10": {
+        "teams": 3,
+        "min": 0.208875,
+        "median": 0.465775,
+        "max": 0.936775,
+        "at_or_above_95": 0
+      },
+      "c_data_matched": {
+        "teams": 3,
+        "min": 0.1508,
+        "median": 0.41595,
+        "max": 0.961275,
+        "at_or_above_95": 1
+      },
+      "d_drift_point": {
+        "teams": 3,
+        "min": 0.177525,
+        "median": 0.433625,
+        "max": 0.948325,
+        "at_or_above_95": 0
+      },
+      "d_drift_low": {
+        "teams": 3,
+        "min": 0.166575,
+        "median": 0.427775,
+        "max": 0.953625,
+        "at_or_above_95": 1
+      },
+      "d_drift_high": {
+        "teams": 3,
+        "min": 0.185075,
+        "median": 0.439275,
+        "max": 0.9438,
+        "at_or_above_95": 0
+      },
+      "d_drift_weeks_1_4": {
+        "teams": 3,
+        "min": 0.21425,
+        "median": 0.457125,
+        "max": 0.92835,
+        "at_or_above_95": 0
+      }
+    }
+  },
+  "limits": [
+    "One season, weeks 1-9, 9 leagues: wide intervals.",
+    "Projection rows are the provider's stored rows, stamped after the games; they may carry post-game information.",
+    "Each week's final projection only: error growth with forecast horizon cannot be measured here.",
+    "Rosters are each week's recorded roster."
+  ]
+}
