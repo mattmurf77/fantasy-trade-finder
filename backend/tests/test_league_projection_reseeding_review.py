@@ -13,7 +13,7 @@ def test_only_exact_native_integer_enum_is_accepted(value):
     with pytest.raises(Unavailable) as exc:run(source,feed)
     assert exc.value.reason=='unsupported_playoff_reseeding_policy'
 
-@pytest.mark.parametrize('key,value',[('divisions',2),('league_average_match',1),('best_ball',1),('playoff_round_type',1),('playoff_type',2),('start_week',2)])
+@pytest.mark.parametrize('key,value',[('divisions',2),('best_ball',1),('playoff_round_type',1),('playoff_type',2),('start_week',2)])
 def test_reseeding_never_disables_other_league_guards(key,value):
     source,feed=world();source[f'{API}/league/123']['settings'].update(playoff_seed_type=1,**{key:value})
     with pytest.raises(Unavailable):run(source,feed)
@@ -23,7 +23,7 @@ def test_manual_bracket_remains_unavailable_under_reseeding():
     source,feed=world();source[f'{API}/league/123']['settings']['playoff_seed_type']=1
     source[f'{API}/league/123']['bracket_overrides_id']='synthetic-manual'
     with pytest.raises(Unavailable) as exc:run(source,feed)
-    assert exc.value.reason=='unsupported_divisions_median_bestball_or_manual_seeding'
+    assert exc.value.reason=='unsupported_divisions_bestball_or_manual_seeding'
 
 
 def eight_team_world(seed_type):
