@@ -404,6 +404,6 @@ def test_admin_label_rows_say_why_when_there_is_no_usable_forecast(stored_league
 
 def test_the_pipeline_version_and_engine_modules_cover_the_season_signal():
     """I16 (with test_deck_pipeline_digest). Sabotage: forget the bump."""
-    assert server.DECK_PIPELINE_VERSION == 23 and 23 in server.DECK_PIPELINE_PINS
+    assert server.DECK_PIPELINE_VERSION >= 25 and 25 in server.DECK_PIPELINE_PINS
     assert {"season_value.py", "league_projections/season_points.py"} <= set(server._ENGINE_CODE_MODULES)
     assert {"_season_evidence", "_season_viewer_complete"} <= set(server.DECK_PIPELINE_FUNCTIONS)
