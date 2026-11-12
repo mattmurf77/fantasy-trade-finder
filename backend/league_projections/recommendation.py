@@ -129,6 +129,49 @@ def build(state, result, current_outlook, cuts, *, failure_reason=None):
             "captured_at": result.get("captured_at")}
 
 
+def _instant(value):
+    from datetime import datetime, timezone
+    try:
+        at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def saved_chance(view, now=None):
+    """The viewer's playoff chance from the saved run, shown the way Home's
+    playoff tile shows it (`mobile/src/utils/homePlayoffBanner.ts`), or None.
+
+    Shown whenever Home shows a percentage: a complete saved run that holds
+    the viewer's team with a valid probability and a capture time not in the
+    future. `current` is Home's test (state current, current model, before
+    the next weekly update); otherwise the client marks it "last saved". No
+    run, no team, or a bad probability: None, and nothing is shown.
+    """
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    run = (view or {}).get("run") or {}
+    if run.get("status") != "complete" or not run.get("result_json"):
+        return None
+    result = json.loads(run["result_json"])
+    roster_id = result.get("viewer_roster_id")
+    team = next((t for t in result.get("teams") or [] if roster_id is not None and t.get("roster_id") == roster_id), None)
+    probability = (team or {}).get("playoff_probability")
+    captured = _instant(result.get("captured_at"))
+    if not valid_probability(probability) or captured is None or captured > now:
+        return None
+    due = _instant(view.get("next_attempt_not_before"))
+    current = (view.get("state") == "current" and result.get("model_version") == VERSION
+               and due is not None and now < due)
+    return {"playoff_probability": probability, "captured_at": result.get("captured_at"), "current": current}
+
+
+def load_chance(user_id, league_id):
+    """`saved_chance` for one account and league, from the saved run only."""
+    from . import batch
+    return saved_chance(batch.view(user_id, league_id))
+
+
 def load(user_id, league_id, current_outlook):
     """The block for one account and league, from the saved run only."""
     from . import batch

@@ -46,23 +46,17 @@ export interface TeamReviewStanding {
     ppg_rank: number;
     record: { w: number; l: number; t: number } | null;
   } | null;
-  /** #169 playoff band. Present only when `outlook.odds` is on AND the league
-   *  is Sleeper AND the sim succeeded — absent, never null-filled, otherwise.
-   *  `playoff_pct` is for the VoiceOver label only; the visible surface is the
-   *  band. There is deliberately no title_pct. */
-  outlook?: {
-    band: PlayoffBand;
-    playoff_pct: number;
-    projected_seed: number | null;
-    beta: boolean;
-    is_preseason: boolean;
-    priced_slot_coverage: {
-      fraction: number;
-      total_slots: number;
-      priced_slots: number;
-      unpriced_slots: string[];
-      affects_strength: boolean;
-    } | null;
+  /** The saved weekly forecast's playoff chance for your team — the same
+   *  saved run Home's playoff tile, Standings and the window beat read, shown
+   *  whenever Home would show a percentage. Absent (never null-filled) when
+   *  `league.projections` is off, the league is not Sleeper, or there is no
+   *  usable saved result. `current` false means Home's "last saved".
+   *  The old `outlook` band (the `outlook.odds` simulator) is no longer sent:
+   *  it could contradict the forecast on the very next step. */
+  playoff_chance?: {
+    playoff_probability: number;
+    captured_at: string;
+    current: boolean;
   };
 }
 
@@ -237,6 +231,10 @@ export interface TeamReviewWindow {
    *  is not Sleeper, `outlook.odds` is off, or the sim failed. */
   odds_reason?: 'odds_unavailable' | 'preseason' | null;
   options: OutlookOption[];
+  /** The rules choosing an outlook switches on, by outlook, named exactly as
+   *  the rule catalog (`backend/rule_catalog.py`) names them. An outlook with
+   *  no rule of its own is absent. Absent entirely from an older server. */
+  outlook_rules?: Partial<Record<OutlookOption, string[]>>;
 }
 
 export interface TeamReviewDepth {
