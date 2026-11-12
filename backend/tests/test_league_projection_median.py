@@ -25,6 +25,7 @@ All data here is invented. Nothing is copied from a real league.
 from copy import deepcopy
 import json
 import math
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -293,16 +294,19 @@ def test_median_record_scale_is_checked_against_the_snapshot_format():
 
 # ── Non-median: byte-identical ─────────────────────────────────────────────
 
-# sha256 of the canonical JSON, produced by origin/main (455d1265, before the
-# median change) with the `league_format` marker absent. Regenerate only for a
-# deliberate model change (and bump core.VERSION then).
+# The outputs of origin/main (455d1265, before the median change) with the
+# `league_format` marker absent. Captures hold no floats, so their sha256 is
+# pinned. Results hold floats computed with `math`, whose last digit differs
+# between macOS and Linux, so they are compared to the saved values
+# (fixtures/league_projection_h2h_golden.json) exactly for everything but
+# floats and to 1e-9 for floats. Regenerate only for a deliberate model
+# change (and bump core.VERSION then).
 GOLDEN = {
-    "sim_fixture": "8fb28464c926eeb8fac5189a0a897e57ec571970be00c00028e2ec5c5dfcef85",
     "two_team_capture": "dc773d63c7b80fdf0a152d261b48ced79dba1b89fcdda2a04a5e3d3f2170f502",
-    "two_team_result": "c4539cdd17a313c492562eca3f7f0594901264debfdc8df448e836783b9e8327",
     "eight_team_capture": "4b6f94fcb3877e6446609ce9b3c22c91c41bbfc1972c9a956ab2163b56e3d8ea",
-    "eight_team_result": "895c45d08ff1803de40adfefa663706fe5ba49132eb1cdeff2e3f311c97c55a5",
 }
+with open(os.path.join(os.path.dirname(__file__), "fixtures", "league_projection_h2h_golden.json")) as _f:
+    GOLDEN_RESULTS = json.load(_f)
 
 
 def _without_marker(value):
@@ -311,15 +315,36 @@ def _without_marker(value):
     return value
 
 
+def _same(got, want, path="result"):
+    """Equal apart from the last digits of a float; names the first difference."""
+    if isinstance(want, float) or isinstance(got, float):
+        assert isinstance(got, (int, float)) and not isinstance(got, bool), path
+        assert math.isclose(got, want, rel_tol=1e-9, abs_tol=1e-12), f"{path}: {got!r} != {want!r}"
+    elif isinstance(want, dict):
+        assert isinstance(got, dict) and set(got) == set(want), path
+        for key in want:
+            _same(got[key], want[key], f"{path}.{key}")
+    elif isinstance(want, list):
+        assert isinstance(got, list) and len(got) == len(want), path
+        for i, (g, w) in enumerate(zip(got, want)):
+            _same(g, w, f"{path}[{i}]")
+    else:
+        assert got == want and type(got) is type(want), f"{path}: {got!r} != {want!r}"
+
+
+def _json(value):
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
 def test_non_median_snapshot_and_result_are_byte_identical_to_before():
     """Same seed, same snapshot: the result equals the pre-change result apart
     from the new `league_format` marker, so core.VERSION is not bumped."""
-    assert digest(_without_marker(simulate(h2h_snapshot(), config()))) == GOLDEN["sim_fixture"]
+    _same(_json(_without_marker(simulate(h2h_snapshot(), config()))), GOLDEN_RESULTS["sim_fixture"])
     for name, (source, feed) in (("two_team", world()), ("eight_team", eight_team_world(0))):
         snap = _without_marker(run(source, feed))
         assert digest(snap) == GOLDEN[name + "_capture"]
         # A snapshot saved before the marker existed reads as head-to-head.
-        assert digest(_without_marker(simulate(snap, config()))) == GOLDEN[name + "_result"]
+        _same(_json(_without_marker(simulate(snap, config()))), GOLDEN_RESULTS[name + "_result"])
 
 
 def test_marker_on_a_head_to_head_snapshot_changes_only_the_snapshot_hash():
