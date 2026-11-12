@@ -6,6 +6,13 @@
 - **Checked against one real median league (local, nothing committed):** rebuilt W-L-T matched the official records for all 12 teams over 9 weeks; head-to-head alone matched none. **Dry run against live feeds (main session, nothing written):** that league completes on v6 with `games_per_week` 2, 18 games per team so far, 28 expected, playoff chances summing to 6.
 - **CI fix (main session):** the "non-median result is unchanged" test pinned a sha256 of float results, which matched on macOS and not on the Linux runner (1 failed, 14,594 passed). Captures hold no floats and keep their pinned hash; results are now compared to the saved pre-change values (`fixtures/league_projection_h2h_golden.json`, verified against the old hashes before saving), exact for everything but floats and to 1e-9 for floats. Sabotage (median game applied to every league): red, then restored.
 - **Not verified:** a tie exactly at the median; anything on a device.
+
+## 2026-11-11 — Why-pass frame opens from the ✕, branch `fix/pass-button-on-asking-card`
+
+- **Main session re-run:** `tsc --noEmit` clean; **173 of 173** `mobile/tests/check-*.js` files pass; testid-lint OK. `check-pass-reason-cadence.js` is 45 assertions: the asking card keeps the ✕, the ✕ opens the frame, every exit (chip, Just pass, close, scrim, escape, Android back) is a pass, the ask carries past a like or a swipe, and the panel is always inside the visible deck area (a sweep of more than 500 placements runs the real function).
+- **Sabotages, red then restored (32, Opus subagent; 2 re-run in the main session):** panel clamped to the card only turned 8a, 8b and 8f red; Undo on every pass turned 9a red.
+- **Builder slip, caught and fixed by the builder:** one sabotage loop left 9 sabotages in the sources; each was reverted, the diff scanned for every sabotage string, and the set re-run with a checksum compare after every restore.
+- **Not verified (no device, D-056):** that the deck ScrollView reports its visible area on iOS (a 400 ms fallback places the panel inside the card if it does not); the scroll-in under the scrim; whether a swipe fires through the frame; VoiceOver containment. Checklist in the PR body.
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
 
 ## 2026-11-11 — Rank table lists every touched position, branch `feat/fit-rank-table-all-positions`

@@ -714,11 +714,11 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Pass-reason cadence (flag `trade.pass_reason_cadence`, offer-learnings
     # WS3; scope docs/plans/offer-learnings/scope-pass-reason-cadence.md).
     # The deck keeps the plain ✕ and asks only after N consecutive passes, on
-    # one card, with one row of chips + "Just pass". BOTH NON_INTENT and both
+    # one card: its ✕ opens a frame of chips + "Just pass". BOTH NON_INTENT and both
     # in NON_INTENT_EVENTS in this same commit:
-    #   pass_reason_prompt_shown — an EXPOSURE (the chip row mounted). The
+    #   pass_reason_prompt_shown — an EXPOSURE (the chip frame opened). The
     #     answer is the existing INTENT pair trade_pass_layer1/_layer2.
-    #   pass_reason_prompt_dismissed — a DISMISSAL ("Just pass"). The pass
+    #   pass_reason_prompt_dismissed — a DISMISSAL (any no-reason exit). The pass
     #     itself still lands server-side as `match_swiped`.
     # The #384 overlay pair is NOT reused: it measures that one surface (its
     # `banked` prop is that surface's question), and a prop-less `opened`
