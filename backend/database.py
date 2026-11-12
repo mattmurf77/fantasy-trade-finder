@@ -648,6 +648,13 @@ leagues_table = Table("leagues", metadata,
     # Season-stamped, so a future season resolves nothing (#273).
     # NULL = unresolved → owned picks keep today's generic round label.
     Column("draft_slot_order", Text),
+    # ── League median (Sleeper `settings.league_average_match`) ──────────
+    # 1 = every week also books a result against the league median score,
+    # 0 = head-to-head only, NULL = unknown (not a Sleeper league, or not
+    # synced since this column arrived). Written by upsert_league from the
+    # league payload session init already fetched; refreshed on every sync.
+    # Descriptive only: the playoff forecast reads the live setting.
+    Column("median_game", Integer),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -3818,6 +3825,14 @@ _MODEL_CONFIG_DEFAULTS = [
     # / 2028 1st 1459 vs a 2184.6 current-year mid, measured on prod
     # 2026-08-24). 0 = pure market, the deploy-free revert to pre-D-161.
     ("market_r1_yoy_floor", 1.00, "D-161: a FUTURE-season 1st-round pick never prices below this fraction of the CURRENT class's round-1 market price (1.0 = firsts hold value YoY, operator re-ruling 2026-08-24). 0 = pure DynastyProcess curve, byte-identical to pre-D-161. Rounds 2-4 untouched"),
+    # ── Projected slot value (flag picks.projected_slot_value) ───────────
+    # docs/plans/pick-value-projected-slot/design.md. A next-draft 1st priced
+    # by its ORIGINAL team's projected slot from the saved league forecast.
+    ("pick_projection_weight",        1.00, "picks.projected_slot_value: strength of the adjustment, value = generic x (1 + weight x (ratio - 1)). 1 = full strength (matches DP's Early/Late 1st spread). 0 = every pick prices exactly as without the feature (deploy-free rollback)"),
+    ("pick_projection_season_scaling", 0.0, "picks.projected_slot_value: 0 (operator ruling 2026-11-11) = full weight once min_weeks passes; 1 = also multiply by completed / regular-season weeks (the original weeks-played ramp); between blends the two"),
+    ("pick_projection_min_weeks",     3.0,  "picks.projected_slot_value: no adjustment before this many completed regular-season weeks"),
+    ("pick_projection_max_age_days",  8.0,  "picks.projected_slot_value: a forecast run older than this is ignored, unless it had at most one regular-season week left"),
+    ("pick_projection_max_round",     1.0,  "picks.projected_slot_value: rounds above this stay generic"),
     # ── Fit-challenger arm knobs (docs/plans/fit-challenger/LLD.md §4) ────
     # All 17 seeded in PR-M so set_config/PUT never KeyErrors on them (HLD
     # F-1); backend/trade_gen_fit.py consumes them from PR-F1/F2/F3 on.
@@ -3868,6 +3883,12 @@ _MODEL_CONFIG_DEFAULTS = [
     ("owner_bilateral_revision_enabled", 0.0, "Bilateral revision selector: exactly 1 selects owner-v2-bilateral-2 when bilateral is selected; 0 retains/restores owner-v2-bilateral-1; other arms and serving settings unchanged"),
     ("owner_outlook_evidence_enabled", 0.0, "Evidence-bound outlook candidate: exactly 1 selects owner-v2-bilateral-3 only when bilateral and revision selectors are both enabled; 0 restores revision 2; no automatic activation"),
     ("owner_bilateral_revision_4_enabled", 0.0, "Bilateral revision 4 (owner-v2-bilateral-4, built on revision 2): exactly 1 selects it when bilateral and revision selectors are both enabled, and it wins over owner_outlook_evidence_enabled; any other value leaves the revision 2/3 selection unchanged; no automatic activation"),
+    ("owner_bilateral_revision_5_enabled", 0.0, "Bilateral revision 5 (owner-v2-bilateral-5, win-now season signal, built on revision 2): exactly 1 selects it when bilateral and revision selectors are both enabled, and it wins over the revision 3 and 4 selectors; any other value leaves the revision 2/3/4 selection unchanged; no automatic activation"),
+    ("season_conflict_demotion", 0.10, "Revision 5 only: support taken from both sides of a card that works against the viewer's saved plan and qualified through the viewer's own rankings (order only, never inventory or terms); 0 = flagged and stated, not pushed down"),
+    ("season_partner_matching", 0.0, "Revision 5 only: 1 = stage 2, the season label table also reads every league-mate's plan fit (seller-buyer matching); 0 = the viewer only"),
+    ("season_shed_weight_tanking", 1.0, "Revision 5 only: a Tanking team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
+    ("season_shed_weight_rebuilding", 0.5, "Revision 5 only: a Rebuilding team's season lineup term with the sign reversed (points shed count for the trade), at this share of an All-in team's; order only, never inventory or terms"),
+    ("owner_untouchable_hard", 1.0, "Owner-family generators (owner-v1, bilateral 1-4): 1 = Keep/untouchable is a hard rule, a generated card never sends a manager's untouchable unless the viewer pinned it on their own give side; 0 = the premium-return rule (an untouchable leaves only for a market gain with a same-position return); any other value reads as 1"),
     ("prepared_trade_inventory_enabled", 0.0, "Silent durable prepared trade inventory: exactly 1 enables preparation/adoption with the registered capability; default 0, no model or offer-limit changes"),
     ("owner_pool_size",            16.0, "owner_v1 bounded candidate pool per team; computational limit, not a value gate"),
     ("owner_pair_budget",        4096.0, "owner_v1 maximum candidate evaluations per opponent"),
@@ -4322,6 +4343,9 @@ def _migrate_db() -> None:
         ("leagues",            "draft_status",          "VARCHAR"),
         ("leagues",            "draft_status_confidence", "VARCHAR"),
         ("leagues",            "draft_status_checked_at", "VARCHAR"),
+        # League median setting (docs/plans/league-projections/median-leagues-scope.md).
+        # NULL on every existing row until that league's next sync; no backfill.
+        ("leagues",            "median_game",           "INTEGER"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -6976,6 +7000,14 @@ def get_unlocked_formats(user_id: str) -> list[str]:
 # League operations
 # ---------------------------------------------------------------------------
 
+def league_median_setting(meta) -> int | None:
+    """1/0 from a Sleeper league payload's `settings.league_average_match`;
+    None when the payload or the key is absent or not 0/1 (never guessed)."""
+    settings = meta.get("settings") if isinstance(meta, dict) else None
+    value = settings.get("league_average_match") if isinstance(settings, dict) else None
+    return value if type(value) is int and value in (0, 1) else None
+
+
 def upsert_league(
     league_id: str,
     user_id: str,
@@ -6987,6 +7019,7 @@ def upsert_league(
     platform: str | None = None,
     require_user: bool = False,
     only_if_exists: bool = False,
+    median_game: int | None = None,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -7011,6 +7044,9 @@ def upsert_league(
     raises AccountGone when that row is gone) and, for a row it found at its
     start or a platform league's, `only_if_exists`: update only, so a row an
     account deletion removed in between is never re-created.
+
+    `median_game` (1/0, see `league_median_setting`) is written on insert and
+    refreshed on every update that knows it; None leaves the stored value.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -7026,7 +7062,9 @@ def upsert_league(
         "created_at":        now,
         "updated_at":        now,
         "platform":          platform,
+        "median_game":       median_game,
     }
+    refresh = {"median_game": median_game} if median_game is not None else {}
 
     with engine.begin() as conn:
         if require_user:
@@ -7034,7 +7072,7 @@ def upsert_league(
         if only_if_exists:
             conn.execute(update(leagues_table)
                          .where(leagues_table.c.sleeper_league_id == league_id)
-                         .values(name=name, updated_at=now))
+                         .values(name=name, updated_at=now, **refresh))
             return
         # Single atomic upsert on the PK — race-safe against two members of
         # the same league hitting session_init concurrently (both would
@@ -7049,6 +7087,7 @@ def upsert_league(
             set_={
                 "name":       stmt.excluded.name,
                 "updated_at": stmt.excluded.updated_at,
+                **({"median_game": stmt.excluded.median_game} if refresh else {}),
             },
         )
         conn.execute(stmt)

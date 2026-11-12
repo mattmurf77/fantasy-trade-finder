@@ -144,6 +144,7 @@ ROUTES = {
     ("GET", "/api/admin/prepared-trades"): NEVER_GATE,
     ("POST", "/api/admin/prepared-trades"): NEVER_GATE,
     ("GET", "/api/admin/receipts/metrics"): NEVER_GATE,
+    ("GET", "/api/admin/season-signal/labels"): NEVER_GATE,
     ("GET", "/api/admin/segments"): NEVER_GATE,
     ("POST", "/api/admin/segments"): NEVER_GATE,
     ("DELETE", "/api/admin/segments/<int:seg_id>"): NEVER_GATE,

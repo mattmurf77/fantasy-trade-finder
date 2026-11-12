@@ -165,6 +165,7 @@ manager–league pairs with a saved All-in or Contending plan:
 | Outlook flip | under revision 5, All-in ≥ Contending > Not sure on lineup points added, in at least 80% of requests. Under revision 2 this ordering is expected to fail often; report how often |
 | Label table against numbers (arm 2 vs 4) | the table within 0.3 points a week of the numbers, or ahead. If it is further behind, the plan fit reads the number and the label stays the printed summary of it; the operator is told |
 | Need term clipping | reported: the share of scored cards whose lineup-gain part sits at ±1. Above half means the rate is too high |
+| Rebuilding / Tanking (*amended 2026-11-11, operator direction*) | lineup points a week over the first 30 served cards **fall** against revision 2 (mean over Rebuilding and Tanking requests), and **Tanking falls more than Rebuilding**. Reported beside All-in / Contending: the share of the first 30 shedding ≥ 0.5 a week, the share adding ≥ 0.5, the served deck size, first-30 overlap with revision 2, and set identity with revision 2 (which must hold: §6) |
 | Guardrails | §6, all |
 
 ## 4. Label review by the operator
@@ -228,7 +229,7 @@ Checked in the replay and again as unit tests ([lld §10](lld.md#10-invariants-a
 | **Deck size must not shrink** | served deck under revision 5 ≥ 95% of revision 2's at the median request; never under 30 where revision 2 served ≥ 30; a request that would break this is listed, not averaged away |
 | **Fairness floor unchanged** | every card present under both revisions has identical package values, fairness score and floor decision; no card under revision 5 sits below the request's floor |
 | **Not sure** | identical cards and order on every request |
-| **Rebuilding / Tanking** | identical set of cards and terms; with the push-down at 0, identical order |
+| **Rebuilding / Tanking** | identical set of cards and terms (*amended 2026-11-11, operator direction:* the order differs by design, so "identical order at push-down 0" is withdrawn) |
 | **No forecast** | identical cards and order on every request with no usable evidence |
 | **Speed** | full-solve CPU within 10% of revision 2; after the join, the page path equals the gated full solve |
 | **The push-down removes nothing** | inventory at 0.10 equals inventory at 0 |
@@ -239,10 +240,21 @@ Checked in the replay and again as unit tests ([lld §10](lld.md#10-invariants-a
 Built with stage 1, served only after its own pass, because it changes decks for users who saved no
 win-now plan.
 
-- Replay: all five outlooks. Metric for a Rebuilding or Tanking viewer: share of the first 30 where
-  the viewer sends a win-now piece to a team it would start for and gets back rebuild pieces,
-  cornerstones or picks; and the reverse for a win-now viewer. Bar: both up; Not sure viewers'
-  mean support and deck size within 2% of stage 1.
+- Replay: all five outlooks. *Corrected 2026-11-11, operator direction:* two win-now teams share a
+  priority and are not expected to trade as often unless their rankings differ a lot or their
+  positional needs complement, so the measure looks at **who the partner is** (the partner's plan
+  as the engine resolved it: win-now = All-in / Contending, selling = Rebuilding / Tanking, other;
+  and whether the partner saved it or it was read from the roster). Bars:
+  - win-now viewer: the share of the first 30 that **buy a starter from a selling partner** goes up;
+  - win-now viewer: the share with **win-now partners** may fall: reported, no bar;
+  - Rebuilding / Tanking viewer: the share that **sells a win-now piece to a team it would start
+    for** goes up, reported split by the partner's plan and source;
+  - Not sure viewers' mean support and deck size within 2% of stage 1 (unchanged).
+
+  (The first version's single bar, "matched share up" for win-now viewers, failed on the fixture at
+  −0.058 without looking at the partner; it is replaced, not loosened.) Two unit tests pin that two
+  win-now teams still produce an eligible card for each other under stage 2 on a large ranking
+  discrepancy and on complementary positional needs (`test_trade_gen_bilateral_season.py`).
 - Calibration: the same round re-run with `season_partner_matching` on in the revision 5 arm, at
   least two Rebuilding or Tanking decks. Bar: mean grade not lower; `they_wont_accept` and
   `wrong_for_their_window` rates not higher.

@@ -9,6 +9,7 @@
   "trade.fast_deck": false,
   "trade.fast_deck_shadow": false,
   "deck.rules_first": true,
+  "trade.partner_outlook_projection": true,
   "_comment_fixture": "GENERATED MIRROR of config/features.json \u2014 the flag set the shipped app actually runs with, and therefore the one the screen library captures as release truth (capture-matrix-signoff.md ruling A). Refresh with a verbatim copy of config/features.json, then re-insert this key; test_seed_ui_test_db.test_release_flags_mirror_features_json fails the build if the two drift. There are NO deliberate test-only deltas here \u2014 if one is ever needed, mark it with a _comment_ key naming the matrix row it unblocks, or the next refresh will silently revert it. Keys beginning with _ are dropped by seed_ui_test_db.load_flag_set.",
   "_comment": "Feature flags for the 2026-04-19 sprint. Every key defaults to false in backend/feature_flags.py. Flip a value to true here to enable the feature in the running deployment. Unknown keys are ignored with a console warning.",
   "swipe.community_compare": false,
@@ -64,6 +65,7 @@
   "picks.rank_year_labels": true,
   "picks.league_horizon": true,
   "picks.slot_labels": true,
+  "picks.projected_slot_value": true,
   "market.trade_capture": true,
   "market.roster_history": true,
   "market.manager_profiles": true,
@@ -275,6 +277,8 @@
   "trades.roster_tier_rank": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
+  "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
-  "trade.sleeper_offer_import": true
+  "trade.sleeper_offer_import": true,
+  "trade.season_signal": true
 }

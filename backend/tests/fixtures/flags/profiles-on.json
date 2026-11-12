@@ -8,6 +8,7 @@
   "trade.fast_deck": false,
   "trade.fast_deck_shadow": false,
   "deck.rules_first": true,
+  "trade.partner_outlook_projection": true,
   "_comment_fixture": "release.json with profiles.public_pages TRUE \u2014 the populated public-profile render, capture request #11 (only flag-off.png, \"Public profiles are coming soon\", exists today). Pair it with the `quickset-done` profile: /api/profile/<username> builds tiers_snapshot from load_tier_overrides, and quickset-done is the ONLY profile that seeds tier overrides \u2014 against any other profile the flag is on and the page renders empty. profiles.user_toggle is deliberately LEFT AT ITS RELEASE VALUE (false), and turning it on here would BREAK this capture, not strengthen it: with it on, server._profile_opt_in_denied additionally requires the user's own `profile_public` marker, which no fixture sets, so both /u/<username> and /api/profile/<username> 404 \u2014 indistinguishable from not-found by design, so the screen would render its error state instead. Everything else mirrors release.json.",
   "_comment": "Feature flags for the 2026-04-19 sprint. Every key defaults to false in backend/feature_flags.py. Flip a value to true here to enable the feature in the running deployment. Unknown keys are ignored with a console warning.",
   "swipe.community_compare": false,
@@ -62,6 +63,7 @@
   "picks.rank_year_labels": true,
   "picks.league_horizon": true,
   "picks.slot_labels": true,
+  "picks.projected_slot_value": true,
   "market.trade_capture": true,
   "market.roster_history": true,
   "market.manager_profiles": true,
@@ -266,6 +268,8 @@
   "trades.roster_tier_rank": true,
   "trade.next_move": true,
   "trade.fit_first_copy": true,
+  "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
-  "trade.sleeper_offer_import": true
+  "trade.sleeper_offer_import": true,
+  "trade.season_signal": true
 }

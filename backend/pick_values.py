@@ -720,8 +720,96 @@ def _r1_yoy_floored(market: float, season, round_,
     return max(market, round(rate * current, 1))
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Projected slot value (`picks.projected_slot_value`) — next-draft firsts
+# priced by the ORIGINAL team's projected draft slot. Design:
+# docs/plans/pick-value-projected-slot/design.md. The math is the pure leaf
+# `pick_projection`; this block only supplies the market curve and applies
+# the multiplier on top of step 2. `projection=None` (flag off, weight 0, no
+# usable forecast) never reaches any of it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def projected_slot_curve(teams: int, season, round_,
+                         scoring_format: str = "1qb_ppr") -> list[float] | None:
+    """The per-slot curve `c[1..teams]` in engine value units, or None.
+
+    SHAPE only — `pick_projection.ratio` divides by its mean. Primary: DP's
+    per-slot grid for the round, of the season `market_anchor_season` reads
+    (the current class; whatever year DP has rolled to). Fallback: DP's
+    `"<season> Early/Mid/Late <ordinal>"` rungs for the pick's season as a
+    3-step curve. A league of any size maps onto DP's 12-team grid by
+    percentile within the round (`draft_board_service._basis_slot`, the Draft
+    Room's mapping). Means stay in value space, never Elo space."""
+    from .data_loader import load_pick_slot_values, pick_slot_label
+    from .draft_board_service import _basis_slot
+    from .trade_service import elo_to_value as _e2v
+    try:
+        teams, season, round_ = int(teams), int(season), int(round_)
+    except (TypeError, ValueError):
+        return None
+    ordinal = _MARKET_ORDINALS.get(round_)
+    if teams < 2 or ordinal is None:
+        return None
+    slot_map = load_pick_slot_values(scoring_format)
+    if not slot_map:
+        return None
+    basis = [_basis_slot(k, teams) for k in range(1, teams + 1)]
+    anchor = market_anchor_season(scoring_format)
+    if anchor is not None:
+        grid = [slot_map.get(pick_slot_label(anchor, round_, s))
+                for s in range(1, _TERCILE_TEAMS + 1)]
+        if all(e is not None for e in grid):
+            return [_e2v(grid[b - 1]) for b in basis]
+    rungs = [slot_map.get(f"{season} {tier} {ordinal}") for tier in ("Early", "Mid", "Late")]
+    if any(e is None for e in rungs):
+        return None
+    third = _TERCILE_TEAMS // 3
+    return [_e2v(rungs[min(2, (b - 1) // third)]) for b in basis]
+
+
+def _projection_terms(row: dict, projection, scoring_format: str,
+                      slot: int | None = None):
+    """`(multiplier, distribution)` for a pick the projection prices, or None.
+
+    `slot` set: D-090 resolved a real slot that DP has no row for — a point
+    mass on that slot, at full weight (the order is known, not forecast)."""
+    from . import pick_projection as pp
+    if not pp.covers(projection, row.get("season"), row.get("round")):
+        return None
+    curve = projected_slot_curve(projection.teams, row.get("season"),
+                                 row.get("round"), scoring_format)
+    if curve is None:
+        return None
+    if slot:
+        if not 1 <= int(slot) <= projection.teams:
+            return None
+        dist = tuple(1.0 if k == int(slot) else 0.0 for k in range(1, projection.teams + 1))
+        return pp.ratio(dist, curve), dist
+    dist = pp.distribution(projection, row.get("original_roster_id"))
+    if dist is None or len(dist) != len(curve):
+        return None
+    return pp.factor(projection, dist, curve), dist
+
+
+def projected_pick_slot(row: dict, projection, scoring_format: str = "1qb_ppr") -> int | None:
+    """The projected slot to SHOW for an unslotted pick, or None when
+    `priced_pool_value` did not apply the projection to this row (so the pick
+    keeps today's exact label). Derived from the same terms as the price, so
+    the label and the value cannot disagree about which picks moved."""
+    if projection is None:
+        return None
+    if market_pick_pool_value(row.get("season"), row.get("round"), scoring_format) is None:
+        return None                      # step 3: priced generic, so no slot
+    terms = _projection_terms(row, projection, scoring_format)
+    if terms is None:
+        return None
+    from .pick_projection import projected_slot
+    return projected_slot(terms[1])
+
+
 def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
-                      mode: str | None = None, slot: int | None = None) -> float:
+                      mode: str | None = None, slot: int | None = None,
+                      projection=None) -> float:
     """The engine value of ONE owned-pick row.
 
     THE read-time seam. `row` is a `draft_picks` row as `load_draft_picks`
@@ -753,6 +841,15 @@ def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
          here: step 3 is reached only when there is no market price to floor,
          and the stored ladder is already flat in round 1 by D-079.
 
+    **Projected slot value (`projection`, flag `picks.projected_slot_value`).**
+    When a usable league forecast is passed and it covers the pick's
+    `(season, round)`, step 2's price G becomes `G × (1 + w·(ratio − 1))`
+    from the ORIGINAL team's projected slot distribution
+    (`pick_projection`); a slot D-090 resolved but DP has no row for prices
+    as a point mass on that slot. `projection=None` returns exactly the
+    three-step result above. Like `slot`, it is resolved once per league by
+    the caller (`server._league_pick_projection`) and passed in.
+
     `slot` is PASSED IN, never resolved here. Resolution is D-090's job
     (`server._league_slot_order` → `pick_slots.slot_for`), it costs a DB read
     plus a cache lookup per LEAGUE, and this function runs per PICK. Passing
@@ -782,5 +879,11 @@ def priced_pool_value(row: dict, *, scoring_format: str = "1qb_ppr",
                                     scoring_format)
     if market is None:
         return stored
-    return _r1_yoy_floored(market, row.get("season"), row.get("round"),
-                           scoring_format)
+    generic = _r1_yoy_floored(market, row.get("season"), row.get("round"),
+                              scoring_format)
+    if projection is None:
+        return generic
+    terms = _projection_terms(row, projection, scoring_format, slot)
+    if terms is None:
+        return generic
+    return round(generic * terms[0], 1)

@@ -324,6 +324,7 @@ row. It inserts only on a Sleeper league's first init, with
 | `draft_status_checked_at` | str | ISO UTC of the last check — stamped even for `'unknown'` so a persistently flaking league backs off. Drives the asymmetric cheap-skip TTLs in `server._DRAFT_STATUS_TTL_SECONDS` (drafted 12 h, not_drafted 3 h, unknown 1 h) |
 | `pick_assignment_settings` | text (JSON) | **W3 M-A (ADR-010)**, flag `picks.assign` — `{rounds:int, order_type:'linear'\|'snake', order:[user_id, …]}`. **NUMBERING ONLY.** Ownership is never stored here — it lives one row per slot in `draft_picks`. `order` is the round-1 pick sequence and `order_type` the shape; both change slot numbers and **never** who owns a pick, which is what makes the toggle safe to flip at any time. NULL = never configured (defaults: 4 rounds, linear, members sorted by `user_id`). Accessors: `load_pick_assignment_settings` / `save_pick_assignment_settings` |
 | `draft_slot_order` | text (JSON) | **D-090 (2026-08-19)**, flag `picks.slot_labels` — the league's resolved **CURRENT-season** draft order: `{schema:1, season:int, teams:int, type:'linear'\|'snake', reversal_round:int, slots:{roster_id: slot}, source:'sleeper_draft_order'}`. Written by `server._sync_sleeper_owned_picks` from the `draft_order` already carried on the `/league/<id>/drafts` payload that function fetches for the #228 exclusion, composed with its `roster_id → user_id` map — **zero additional upstream calls**. **NUMBERING ONLY**, exactly like `pick_assignment_settings` above and for the same reason: the ORDER is stored, the SLOT never is, so renumbering can never touch an owner (D18). Season-stamped, so a future season resolves nothing (#273). Written as NULL when the order is unset upstream or the season's draft has completed, so a stale order cannot outlive the draft it described. NULL = unresolved → owned-pick labels fall back to their generic round, which is every pre-D-090 row and every MFL league. Read at label time only (`server._league_slot_order`, 300 s TTL cache); **no engine input reads it and no price depends on it**. Accessors: `load_draft_slot_order` / `save_draft_slot_order`; resolution logic: `backend/pick_slots.py` |
+| `median_game` | integer, nullable | **2026-11-11** ([scope](plans/league-projections/median-leagues-scope.md)) — the Sleeper league-median setting (`settings.league_average_match`): `1` = every week each team also plays the league's median score (two results a week), `0` = head-to-head only, `NULL` = unknown (not a Sleeper league, a missing or unexpected setting, or not synced since the column arrived). Written by `upsert_league` from the league payload session init already fetched (`database.league_median_setting`; no extra call), on first link and on every later sync, so a commissioner's change between seasons is picked up; a `NULL` row is filled at that league's next sync (no backfill). An unknown value never overwrites a known one. ESPN / MFL / Fleaflicker rows stay `NULL` (no adapter reads an equivalent setting). **Descriptive only:** the playoff forecast reads the live Sleeper setting at capture, never this column. Not yet returned to clients. Migration entry in `_migrate_db`. |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -664,7 +665,15 @@ depends on how the owner deck was built (ADR-030, `deck.rules_first`):
 recorded without applying the legacy divergence/relaxation discount.
 
 The once-per-run selected `bakeoff_runs.config_json` contains the full captured
-input ledger; organic runs store it under `config_json.owner_request`. Each
+input ledger; organic runs store it under `config_json.owner_request`. With flag
+`trade.season_signal` on, an organic trade job's owner request also carries
+`season_evidence` (schema `season-evidence-1`: state, reason, run id, model version,
+weeks, slots, `players` {id: {ppg, games}}, `unprojected`, `free_agent_level`, digest,
+`as_of`) beside `input_evidence`, whatever revision is selected; only its digest (or,
+when unavailable, its state and reason) joins the request hash. The per-impression
+`owner_request` keeps the card's assets' rows only. Under revision 5 the frozen proof
+(`valuation_json`) adds a private `season_signal` object (lld §4). The slim form keeps
+`season_evidence`. Each
 joins the package-scoped impression record by request hash and capture time,
 including board/pool values, lineup context, rosters and preferences. Capture
 timestamps are not market source timestamps:

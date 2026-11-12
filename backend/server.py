@@ -88,7 +88,7 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league, AccountGone,
+    upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
@@ -266,6 +266,7 @@ from . import test_profile as _tp               # onboarding test profile (dev.t
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
+from . import partner_outlook as _partner_outlook   # trade.partner_outlook_projection
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
@@ -897,6 +898,7 @@ from .pick_values import (
     GENERIC_PICK_SEEDS, _PICK_ORDINALS, generic_pick_label, pick_pool_value,
     discount_pick_value, parse_generic_pick_id, year_pick_label,
     priced_pool_value,          # read-time market pricing seam (D-144)
+    projected_pick_slot,        # projected slot value: the slot shown
     GENERIC_PICK_ID_PREFIX,     # Send-in-MFL pick split (_is_ftf_pick_asset)
 )
 
@@ -1163,15 +1165,17 @@ def _roster_eveners(league_id: str, owner_user_id: str, gap_value: float,
     # such row carries its provenance, and so does a combo containing one.
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)          # D-090, once per call
+    projection = _league_pick_projection(league_id)     # projected slot value, once per call
     for pk in load_draft_picks(league_id=league_id, owner_user_id=owner_user_id,
                                source=_pick_read_source()):
         pid = str(pk["pick_id"])
-        val = _priced_pick_value(pk, slot_order, scoring_format)
+        val = _priced_pick_value(pk, slot_order, scoring_format, projection)
         if pid in skip or val <= 0:
             continue
         assets.append({
             "id":       pid,
-            "name":     _owned_pick_label(pk, slot_order),
+            "name":     _owned_pick_label(pk, slot_order, projection, scoring_format),
+            **_owned_pick_projection_fields(pk, slot_order, projection, scoring_format),
             "position": "PICK",
             "team":     None,
             "value":    round(val, 1),
@@ -3729,7 +3733,18 @@ def _trade_job_preferences(user_id, league_id, sess, league):
     seeded = None
     if not outlook:
         seeded, _ = _infer_user_outlook(user_id, league_id, sess, league)
-    return {"prefs": prefs, "seeded_outlook": seeded}
+    out = {"prefs": prefs, "seeded_outlook": seeded}
+    if _partner_outlook.enabled(is_enabled):
+        # trade.partner_outlook_projection: the request's ONE forecast read.
+        # It rides the preload, so the worker uses exactly these reads and the
+        # request signature (job cache, stored pages, prepared inventory)
+        # changes whenever a league-mate's assumed outlook would. Flag off:
+        # the key is absent and the preload is byte-identical.
+        out["partner_projection"] = _partner_outlook.session_reads(
+            sess, user_id, league_id,
+            [m.user_id for m in getattr(league, "members", ()) or ()],
+            platform=getattr(league, "platform", "sleeper"))
+    return out
 
 
 def _trade_request_signature(prefs_preload):
@@ -4623,7 +4638,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 22
+DECK_PIPELINE_VERSION = 27
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4657,6 +4672,8 @@ DECK_PIPELINE_FUNCTIONS = (
     "_load_presentment_exclusions", "_presentment_need_gate_bypass",
     "_owner_cards_valid", "_owner_selected_assignment", "_owner_generation_context",
     "_owner_canonical", "_first_session_confidence_ok", "_audition_statuses",
+    "_apply_partner_outlooks",   # a league-mate's assumed outlook, an engine input
+    "_season_evidence", "_season_viewer_complete",   # win-now season signal: revision 5's input
     # order and composition of the served deck (the F-layers, quality, ghosts)
     "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
     "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
@@ -4671,6 +4688,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_league_pick_projection", "_load_pick_projection_summary",  # projected slot value
     "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
@@ -4679,7 +4697,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
     "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
     "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
-    "_value_core_live", "_slot_labels_enabled",
+    "_value_core_live", "_slot_labels_enabled", "_pick_projection_enabled",
     # the stored card's content
     "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
     "_owner_public_selection", "player_to_dict",
@@ -4706,6 +4724,7 @@ DECK_PIPELINE_IGNORED = {
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
     "_log_owner_selected_run": "run logging",
     "_log_presentment_outcome": "a log line",
+    "_log_season_signal": "a counts-only log line (win-now season signal)",
     "_log_roster_rejections": "shadow logging of rejected candidates",
     "_mirror_skip_rows": "shadow logging of skipped mirrors",
     "_note_mirror_skip": "shadow logging of skipped mirrors",
@@ -4737,11 +4756,13 @@ DECK_PIPELINE_IGNORED = {
     "_iso_age_days": "a date utility",
     "_FA_LEAGUE_META_TTL": "a cache TTL",
     "_SLOT_ORDER_TTL_SECONDS": "a cache TTL",
+    "_PICK_PROJECTION_TTL_SECONDS": "a cache TTL",
     "_THOMPSON_PRIOR_CACHE_TTL_S": "a cache TTL",
     "_thompson_prior_cache": "a mutable cache, not a constant",
     # copy and label formatting on stored cards (copy churn; models-eng's call: out)
     "_standing_offer_reason": "label copy only",
     "_owned_pick_label": "label copy only",
+    "_owned_pick_projection_fields": "label copy only (projected slot value's proj_slot / proj_name)",
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
     "_aggregate_pick_label": "label copy only (the medians' value_label; the fit block reads only value)",
@@ -4774,6 +4795,11 @@ DECK_PIPELINE_PINS = {
     20: "4e8e4cbd886c9149",  # Partner activity (trade.partner_activity, default off; revision 4 only): the owner context carries the league's public completed-trade counts; flag off or revision 4 not selected: context, hash, terms and order unchanged.
     21: "6b0e0c0fe51fb2ef",  # Revised-offer cards (trade.next_move, default off): the user's declined Sleeper offers lead the organic owner deck, proven by the owner evaluator, and carry the job's fit context; flag off: no read, no card, terms and order unchanged.
     22: "6eb0e82ee1b62e47",  # ADR-030 rules-first construction (deck.rules_first, ships on): per-card deck rules decide admission before ranking for organic owner-only decks (no pins, opponent scope or intent); liked trades stay an overlay after generation, and on rules-first jobs a liked mirror or standing offer the generator did not build is proven by the job's owner evaluator (consensus card when not eligible); the downstream quality filter follows the rules' flag capture; the safety signature stamps it, guard counts logged; the retired trade.fast_deck hooks removed (both were off); flag off: same generator call and likes-you injection, terms and order unchanged.
+    23: "68e072f20220238b",  # Partner outlook from the saved forecast (trade.partner_outlook_projection, default off): the job's one forecast read (request preload, else the worker's) gives a league-mate with no saved outlook an inferred_outlook from their playoff chance (45% cut, two bands) in the owner context, with outlook_source on every league-mate's preferences; the fit context tags those reads source projection; flag off: no read, no key, terms and order unchanged.
+    24: "0622c34be2da22ae",  # trade.fit_position_ranks (default off): _fit_league_context reads it once per job; off: no position-value walk, the context carries roster reads only and the fit block states no league rank; on: context and block byte-identical to v22. Display only: terms and order unchanged.
+    25: "b00f8f62029606ed",  # Win-now season signal (trade.season_signal, default off; revision 5 selector owner_bilateral_revision_5_enabled, default 0): one read-only forecast read per organic owner job, recorded on the request record (digest in the hash), passed only to revision 5; the five revision-5 knobs leave the request hash unless revision 5 is selected; presentment reads owner_presentment_version; trade_card_to_dict adds season_block; flag off and selector 0: context, hash, terms, order and payload unchanged.
+    26: "2d4aef7d5d0261fb",  # Projected slot value (picks.projected_slot_value, default off): owned next-draft firsts price by the original team's projected slot from the saved league forecast (_league_pick_projection hoisted beside _league_slot_order into _priced_pick_value and the label, which names the projected slot, and player_to_dict emits proj_slot / proj_name); flag off or weight 0: projection None, prices, labels, terms and order unchanged.
+    27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4788,10 +4814,12 @@ _ENGINE_CODE_MODULES = (
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "pick_projection.py",         # projected slot value: next-draft firsts by projected order
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "partner_outlook.py",         # a league-mate's assumed outlook (trade.partner_outlook_projection)
     "calibration_native_lineup.py",  # Optional exact range assignment consumed by both owner engines.
     "negmem.py", "trade_breaker.py", "deck_quality.py",
     # composition and order of the served deck
@@ -4800,6 +4828,8 @@ _ENGINE_CODE_MODULES = (
     "small_trade_presentment.py",
     # the card copy itself
     "trade_narrative.py",
+    # the win-now season signal's evidence and labels (revision 5's input)
+    "season_value.py", "league_projections/season_points.py",
 )
 # Excluded on purpose (models-eng, 2026-10-26):
 # - outlook/, except league_state.py: the Outlook feature. Value core's
@@ -7492,10 +7522,12 @@ def _trade_current_snapshot(league_id: str, scoring_format: str):
     from .database import engine as _engine
     try:
         snap = _trade_roster_snapshot(league_id)
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -8353,7 +8385,8 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
         version = owner_model_version or _bakeoff.owner_version()
-        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4"):
+        if version in ("owner-v2-bilateral-2", "owner-v2-bilateral-3", "owner-v2-bilateral-4",
+                       "owner-v2-bilateral-5"):
             signature.append("owner_model_version:" + version)
     significance = (significance_capture if significance_capture is not None
                     else _capture_trade_significance())
@@ -8536,10 +8569,12 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
     from .database import engine as _engine
     extra = {"parts": parts} if parts is not None else {}
     try:
+        projection_key = _pick_projection_key(league_id)
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key, **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -11091,10 +11126,11 @@ def _build_trade_roster_context(*, sess, league, players, seed_map,
     missing = [pk for pk in picks if str(pk["pick_id"]) not in ctx.assets]
     if missing:
         slot_order = _league_slot_order(league_id)
+        projection = _league_pick_projection(league_id)
         for pk in missing:
             pid = str(pk["pick_id"])
             ctx.assets[pid] = Asset(pid, frozenset(),
-                float(_priced_pick_value(pk, slot_order, scoring_format)), is_pick=True)
+                float(_priced_pick_value(pk, slot_order, scoring_format, projection)), is_pick=True)
     # Explicit intent and inferred defaults are different evidence. No live
     # point provider exists yet: leave projections absent and retain that
     # uncertainty in the frozen benefit snapshot.
@@ -12663,6 +12699,9 @@ class _TradeExecutionContext:
     players: tuple
     league_user_id: str
     prepared_roster_snapshot: tuple | None = None
+    # trade.partner_outlook_projection: the session's roster→owner index, for a
+    # worker that reads the forecast itself (no request-thread preload).
+    sleeper_roster_index: dict | None = None
 
 
 def _capture_trade_execution(sess, user_id, league_id, scoring_format):
@@ -12692,6 +12731,7 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
         user_id, league_id, scoring_format, service, trade_service, league,
         tuple(sess.get("user_roster") or ()), tuple(sess.get("players") or ()),
         _league_user_id(sess),
+        sleeper_roster_index=copy.deepcopy(sess.get("sleeper_roster_index")),
     )
 
 
@@ -13122,6 +13162,19 @@ def _run_trade_job(
             if seeded:
                 outlook_value = seeded
 
+        # trade.partner_outlook_projection — the job's one forecast read: the
+        # request thread's (it is in the request signature), else read once here.
+        partner_projection = None
+        partner_on = _partner_outlook.enabled(is_enabled)
+        if partner_on:
+            if prefs_preload is not None and "partner_projection" in prefs_preload:
+                partner_projection = prefs_preload["partner_projection"]
+            else:
+                partner_projection = _partner_outlook.session_reads(
+                    {"sleeper_roster_index": ctx.sleeper_roster_index}, g_user_id, league_id,
+                    [m.user_id for m in g_league.members],
+                    platform=getattr(g_league, "platform", "sleeper"))
+
         # G6 presentment rules — R-5b bypass (server-derived, never
         # client-passable) + the R4 #336 windowless exclusion set, both
         # built once per job. Flag off ⇒ neither is consulted downstream.
@@ -13425,6 +13478,7 @@ def _run_trade_job(
         owner_context = None
         owner_request_evidence = None
         owner_selected_run = None
+        season_out: dict = {}   # trade.season_signal: the job's evidence, for the request record
         if owner_on:
             try:
                 owner_context = _owner_generation_context(
@@ -13433,7 +13487,8 @@ def _run_trade_job(
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
                     captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
-                    job_draft_context=_owner_job_draft_context,
+                    job_draft_context=_owner_job_draft_context, season_out=season_out,
+                    **({"partner_projection": partner_projection} if partner_on else {}),
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -13444,7 +13499,8 @@ def _run_trade_job(
                     opponent_user_id=opponent_user_id, trade_intent=trade_intent,
                     **({"require_all_give": True} if pinned_give and pinned_give_mode == "all" else {}))
                 owner_request_evidence = _owner_selected_assignment(
-                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive)
+                    owner_context, "organic", serve=owner_exclusive, exclusive=owner_exclusive,
+                    season_evidence=season_out.get("evidence"))
                 owner_request_evidence.update(model_arm=owner_model,
                     unit="owner_only" if owner_exclusive else "team_draft",
                     assignment_probability=1.0 if owner_exclusive else None)
@@ -13570,7 +13626,8 @@ def _run_trade_job(
                 final_cards = legacy_cards
             else:
                 assignment = _owner_selected_assignment(owner_context, "targeted_deck",
-                                                       serve=owner_serve, exclusive=owner_exclusive)
+                                                       serve=owner_serve, exclusive=owner_exclusive,
+                                                       season_evidence=season_out.get("evidence"))
                 assignment["captured_at"] = owner_request_evidence["captured_at"]
                 final_cards = proposed if assignment["model_arm"] in _bakeoff.OWNER_ARMS else legacy_cards
                 for card in final_cards:
@@ -14358,8 +14415,7 @@ def _run_trade_job(
             final_cards, owner_presentment = trade_bilateral_presentment.present(
                 final_cards, selected_give=pinned_give or (),
                 selected_receive=pinned_receive or (), opponent_user_id=opponent_user_id,
-                generator_version=(owner_model_version if owner_model_version in ("owner-v2-bilateral-3", "owner-v2-bilateral-4")
-                                   else trade_bilateral_presentment.GENERATOR_VERSION))
+                generator_version=_bakeoff.owner_presentment_version(owner_config))
             with _trade_jobs_lock:
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
@@ -15394,7 +15450,7 @@ def player_to_dict(p) -> dict:
         "injury_status",        "injury_body_part",
         "birth_date",           "height",  "weight",
         "college",              "search_rank", "adp",
-        "pick_value",
+        "pick_value",           "proj_slot", "proj_name",
     ):
         val = getattr(p, attr, None)
         if val is not None:
@@ -19671,10 +19727,11 @@ def _consensus_pricing(fmt: str, league_id: str | None = None):
             # 60s cache), never per pick — same discipline as the deck
             # lane's lookup in `_owned_pick_assets`.
             _slot_order = _league_slot_order(league_id)
+            _projection = _league_pick_projection(league_id)
             for _p in load_draft_picks(league_id=league_id,
                                        source=_pick_read_source()):
                 league_pick_vals[_p["pick_id"]] = _priced_pick_value(
-                    _p, _slot_order, fmt)
+                    _p, _slot_order, fmt, _projection)
                 league_pick_rows.append(_p)
         except Exception as _lp_err:
             log.warning("evaluate: owned-pick load failed (continuing): %s", _lp_err)
@@ -20361,13 +20418,15 @@ def get_league_picks():
             return RankingService.tier_for_elo(
                 _trade_service_mod.value_to_elo(float(v)), None, fmt)
         slot_order = _league_slot_order(league_id)      # D-090, once per request
+        projection = _league_pick_projection(league_id) # projected slot value, once per request
         def _serialize(p: dict) -> dict:
-            priced = _priced_pick_value(p, slot_order, fmt)
+            priced = _priced_pick_value(p, slot_order, fmt, projection)
             value = round(priced, 1) if priced > 0 else None
             return {**p, "pool_value": value,
                     "original_username": pick_team_name(p, "original"),
                     "owner_username": pick_team_name(p, "owner", raw),
-                    "label": _owned_pick_label(p, slot_order),
+                    "label": _owned_pick_label(p, slot_order, projection, fmt),
+                    **_owned_pick_projection_fields(p, slot_order, projection, fmt),
                     "tier": _pick_tier(value),
                     **_pick_wire_source(p, tradeable)}
         all_picks = [_serialize(p) for p in raw]
@@ -20382,7 +20441,8 @@ def get_league_picks():
         return jsonify({"error": "internal_error"}), 500
 
 
-def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
+def _owned_pick_label(p: dict, slot_order: dict | None = None, projection=None,
+                      scoring_format: str = DEFAULT_SCORING) -> str:
     """Display label for an owned pick, e.g. "2027 1st" or
     "2026 2nd (from Jared)" when the pick was acquired via trade.
 
@@ -20400,18 +20460,56 @@ def _owned_pick_label(p: dict, slot_order: dict | None = None) -> str:
 
     `slot_order` is passed in, never looked up here: this runs once per pick and
     the lookup is once per league (see `_league_slot_order`).
+
+    Projected slot value (operator ruling 2026-11-11) — with `projection`
+    (`_league_pick_projection`, the one the price came from) a pick whose
+    price the projection set names its projected slot in place of the round
+    and ends in the plain-text marker: "2027 1.02 (from dondags) · projected".
+    `_owned_pick_projection_fields` carries the same name without the marker
+    for clients that render their own tag. `projection=None` changes nothing.
     """
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return f"{name}{_PROJECTED_PICK_MARKER}" if projected else name
+
+
+#: The plain-text marker an adjusted pick's `name`/`label` ends with, so a
+#: client build that predates `proj_name` still says it is a projection.
+_PROJECTED_PICK_MARKER = " \u00b7 projected"
+
+
+def _owned_pick_name(p: dict, slot_order: dict | None, projection,
+                     scoring_format: str) -> tuple[str, str | None]:
+    """`(name without marker, projected slot or None)` — the one composition
+    behind `_owned_pick_label` and `_owned_pick_projection_fields`. A real
+    D-090 slot wins; else a pick the projection priced shows its projected
+    slot (`pick_values.projected_pick_slot`); else the round ordinal."""
     season = p.get("season")
     rnd = int(p.get("round") or 0)
     slot = pick_slots.slot_for(slot_order, season, rnd,
                                p.get("original_roster_id"))
+    projected = None
+    if not slot and projection is not None:
+        guess = projected_pick_slot(p, projection, scoring_format)
+        projected = pick_slots.slot_suffix(rnd, guess) if guess else None
     unit = (pick_slots.slot_suffix(rnd, slot) if slot
-            else _PICK_ORDINALS.get(rnd, str(p.get("round"))))
+            else projected or _PICK_ORDINALS.get(rnd, str(p.get("round"))))
     base = f"{season} {unit}"
     original = pick_team_name(p, "original")
     if p.get("is_traded") and original:
-        return f"{base} (from {original})"
-    return base
+        return f"{base} (from {original})", projected
+    return base, projected
+
+
+def _owned_pick_projection_fields(p: dict, slot_order: dict | None, projection,
+                                  scoring_format: str = DEFAULT_SCORING) -> dict:
+    """`{"proj_slot": "1.02", "proj_name": "2027 1.02 (from dondags)"}` for a
+    pick the projection priced, else `{}` — so an unadjusted pick's payload is
+    byte-identical. Clients print `proj_name` plus their own PROJECTED tag and
+    never compose or parse these strings (docs/cross-client-invariants.md)."""
+    if projection is None:
+        return {}
+    name, projected = _owned_pick_name(p, slot_order, projection, scoring_format)
+    return {"proj_slot": projected, "proj_name": name} if projected else {}
 
 
 def _pick_labels_by_id(asset_ids) -> dict[str, str]:
@@ -20483,11 +20581,13 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 ).where(draft_picks_table.c.pick_id.in_(owned_ids))
             ).fetchall()
         orders: dict[str, dict | None] = {}
+        projections: dict[str, object] = {}
         for r in rows:
             m = r._mapping
             lg = str(m["league_id"] or "")
             if lg not in orders:
                 orders[lg] = _league_slot_order(lg)
+                projections[lg] = _league_pick_projection(lg)
             labels[m["pick_id"]] = _owned_pick_label({
                 "season":             m["season"],
                 "round":              m["round"],
@@ -20496,7 +20596,7 @@ def _pick_labels_by_id(asset_ids) -> dict[str, str]:
                 "original_roster_id": m["original_roster_id"],
                 "source":             m["source"],
                 "original_user_id":   m["original_user_id"],
-            }, orders[lg])
+            }, orders[lg], projections[lg])
     except Exception as e:
         # Display-only enrichment — a lookup failure must never fail the
         # route; the caller falls back to the raw id exactly as before.
@@ -20722,6 +20822,99 @@ def _invalidate_slot_order(league_id: str) -> None:
         _slot_order_cache.pop(str(league_id), None)
 
 
+# ── Projected slot value — next-draft firsts by projected draft order ─────
+# docs/plans/pick-value-projected-slot/design.md. The twin of
+# `_league_slot_order`: one read per LEAGUE, cached, passed down to every
+# pick. The cache holds the knob-free run summary; the gates and knobs are
+# applied on every call (a dict of floats), so a knob write takes effect at
+# the next reload without waiting out the TTL.
+
+_PICK_PROJECTION_TTL_SECONDS = 300
+_pick_projection_cache: dict[str, tuple[float, object]] = {}
+_pick_projection_lock = threading.Lock()
+
+
+def _pick_projection_enabled() -> bool:
+    """Read live (not off the FLAGS snapshot), like `_slot_labels_enabled`."""
+    return is_enabled("picks.projected_slot_value")
+
+
+def _load_pick_projection_summary(league_id: str):
+    """The newest complete baseline forecast for the league from ANY user
+    whose model is current, compacted, or None. Baselines are the targets'
+    `last_success_id` rows (scenario runs are user what-ifs and never are).
+    Reads `result_json` one row at a time, newest first, so a valid newest
+    run costs one parse."""
+    from sqlalchemy import select as _sa_select
+    from .database import (engine as _engine, get_league_platform,
+                           league_projection_runs_table as _runs,
+                           league_projection_targets_table as _targets)
+    from .league_projections.core import VERSION as _forecast_version
+    from . import pick_projection as _pp
+    if get_league_platform(league_id) != "sleeper":
+        return None
+    with _engine.connect() as conn:
+        baselines = _sa_select(_targets.c.last_success_id).where(
+            _targets.c.league_id == str(league_id),
+            _targets.c.last_success_id.is_not(None))
+        ids = conn.execute(_sa_select(_runs.c.run_id, _runs.c.created_at).where(
+            _runs.c.league_id == str(league_id), _runs.c.status == "complete",
+            _runs.c.run_id.in_(baselines)).order_by(_runs.c.created_at.desc())).fetchall()
+        for run_id, created_at in ids:
+            text = conn.execute(_sa_select(_runs.c.result_json).where(
+                _runs.c.run_id == run_id)).scalar()
+            summary = _pp.compact(text, run_id=run_id, created_at=created_at)
+            if summary is not None and summary.model_version == _forecast_version:
+                return summary
+    return None
+
+
+def _league_pick_projection(league_id: str):
+    """The league's usable `pick_projection.PickProjection`, or None.
+
+    None — flag off, the demo league, a non-Sleeper league, no qualifying run,
+    any gate failing, or weight 0 — makes every pick price and label exactly
+    as without the feature. Never raises: a failed read logs and prices
+    generic."""
+    if not league_id or league_id == "league_demo" or not _pick_projection_enabled():
+        return None
+    from . import pick_projection as _pp
+    from .league_projections.core import VERSION as _forecast_version
+    now = time.time()
+    with _pick_projection_lock:
+        hit = _pick_projection_cache.get(league_id)
+    if hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS:
+        summary = hit[1]
+    else:
+        try:
+            summary = _load_pick_projection_summary(league_id)
+        except Exception as e:
+            log.warning("pick-projection read failed for %s: %s", league_id, e)
+            summary = None
+        with _pick_projection_lock:
+            if len(_pick_projection_cache) > 500:
+                _pick_projection_cache.clear()
+            _pick_projection_cache[league_id] = (now, summary)
+    c = _trade_service_mod._c
+    projection = _pp.usable(
+        summary, model_version=_forecast_version, now=datetime.now(timezone.utc),
+        weight=c("pick_projection_weight"), min_weeks=c("pick_projection_min_weeks"),
+        max_age_days=c("pick_projection_max_age_days"),
+        max_round=c("pick_projection_max_round"),
+        season_scaling=c("pick_projection_season_scaling"))
+    if not (hit and now - hit[0] < _PICK_PROJECTION_TTL_SECONDS):
+        log.info("pick-projection: league=%s applied=%s w=%s", league_id,
+                 projection is not None,
+                 round(projection.weight, 3) if projection is not None else None)
+    return projection
+
+
+def _pick_projection_key(league_id: str) -> str | None:
+    """The projection's cache key for `roster_snapshot`'s vsn1, or None."""
+    projection = _league_pick_projection(league_id)
+    return projection.key if projection is not None else None
+
+
 # ── D-148 — ONE priced value for an owned pick, engine and league alike ───
 #
 # D-146 shipped the per-slot waterfall into the ENGINE only and left the two
@@ -20741,7 +20934,7 @@ def _invalidate_slot_order(league_id: str) -> None:
 # DB read plus a cache lookup once per LEAGUE. Every caller hoists it.
 
 def _priced_pick_value(p: dict, slot_order: dict | None,
-                       scoring_format: str) -> float:
+                       scoring_format: str, projection=None) -> float:
     """The engine value of ONE owned-pick row `p` — THE only pricing call.
 
     `pick_slots.slot_for` is pure and refuses everything it should (a future
@@ -20754,11 +20947,16 @@ def _priced_pick_value(p: dict, slot_order: dict | None,
     Returns a number in the stored `draft_picks.pool_value` scale
     (elo_to_value units). It NEVER writes: pricing is read-time in every mode
     and the stored column stays the sync-written ladder value (D-146).
+
+    `projection` is `_league_pick_projection(league_id)`, hoisted once per
+    league beside `slot_order` by every caller (projected slot value; None =
+    today's price exactly). Passed POSITIONALLY at every site.
     """
     return priced_pool_value(
         p, scoring_format=scoring_format,
         slot=pick_slots.slot_for(slot_order, p.get("season"), p.get("round"),
-                                 p.get("original_roster_id")))
+                                 p.get("original_roster_id")),
+        projection=projection)
 
 
 def _owned_picks_available(league_id: str, league) -> bool:
@@ -20839,6 +21037,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
     # asserted. The guard `_owned_picks_available` decides per league; this
     # decides per row.
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     # `picks`, when supplied, is the SAME read this line would issue, already
     # done once for this job (see `_run_trade_job`'s `_job_draft_picks`).
     if picks is None:
@@ -20856,7 +21055,7 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             # `_owned_pick_label` would mean changing all five of its call
             # sites, four of which have no price to keep in step.
             _priced[p["pick_id"]] = _priced_pick_value(p, slot_order,
-                                                       scoring_format)
+                                                       scoring_format, projection)
 
     out: dict[str, list] = {}
     for owner, picks in by_owner.items():
@@ -20871,13 +21070,15 @@ def _owned_pick_assets(league_id: str, scoring_format: str = "1qb_ppr",
             inv_pick_value = (v2e(pool_v) - 1200.0) / 6.0
             assets.append(Player(
                 id               = p["pick_id"],
-                name             = _owned_pick_label(p, slot_order),
+                name             = _owned_pick_label(p, slot_order, projection,
+                                                     scoring_format),
                 position         = "PICK",
                 team             = "PICK",
                 age              = 0,
                 years_experience = 0,
                 pick_value       = round(inv_pick_value, 3),
                 search_rank      = _OWNED_PICK_SEARCH_RANK.get(int(p.get("round") or 4), 200),
+                **_owned_pick_projection_fields(p, slot_order, projection, scoring_format),
             ))
         if assets:
             out[owner] = assets
@@ -21286,6 +21487,10 @@ def _fit_league_context(owner_context, service):
     each window, exactly as trade_gen_owner._team resolves an undeclared team
     (a stored inferred outlook, else infer_team_outlook over the roster under
     the job's config). A DECLARED outlook is never read here.
+
+    Flag trade.fit_position_ranks (read once here, for the whole job): off ⇒
+    the block states no league rank, so the position-value walk is skipped
+    and the context carries the roster reads alone.
     """
     if owner_context is None or not is_enabled("trade.fit_first_copy"):
         return None
@@ -21300,14 +21505,17 @@ def _fit_league_context(owner_context, service):
         for member in league.members:
             if member.user_id != viewer:
                 rosters[member.user_id] = list(member.roster)
-        seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
-                                         players.values())
-        player_ids = {uid: [pid for pid in roster
-                            if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
-                      for uid, roster in rosters.items()}
-        teams = compute_power_rankings(
-            [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
-            seed, meta)
+        position_ranks = is_enabled("trade.fit_position_ranks")
+        teams, player_ids = [], {}
+        if position_ranks:
+            seed, meta = _power_value_inputs(owner_context["scoring_format"], service,
+                                             players.values())
+            player_ids = {uid: [pid for pid in roster
+                                if not ts.is_pick_asset(players.get(pid) or meta.get(pid))]
+                          for uid, roster in rosters.items()}
+            teams = compute_power_rankings(
+                [{"user_id": uid, "player_ids": ids} for uid, ids in player_ids.items()],
+                seed, meta)
         prefs = owner_context.get("manager_preferences") or {}
         inferred = owner_context.get("inferred_outlooks") or {}
         reads = {}
@@ -21320,9 +21528,15 @@ def _fit_league_context(owner_context, service):
                     read = ts.infer_team_outlook(list(roster), players,
                                                  num_teams=len(rosters))[0]
                 reads[uid] = read
+        # trade.partner_outlook_projection: a read taken from the saved
+        # forecast is tagged as such (the tag's words are unchanged).
+        sources = {uid: "projection" for uid in reads if uid != viewer
+                   and (prefs.get(uid) or {}).get("outlook_source") == "projection"}
         return FitLeagueContext(viewer_id=viewer, teams=teams,
-                                medians=_position_medians(teams),
-                                rosters=player_ids, reads=reads)
+                                medians=_position_medians(teams) if position_ranks else {},
+                                rosters=player_ids, reads=reads,
+                                position_ranks=position_ranks,
+                                **({"sources": sources} if sources else {}))
     except Exception:
         log.exception("fit block: league context unavailable (cards carry no block)")
         return None
@@ -21376,6 +21590,14 @@ def trade_card_to_dict(card, players: dict) -> dict:
             fit = _fit_block(identity, card, players, card.fit_context)
             if fit:
                 out["fit_block"] = fit
+            # Win-now season signal (lld §5.2, trade.season_signal): composed
+            # from the frozen proof alone (revision 5 carries `season_signal`);
+            # absent, never null or empty, when there is nothing to show.
+            if is_enabled("trade.season_signal"):
+                from .trade_narrative import season_block as _season_block
+                season = _season_block(identity, card, players)
+                if season:
+                    out["season_block"] = season
     # Pick-denominated value verdict (feedback #157 value-bar) — the same
     # {give_value, receive_value, favors, gap} shape POST /api/trade/evaluate
     # returns, built here from the card's own consensus package values via the
@@ -22172,12 +22394,112 @@ def _owner_enabled(league_id):
             and any(arm in _bakeoff.OWNER_ARMS for arm in _bakeoff.arm_roster(exclusive=False)))
 
 
+_PARTNER_UNREAD = object()   # _owner_generation_context: no forecast read was passed
+
+
+def _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection):
+    """trade.partner_outlook_projection: each league-mate's assumed outlook and
+    its source (`partner_outlook.assumed`). A league-mate with no saved outlook
+    and a projection read gets it as `inferred_outlook`, the engine's input for
+    an undeclared team (the owner generators and the fit block's roster read
+    both take it from there). Every league-mate's preferences record
+    `outlook_source` (declared / projection / roster), which the request
+    evidence captures. The viewer is not touched (D-230)."""
+    if partner_projection is _PARTNER_UNREAD:
+        partner_projection = _partner_outlook.session_reads(
+            sess, user_id, league.league_id, [m.user_id for m in league.members],
+            platform=getattr(league, "platform", "sleeper"))
+    reads = (partner_projection or {}).get("reads") or {}
+    for uid, prefs in manager_preferences.items():
+        if uid == user_id:
+            continue
+        outlook, source = _partner_outlook.assumed(
+            uid, declared={uid: prefs.get("team_outlook")}, projection=reads,
+            roster=prefs.get("inferred_outlook"))
+        if source == "projection":
+            prefs["inferred_outlook"] = outlook
+        prefs["outlook_source"] = source
+
+
+def _season_evidence(user_id, league_id, platform, slots, *, as_of=None):
+    """The season evidence for one owner job (win-now season signal, lld §6).
+
+    Read only: the account's last saved league forecast for this league
+    (`league_projections.batch.view` for its state, `store.get` for the
+    snapshot); never queues a run or calls a provider. Not a Sleeper league:
+    `platform_unsupported` without touching the store. `slots` None means the
+    snapshot's own (the admin label tool, which has no session). Any failure is
+    `read_failed`, logged without payloads: the job then serves today's deck.
+    """
+    from . import season_value
+    if str(platform or "").lower() != "sleeper":
+        return season_value.unavailable("platform_unsupported")
+    try:
+        from .league_projections import batch as lp_batch, store as lp_store
+        from .league_projections.core import VERSION as model_now
+        view = lp_batch.view(user_id, league_id)
+        run = view.get("run")
+        if not run or view.get("state") == "unsupported_policy":
+            return season_value.unavailable("no_forecast")
+        model_version = (json.loads(run.get("result_json") or "null") or {}).get("model_version")
+        if model_version != model_now:
+            return season_value.unavailable("old_model")      # no snapshot read for a dead model
+        if view.get("state") != "current":
+            return season_value.unavailable("stale")
+        row = lp_store.get(run["run_id"], user_id, league_id)
+        snapshot = (row or {}).get("snapshot_json")
+        if snapshot is not None and slots is None:
+            snapshot = json.loads(snapshot) if isinstance(snapshot, (str, bytes)) else snapshot
+            slots = snapshot.get("slots")
+        return season_value.build_evidence(
+            snapshot, as_of=as_of or datetime.now(timezone.utc), league_id=league_id, slots=slots,
+            platform="sleeper", run_id=run["run_id"], model_version=model_version, current=True)
+    except Exception as exc:
+        log.warning("season signal: forecast read failed (%s)", type(exc).__name__)
+        return season_value.unavailable("read_failed")
+
+
+def _season_viewer_complete(evidence, *, user_roster, players, seed_map):
+    """PRD §2.5 rule 5 on the VIEWER's roster only: a healthy, unprojected
+    player worth the filler floor or more makes the viewer's season lineup
+    unknown (`viewer_unprojected_asset`). League-mates' gaps never count."""
+    from . import season_value
+    from .trade_roster import UNAVAILABLE
+    if not season_value.usable(evidence):
+        return evidence
+    value = _trade_service_mod.make_consensus_value_fn(seed_map, players)
+    roster = [pid for pid in user_roster if pid in players]
+    market = {pid: value(pid) for pid in roster if isinstance(seed_map.get(pid), (int, float))}
+    return season_value.require_viewer_projected(
+        evidence, roster=roster, position={pid: getattr(players[pid], "position", None) for pid in roster},
+        market=market,
+        inactive={pid for pid in roster
+                  if str(getattr(players[pid], "injury_status", "") or "").upper() in UNAVAILABLE})
+
+
+def _log_season_signal(evidence, viewer_prefs, config):
+    """The one counts-only `season-signal:` line per organic owner job (no ids)."""
+    from . import season_value
+    declared = viewer_prefs.get("team_outlook")
+    outlook = declared or viewer_prefs.get("inferred_outlook")
+    revision_5 = _bakeoff.owner_revision_5_enabled(config)
+    scored = (revision_5 and season_value.usable(evidence)
+              and outlook in ("championship", "contender", "rebuilder", "jets"))
+    log.info("season-signal: state=%s reason=%s weeks=%d viewer_outlook=%s source=%s scored=%s "
+             "unprojected=%d revision=%s",
+             evidence.get("state"), evidence.get("reason") or "-", len(evidence.get("weeks") or ()),
+             outlook or "-", "declared" if declared else ("inferred" if outlook else "-"),
+             "true" if scored else "false", len(evidence.get("unprojected") or ()),
+             _bakeoff.owner_version(config))
+
+
 def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
                               captured_config=None, job_draft_picks=None,
-                              job_draft_context=None, **selection):
+                              job_draft_context=None, partner_projection=_PARTNER_UNREAD,
+                              season_out=None, **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
@@ -22186,6 +22508,12 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
     each, the ones its roster stamp is checked against (#486 QA P3-1); other
     entrances read their own.
+    `partner_projection`: the job's one forecast read
+    (`partner_outlook.session_reads`); an entrance that passes none reads its
+    own once here. Only with trade.partner_outlook_projection on.
+    `season_out`: a trade job's dict; with trade.season_signal on it receives
+    the job's season evidence under "evidence" (the request record's copy),
+    never a context key, so no generator but revision 5 ever sees it.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -22227,6 +22555,8 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         prefs["lineup_source"] = "observed" if roster_slots else "estimated"
         prefs["roster_capacity"] = sum(s not in ("IR", "TAXI") for s in roster_slots) if roster_slots else None
         manager_preferences[uid] = prefs
+    if _partner_outlook.enabled(is_enabled):
+        _apply_partner_outlooks(manager_preferences, user_id, sess, league, partner_projection)
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
@@ -22280,6 +22610,21 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
         # compares within the league. Only revision 4 accepts the key, and
         # flag-off contexts, evidence and request hashes never carry it.
         context["partner_activity"] = load_manager_trade_counts(league.league_id)
+    if FLAGS.trade_season_signal and _bakeoff.owner_revision_enabled(config) and (
+            season_out is not None or _bakeoff.owner_revision_5_enabled(config)):
+        # Win-now season signal (lld §6): one forecast read per owner job. The
+        # trade job passes `season_out` and records the evidence on its request
+        # record whatever revision is selected; only revision 5 accepts the
+        # generator keyword. Flag off: no read, no line, no key.
+        evidence = _season_evidence(user_id, league.league_id, getattr(league, "platform", None),
+                                    own["starter_slots"])
+        evidence = _season_viewer_complete(evidence, user_roster=user_roster, players=players,
+                                           seed_map=seed_map)
+        if _bakeoff.owner_revision_5_enabled(config):
+            context["season_evidence"] = evidence
+        if season_out is not None:
+            season_out["evidence"] = evidence
+            _log_season_signal(evidence, own, config)
     if _bakeoff.owner_revision_enabled(config):
         from .trade_input_evidence import detached_context, PoolInputEvidence
         pool = (g_universal_by_format.get(scoring_format)
@@ -22362,18 +22707,34 @@ def _owner_request_snapshot(assignment, card, *, detach=True):
     if "input_evidence" in assignment:
         from .trade_input_evidence import project_evidence
         snapshot["input_evidence"] = project_evidence(assignment["input_evidence"], assets)
+    if isinstance(assignment.get("season_evidence"), dict):
+        # Per impression: the offered assets' rows only; the request record
+        # (bake-off run) keeps the whole map and the digest names it.
+        season = assignment["season_evidence"]
+        snapshot["season_evidence"] = {
+            **season,
+            **({"players": {pid: row for pid, row in season["players"].items() if pid in assets}}
+               if isinstance(season.get("players"), dict) else {}),
+            **({"unprojected": [pid for pid in season["unprojected"] if pid in assets]}
+               if isinstance(season.get("unprojected"), list) else {})}
     # Impression assembly serializes this frozen request immediately without
     # mutating it. Other consumers retain the detached-copy contract.
     return copy.deepcopy(snapshot) if detach else snapshot
 
 
-def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
+def _owner_selected_assignment(context, surface, *, serve, exclusive=False, season_evidence=None):
     """Stable request/input assignment, not a client-selected model or user trial.
 
     Do not hash capture time: identical repeated requests stay in the same arm.
     A genuinely changed board/market/outlook/roster is a new comparison unit.
+    `season_evidence` (trade.season_signal): the job's evidence, else the
+    context's (revision 5). Only its digest (or state and reason) joins the
+    hash, never `as_of`; the full object is recorded beside `input_evidence`.
     """
-    inputs = _owner_canonical({k: v for k, v in context.items() if k not in {"players", "league", "input_evidence"}})
+    if season_evidence is None:
+        season_evidence = context.get("season_evidence")
+    inputs = _owner_canonical({k: v for k, v in context.items()
+                               if k not in {"players", "league", "input_evidence", "season_evidence"}})
     inputs["members"] = [{"id": m.user_id, "roster": list(m.roster),
                           "elo": m.elo_ratings,
                           "board_updated_at": getattr(m, "board_updated_at", None)}
@@ -22408,6 +22769,21 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
         canonical["config"].pop("owner_bilateral_revision_4_enabled", None)
     if not canonical["config"].get("owner_bilateral_revision_enabled"):
         canonical["config"].pop("owner_bilateral_revision_enabled", None)
+    if not _bakeoff.owner_revision_5_enabled(context["config"]):
+        # Revision 5's selector and season knobs never reshuffle revision 2-4 units.
+        for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
+                    "season_partner_matching", "season_shed_weight_tanking",
+                    "season_shed_weight_rebuilding"):
+            canonical["config"].pop(key, None)
+    if season_evidence is not None:
+        canonical["season_evidence"] = (
+            {"digest": season_evidence.get("digest")} if season_evidence.get("digest")
+            else {"state": season_evidence.get("state"), "reason": season_evidence.get("reason")})
+    from . import trade_gen_owner as _owner_gen
+    if not _owner_gen.untouchable_hard(canonical["config"]):
+        # Knob 0 is the premium-return rule every unit before it was built
+        # under: it keeps their hashes. On (the default) it is a new unit.
+        canonical["config"].pop(_owner_gen.UNTOUCHABLE_HARD_KEY, None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:
@@ -22435,6 +22811,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
             **({"exclusive": True} if exclusive else {}),
             "serve_enabled": serve, "input": inputs,
             **({"input_evidence": input_evidence} if input_evidence is not None else {}),
+            **({"season_evidence": copy.deepcopy(season_evidence)} if season_evidence is not None else {}),
             "captured_at": datetime.now(timezone.utc).isoformat(), "market_as_of": "unavailable"}
 
 
@@ -29787,6 +30164,70 @@ def admin_config_update(key: str):
         return jsonify({"error": "internal_error"}), 500
 
 
+def _season_label_rows(user_id: str, league_id: str) -> dict:
+    """One league's label-review rows (`season-label-review-1`, lld §8) for an
+    account and league, from stored state only: the league's stored rosters,
+    the consensus pool, and the account's saved forecast (read only, no
+    provider call). The viewer is the account's team; boards are consensus, so
+    no private board is read. Raises LookupError for an unknown league or an
+    account with no team in it."""
+    from . import trade_gen_bilateral_season as r5
+    from .eval.season_label_review import SCHEMA, rows_from_search
+    from . import season_value
+    from .database import get_league_platform
+    platform = get_league_platform(league_id)
+    members_rows = load_league_members(league_id)
+    if platform is None or not members_rows:
+        raise LookupError("league_not_found")
+    viewer_row = next((m for m in members_rows if str(m.get("user_id")) == user_id), None)
+    if viewer_row is None:
+        raise LookupError("not_a_member")
+    pool, seed = _get_universal_pool(get_league_scoring(league_id))
+    players = {p.id: p for p in pool}
+    rosters = {str(m["user_id"]): [str(x) for x in m.get("player_ids") or [] if str(x) in players]
+               for m in members_rows}
+    evidence = _season_evidence(user_id, league_id, platform, None)
+    key = "league-" + hashlib.sha256(str(league_id).encode()).hexdigest()[:10]
+    out = {"schema": SCHEMA, "league_key": key, "label_rules_version": r5.LABEL_RULES_VERSION,
+           "evidence": {"state": evidence.get("state"), "reason": evidence.get("reason"),
+                        "weeks": evidence.get("weeks") or [], "captured_at": evidence.get("captured_at")},
+           "line": {}, "players": [], "own": []}
+    if not season_value.usable(evidence):
+        return out
+    members = [_trade_service_mod.LeagueMember(uid, uid, roster, {}, False)
+               for uid, roster in sorted(rosters.items()) if uid != user_id and roster]
+    slots = list(evidence["slots"])
+    search = r5._Search(
+        players=players, league=_trade_service_mod.League(str(league_id), "League", platform, members),
+        user_id=user_id, user_roster=rosters[user_id], seed_elo=dict(seed), user_elo=dict(seed),
+        outlook="championship", fairness_threshold=0.75,
+        manager_preferences={uid: {"starter_slots": slots, "lineup_source": "observed"} for uid in rosters},
+        season_evidence=evidence)
+    return {**rows_from_search(search, key), "evidence": out["evidence"]}
+
+
+@app.route("/api/admin/season-signal/labels", methods=["GET"])
+def admin_season_signal_labels():
+    """GET /api/admin/season-signal/labels?user_id=&league_id= (X-Cron-Secret).
+
+    The win-now season signal's label table for one account's league, as the
+    rows `backend/eval/season_label_review.py write --rows` reads
+    (`season-label-review-1`). Operator tool: read only, not flag-gated. Rows
+    carry public NFL player ids and names, never a user id, team name or
+    manager name; `league_key` is a hash of the league id. Without usable
+    season evidence the rows are empty and `evidence` says why.
+    """
+    _require_cron_auth()
+    user_id = str(request.args.get("user_id") or "").strip()
+    league_id = str(request.args.get("league_id") or "").strip()
+    if not user_id or not league_id:
+        return jsonify(error="user_id_and_league_id_required"), 400
+    try:
+        return jsonify(_season_label_rows(user_id, league_id))
+    except LookupError as exc:
+        return jsonify(error=str(exc)), 404
+
+
 @app.route("/api/admin/engine-metrics", methods=["GET"])
 def admin_engine_metrics():
     """
@@ -30270,6 +30711,14 @@ def session_init():
                                   league_user_id, league_display_name,
                                   user_player_ids, opponent_rosters)]
                              if _s0_raw.get("fetch_started_at") else None),
+        # trade.partner_outlook_projection: which Sleeper roster each league
+        # member owns or co-owns, from this init's read, so a league-mate's
+        # forecast probability (keyed by roster_id) maps to the member without
+        # another Sleeper call. Always set: `update` must not keep an older
+        # init's (or another league's) rosters.
+        "sleeper_roster_index": ({"league_id": str(league_id),
+                                  "rosters": _partner_outlook.roster_index(_s0_raw.get("rosters"))}
+                                 if _s0_raw.get("rosters") else None),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -30411,6 +30860,9 @@ def session_init():
                     platform         = authoritative["platform"],
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
+                    # League median, from the league payload S0 already
+                    # read (no extra call); None for a platform league.
+                    median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
                 )
                 if (authoritative["platform"] == "sleeper" and is_enabled("league.projections")
                         and not _tp.is_test_league_id(league_id)):
@@ -33546,10 +33998,12 @@ def _share_value_snapshot(give_ids, recv_ids, fmt, league_id=None) -> str | None
                             / e2v(GENERIC_PICK_SEEDS[(1, "Mid")]))
         from . import roster_snapshot
         from .database import engine as _engine
+        projection_key = _pick_projection_key(league_id or "")
         with _engine.connect() as conn:
             vsn = roster_snapshot.values_snapshot_id(
                 conn, fmt, league_id or "", g_universal_by_format.get(fmt) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(),
+                pick_projection_key=projection_key)
         pick = v["gap"].get("pick_equivalent")
         snapshot = {
             "v":                1,
@@ -38897,6 +39351,7 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
     cur_season = min(seasons) if seasons else 0
     tradeable = _asserted_picks_tradeable()
     slot_order = _league_slot_order(league_id)           # D-090, once per league
+    projection = _league_pick_projection(league_id)      # projected slot value, once per league
     out: dict[str, list[dict]] = {}
     for p in rows:
         owner = str(p.get("owner_user_id") or "")
@@ -38916,9 +39371,10 @@ def _power_picks_by_owner(league_id: str, fmt: str) -> dict[str, list[dict]]:
             years_out = max(0, int(p.get("season") or cur_season) - cur_season)
             p = {**p, "pool_value": pick_pool_value(
                 int(p.get("round") or 4), years_out, fmt)}
-        val = _priced_pick_value(p, slot_order, fmt)
+        val = _priced_pick_value(p, slot_order, fmt, projection)
         out.setdefault(owner, []).append({
-            "label": _owned_pick_label(p, slot_order),
+            "label": _owned_pick_label(p, slot_order, projection, fmt),
+            **_owned_pick_projection_fields(p, slot_order, projection, fmt),
             "value": round(float(val), 1),
             # #285 — round for _pick_firsts_equivalent's literal pick-count
             # label math; never serialized on its own (see docstring above).
@@ -39635,6 +40091,25 @@ def league_team_review_route():
             except Exception:
                 member_windows[uid] = "not_sure"
 
+        # trade.partner_outlook_projection — the same assumed outlook the trade
+        # engine and the card's fit tag use (partner_outlook.assumed): a
+        # league-mate with no saved outlook takes their read from the saved
+        # forecast when it is usable. A saved outlook is never shown here
+        # (this beat has only ever used reads), so a declared league-mate
+        # keeps the roster read. One forecast read for the request.
+        member_outlook_sources = None
+        if _partner_outlook.enabled(is_enabled):
+            member_outlook_sources = {}
+            others = [uid for uid in member_windows if uid != str(me_league_id)]
+            projection = (_partner_outlook.session_reads(
+                sess, str(sess["user_id"]), str(league_id), others, platform=platform) or {}).get("reads") or {}
+            declared = ({uid: (row or {}).get("team_outlook") for uid, row in
+                         load_league_preferences_bulk(others, str(league_id)).items()}
+                        if projection else {})
+            for uid in others:
+                member_windows[uid], member_outlook_sources[uid] = _partner_outlook.public(
+                    uid, declared=declared, projection=projection, roster=member_windows[uid])
+
         my_window, _my_score, my_signals = _trade_service_mod.infer_team_outlook(
             my_roster, players_meta, pick_share.get(me_league_id, 0.0), len(members),
             firsts_ledgers.get(me_league_id),
@@ -39711,6 +40186,7 @@ def league_team_review_route():
             window_odds=window_odds,
             window_odds_reason=window_odds_reason,
             window_projection=window_projection,
+            member_outlook_sources=member_outlook_sources,
         )
         if not payload:
             return jsonify({"error": "league_not_found"}), 404
@@ -44955,7 +45431,7 @@ def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
     data = request.get_json(silent=True) if request.content_length else {}
-    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete"}:
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete", "retry_unsupported"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
         return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))
@@ -45058,6 +45534,8 @@ _install_overhaul(app, require_session=_require_initialized_session,
                   is_pick_asset=_is_ftf_pick_asset, owned_picks_available=_owned_picks_available,
                   inject_owned_picks=_inject_owned_picks, pick_label=_owned_pick_label,
                   slot_order=_league_slot_order, priced_pick_value=_priced_pick_value,
+                  pick_projection=_league_pick_projection,
+                  pick_projection_fields=_owned_pick_projection_fields,
                   elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
                   sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
 

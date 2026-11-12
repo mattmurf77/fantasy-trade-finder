@@ -80,6 +80,10 @@ export interface GuideScroller {
   /** The container's CURRENT content offset, so a window-space delta can be
    *  turned into an absolute offset. */
   getScrollY: () => number;
+  /** Optional: the container's visible rect in WINDOW coordinates (top,
+   *  height). The deck's why-pass frame (PassReasonChips) places its panel
+   *  inside it; without it the frame falls back to the safe-area window. */
+  measureViewport?: (cb: (top: number, height: number) => void) => void;
 }
 
 const scrollers = new Map<string, GuideScroller>();

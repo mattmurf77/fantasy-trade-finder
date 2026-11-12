@@ -205,7 +205,12 @@ def build_session(server, target):
     return {"user_id": uid, "league_user_id": target["league_user_id"],
         "league": league, "players": list(pool), "user_roster": roster,
         "services": {fmt: ranking}, "service": ranking,
-        "trade_svcs": {fmt: trades}, "trade_svc": trades, "active_format": fmt}
+        "trade_svcs": {fmt: trades}, "trade_svc": trades, "active_format": fmt,
+        # trade.partner_outlook_projection: the source's rosters map forecast
+        # roster ids to members, as session init's read does interactively.
+        "sleeper_roster_index": ({"league_id": str(target["league_id"]),
+            "rosters": server._partner_outlook.roster_index(_source_rosters(target["source"]))}
+            if target["platform"] == "sleeper" else None)}
 
 
 def _semantic_source(source):
@@ -327,6 +332,7 @@ def dependency_receipt(server, scope, session, target, *, exclude_job_id=None,
             for r in records["deck_suppressions"]},
         "pick_read_source": server._pick_read_source(),
         "slot_order": server._league_slot_order(lid),
+        **({"pick_projection": projection_key} if (projection_key := server._pick_projection_key(lid)) else {}),
         "preferences": server._trade_job_preferences(uid, lid, session, session["league"]),
         "config": dict(server._trade_service_mod._cfg), "flags": server.flags_dict()}
     # Hash each private component, not private values, in the lookup receipt.

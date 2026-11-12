@@ -5,13 +5,17 @@
 // WHY THIS EXISTS. The operator wants a reason only "once every few passes",
 // and a deck that never waits. Four properties would each regress silently:
 //   1. THE CADENCE — ask after N consecutive passes, then quiet for M passes;
-//      a like resets the run. Executed here against the real module.
+//      a like resets the run. An armed card whose why-pass frame never opened
+//      (liked, or swiped) carries the ask. Executed against the real module.
 //   2. FLAG OFF NEVER CHANGES ANYTHING — the state never moves, the card's
 //      reasons object is returned untouched, the hook adds no props.
 //   3. ONE TAP — a chip is the pass and the reason in one write and the deck
 //      advances at once (no layer-2 deferral, no undo hold that would let an
 //      Undo rewind a pass the reason write already committed).
 //   4. THE CHIPS — the operator's six phrases, each on a code the API knows.
+//   5. THE FRAME (TestFlight build 186 → operator 2026-11-11) — the asking
+//      card keeps its ✕; the ✕ opens a frame over the card; every exit from
+//      the frame is a pass; the non-cadence ✕ forms are unchanged.
 // Not runtime proof: the TestFlight checklist in the scope block is.
 //
 // Run: node tests/check-pass-reason-cadence.js  (npm run test:pass-reason-cadence)
@@ -48,13 +52,17 @@ vm.runInNewContext(ts.transpileModule(src, { compilerOptions: {
 } }).outputText, { module: mod, exports: mod.exports, require: () => ({}) });
 const C = mod.exports;
 
-/** Feed a sequence of 'p'/'l' and return, per card, whether it was asked. */
+/** Feed a sequence and return, per card, whether it was asked (armed).
+ *  'p' = pass with the ✕ (on an armed card the ✕ opens the frame, so the pass
+ *  is prompted), 's' = swipe / VoiceOver pass (frame never opens), 'l' = like
+ *  (frame never opens). */
 function run(on, seq, cfg = C.DEFAULT_CADENCE) {
   let s = C.INITIAL_CADENCE;
   const asked = [];
   for (const ch of seq) {
-    asked.push(C.shouldAsk(on, s, cfg));
-    s = C.recordDisposition(on, s, ch === 'l' ? 'like' : 'pass', cfg);
+    const armed = C.shouldAsk(on, s, cfg);
+    asked.push(armed);
+    s = C.recordDisposition(on, s, ch === 'l' ? 'like' : 'pass', cfg, ch === 'p' && armed);
   }
   return asked.map((a) => (a ? 'A' : '.')).join('');
 }
@@ -80,8 +88,18 @@ check('1f. a like during the quiet period does not shorten it', () => {
   // the five quiet passes are cards 5, 7, 8, 9, 10 (card 6 is the like); card 11 asks.
   eq(run(true, 'pppp' + 'p' + 'l' + 'ppp' + 'p' + 'p'), '...A' + '.' + '.' + '...' + '.' + 'A');
 });
-check('1g. a like ON the asked card ends that ask without a quiet period', () => {
-  eq(run(true, 'ppplppp' + 'p'), '...A...A');
+check('1g. a like ON the armed card (frame never opened) carries the ask', () => {
+  // card 4 armed, liked → card 5 still armed; its ✕ spends it → quiet.
+  eq(run(true, 'ppplppp' + 'p'), '...AA...');
+});
+check('1g2. a swipe ON the armed card (frame never opened) carries the ask', () => {
+  eq(run(true, 'pppssp' + 'p'), '...AAA.');
+});
+check('1g3. an unprompted pass of an armed card extends the run, quiet stays 0', () => {
+  const ripe = { consecutivePasses: 3, quietRemaining: 0 };
+  eq(C.recordDisposition(true, ripe, 'pass', C.DEFAULT_CADENCE, false), { consecutivePasses: 4, quietRemaining: 0 });
+  ok(C.recordDisposition(true, ripe, 'like', C.DEFAULT_CADENCE, false) === ripe, 'like moved an armed state');
+  eq(C.recordDisposition(true, ripe, 'pass', C.DEFAULT_CADENCE, true), { consecutivePasses: 0, quietRemaining: 5 });
 });
 check('1h. the asked pass starts a new run (N=1, M=0 asks every other card)', () => {
   eq(run(true, 'pppppp', { askAfter: 1, quietFor: 0 }), '.A.A.A');
@@ -92,8 +110,8 @@ check('2a. flag off: never asks, however long the run', () => {
 });
 check('2b. flag off: the state object never moves', () => {
   const s = { consecutivePasses: 7, quietRemaining: 2 };
-  ok(C.recordDisposition(false, s, 'pass', C.DEFAULT_CADENCE) === s, 'pass moved the state');
-  ok(C.recordDisposition(false, s, 'like', C.DEFAULT_CADENCE) === s, 'like moved the state');
+  ok(C.recordDisposition(false, s, 'pass', C.DEFAULT_CADENCE, true) === s, 'pass moved the state');
+  ok(C.recordDisposition(false, s, 'like', C.DEFAULT_CADENCE, true) === s, 'like moved the state');
 });
 check('2b2. flag killed mid-run: a ripe state still never asks', () => {
   ok(!C.shouldAsk(false, { consecutivePasses: 9, quietRemaining: 0 }, C.DEFAULT_CADENCE),
@@ -206,24 +224,147 @@ check('6b. hook: N and M come from the server payload', () => {
 check('6c. hook: prompt events are the two registered names', () => {
   ok(hook.includes("'pass_reason_prompt_shown'") && hook.includes("'pass_reason_prompt_dismissed'"), 'event names');
 });
+check('6d. hook: "shown" (frame opened) is what makes a pass spend the ask', () => {
+  ok(/onShown: \(tradeId: string\) => \{\s*shownRef\.current = true;\s*track\(\s*'pass_reason_prompt_shown'/.test(hook),
+    'onShown does not mark the frame shown before tracking');
+  ok(/const prompted = shownRef\.current;\s*shownRef\.current = false;/.test(hook), 'record does not read-and-clear the marker');
+  ok(hook.includes('recordDisposition(on, s, decision, cfg, prompted)'), 'record does not pass prompted');
+});
 
 const card = read('src/components/TradeCard.tsx');
-check('7a. TradeCard: chips take precedence over the tile panel', () => {
-  const chips = card.indexOf('disposition.reasons?.cadence ? (');
-  const panel = card.indexOf('<DeclineReasonPanel {...disposition.reasons} />');
-  ok(chips > 0 && panel > chips, 'chips branch must come first');
+check('7a. TradeCard: a cadence card mounts no inline panel/row under the card', () => {
+  ok(card.includes('{disposition.reasons?.cadence ? null : disposition.reasons && !reasonsAsOverlay ? ('),
+    'the cadence card is not excluded from the inline panel slot');
+  eq((card.match(/<PassReasonChips\b/g) || []).length, 1, 'PassReasonChips mounts');
 });
 check('7b. TradeCard: a chip is onLayer1 with its detail; Just pass is the plain pass', () => {
   ok(card.includes("onChip={(r, d) => disposition.reasons!.onLayer1(r, 'none', d)}"), 'chip wiring');
   ok(/onSkip=\{\(\) => \{\s*disposition\.reasons!\.cadence!\.onDismissed\(data\.trade_id\);\s*disposition\.onPass\(\);\s*\}\}/.test(card),
     'Just pass wiring');
 });
+// Build 186 ("a card with no pass button") → operator 2026-11-11: the asking
+// card keeps its ✕; the ✕ opens the frame over the card.
+const passBtnAt = card.indexOf('testID="trades.pass-btn"');
+const passBtnJsx = passBtnAt > 0
+  ? card.slice(card.lastIndexOf('<Pressable', passBtnAt), card.indexOf('</Pressable>', passBtnAt)) : '';
+check('7d. TradeCard: the ✕ unmounts only for the inline tile form, never on the asking card', () => {
+  ok(passBtnJsx, 'trades.pass-btn not found');
+  ok(card.includes('{disposition.reasons && !reasonsAsOverlay && !disposition.reasons.cadence ? null : ('),
+    '✕ mount condition does not keep it on the cadence card (or no longer drops it for the inline tiles)');
+  ok(/const passBtnMounted =\s*!!disposition && !\(disposition\.reasons && !reasonsAsOverlay && !disposition\.reasons\.cadence\);/.test(card),
+    'passBtnMounted (guide target trades.pass-btn) does not follow the ✕ mount condition');
+});
+check('7e. TradeCard: on the asking card the ✕ opens the frame and does not pass', () => {
+  ok(/: disposition\.reasons\?\.cadence\s*\?\s*\(\) => setReasonOverlayOpen\(true\)\s*: disposition\.onPass/.test(passBtnJsx),
+    '✕ on the cadence card does not open the frame (or the plain-pass fallback is gone)');
+});
+check('7f. TradeCard: the frame mounts only when opened, after every card block', () => {
+  const at = card.indexOf('{disposition?.reasons?.cadence && reasonOverlayOpen ? (');
+  ok(at > 0, 'frame mount is not gated on cadence + open');
+  // Only the Matches-only footer (never on a deck card; pinned last by
+  // check-match-value-section S-2) may follow — the frame must cover the card.
+  const tail = card.slice(at, card.indexOf('export default React.memo(TradeCardComp);'));
+  ok(/\) : null\}\s*\{footer \?\? null\}\s*<\/View>\s*\);\s*\}\s*$/.test(tail), 'something other than the footer renders after the frame');
+});
 const chipsSrc = read('src/components/PassReasonChips.tsx');
-check('7c. chips: no truncation, 44pt floor, radius ≤ 8, no emoji', () => {
+check('7g. frame: covers the card, every exit is onSkip, modal region', () => {
+  ok(/frame: \{\s*\.\.\.StyleSheet\.absoluteFillObject/.test(chipsSrc), 'frame is not an absolute fill over the card');
+  ok(/backgroundColor: scrim,/.test(chipsSrc), 'scrim is not the scrim token');
+  ok(/accessibilityViewIsModal\s*onAccessibilityEscape=\{skip\}/.test(chipsSrc), 'not a modal region with escape = pass');
+  ok(/testID="trades\.pass-reason-scrim"\s*style=\{styles\.scrim\}\s*onPress=\{skip\}/.test(chipsSrc), 'scrim tap is not the pass');
+  ok(/hardwareBackPress', \(\) => \{\s*if \(!disabledRef\.current\) skipRef\.current\(\);\s*return true;/.test(chipsSrc), 'Android back is not the pass');
+  ok(/testID="trades\.pass-reason-skip"\s*onPress=\{skip\}/.test(chipsSrc), 'Just pass is not onSkip');
+  ok(/testID="trades\.pass-reason-close"\s*onPress=\{skip\}/.test(chipsSrc), 'the close control is not onSkip');
+  ok(/accessibilityLabel="Close and pass on this trade"/.test(chipsSrc), 'close a11y label does not say it passes');
+  ok(/<Icon name="x" size=\{16\} color=\{pressed \? chalk\.base : chalk\.dim\} \/>/.test(chipsSrc), 'close is not a neutral chalk ✕');
+  ok(/close: \{\s*width: 44,\s*height: 44,/.test(chipsSrc), 'close is under the 44pt floor');
+  ok(/const skip = \(\) => \{\s*if \(!disabled\) onSkip\(\);\s*\};/.test(chipsSrc), 'skip ignores disabled');
+  ok(/AccessibilityInfo\.setAccessibilityFocus\(node\)/.test(chipsSrc), 'focus does not move into the frame');
+  ok(/Your answer helps us find better trades for you\./.test(chipsSrc), 'model-help copy line');
+});
+check('7c. chips: no truncation, 44pt floor, radius ≤ 8, no emoji, no blur', () => {
+  ok(!/blur|BlurView|LinearGradient/i.test(chipsSrc), 'blur / gradient');
   ok(!/numberOfLines\s*=/.test(chipsSrc), 'truncates');
   ok(/minHeight: 44/.test(chipsSrc), 'touch floor');
   ok(!/borderRadius:\s*(9|[1-9]\d)/.test(chipsSrc), 'radius > 8');
   ok(!/[\u{1F300}-\u{1FAFF}]/u.test(chipsSrc), 'emoji');
+});
+
+// ── 8. Panel placement (coordinator review 2026-11-11) ────────────────────
+// The deck card sits in a ScrollView and can be taller than the screen; a
+// panel centred in the card opened off screen — the build-186 bug again.
+// Executed: the whole panel ends inside the visible viewport after the
+// returned scroll, and inside the card's padding, for every ✕ position.
+const PAD = 12, EDGE = 8;
+function landed(inp) {
+  const p = C.placeWhyPassPanel({ pad: PAD, edge: EDGE, ...inp });
+  const winTop = inp.frameWinY + p.top - p.scrollBy;
+  return { ...p, winTop, winBottom: winTop + inp.panelH };
+}
+check('8a. ✕ at the BOTTOM edge of a tall card: panel lifted fully on screen, no scroll', () => {
+  // viewport 100–800; card 1500 tall, top 600 above the screen; row at window 780.
+  const r = landed({ anchorY: 1380, panelH: 320, frameH: 1500, frameWinY: -600, visTop: 100, visBottom: 800 });
+  eq(r.scrollBy, 0, 'scrollBy');
+  ok(r.winTop >= 108 && r.winBottom <= 792, `panel at ${r.winTop}–${r.winBottom}`);
+});
+check('8b. ✕ at the TOP edge of a tall card: panel dropped fully on screen, no scroll', () => {
+  const r = landed({ anchorY: 1120, panelH: 320, frameH: 1500, frameWinY: -1000, visTop: 100, visBottom: 800 });
+  eq(r.scrollBy, 0, 'scrollBy');
+  ok(r.winTop >= 108 && r.winBottom <= 792, `panel at ${r.winTop}–${r.winBottom}`);
+});
+check('8c. room on screen: centred on the ✓/✕ row', () => {
+  const r = landed({ anchorY: 400, panelH: 300, frameH: 900, frameWinY: 0, visTop: 100, visBottom: 800 });
+  eq([r.top, r.scrollBy], [250, 0]);
+});
+check('8d. card mostly scrolled away: the page scrolls the panel in', () => {
+  // only 108–150 of the card is visible; nothing fits without a scroll.
+  const r = landed({ anchorY: 1110, panelH: 320, frameH: 1150, frameWinY: -1000, visTop: 100, visBottom: 800 });
+  ok(r.scrollBy < 0, `scrollBy ${r.scrollBy}`);
+  ok(r.winTop >= 108 && r.winBottom <= 792, `panel at ${r.winTop}–${r.winBottom}`);
+});
+check('8e. panel taller than the viewport: top-aligned, so label + copy + first chips show', () => {
+  const r = landed({ anchorY: 600, panelH: 500, frameH: 1200, frameWinY: -200, visTop: 100, visBottom: 400 });
+  eq(r.winTop, 108, 'panel top');
+});
+check('8f. sweep: ✕ anywhere on screen ⇒ whole panel on screen and inside the card', () => {
+  let n = 0;
+  for (const frameH of [420, 700, 1100, 1600]) {
+    for (const panelH of [260, 340]) {
+      if (panelH > frameH - 2 * PAD) continue;
+      for (let frameWinY = -1400; frameWinY <= 760; frameWinY += 37) {
+        for (let anchorY = 40; anchorY <= frameH - 40; anchorY += 53) {
+          const rowWin = frameWinY + anchorY;
+          if (rowWin < 128 || rowWin > 772) continue; // the ✕ (56pt) is on screen
+          const r = landed({ anchorY, panelH, frameH, frameWinY, visTop: 100, visBottom: 800 });
+          n++;
+          ok(r.top >= PAD - 1e-9 && r.top + panelH <= frameH - PAD + 1e-9,
+            `outside card: frameH ${frameH} panel ${panelH} y ${frameWinY} a ${anchorY} top ${r.top}`);
+          ok(r.winTop >= 108 - 1e-9 && r.winBottom <= 792 + 1e-9,
+            `off screen: frameH ${frameH} panel ${panelH} y ${frameWinY} a ${anchorY} → ${r.winTop}–${r.winBottom}`);
+        }
+      }
+    }
+  }
+  ok(n > 500, `only ${n} cases`);
+});
+check('8g. wiring: TradeCard anchors on the ✓/✕ row; the frame places, hides, falls back', () => {
+  ok(/onLayout=\{\s*disposition\.reasons\?\.cadence\s*\?\s*\(e\) => \{\s*actionRowMidRef\.current = e\.nativeEvent\.layout\.y \+ e\.nativeEvent\.layout\.height \/ 2;/.test(card),
+    'the ✓/✕ row is not measured (cadence card only)');
+  ok(card.includes('anchorY={actionRowMidRef.current}'), 'anchorY not passed to the frame');
+  ok(/const p = placeWhyPassPanel\(\{ \.\.\.base, frameWinY, visTop, visBottom \}\);/.test(chipsSrc), 'frame does not place through placeWhyPassPanel');
+  ok(/opacity: placed \? 1 : 0/.test(chipsSrc), 'panel is visible before it is placed');
+  ok(/scroller\?\.measureViewport\) scroller\.measureViewport\(/.test(chipsSrc), 'the deck viewport is not used');
+  ok(/scroller\.scrollTo\(Math\.max\(0, scroller\.getScrollY\(\) \+ p\.scrollBy\), true\)/.test(chipsSrc), 'scroll fallback missing');
+  ok(/const fallback = setTimeout\(/.test(chipsSrc), 'no fallback when a measurement never answers');
+  ok(/measureViewport: \(cb\) =>\s*mainScrollRef\.current\?\.getNativeScrollRef\(\)\?\.measureInWindow\(/.test(screen),
+    'TradesScreen does not expose the deck ScrollView viewport');
+});
+
+// ── 9. The "Passed" toast offers Undo only when there is something to undo ─
+check('9a. Undo action only on a held pass (a reasoned / unheld pass gets a plain "Passed")', () => {
+  ok(adv.includes("action: heldPass ? { label: 'Undo', onPress: undoPass } : undefined,"),
+    'Undo action is not gated on heldPass');
+  eq((screen.match(/onPress: undoPass/g) || []).length, 1, 'undoPass toast actions');
 });
 
 console.log(`\ncheck-pass-reason-cadence: ${passed} passed, ${failed} failed`);
