@@ -689,8 +689,11 @@ export default function ClaimSheet({
         <View style={sheetStyles.headerMeta}>
           <PositionChip position={row.position} size="sm" />
           <Text style={type.bodySm}>
-            {row.team ?? 'FA'} · FA {row.position}
-            {row.pos_rank}
+            {/* pos_rank is the overall rank at the position (rostered
+                players counted), so it reads "TE23", not "FA TE23"; a
+                target without one (Usage Trends) keeps "FA TE". */}
+            {row.team ?? 'FA'} ·{' '}
+            {row.pos_rank != null ? `${row.position}${row.pos_rank}` : `FA ${row.position}`}
           </Text>
           {/* #277 — tier label instead of the numeric board value;
               numeric fallback only for old-server payloads. */}

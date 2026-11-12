@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-249 — A free agent's positional rank is the overall rank at the position; the league selector is the header on Free Agents
+
+**Date:** 2026-11-12 · **Who:** the operator: "The free agents page breaks the behavior of other pages where the league selector stays as a header. Additionally, the positional ranks present of all FAs (so Theo Johnson shows as TE1). It should instead be overall at the position (regardless of who is owned or not)." Changing what `pos_rank` means rather than adding a field, and the custom native-stack header, are the builder's and the main session's calls. Plan: [`../docs/plans/free-agents-header-rank/`](../docs/plans/free-agents-header-rank/).
+**Context:** `GET /api/free-agents` ranked each free agent among free agents only, so the best available tight end read TE1. Free Agents is a root-stack push with a native header; the league selector lives in `TopBar`, mounted only above the tabs.
+**Decision:** `pos_rank` on this route is the player's rank among every non-pick pool player at the position on the board the page is priced from (the caller's values, consensus fallback), rostered or not, numbered before any roster exclusion or filter. The field keeps its name so builds already installed show the corrected number. Free Agents renders through native-stack's custom `header`: the unchanged `TopBar` over a 44pt sub-header with the JS back control and the title (`RootNav.LeagueTopBarHeader`). A league switch is a new query key; an open claim is dropped and the claim sheet mounts only for the league it was opened in.
+**Consequences:**
+- The rank reaches TestFlight 1.22.0 (187) with the server deploy. Its claim sheet header still reads "FA TE23" until the next build.
+- `TopBar` now has two instances (tabs, this push), each with its own switcher sheet.
+- No flag and no analytics event (there is no league-switch event anywhere).
+- Other league-scoped root pushes still have no selector: Standings, Usage Trends, Receipts, Win-now, League summary. Draft room, Mock draft, Pick assignment, Record picks and Shop asset take a league from route params, so a selector there needs a decision first. Open with the operator.
+- This route's other `pos_rank`s (extension rankings, Team Review, Trends, consensus rank) are different fields and unchanged.
+
 ## D-248 — In-app add/drop goes platform by platform behind two locks: a flag and a verified write shape
 
 **Date:** 2026-11-12 · **Who:** the operator: "create add /drop and waiver claim transactions directly from the app rather than send the user to sleeper/espn or mfl". Merging the MFL adapter dark, and the two-lock rule, are the builder's and the main session's calls. Plan: [`../docs/plans/in-app-claims/`](../docs/plans/in-app-claims/).

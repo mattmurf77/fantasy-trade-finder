@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Free Agents: ranks count every player at the position; the league selector is the header (D-249)
+
+- **Ranks:** a free agent now shows his overall rank at the position on your board (TE23), not his rank among free agents (TE1). Server-side, so build 187 gets it on deploy.
+- **Header:** the page carries the same top bar as the tab screens, with the back button and title under it. Switching league reloads the list for that league. Needs the next app build.
+- **Not verified on a device:** the new header's layout; it is the first custom native-stack header in the app.
+- **Open:** whether the other pushed league pages (Standings, Usage Trends, Receipts, Win-now) get the selector too.
+
 ## 2026-11-12 — In-app add/drop: MFL path merged, switched off (D-248)
 
 - **What landed:** the server can build and send an MFL free-agent add or add+drop from the existing claim sheet. It is behind flag `mfl.send_add_drop` (false) and a second lock that opens only after one supervised real MFL transaction is recorded.
