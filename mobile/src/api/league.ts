@@ -877,8 +877,11 @@ export async function connectLeague(sleeperUrl: string): Promise<ConnectLeagueRe
 // players — `user_has_rankings: false` means the whole list is consensus).
 // `drop_suggestion` = the caller's lowest-valued same-position rostered
 // player strictly below the FA's value (null when none); `delta` is the
-// add/drop value gain. `pos_rank` is the FA's rank within its position
-// across ALL free agents, so it's stable under position filters.
+// add/drop value gain. `pos_rank` is the player's OVERALL rank at its
+// position on the caller's board — rostered players counted, picks never —
+// so an FA who is the 23rd TE is 23 (not 1). Stable under position filters
+// and independent of which rosters loaded (server-computed since
+// 2026-11-12; the shipped binary renders it unchanged).
 // Read-gated like /api/rankings (priced by the caller's board).
 export interface FreeAgentDropSuggestion {
   player_id: string;

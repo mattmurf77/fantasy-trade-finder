@@ -50,6 +50,15 @@ TREND_SLOPE_PP = 5.0
 MIN_AVG_SNAP_SHARE = 10.0
 _NEWS_KINDS = ("spike", "return", "new", "rising")
 
+# The "Last 3 weeks" reading (`?period=3`, docs/plans/usage-trends/
+# scope-period-toggle.md). The period is the newest PERIOD_WEEKS weeks of the
+# selection; the baseline is up to PERIOD_WEEKS completed weeks right before
+# it, fetched even when they are outside the selection. A player needs
+# MIN_PERIOD_GAMES played weeks in the period to be a jump, to be "back or
+# new", or to rank by his period average ahead of players who played less.
+PERIOD_WEEKS = 3
+MIN_PERIOD_GAMES = 2
+
 
 def state_url() -> str:
     return "https://api.sleeper.app/v1/state/nfl"
@@ -112,6 +121,28 @@ def parse_weeks_param(raw: str | None, available: list[int]) -> list[int] | None
     if missing:
         raise ValueError(f"not a completed week: {missing[0]}")
     return weeks
+
+
+def parse_period_param(raw: str | None) -> int | None:
+    """`?period=3` -> PERIOD_WEEKS; absent or empty -> None (today's
+    response, unchanged). ValueError for anything else."""
+    if raw is None or raw.strip() == "":
+        return None
+    if raw.strip() == str(PERIOD_WEEKS):
+        return PERIOD_WEEKS
+    raise ValueError(f"period must be {PERIOD_WEEKS}")
+
+
+def period_weeks(weeks: list[int], available: list[int]) -> tuple[list[int], list[int]]:
+    """(period, baseline). period = the newest PERIOD_WEEKS selected weeks
+    (all of them when fewer are selected); baseline = up to PERIOD_WEEKS
+    completed weeks before the period's first week, newest last. Empty
+    baseline when the period starts at the season's first completed week."""
+    period = weeks[-PERIOD_WEEKS:]
+    if not period:
+        return [], []
+    earlier = [w for w in available if w < period[0]]
+    return period, earlier[-PERIOD_WEEKS:]
 
 
 def fetch_weeks(season: int, weeks: list[int], fetch_json: Callable) -> dict[int, list]:
@@ -283,12 +314,20 @@ def compute(weeks_rows: dict[int, list], weeks: list[int]) -> list[dict]:
     return compute_normalized({w: normalize_week(weeks_rows.get(w) or []) for w in weeks}, weeks)
 
 
-def compute_normalized(parsed: dict[int, tuple[dict, dict]], weeks: list[int]) -> list[dict]:
+def compute_normalized(parsed: dict[int, tuple[dict, dict]], weeks: list[int],
+                       period: tuple[list[int], list[int]] | None = None) -> list[dict]:
     """One record per RB/WR/TE who played at least one window week and passes
     `_relevant`, each metric carrying its server rank (see `_rank`). Input is
     `{week: normalize_week(...)}` — from a live fetch or the stored tables.
     Shares are percentages rounded to one decimal; counts are ints; a week
-    the player did not play (bye or out) is null in both."""
+    the player did not play (bye or out) is null in both.
+
+    `period` = `period_weeks(...)` adds the "Last 3 weeks" reading: each
+    metric gains a `period` block (`_period_metric`, ranked by
+    `_rank_period`) and `parsed` must also hold the baseline weeks. Without
+    it the output is exactly what it was before the reading existed."""
+    base_weeks = period[1] if period else []
+    base_parsed = {w: parsed.get(w) or ({}, {}) for w in base_weeks}
     parsed = {w: parsed.get(w) or ({}, {}) for w in weeks}
     pids = {pid for w in weeks for pid in parsed[w][1]}
     out = []
@@ -326,11 +365,98 @@ def compute_normalized(parsed: dict[int, tuple[dict, dict]], weeks: list[int]) -
             metrics[m] = md
         if not _relevant(metrics):
             continue
+        if period:
+            in_period = [i for i, w in enumerate(weeks) if w in period[0] and status[i] == "played"]
+            base_rows = []                      # (row, team totals) per played baseline week
+            for w in base_weeks:
+                teams, players = base_parsed[w]
+                row = players.get(pid)
+                tt = teams.get(row["team"]) if row else None
+                if row and row["played"] and tt and tt["snaps"] > 0:
+                    base_rows.append((row, tt))
+            for m in METRICS:
+                counts, _, totals = rec[m]
+                metrics[m]["period"] = _period_metric(
+                    m, [(counts[i], totals[i]) for i in in_period],
+                    [(int(r[m]), tt[m]) for r, tt in base_rows], bool(base_weeks))
         out.append({"player_id": pid, "name": latest["name"],
                     "position": latest["position"], "team": latest["team"],
                     "status": status, **metrics})
     _rank(out)
+    if period:
+        _rank_period(out)
     return out
+
+
+def _period_metric(metric: str, games: list[tuple[int, int]],
+                   base: list[tuple[int, int]], has_base_weeks: bool) -> dict:
+    """The "Last 3 weeks" block for one player's metric. `games` / `base` are
+    (count, team total) for each PLAYED week of the period / baseline — the
+    feature's averaging rule: byes and missed games are left out.
+
+      avg, avg_share           — period: mean count; total ÷ team total, as %
+      base_avg, base_avg_share — the same over the baseline weeks
+      kind  "jump" — ≥ MIN_PERIOD_GAMES games, ≥ the metric's weekly volume
+                     floor on average, at least one baseline game, and
+                     avg_share beats base_avg_share by the spike's margin
+                     (15 / 10 / 8 points);
+            "new"  — the same games and volume, but no baseline game while
+                     baseline weeks exist (a first role, or back after
+                     missing every baseline week);
+            None   — otherwise (also always when there are no baseline weeks).
+      delta, delta_share — avg − base_avg and avg_share − base_avg_share, on
+                     a jump only."""
+    dpp, floor = SPIKE_RULES[metric]
+    n, bn = len(games), len(base)
+    tot = sum(t for _, t in games)
+    btot = sum(t for _, t in base)
+    avg = sum(c for c, _ in games) / n if n else None
+    avg_share = 100.0 * sum(c for c, _ in games) / tot if tot else None
+    base_avg = sum(c for c, _ in base) / bn if bn else None
+    base_share = 100.0 * sum(c for c, _ in base) / btot if btot else None
+    kind = delta = delta_share = None
+    if has_base_weeks and n >= MIN_PERIOD_GAMES and avg >= floor:
+        if bn == 0:
+            kind = "new"
+        elif avg_share is not None and base_share is not None and avg_share - base_share >= dpp:
+            kind = "jump"
+            delta, delta_share = avg - base_avg, avg_share - base_share
+    return {"games": n, "avg": _r1(avg), "avg_share": _r1(avg_share),
+            "base_games": bn, "base_avg": _r1(base_avg), "base_avg_share": _r1(base_share),
+            "kind": kind, "delta": _r1(delta), "delta_share": _r1(delta_share)}
+
+
+def _rank_period(players: list[dict]) -> None:
+    """Per metric, three server orders for the "Last 3 weeks" reading:
+
+      rank_jump  — jumps (biggest delta_share first), then "new" (highest
+                   avg_share first), then everyone with ≥ MIN_PERIOD_GAMES
+                   games by avg_share, then fewer games by avg_share;
+      rank_share — ≥ MIN_PERIOD_GAMES games by avg_share, then one game,
+                   then none;
+      rank_count — the same tiers by avg (the Count unit).
+
+    Ties fall to player_id, so the order is deterministic."""
+    def games_tier(b):
+        return 0 if b["games"] >= MIN_PERIOD_GAMES else 1 if b["games"] else 2
+
+    for m in METRICS:
+        def jump_key(p):
+            b = p[m]["period"]
+            if b["kind"] == "jump":
+                return (0, -b["delta_share"], p["player_id"])
+            tier = 1 if b["kind"] == "new" else 2 + games_tier(b)
+            return (tier, -(b["avg_share"] or 0.0), p["player_id"])
+        orders = {
+            "rank_jump": jump_key,
+            "rank_share": lambda p: (games_tier(p[m]["period"]),
+                                     -(p[m]["period"]["avg_share"] or 0.0), p["player_id"]),
+            "rank_count": lambda p: (games_tier(p[m]["period"]),
+                                     -(p[m]["period"]["avg"] or 0.0), p["player_id"]),
+        }
+        for name, key in orders.items():
+            for i, p in enumerate(sorted(players, key=key), start=1):
+                p[m]["period"][name] = i
 
 
 def _relevant(metrics: dict) -> bool:

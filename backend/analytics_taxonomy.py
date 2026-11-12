@@ -1261,14 +1261,17 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `weeks` is the user's week selection: default (last four) | "2,6" | …
     # `order` is Simple's order toggle: jumps (default) | week — do users
     # read usage by change or by level, and which one drives Add/Trade?
+    # `period` is Simple's period toggle: week (default, Last week) |
+    # three_weeks (Last 3 weeks) — does anyone read the longer reading?
     "usage_trends_action":   frozenset({"league_id", "action", "player_id",
                                         "position", "metric", "signal",
-                                        "focus_status", "ownership", "view", "order"}),
+                                        "focus_status", "ownership", "view", "order",
+                                        "period"}),
     "usage_trends_availability_opened": frozenset({"league_id", "player_id",
                                                    "n_leagues", "n_free_agent",
                                                    "view"}),
     "usage_trends_view_changed": frozenset({"league_id", "metric", "ownership",
-                                            "view", "sort", "weeks", "order"}),
+                                            "view", "sort", "weeks", "order", "period"}),
     # `mode` mirrors find_trades_tapped's — the OUTCOME half of the pair. A
     # find_trades_tapped{mode:single_pin} with no following
     # trade_card_viewed{mode:single_pin} is #298 reappearing: a deck

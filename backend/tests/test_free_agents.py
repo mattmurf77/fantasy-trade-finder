@@ -11,6 +11,9 @@ Pins the four rules the route relies on:
      delta is fa_value - drop_value.
   4. Position filter — filters rows without renumbering pos_rank (an FA is
      "RB3" under every filter).
+  5. pos_rank is the OVERALL rank at the position on the caller's board —
+     rostered players counted, picks never — so it does not depend on which
+     rosters loaded (operator, 2026-11-12: an FA who is the 23rd TE is TE23).
 
 Pure-function tests: no Flask, no DB (the route is a thin wrapper whose
 gate/session plumbing is covered by test_verified_reads.py).
@@ -139,15 +142,98 @@ def test_board_value_defaults_to_1500_when_absent_everywhere():
     assert board_value("ghost", {}, {}) == round(elo_to_value(1500.0), 1)
 
 
-def test_pos_rank_is_within_position_over_the_fa_pool():
+def test_pos_rank_is_overall_at_the_position_not_among_free_agents():
+    """rb1 rostered → rb2 is the best AVAILABLE RB, but the second RB on the
+    board, so it reads RB2 (not RB1). Rostered players above an FA count."""
     rows = compute_free_agents(
+        pool_players=POOL, seed_elo=SEED, user_elo={},
+        rostered_ids={"rb1", "qb1"}, user_roster=[],
+    )
+    assert _row(rows, "rb2")["pos_rank"] == 2
+    assert _row(rows, "rb3")["pos_rank"] == 3
+    assert _row(rows, "qb2")["pos_rank"] == 2  # behind rostered qb1
+
+
+def test_pos_rank_counts_the_callers_own_roster_too():
+    rows = compute_free_agents(
+        pool_players=POOL, seed_elo=SEED, user_elo={},
+        rostered_ids=set(), user_roster=["rb1", "rb2"],
+    )
+    assert _row(rows, "rb3")["pos_rank"] == 3
+
+
+def test_free_agent_te_who_is_the_23rd_te_reads_te23():
+    """The operator's example: 22 rostered TEs above a free agent → TE23."""
+    pool = [_p(f"te{i}", "TE") for i in range(1, 24)]
+    seed = {p.id: 1900.0 - 10 * i for i, p in enumerate(pool)}
+    rows = compute_free_agents(
+        pool_players=pool, seed_elo=seed, user_elo={},
+        rostered_ids={f"te{i}" for i in range(1, 23)}, user_roster=[],
+    )
+    assert _ids(rows) == ["te23"]
+    assert rows[0]["pos_rank"] == 23
+
+
+def test_pos_rank_does_not_depend_on_which_rosters_loaded():
+    """Same board, different exclusion sets (e.g. the live Sleeper read
+    failed and only the snapshot loaded) → every surfaced FA keeps the
+    same rank."""
+    full = compute_free_agents(
+        pool_players=POOL, seed_elo=SEED, user_elo={},
+        rostered_ids={"qb1", "rb1", "rb2"}, user_roster=["wr1"],
+    )
+    partial = compute_free_agents(
         pool_players=POOL, seed_elo=SEED, user_elo={},
         rostered_ids={"rb1"}, user_roster=[],
     )
-    # rb1 rostered → rb2 is the best available RB.
-    assert _row(rows, "rb2")["pos_rank"] == 1
-    assert _row(rows, "rb3")["pos_rank"] == 2
-    assert _row(rows, "qb2")["pos_rank"] == 2  # behind qb1
+    none = compute_free_agents(
+        pool_players=POOL, seed_elo=SEED, user_elo={},
+        rostered_ids=set(), user_roster=[],
+    )
+    ranks = lambda rows: {r["player_id"]: r["pos_rank"] for r in rows}
+    for pid, rank in ranks(full).items():
+        assert ranks(partial)[pid] == rank
+        assert ranks(none)[pid] == rank
+    assert ranks(none) == {"qb1": 1, "qb2": 2, "rb1": 1, "rb2": 2,
+                           "rb3": 3, "wr1": 1, "te1": 1}
+
+
+def test_pos_rank_follows_the_callers_board():
+    """The caller ranks rb3 above everyone → rb3 is RB1 on their board even
+    though consensus has it third, and rb1 (rostered) drops to RB2."""
+    rows = compute_free_agents(
+        pool_players=POOL, seed_elo=SEED, user_elo={"rb3": 1950.0},
+        rostered_ids={"rb1"}, user_roster=[],
+    )
+    assert _row(rows, "rb3")["pos_rank"] == 1
+    assert _row(rows, "rb2")["pos_rank"] == 3
+
+
+def test_picks_are_never_ranked():
+    """#222 — a generic pick carries a real position (RB) and a high value;
+    it must not take a rank slot ahead of real RBs."""
+    pool = POOL + [_p("generic_pick_1_early", "RB",
+                      name="Early 1st Round Pick", team="PICK")]
+    seed = {**SEED, "generic_pick_1_early": 1990.0}
+    rows = compute_free_agents(
+        pool_players=pool, seed_elo=seed, user_elo={},
+        rostered_ids=set(), user_roster=[], position="RB",
+    )
+    assert {r["player_id"]: r["pos_rank"] for r in rows} == {
+        "rb1": 1, "rb2": 2, "rb3": 3}
+
+
+def test_pos_rank_ties_keep_pool_order():
+    """Equal board values: the existing stable ordering (pool order) decides,
+    for the list order and the rank alike."""
+    pool = [_p("a", "WR"), _p("b", "WR"), _p("c", "WR")]
+    seed = {"a": 1600.0, "b": 1600.0, "c": 1600.0}
+    rows = compute_free_agents(
+        pool_players=pool, seed_elo=seed, user_elo={},
+        rostered_ids={"a"}, user_roster=[],
+    )
+    assert _ids(rows) == ["b", "c"]
+    assert [r["pos_rank"] for r in rows] == [2, 3]
 
 
 # ── 3. Drop-suggestion rule ──────────────────────────────────────────────

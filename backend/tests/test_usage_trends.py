@@ -14,8 +14,15 @@ Spec: docs/plans/usage-trends/scope.md. Covers:
   * the route: flag gate, roster join (mine / rostered / orphan / FA), other
     leagues, non-member leagues withheld, 503 without a partial window, the
     out-of-season shape, the stats cache, and the user's week selection
-    (default last four, `available_weeks`, any subset, 400 on a bad one).
+    (default last four, `available_weeks`, any subset, 400 on a bad one);
+  * the "Last 3 weeks" reading (`?period=3`, scope-period-toggle.md): the
+    period and baseline weeks, the three-week average over played weeks, the
+    jump against up to three earlier weeks (outside the selection), its two-
+    game and volume floors, fewer than two games ranked last, no earlier
+    weeks = no jumps, back-or-new, and — without the parameter — output and
+    route bytes identical to the code before the reading existed.
 """
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -349,3 +356,177 @@ def test_route_caches_the_stats_window(client):
     assert _get(client, fake).status_code == 200
     assert _get(client, fake).status_code == 200
     assert sum("/stats/nfl/" in u for u in fake.calls) == 4    # one per week, once
+
+
+# ── the "Last 3 weeks" reading (?period=3, scope-period-toggle.md) ──────────
+
+
+def _weeks_of(shapes, n, tm=60):
+    """{week: rows} for team A over weeks 1..n; shapes = {pid: (snaps per
+    week or None for a missed game or 'bye')}. A 'bye' in any shape makes
+    the whole team bye that week."""
+    out = {}
+    for w in range(1, n + 1):
+        if any(s[w - 1] == "bye" for s in shapes.values()):
+            out[w] = []
+            continue
+        out[w] = _team("A", tm=tm)
+        for pid, s in shapes.items():
+            if s[w - 1] is not None:
+                out[w].append(_row(pid, "WR", "A", s[w - 1], tm=tm))
+    return out
+
+
+def _with_period(weeks_rows, weeks, available):
+    parsed = {w: ut.normalize_week(rows) for w, rows in weeks_rows.items()}
+    return _by_id(ut.compute_normalized(parsed, weeks, period=ut.period_weeks(weeks, available)))
+
+
+def test_period_param_and_weeks():
+    assert ut.parse_period_param(None) is None and ut.parse_period_param(" ") is None
+    assert ut.parse_period_param("3") == 3
+    for bad in ("1", "4", "x", "3,3"):
+        with pytest.raises(ValueError):
+            ut.parse_period_param(bad)
+    nine = list(range(1, 10))
+    assert ut.period_weeks([6, 7, 8, 9], nine) == ([7, 8, 9], [4, 5, 6])      # default window
+    assert ut.period_weeks([1, 2, 3], nine) == ([1, 2, 3], [])                # no earlier weeks
+    assert ut.period_weeks([2, 6, 9], nine) == ([2, 6, 9], [1])               # sparse pick
+    assert ut.period_weeks([3, 4], nine) == ([3, 4], [1, 2])                  # under three picked
+    assert ut.period_weeks([], nine) == ([], [])
+
+
+def test_three_week_average_leaves_out_byes_and_missed_games():
+    # Weeks 7-9: 30, bye, 40 → 2 games, avg 35, share 70/120.
+    rows = _weeks_of({"wr": (30, 30, 30, 30, 30, 30, 30, "bye", 40)}, 9)
+    b = _with_period(rows, [6, 7, 8, 9], list(range(1, 10)))["wr"]["snaps"]["period"]
+    assert (b["games"], b["avg"], b["avg_share"]) == (2, 35.0, 58.3)
+    rows = _weeks_of({"wr": (30, 30, 30, 30, 30, 30, 30, None, 40)}, 9)      # missed game
+    b = _with_period(rows, [6, 7, 8, 9], list(range(1, 10)))["wr"]["snaps"]["period"]
+    assert (b["games"], b["avg"], b["avg_share"]) == (2, 35.0, 58.3)
+    assert b["base_games"] == 3 and b["base_avg"] == 30.0 and b["base_avg_share"] == 50.0
+
+
+def test_three_week_jump_is_measured_against_the_three_weeks_before():
+    # Baseline weeks 4-6 (outside the default selection 6-9), one of them missed.
+    shapes = {"riser": (50, 50, 50, 10, None, 14, 30, 33, 36),   # base (10+14)/2=12 → 20%; period 55%
+              "steady": (30,) * 9,
+              "small": (50, 50, 50, 30, 30, 30, 40, 40, 40)}      # +16.7 share: a jump, smaller
+    ps = _with_period(_weeks_of(shapes, 9), [6, 7, 8, 9], list(range(1, 10)))
+    r = ps["riser"]["snaps"]["period"]
+    assert r["kind"] == "jump" and r["base_games"] == 2 and r["base_avg"] == 12.0
+    assert r["base_avg_share"] == 20.0 and r["avg_share"] == 55.0
+    assert r["delta_share"] == 35.0 and r["delta"] == 21.0
+    assert ps["steady"]["snaps"]["period"]["kind"] is None
+    assert ps["small"]["snaps"]["period"]["kind"] == "jump"
+    order = sorted(shapes, key=lambda pid: ps[pid]["snaps"]["period"]["rank_jump"])
+    assert order == ["riser", "small", "steady"]                 # biggest jump first
+    # Weekly reading by the period average, not the jump.
+    assert sorted(shapes, key=lambda pid: ps[pid]["snaps"]["period"]["rank_share"]) == ["small", "riser", "steady"]
+    # The one-week reading is untouched by the period.
+    plain = _by_id(ut.compute({w: r for w, r in _weeks_of(shapes, 9).items()}, [6, 7, 8, 9]))
+    for pid in shapes:
+        block = dict(ps[pid]["snaps"])
+        block.pop("period")
+        assert block == plain[pid]["snaps"]
+
+
+def test_three_week_jump_needs_two_games_and_the_volume_floor():
+    shapes = {"one_game": (10, 10, 10, 10, 10, 10, None, None, 50),   # +big, but 1 game
+              "thin": (2, 2, 2, 2, 2, 2, 15, 15, 15)}                  # +20 pp, 15 snaps < 20
+    ps = _with_period(_weeks_of(shapes, 9), [6, 7, 8, 9], list(range(1, 10)))
+    one = ps["one_game"]["snaps"]["period"]
+    assert one["games"] == 1 and one["kind"] is None and one["avg_share"] == 83.3
+    assert ps["thin"]["snaps"]["period"]["kind"] is None
+
+
+def test_fewer_than_two_games_rank_after_everyone_who_played_two():
+    shapes = {"one_game": (40, 40, 40, 40, 40, 40, None, None, 58),   # 97% in his only game
+              "two_games": (40, 40, 40, 40, 40, 40, None, 30, 30),
+              "three": (40,) * 9}
+    ps = _with_period(_weeks_of(shapes, 9), [6, 7, 8, 9], list(range(1, 10)))
+    by = lambda key: sorted(shapes, key=lambda pid: ps[pid]["snaps"]["period"][key])
+    assert by("rank_share") == ["three", "two_games", "one_game"]
+    assert by("rank_count") == ["three", "two_games", "one_game"]
+    assert by("rank_jump")[-1] == "one_game"
+
+
+def test_no_earlier_weeks_means_no_jumps_and_no_new():
+    shapes = {"a": (10, 40, 50), "b": (None, 40, 40)}
+    ps = _with_period(_weeks_of(shapes, 3), [1, 2, 3], [1, 2, 3])
+    for pid in shapes:
+        b = ps[pid]["snaps"]["period"]
+        assert b["kind"] is None and b["base_games"] == 0 and b["base_avg_share"] is None
+
+
+def test_back_or_new_over_three_weeks():
+    # No game in the baseline weeks (4-6), a real role in 7-9: "new". With the
+    # volume under the floor, nothing.
+    shapes = {"new": (None,) * 6 + (40, 42, 44),
+              "faint": (None,) * 6 + (5, 6, 7),
+              "anchor": (50,) * 9}
+    ps = _with_period(_weeks_of(shapes, 9), [6, 7, 8, 9], list(range(1, 10)))
+    assert ps["new"]["snaps"]["period"]["kind"] == "new"
+    assert ps["new"]["snaps"]["period"]["delta_share"] is None
+    assert ps["faint"]["snaps"]["period"]["kind"] is None
+    order = sorted(shapes, key=lambda pid: ps[pid]["snaps"]["period"]["rank_jump"])
+    assert order[0] == "new"                                   # no jumps; "new" leads
+
+
+# Captured from the code BEFORE the period reading existed (2026-11-12, 12ac0f1d).
+_REAL_W1_4 = "d9d4efef857f2bcdad23565dd55fb72cda7fee426c1324106bf45c77e22d5cfc"
+_REAL_W2_4 = "606fd3e44b67f723691b280d6b3880665d3e712939bb29ec707620e8d9a6d774"
+
+
+def test_without_a_period_the_output_is_byte_identical_to_before():
+    doc = json.loads(FIXTURE.read_text())
+    rows = {int(w): r for w, r in doc["weeks"].items()}
+    digest = lambda ps: hashlib.sha256(json.dumps(ps, sort_keys=True).encode()).hexdigest()
+    assert digest(ut.compute(rows, [1, 2, 3, 4])) == _REAL_W1_4
+    assert digest(ut.compute(rows, [2, 3, 4])) == _REAL_W2_4
+
+
+def test_real_2026_three_week_reading():
+    doc = json.loads(FIXTURE.read_text())
+    parsed = {int(w): ut.normalize_week(r) for w, r in doc["weeks"].items()}
+    ps = ut.compute_normalized(parsed, [2, 3, 4], period=ut.period_weeks([2, 3, 4], [1, 2, 3, 4]))
+    by_name = {p["name"]: p for p in ps}
+    cooper = by_name["Darius Cooper"]["snaps"]["period"]
+    assert (cooper["base_avg_share"], cooper["avg_share"], cooper["kind"]) == (14.5, 48.7, "jump")
+    assert cooper["rank_jump"] == 1
+    assert by_name["Sterling Shepard"]["snaps"]["period"]["kind"] == "new"
+
+
+# Raw response bytes captured from the route BEFORE `period` existed.
+_ROUTE_BYTES = {
+    "": "a5bfab256bfc9d1435c5f268ddd0a161def03691835ce4df866d717ab9487e72",
+    f"?league_ids={OTHER},{ESPN}": "11102c1b51f3952790973fb002f9b99bf193081090030a70c8e4f579b1e7e484",
+    "?weeks=2,6": "58f54b93aa728262b013bdaf5b33b5aa1d39af76d145ac18369221bae121cdba",
+}
+
+
+def test_route_without_period_is_byte_identical_to_before(client):
+    for qs, want in _ROUTE_BYTES.items():
+        fake = FakeSleeper(state={"season": "2026", "week": 7, "season_type": "regular"})
+        r = _get(client, fake, qs)
+        assert hashlib.sha256(r.get_data()).hexdigest() == want, qs
+
+
+def test_route_period_adds_the_reading_and_reads_the_baseline_weeks(client):
+    fake = FakeSleeper(state={"season": "2026", "week": 10, "season_type": "regular"})
+    body = _get(client, fake, "?period=3").get_json()
+    assert body["weeks"] == [6, 7, 8, 9]
+    assert body["period"] == {"weeks": [7, 8, 9], "base_weeks": [4, 5, 6]}
+    fetched = sorted(int(u.split("/stats/nfl/2026/")[1].split("?")[0]) for u in fake.calls if "/stats/" in u)
+    assert fetched == [4, 5, 6, 7, 8, 9]
+    rb = next(p for p in body["players"] if p["player_id"] == "rb1")
+    assert set(rb["snaps"]["period"]) >= {"games", "avg", "avg_share", "base_avg_share", "kind",
+                                          "rank_jump", "rank_share", "rank_count"}
+    plain = _get(client, fake, "").get_json()
+    assert "period" not in plain and "period" not in plain["players"][0]["snaps"]
+
+
+@pytest.mark.parametrize("bad", ["1", "4", "abc"])
+def test_route_rejects_a_bad_period(client, bad):
+    r = _get(client, FakeSleeper(), f"?period={bad}")
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_period"

@@ -8,7 +8,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AppState, View, Text, ActivityIndicator, StyleSheet, Pressable } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
-import { ink, chalk, ice, fonts, radii } from '../theme/chalkline';
+import { ink, chalk, ice, fonts, radii, space } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
 import { useSession, NO_LEAGUE_ID } from '../state/useSession';
 import SignInScreen, { EntryPlatformIntent } from '../screens/SignInScreen';
@@ -53,6 +53,10 @@ import FounderWelcomeScreen from '../screens/FounderWelcomeScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
+// Circular with TopBar (TopBar ← TabNav ← RootNav, and TopBar reads
+// navigationRef lazily) — TopBar is only RENDERED here, never called at
+// module-eval time, so the cycle is safe. See TopBar's import comment.
+import TopBar from '../components/TopBar';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
 import VerifySheet from '../components/VerifySheet';
 import Toast from '../components/Toast';
@@ -269,6 +273,38 @@ function HeaderBack({ onPress, testID }: { onPress: () => void; testID: string }
     >
       <Icon name="chevron-left" size={20} color={chalk.base} />
     </Pressable>
+  );
+}
+
+// Free Agents header (operator, 2026-11-12: "the free agents page breaks the
+// behavior of other pages where the league selector stays as a header").
+// A league-scoped root-stack push gets the SAME global TopBar the tab
+// screens sit under — league cluster + LeagueSwitcherSheet, format tile,
+// bell, gear — with the Chalkline sub-header (JS back + condensed-caps
+// title) beneath it, the way a pushed tab-stack screen (League home, Trade
+// ideas) renders under TopBar. Rendered as native-stack's custom `header`,
+// so no native header (and so no native back button, RNS#3294) exists on
+// the screen: the #151 JS HeaderBack is the back control. TopBar owns the
+// top safe-area inset, exactly as it does above TabNav.
+function LeagueTopBarHeader({
+  title,
+  back,
+}: {
+  title: string;
+  /** The screen's HeaderBack element (its testID stays a greppable literal
+   *  at the registration, for testid-lint). */
+  back: React.ReactNode;
+}) {
+  return (
+    <View style={styles.leagueHeader}>
+      <TopBar />
+      <View style={styles.leagueSubHeader}>
+        {back}
+        <View style={styles.leagueSubHeaderTitle} pointerEvents="none">
+          <HeaderTitle>{title}</HeaderTitle>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -855,22 +891,27 @@ export default function RootNav({ booted }: { booted: boolean }) {
           options={({ navigation }) => ({
             headerShown: true,
             title: 'Free agents',
-            headerTitle: () => <HeaderTitle>Free agents</HeaderTitle>,
-            headerStyle: { backgroundColor: ink.ink0 },
-            headerTintColor: chalk.base,
-            // #151 — the native back control is unresponsive here on iOS 26
-            // (react-native-screens#3294: previous screen has headerShown:
-            // false). Hide it and mount our own JS back control. canGoBack
-            // guards the cold-start deep-link case (FreeAgents as the only
-            // route) by falling back to the Main tabs.
-            headerBackVisible: false,
-            headerLeft: () => (
-              <HeaderBack
-                testID="free-agents.back-btn"
-                onPress={() =>
-                  navigation.canGoBack()
-                    ? navigation.goBack()
-                    : navigation.navigate('Main')
+            // The league selector stays as the header (operator,
+            // 2026-11-12): the global TopBar over the Chalkline sub-header —
+            // see LeagueTopBarHeader. A custom `header` replaces the native
+            // bar entirely, so the native back control that is unresponsive
+            // here on iOS 26 (#151, react-native-screens#3294: previous
+            // screen has headerShown: false) is never rendered; the JS
+            // HeaderBack is the back control. canGoBack guards the
+            // cold-start deep-link case (FreeAgents as the only route) by
+            // falling back to the Main tabs.
+            header: () => (
+              <LeagueTopBarHeader
+                title="Free agents"
+                back={
+                  <HeaderBack
+                    testID="free-agents.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
                 }
               />
             ),
@@ -1263,6 +1304,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0.54,
     textTransform: 'uppercase',
     color: chalk.base,
+  },
+  // LeagueTopBarHeader — ink-0 like TopBar; the sub-header is a 44pt row
+  // (native iOS bar height) with the back control at the 16pt edge inset and
+  // the title centred over the full width, as the native bar draws it.
+  leagueHeader: { backgroundColor: ink.ink0 },
+  leagueSubHeader: {
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: space.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  leagueSubHeaderTitle: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 64,
   },
   // #130 — Icon Button spec (components.md): 32×32, radius sm, not circular.
   headerClose: {
