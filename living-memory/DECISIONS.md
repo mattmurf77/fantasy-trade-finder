@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-250 — Usage Trends gets a period: Last week or Last 3 weeks, measured against the weeks before
+
+**Date:** 2026-11-12 · **Who:** the operator: "Should let users toggle between last week and last three for usage rates". Applying the period to both orders, the baseline, the two-game rule and what "Back or new" becomes are the builder's and the main session's calls, reported to the operator for correction. Plan: [`../docs/plans/usage-trends/scope-period-toggle.md`](../docs/plans/usage-trends/scope-period-toggle.md). Adds to D-203 and D-205.
+**Context:** Both Simple orders were one-week readings: a jump was the newest week against the player's earlier weeks, and Weekly share ordered by the newest week. One game is noisy.
+**Decision:** A **Last week | Last 3 weeks** pill in the Simple view, default Last week (request, cache key and list unchanged, pinned by hashes taken before the change). Last 3 weeks is the newest three selected weeks, on `GET /api/usage-trends?period=3`. A three-week jump is the period's average share minus the player's average over up to three completed weeks right before the period, which the server reads even when they are outside the selection; it needs the spike margin (15 / 10 / 8 points), at least two games in the period, the weekly volume floor on average and at least one baseline game. "Back or new" becomes: no game in the baseline weeks, then two or more games with real volume. A player with fewer than two games in the period is never news and ranks after everyone with two or more. With no earlier weeks there are no jumps. The server ranks (`rank_jump`, `rank_share`, `rank_count`); the client only splits and labels.
+**Consequences:**
+- The pill hides when fewer than three weeks are selected, and Raw stats has no period.
+- The baseline weeks are not added to `weeks`, so the bars and the table are unchanged.
+- `usage_trends_view_changed` and `usage_trends_action` carry `period` (`week | three_weeks`); no new event.
+- A star who missed all three baseline weeks lands in "Back or new".
+- The margins and floors were checked on the Weeks 1–4 fixture only, not on live mid-season weeks.
+- Rejected: using the default window's single earlier week as the baseline; a period on Weekly share only.
+
 ## D-249 — A free agent's positional rank is the overall rank at the position; the league selector is the header on Free Agents
 
 **Date:** 2026-11-12 · **Who:** the operator: "The free agents page breaks the behavior of other pages where the league selector stays as a header. Additionally, the positional ranks present of all FAs (so Theo Johnson shows as TE1). It should instead be overall at the position (regardless of who is owned or not)." Changing what `pos_rank` means rather than adding a field, and the custom native-stack header, are the builder's and the main session's calls. Plan: [`../docs/plans/free-agents-header-rank/`](../docs/plans/free-agents-header-rank/).

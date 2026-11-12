@@ -69,7 +69,7 @@ Parent scopes: [scope.md](scope.md) and [scope-order-toggle.md](scope-order-togg
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | updated | `GET /api/usage-trends`: `period` param, `period` response blocks, `invalid_period`, the client order note |
-| `living-memory/LLD.md` | n/a here | the brief reserves `living-memory/` for the lead session; suggested entry: "Usage Trends Last 3 weeks: server-ranked (`rank_jump`/`rank_share`/`rank_count`); the client sorts by those ranks only" |
+| `living-memory/LLD.md` | updated | "Usage Trends Last 3 weeks is server-ranked" (2026-11-12, D-250), written by the merging session |
 | `docs/architecture.md` | n/a | no module wiring change; one route reads extra weeks through the existing `_usage_week` |
 | `living-memory/HLD.md` | n/a | no architectural shift |
 | `docs/cross-client-invariants.md` | n/a | mobile is the only client of `/api/usage-trends`; no constant is shared with web or the extension |

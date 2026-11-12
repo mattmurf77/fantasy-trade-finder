@@ -1,3 +1,13 @@
+## 2026-11-12 — Usage Trends period toggle (D-250), branch `feat/usage-trends-period-toggle`
+
+- **Full backend suite (Opus subagent, no edits in flight, before merging the Free Agents branch):** 15,410 passed, 42 skipped, 0 failed. `test_usage_trends.py` + `test_usage_trends_refresh.py`: 61 passed (12 new). All `test_analytics_*.py` + `test_events_api.py`: 258 passed.
+- **App (subagent):** `tsc --noEmit` clean; all `check-*.js` pass, with new checks 1ag–1am and 2e7–2e12 in `check-usage-trends.js`; testid-lint OK.
+- **What is pinned:** without `period` the compute output and three raw route responses hash to the values captured before the change; the three-week average uses played weeks only; the baseline is read outside the selection; the jump margin, the two-game floor and the volume floor; fewer than two games ranks last; no earlier weeks means no jumps; a bad `period` is 400; the client sorts by the server's ranks only, defaults to Last week, remembers the choice, hides the pill in Raw stats and reports `period` on both events; copy states both ends and the weeks, no jargon.
+- **Sabotages, red then restored (29, subagent; checksums identical after each):** 13 on the server, 16 on the client and taxonomy.
+- **Main session:** read the route and compute diffs; merged the Free Agents branch in (one conflict in `docs/api-reference.md`, each branch's own row kept) and re-ran the usage, free-agent and digest tests.
+- **Not verified:** anything on a device; live Weeks 7–9 numbers (no network calls were made). Operator checklist: scope-period-toggle.md.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Free Agents: overall positional rank, league selector header (D-249), branch `fix/free-agents-header-rank`
 
 - **Full backend suite (Opus subagent, no edits in flight):** 15,402 passed, 42 skipped, 0 failed. Targeted: `test_free_agents.py`, `test_free_agents_route.py`, `test_fa_move_route.py`, `test_fa_move_capability.py`, `test_verified_reads.py`: 244 passed.
