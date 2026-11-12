@@ -90,10 +90,21 @@ def _expire_other_model_baselines(now):
 def _retry_incomplete_baselines(now):
     """Operator-only: a baseline whose last attempt stopped incomplete under the
     current model, and is not leased, is due now. Returns how many were marked."""
+    return _retry_baselines(now, "incomplete_projections")
+
+
+def _retry_unsupported_baselines(now):
+    """Operator-only, after a rules change admits a league format: a baseline
+    whose last attempt was refused as unsupported under the current model, and
+    is not leased, is due now. A league still unsupported is refused once more."""
+    return _retry_baselines(now, "unsupported_policy")
+
+
+def _retry_baselines(now, status):
     t, r = db.league_projection_targets_table, db.league_projection_runs_table
     with db.engine.begin() as conn:
         rows = conn.execute(select(t.c.target_id, r.c.input_json).join(r, r.c.run_id == t.c.last_attempt_id)
-                            .where(r.c.status == "incomplete_projections", t.c.next_due_at > now.isoformat(),
+                            .where(r.c.status == status, t.c.next_due_at > now.isoformat(),
                                    or_(t.c.lease_until.is_(None), t.c.lease_until <= now.isoformat()))).all()
         current = [target_id for target_id, raw in rows if json.loads(raw or "{}").get("expected_model_version") == VERSION]
         if current:
@@ -132,13 +143,17 @@ def _bootstrap_connected(limit, *, user_id=None, league_id=None):
             added += 1
 
 
-def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None, retry_incomplete=False):
+def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None, retry_incomplete=False,
+             retry_unsupported=False):
     """Weekly dispatch, or explicit operator-only first baseline preparation.
 
     Initial preparation never refreshes a previously attempted baseline and
     uses the same cohort, account locks, bounded queue and next weekly slot.
     retry_incomplete (operator-only, weekly mode) first makes due every target
     whose last attempt stopped incomplete under the current model.
+    retry_unsupported (operator-only, weekly mode) does the same for a last
+    attempt refused as unsupported (`unsupported_policy`), e.g. after a rules
+    change newly supports a league format. Scheduled ticks pass neither.
     """
     if type(initial) is not bool:
         raise ValueError("invalid_initial_mode")
@@ -146,6 +161,10 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
         raise ValueError("invalid_retry_incomplete")
     if retry_incomplete and initial:
         raise ValueError("retry_incomplete_requires_weekly_mode")
+    if type(retry_unsupported) is not bool:
+        raise ValueError("invalid_retry_unsupported")
+    if retry_unsupported and initial:
+        raise ValueError("retry_unsupported_requires_weekly_mode")
     if (user_id is None) != (league_id is None) or (user_id is not None and
             (not isinstance(user_id, str) or not isinstance(league_id, str) or
              not 1 <= len(user_id) <= 128 or not league_id.isdigit() or len(league_id) > 32)):
@@ -164,6 +183,7 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
         return {"status": "approval_pending", "queued": 0}
     t, now = db.league_projection_targets_table, datetime.now(timezone.utc)
     retried = _retry_incomplete_baselines(now) if retry_incomplete else None
+    retried_unsupported = _retry_unsupported_baselines(now) if retry_unsupported else None
     if not initial:
         _expire_other_model_baselines(now)
     eligibility = [t.c.last_attempt_id.is_(None)] if initial else [t.c.next_due_at <= now.isoformat()]
@@ -205,6 +225,8 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
     result = {"status": "dispatched", "queued": queued, "cadence": "weekly", "initial": initial, "schedule_timezone": options["schedule"]["timezone"]}
     if retry_incomplete:
         result["retried"] = retried
+    if retry_unsupported:
+        result["retried_unsupported"] = retried_unsupported
     return result
 
 

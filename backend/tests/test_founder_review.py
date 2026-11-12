@@ -425,7 +425,8 @@ def test_the_flag_ships_off_everywhere():
     root = Path(__file__).resolve().parents[2]
     for rel in ("config/features.json", "backend/tests/fixtures/flags/release.json",
                 "backend/tests/fixtures/flags/onboarding-v2.json", "backend/tests/fixtures/flags/profiles-on.json"):
-        assert json.loads((root / rel).read_text())["founder.review"] is False, rel
+        # Shipped on: the page is still inert until FOUNDER_ACCOUNTS names an account.
+        assert json.loads((root / rel).read_text())["founder.review"] is True, rel
 
 
 def test_the_vocabulary_is_one_definition():
