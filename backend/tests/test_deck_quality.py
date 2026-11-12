@@ -74,13 +74,19 @@ def test_protected_cards_are_never_dropped_or_deferred():
         assert kept(card(["v_star"], ["p_mid", "p_low"], **{attr: "x"}))
 
 
+def test_repeat_cap_is_five_of_the_first_thirty():
+    # Operator 2026-11-11: relaxed from 3 to 5 ("5/30"); the window is unchanged.
+    assert (dq.REPEAT_CAP, dq.REPEAT_WINDOW) == (5, 30)
+
+
 def test_repeat_cap_defers_rather_than_drops():
-    cards = [card(["v_wr"], ["p_wr"]) for _ in range(5)] + [card(["v_qb"], ["p_qb"])]
+    cards = [card(["v_wr"], ["p_wr"]) for _ in range(7)] + [card(["v_qb"], ["p_qb"])]
     out, counts = dq.filter_deck(cards, viewer_id="V", market=lambda a: 3000.0,
                                  position=lambda a: "WR", rosters={}, lineup_slots=SLOTS)
-    assert len(out) == 6 and counts["deferred"] == 2
-    assert out[3] is cards[5]                                  # the different card moves up
-    assert out[4:] == cards[3:5]                               # over-cap cards keep their order
+    assert len(out) == 8 and counts["deferred"] == 2
+    assert out[:5] == cards[:5]                                # five of one asset are allowed
+    assert out[5] is cards[7]                                  # the different card moves up
+    assert out[6:] == cards[5:7]                               # over-cap cards keep their order
 
 
 def test_counts_and_order_preserved():
