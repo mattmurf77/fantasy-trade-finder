@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-255 — Team Review is brought back in line with the engine; a positions-only save leaves the outlook unsaved
+
+**Date:** 2026-11-12 · **Who:** the operator, after an audit of Team Review: "Yes, fix them" (eight findings). How each fix is made, and storing "no outlook declared" as an empty string, are the builder's and the main session's calls. Plan: [`../docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md`](../docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md).
+**Context:** Team Review was built in August as a composer over what existed. Since then the forecast, pick names, roster setup's Keep and Move, the hard rules and the outlook names all changed, and Team Review showed an old simulator's playoff band, a firsts count that read pick labels, its own outlook names, stale steps after a save, and it silently declared an outlook whenever positions were saved.
+**Decision:** (1) Firsts are counted by the pick's round. (2) The Standing step shows the saved weekly forecast's playoff chance, with Home's rules for when it is showable; the old band is no longer sent on that step (it still feeds the window inference). (3) Outlook names are the shared ones, and the rules an outlook switches on are named from the rule catalog. (4) The review refetches after a save. (5) `POST /api/league/preferences` accepts a positions-only body and leaves the stored outlook untouched; a row with no declared outlook stores `""` (`database.UNSAVED_OUTLOOK`) and both loaders return it as none. (6) The Plan step shows Keep and Move and links to Roster setup. (7) The window copy says which read the engine is using until Confirm. (8) A save in Team Review marks Find a Trade's deck as changed, as a Trade DNA save does.
+**Consequences:**
+- Builds up to 1.22.0 (188) get fix 1 on deploy, and stop showing the contradicting band (they show no playoff line on that step). They still send a made-up outlook with every Chase / Shop save; the server cannot tell it from a real choice, so that stops only with the next build.
+- Outlooks already written that way cannot be told apart in the database.
+- The Trade DNA sheet has the same habit (it saves "Not sure" when positions are saved with no outlook picked). Not changed here.
+- No schema change and no pipeline bump. `""` appears in raw dumps of `league_preferences`.
+- Not changed, by scope: the Depth step's thin / deep read, the Divergence step's inputs, the entry card's placement, and any merge of Team Review with Roster setup (proposed to the operator separately).
+
 ## D-254 — Standings is one sortable table with a Record | Points pill; nothing on the page starts a simulation
 
 **Date:** 2026-11-12 · **Who:** the operator: "let's go with one row. W-L, Projected W-L, Playoff Odds %. A pill in the top right of the table to toggle to Points summary. That changes the columns to 'PF', 'Max PF', 'Proj Max PF'", after asking for a version "that doesn't need the current and projected tabs" with sortable columns, and "Expanded tiles are hard to identify" for the open team. The outlined card, the projected record's form, the event reuse and the removal of the old simulation path are the builder's and the main session's calls. Plan: [`../docs/plans/home-engagement/scope-standings-table.md`](../docs/plans/home-engagement/scope-standings-table.md); mockups `mockups/projection-expanded-row/`.

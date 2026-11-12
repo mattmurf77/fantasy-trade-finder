@@ -1,3 +1,13 @@
+## 2026-11-12 — Team Review: eight fixes (D-255), branch `fix/team-review-current-data`
+
+- **Full backend suite (Opus subagent, no edits in flight, before merging the Standings stack):** 15,448 passed, 42 skipped, 0 failed. New `test_team_review_current_data.py`: 23 passed. The digest test passed: no pipeline bump.
+- **App (subagent):** `tsc --noEmit` clean; all `check-*.js` suites pass (`check-team-review.js` 36 of 36); testid-lint OK.
+- **What is pinned:** firsts by round for "1st", slotted and projected labels; the saved chance shown exactly when Home shows a percentage and never the old band; the outlook rules from the catalog; a positions-only save with nothing saved and with an outlook saved; every old body shape of the preferences route behaves as before; the loaders return none for the unsaved value; the app sends an outlook only when one is set; refetch after save; the Plan card's Keep, Move and link; the three window lines; the deck-changed note is consumed once and cleared when a partner is picked.
+- **Sabotages, red then restored (39, subagent; checksums unchanged):** 15 backend, 24 app. One assertion was too loose on the first pass and was narrowed.
+- **Main session:** read the route and database diffs; checked no other reader takes the outlook column raw (one eval bench does); merged the Standings stack in (one conflict in a notes file, each branch's own row kept) and re-ran the Team Review, standings and tile suites, `tsc`, testid-lint and the new backend test file.
+- **Not verified:** anything on a device; a real Postgres instance.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Standings single table (D-254), branch `feat/standings-single-table`
 
 - **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 184 of 184 `check-*.js`, with the new `check-standings-table.js` at 105 of 105; testid-lint OK. Backend: the digest test, every analytics-taxonomy test and the 19 tests that read `mobile/src`: 512 passed; `test_league_projection_median.py` 32 passed. Backend change is comments only in the taxonomy.
