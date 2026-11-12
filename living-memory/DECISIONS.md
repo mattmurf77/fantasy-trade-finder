@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-237 — A league-mate with no saved outlook is assumed from their playoff chance in the saved forecast, in two bands, before the roster read
+
+**Date:** 2026-11-11 · **Who:** the operator: "Assumed team outlooks should use our projections for non app users. For example paulsmenis is shown as 'looks contending' when he has almost no chance to make the playoffs". Two bands, the wire `source`, the cache route and the flag pairing are the main session's and the builder's calls.
+**Context:** An undeclared league-mate's outlook came from roster shape (`infer_team_outlook`), which read almost every team as contending. The season forecast already holds each team's playoff probability.
+**Decision:** Behind `trade.partner_outlook_projection` (code default false, shipped true; needs `league.projections`), precedence per league-mate is: saved outlook, then the viewer's usable saved forecast (at or below 45% Rebuilding, above Contending; never Tanking or All-in), then the roster read. One function (`partner_outlook.assumed`) feeds the trade engine's partner input, the fit block's "Them" tag and Team Review. One forecast read per request, carried in the request preload, so the request signature covers it.
+**Consequences:**
+- Two bands only: an assumed Tanking or All-in would apply those plans' hard rules to a manager who never chose them. On three synthetic leagues four bands moved 5 of 11 league-mates to an extreme and changed 9 to 16 of the top 30 cards again.
+- The tag's wire `source` stays `roster` for a projection read, because installed builds drop any other value; the words are the same. The request evidence (`outlook_source`) and the owner proof (`outlook_read`) record the true source.
+- A stale, incomplete, old-model or missing forecast, a non-Sleeper league, or a roster that does not map to exactly one forecast team falls back to the roster read with no error.
+- Each weekly forecast changes the request signature for that viewer, so stored first pages and prepared decks rebuild weekly.
+- Not changed: the legacy generators, mock-draft CPU drafters and the value core still use the roster read. `DECK_PIPELINE_VERSION` moves (reconciled at merge with the other open branches).
+
 ## D-235 — Rules-first deck construction ships on with no shadow; the repeat cap is 5 of 30; liked trades stay an overlay evaluated after generation
 
 **Date:** 2026-11-11 · **Who:** the operator: build it ("Yes"), accept the order change ("Ok. Aligned."), relax the repeat rule ("I think we can relax it to 5/30"), no shadow week ("No. Roll out immediately."), and on likes: "Would it make more sense for the liked trades to get fetched after generation? ... presents them all blended together?" Scope limits, the Match strength stopgap and what is accepted as different from today are this session's calls. Design: `docs/plans/realtime-trade-engine/fast-deck-v2-design.md`; ADR-030.

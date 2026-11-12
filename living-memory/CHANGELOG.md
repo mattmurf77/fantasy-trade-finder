@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-11 — League-mates' assumed outlooks come from the saved forecast (D-237)
+
+- **Why:** a league-mate with almost no playoff chance read "Looks contending", because the roster read calls nearly every team contending.
+- **What changed (server):** an undeclared league-mate is assumed Rebuilding at or below a 45% playoff chance in the viewer's saved forecast and Contending above it; the roster read is the fallback. The trade engine, the card's "Them" tag and Team Review use the same value. Flag `trade.partner_outlook_projection`, on.
+- **Effect on decks:** on synthetic 12-team leagues 6 to 7 of 11 assumed outlooks changed and 8 to 10 of the top 30 cards stayed the same.
+- **Limits:** Sleeper leagues with a usable forecast only; never an assumed Tanking or All-in. Not verified on a device or against production.
+
 ## 2026-11-11 — Rules-first deck construction is on (D-235, ADR-030); repeat cap 5 of 30
 
 - **What changed:** the deck rules now decide which trades are built, before ranking, and the whole eligible deck is built with the page-first search (about 0.35 s of CPU a search against 4.0 s on the recorded requests). No 150-card cap. `trade.fast_deck` is retired; the switch is `deck.rules_first`.

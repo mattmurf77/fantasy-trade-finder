@@ -1,3 +1,13 @@
+## 2026-11-11 — League-mate outlooks from the saved forecast (D-237), branch `feat/partner-outlook-from-projection`
+
+- **Full suite (main session, after merging main):** **14,573 passed, 42 skipped, 0 failed.** `test_partner_outlook_projection.py` is new, 41 cases.
+- **What they pin:** the 45% boundary and two bands only; a saved outlook always wins; every unusable forecast (stale, incomplete, old model, refresh failed, pending, unsupported, no run, non-Sleeper) gives the roster read; a co-owned roster maps to its primary owner and an unmappable one keeps the roster read; one forecast read per job; the engine, the fit tag and Team Review agree; the read is in the request signature; flag off is byte-identical; rules-first page equals the gated full solve with projection reads.
+- **Sabotages, red then restored (15, Opus subagent; 1 in the main session):** listed in the PR body. Main session: with the wire-source map emptied the tag reads `projection`, which installed builds drop; the tag test went red.
+- **Review fix (main session):** the "Them" tag's wire `source` stays `roster` for a projection read, so build 186 keeps the tag.
+- **Synthetic 12-team leagues:** 6 to 7 of 11 assumed outlooks changed; top-30 overlap 8 to 10 of 30.
+- **Not verified:** production behaviour; anything on a device. Check after deploy: a league-mate with a low playoff chance reads "Looks rebuilding" on a card.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — Rank table lists every touched position, branch `feat/fit-rank-table-all-positions`
 
 - **`test_fit_block_v3.py`: 74 pass** (main session re-run). `positions` is every ranked position the trade touches with its true rank before and after, noise-level changes included; `ranks`, the lead (`flat.*` for a noise-only team), `tag`, `v` and whether the block shows are unchanged; a noise-only card with no lead still has no block. Fit, narrative, digest, fast-deck and revised-offer subset: 514 passed (subagent). `check-fit-first-copy.js`: 14 of 14; the app needed no change.
