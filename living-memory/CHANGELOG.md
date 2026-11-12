@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-11 — Forecasts for league-median leagues; the median setting is stored when a league is linked (D-236)
+
+- A Sleeper league that plays the league median now gets a playoff forecast: two results a week (head-to-head and against the median), in completed and simulated weeks, with seeding on the combined record. Other leagues' forecasts are unchanged and nothing re-runs.
+- New column `leagues.median_game`, written at link and refreshed on sync. Not sent to clients yet.
+- `POST /api/cron/league-projections {"retry_unsupported": true}` re-attempts a league whose format has just become supported.
+- Still to do: stop registering completed-season leagues as forecast targets (found, not built).
+
 ## 2026-11-11 — "Why pass?" opens from the ✕ as a frame over the card
 
 - **Why:** TestFlight 186 report, "a card with no pass button". The asking card removed the ✕ and put the reason chips under the card, below the fold on a tall card.

@@ -1,7 +1,13 @@
 """Weekly projection batch: one baseline per slot, crash and recreation fences,
 and the operator-only retry_incomplete option (a target whose last attempt
 stopped incomplete under the current model is made due now; nothing else is,
-scheduled ticks never pass it, and it is refused outside weekly mode)."""
+scheduled ticks never pass it, and it is refused outside weekly mode).
+
+Its sibling retry_unsupported (2026-11-11, median leagues) does the same for a
+last attempt refused as `unsupported_policy`, so a league format newly
+supported by a rules change is forecast right after deploy; it reports
+`retried_unsupported`, can be passed with retry_incomplete, and a league still
+unsupported is simply refused once more."""
 import pytest
 from backend import database as db,feature_flags as ff
 from backend.league_projections import batch,store,service
@@ -176,6 +182,110 @@ def test_cron_route_passes_retry_incomplete_and_realtime_tick_never_does(monkeyp
     assert not called
     assert client.post(path,json={'retry_incomplete':True},headers=headers).status_code==200
     assert called==[{'retry_incomplete':True,'foreground_busy':server._projection_foreground_busy}]
+    called.clear()
+    monkeypatch.setattr(server,'is_enabled',lambda key:key=='league.projections')
+    monkeypatch.setattr(server,'load_pending_matches_older_than',lambda cutoff:[])
+    assert client.post('/api/cron/realtime-tick',headers=headers).status_code==200
+    assert called==[{'foreground_busy':server._projection_foreground_busy}], 'Scheduled ticks never retry on their own'
+
+
+# ── retry_unsupported ──────────────────────────────────────────────────────
+
+def test_retry_unsupported_requeues_a_current_model_unsupported_baseline_once(scheduled):
+    due=stop_last_attempt(scheduled,'unsupported_policy')
+    plain=batch.dispatch(lambda *a:pytest.fail('enqueue only'))
+    assert plain['queued']==0 and 'retried_unsupported' not in plain and 'retried' not in plain, 'Ordinary ticks keep their shape and never retry'
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_unsupported=True)
+    assert (result['queued'],result['retried_unsupported'])==(1,1) and 'retried' not in result
+    assert run_count(scheduled)==2
+    assert batch.target('account','123')['next_due_at']==batch.next_weekly_slot()>=due
+    # Still unsupported: the new attempt is refused again and waits for its slot.
+    t=db.league_projection_targets_table
+    with scheduled.begin() as conn:
+        run_id=conn.execute(db.select(t.c.last_attempt_id)).scalar()
+        conn.execute(db.league_projection_runs_table.update().where(db.league_projection_runs_table.c.run_id==run_id).values(status='unsupported_policy'))
+    assert batch.dispatch(lambda *a:pytest.fail('enqueue only'))['queued']==0, 'Scheduled ticks never loop on a refused league'
+
+
+@pytest.mark.parametrize('status',['complete','incomplete_projections','failed','queued','running','stale','cancelled'])
+def test_retry_unsupported_leaves_other_outcomes_on_their_weekly_slot(scheduled,status):
+    due=stop_last_attempt(scheduled,status)
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_unsupported=True)
+    assert (result['queued'],result['retried_unsupported'])==(0,0)
+    assert batch.target('account','123')['next_due_at']==due and run_count(scheduled)==1
+
+
+def test_unsupported_under_another_model_stays_with_the_other_model_rule(scheduled):
+    stop_last_attempt(scheduled,'unsupported_policy',model_version='joint-season-scenario-v2')
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_unsupported=True)
+    assert (result['queued'],result['retried_unsupported'])==(1,0), 'The model-change rule refreshes it; retry must not count it'
+
+
+def test_retry_unsupported_skips_a_leased_target(scheduled):
+    from datetime import datetime,timezone,timedelta
+    due=stop_last_attempt(scheduled,'unsupported_policy')
+    with scheduled.begin() as conn:
+        conn.execute(db.league_projection_targets_table.update().values(lease_until=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat()))
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_unsupported=True)
+    assert (result['queued'],result['retried_unsupported'])==(0,0)
+    assert batch.target('account','123')['next_due_at']==due
+
+
+@pytest.mark.parametrize('kwargs,error',[(dict(retry_unsupported=True,initial=True),'retry_unsupported_requires_weekly_mode'),
+                                         (dict(retry_unsupported=1),'invalid_retry_unsupported'),
+                                         (dict(retry_unsupported='true'),'invalid_retry_unsupported'),
+                                         (dict(retry_unsupported=None),'invalid_retry_unsupported')])
+def test_retry_unsupported_refuses_initial_mode_and_non_bool(scheduled,kwargs,error):
+    with pytest.raises(ValueError) as exc:
+        batch.dispatch(None,**kwargs)
+    assert str(exc.value)==error
+
+
+@pytest.mark.parametrize('off,expected',[('league.projections',{'status':'disabled','queued':0}),
+                                         ('league.projections_provider_approved',{'status':'approval_pending','queued':0})])
+def test_retry_unsupported_marks_nothing_when_dispatch_returns_early(scheduled,monkeypatch,off,expected):
+    due=stop_last_attempt(scheduled,'unsupported_policy')
+    monkeypatch.setattr(batch,'is_enabled',lambda key:key!=off)
+    assert batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_unsupported=True)==expected
+    assert batch.target('account','123')['next_due_at']==due
+
+
+def test_both_retry_options_together_report_their_own_counts(scheduled):
+    """One target stopped incomplete, another refused unsupported."""
+    stop_last_attempt(scheduled,'incomplete_projections')
+    with scheduled.begin() as conn:
+        conn.execute(db.leagues_table.insert().values(sleeper_league_id='456',user_id='account',platform='sleeper',season='2026'))
+    batch.register('account','456','account',2026)
+    import json
+    from backend.league_projections.core import VERSION
+    t,r=db.league_projection_targets_table,db.league_projection_runs_table
+    later=batch.next_weekly_slot()
+    with scheduled.begin() as conn:
+        target_id=conn.execute(db.select(t.c.target_id).where(t.c.league_id=='456')).scalar()
+        conn.execute(r.insert().values(run_id='f'*32,user_id='account',league_id='456',status='unsupported_policy',created_at=store.utc_now(),
+                     updated_at=store.utc_now(),expires_at=store.utc_now(),request_hash='u',
+                     input_json=json.dumps({'kind':'baseline','expected_model_version':VERSION})))
+        conn.execute(t.update().where(t.c.target_id==target_id).values(last_attempt_id='f'*32,next_due_at=later))
+    incomplete_only=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True)
+    assert (incomplete_only['retried'],'retried_unsupported' in incomplete_only)==(1,False)
+    with scheduled.begin() as conn:
+        conn.execute(r.update().where(r.c.league_id=='123').values(status='incomplete_projections'))
+        conn.execute(t.update().values(next_due_at=later))
+    result=batch.dispatch(lambda *a:pytest.fail('enqueue only'),retry_incomplete=True,retry_unsupported=True)
+    assert (result['retried'],result['retried_unsupported'])==(1,1)
+
+
+def test_cron_route_passes_retry_unsupported_and_realtime_tick_never_does(monkeypatch):
+    from backend import server
+    monkeypatch.setattr(server,'_CRON_SECRET','synthetic-secret')
+    monkeypatch.setattr(server,'_IS_PROD_ENV',True)
+    called=[]
+    monkeypatch.setattr(batch,'dispatch',lambda fetch,**kw:called.append(kw) or {'queued':0})
+    client,path,headers=server.app.test_client(),'/api/cron/league-projections',{'X-Cron-Secret':'synthetic-secret'}
+    assert client.post(path,json={'retry_unsupported':True}).status_code==401
+    assert not called
+    assert client.post(path,json={'retry_unsupported':True,'retry_incomplete':True},headers=headers).status_code==200
+    assert called==[{'retry_unsupported':True,'retry_incomplete':True,'foreground_busy':server._projection_foreground_busy}]
     called.clear()
     monkeypatch.setattr(server,'is_enabled',lambda key:key=='league.projections')
     monkeypatch.setattr(server,'load_pending_matches_older_than',lambda cutoff:[])
