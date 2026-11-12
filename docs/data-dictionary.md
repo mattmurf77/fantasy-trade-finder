@@ -2598,3 +2598,16 @@ not a storage, schema or evidence-retention change.
 
 Default-off weekly advisory sidecar. `league_projection_runs` owns run_id,user_id,league_id,request/input hashes, immutable request/snapshot/result JSON, created/updated/expiry timestamps, state/reason/details, worker_token and retry_count. The worker token fences abandoned attempts; recovery reuses saved inputs once. `league_projection_targets` owns a random target generation, unique(user_id,league_id), canonical league seat, season, next weekly eligibility, dispatch lease/token and last-attempt/last-success references. Both tables join the account deletion/export registry; writes lock the live user. New tables use metadata.create_all. No trade/ranking data is rewritten. Ordinary history retention is configurable(default7days); the last successful target baseline is retained until replaced or account deletion. Raw unrelated user profiles are not stored.
 Calibration native MFL range inputs add no tables. Frozen source/proof JSON records original native bounds, explicit partition totals, the representative-template-only role of slot arrays, account/native-franchise/canonical-seat provenance and unchanged fixed holdings. `calibration_native_lineup.py` joins `_ENGINE_CODE_MODULES` because both owner engines consume its optional exact assignment. Existing code-currentness and complete Calibration source hashes cover helper changes; no stored page is re-labeled current without matching source identity.
+
+### founder_label_overrides
+
+Founders' review ([design](plans/founder-review/design.md) §3): the founder's correction of a win-now season-signal player label. One row per **(player_id, scope)**; deleting the row returns the player to the engine's label in that scope. Written only by `POST /api/founder/labels`; read by `server._season_evidence` (every row, once per usable evidence build) → `season_value.with_label_overrides` → `league_profile`. New table: `metadata.create_all`, no `migration_cols` row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `player_id` | String, PK | Sleeper player id (QB/RB/WR/TE; never a pick) |
+| `scope` | String, PK | `all` (RB / WR / TE: every league) \| `superflex` / `single_qb` (QB: leagues of that QB format, `season_value.qb_scope` of the lineup slots). Any position can take a narrower scope later (e.g. TE premium) without a migration |
+| `label` | String, not null | `cornerstone` \| `win_now` \| `rebuild` \| `depth` (`season_value.OVERRIDE_LABELS`). A value, not per-label booleans: a multi-label model would widen the key to `(player_id, scope, label)` |
+| `set_by` | String, not null | the founder's account id (`sess["user_id"]`). Account deletion sets it to `deleted_user` and keeps the row (a judgment about an NFL player and an engine input); exported with the account (`accounts._EXPORT_TABLES`) |
+| `set_at` | String, not null | ISO UTC; changes only when the label changes |
+

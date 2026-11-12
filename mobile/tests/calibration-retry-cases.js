@@ -124,6 +124,10 @@ function makeHarness(initial=null) {
       },
     },
     '../state/useSession':{useSession},
+    // Founders' review (docs/plans/founder-review/): a non-founder session — the
+    // capability probe answers false, so the screen is the grading page only.
+    '../api/founder':{getFounderCapability:async()=>false},
+    '../components/founder/FounderLabelReview':{},
   };
   const out={};
   vm.runInNewContext(js,{exports:out,require:id=>{assert.ok(id in stubs,id);return stubs[id];},AbortController,

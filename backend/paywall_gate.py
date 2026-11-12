@@ -203,6 +203,9 @@ ROUTES = {
     ("POST", "/api/fleaflicker/import"): FREE,
     ("GET", "/api/fleaflicker/leagues"): FREE,
     ("POST", "/api/fleaflicker/link"): FREE,
+    ("GET", "/api/founder/capability"): FREE,     # founder-only (docs/plans/founder-review/)
+    ("GET", "/api/founder/labels"): FREE,
+    ("POST", "/api/founder/labels"): FREE,
     ("POST", "/api/grading/cards/<card_id>"): FREE,
     ("POST", "/api/grading/sessions"): FREE,
     ("GET", "/api/grading/sessions/<session_id>/next"): FREE,
