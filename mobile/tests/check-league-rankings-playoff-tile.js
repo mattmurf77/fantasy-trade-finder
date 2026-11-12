@@ -2,13 +2,14 @@
 // League Rankings shows Home's playoff tile (2026-11-12, operator ask): under
 // `league.projections` the page mounts the SAME `HomePlayoffBanner` Home does,
 // in place of the inline `LeagueProjectionSection`; the full projected
-// standings render only on the Standings page (Projected segment).
-//   T1  League Rankings mounts the tile, no longer the section; Standings does
+// standings render only on the Standings page (its single table).
+//   T1  League Rankings mounts the tile, no longer the section; Standings
+//       holds the projections (the shared read + the moved team detail)
 //   T2  the mount: keyed by user + league, roster id the way Home finds it,
 //       on the shared `['league-rosters', id]` key; the `outlook.odds` strip
 //       path (batch projections off) is unchanged
 //   T3  the handlers, EXECUTED for both routes: View / percentage → Standings
-//       on Projected; Review outlook → the Trade DNA sheet with the
+//       (no params); Review outlook → the Trade DNA sheet with the
 //       suggestion (tab root: Home's navigate; legacy root push: popTo Main)
 //   T4  analytics: Home's events and tile values, screen = route.name
 //   T5  one component, one query key, one util; Home's mount unchanged;
@@ -32,11 +33,11 @@ assert(ls.includes("import HomePlayoffBanner from '../components/home/HomePlayof
   'T1a League Rankings imports Home\'s tile component');
 assert.equal(count(ls, '<HomePlayoffBanner'), 1, 'T1b exactly one tile mount on League Rankings');
 assert(!ls.includes('LeagueProjectionSection'), 'T1c League Rankings no longer imports or mounts LeagueProjectionSection');
-assert(/import LeagueProjectionSection from '\.\.\/components\/LeagueProjectionSection';/.test(standings)
-  && /<LeagueProjectionSection key=\{leagueId \?\? ''\} \/>/.test(standings),
-  'T1d Standings still mounts the full section');
-assert(standings.includes("route.params?.segment === 'projected' ? 'projected' : 'current'"),
-  'T1e Standings opens on Projected from the { segment } param');
+assert(standings.includes("queryKey: ['league-projection-batch', userId, leagueId]")
+  && standings.includes("import { ProjectionTeamDetail } from '../components/LeagueProjectionDetail';"),
+  'T1d Standings holds the full projections: the shared forecast read and the moved team detail');
+assert(!/route\.params|useRoute/.test(standings),
+  'T1e Standings opens the same table however it is reached ({ segment } is accepted, never read)');
 
 // ── T2 ────────────────────────────────────────────────────────────────────
 const slot = (/\{batchProjections \? \([\s\S]*?\) : oddsEnabled \? \(\s*outlookSupported \? \(\s*<OutlookStripAndSection query=\{outlookQuery\} leagueId=\{leagueId\} \/>\s*\) : \(\s*<OutlookUnsupportedRow \/>\s*\)\s*\) : null\}/.exec(ls) || [''])[0];
@@ -73,8 +74,8 @@ for (const [routeName, isTabRoot] of [['LeagueRankings', true], ['LeagueSummary'
   h.onTileDetails();
   assert.deepEqual(calls, [
     ['track', 'home_tile_tapped', { tile: 'standings' }, routeName],
-    ['navigate', 'Standings', { segment: 'projected' }],
-  ], `T3a/T4a ${routeName}: track, then Standings on Projected`);
+    ['navigate', 'Standings'],
+  ], `T3a/T4a ${routeName}: track, then the Standings table (no params)`);
   calls.length = 0;
   h.onTileReviewOutlook('contender');
   assert.deepEqual(calls, [
@@ -87,7 +88,7 @@ for (const [routeName, isTabRoot] of [['LeagueRankings', true], ['LeagueSummary'
 // Home's own destination is the same selector with the same params.
 assert(hub.includes("navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });"),
   'T3c Home\'s Review outlook opens the same selector with the same params');
-assert(hub.includes("navigation.navigate('Standings', { segment: 'projected' });"), 'T3d Home\'s View opens the same page');
+assert(hub.includes("const onProjections = () => {\n    track('home_tile_tapped', { tile: 'standings' }, 'Home');\n    navigation.navigate('Standings');"), 'T3d Home\'s View opens the same page');
 // T4 — existing event, existing props and tile values; no new name.
 assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band"\}\)/.test(taxonomy)
   && /#   outlook \| standings \| overall_rank/.test(taxonomy),

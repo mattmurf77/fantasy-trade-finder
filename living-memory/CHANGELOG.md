@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Standings is one sortable table (D-254)
+
+- **What changed:** no Current / Projected tabs. One row per team with a Record | Points pill: Record shows W-L, projected W-L and playoff odds; Points shows PF, Max PF and projected Max PF. Every heading sorts.
+- **Open team:** an outlined card that stands out from the rows, holding the rest of the team's numbers and the record, weekly and draft-pick detail.
+- **No forecast:** current numbers still show; forecast columns show a dash.
+- **Needs the next app build.** Not seen on a device.
+
 ## 2026-11-12 — League rankings shows the playoff tile; the roster-changed card counts correctly (D-253, G-078)
 
 - **League rankings:** the full Projected standings section is replaced by the same playoff tile Home shows, linking to the Standings page.

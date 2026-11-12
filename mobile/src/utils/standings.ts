@@ -27,6 +27,12 @@ export interface SleeperRosterSettings {
   ties?: number | null;
   fpts?: number | null;
   fpts_decimal?: number | null;
+  /** Sleeper's season-to-date potential points (Max PF). Not in Sleeper's
+   *  public docs, so it may be absent; absent ⇒ Max PF is unknown (null),
+   *  never fpts. The forecast pipeline reads the same field the same way
+   *  (backend/league_projections/provider.py: ppts + ppts_decimal / 100). */
+  ppts?: number | null;
+  ppts_decimal?: number | null;
 }
 
 /** Structural subset of api/sleeper.ts RosterRow plus Sleeper's `settings`. */
@@ -53,6 +59,8 @@ export interface StandingsRow {
   games: number;
   winPct: number;
   pointsFor: number;
+  /** Season-to-date Max PF from `settings.ppts`; null when Sleeper sent none. */
+  maxPf: number | null;
   /** 1-based computed place; unique (ties broken by points for, then roster_id). */
   place: number;
   isYou: boolean;
@@ -76,6 +84,12 @@ function num(v: number | null | undefined): number {
 export function pointsFor(s: SleeperRosterSettings | null | undefined): number {
   if (!s) return 0;
   return Math.round((num(s.fpts) + num(s.fpts_decimal) / 100) * 100) / 100;
+}
+
+/** Max PF to 2 dp from `ppts` + `ppts_decimal`; null when `ppts` is absent. */
+export function maxPointsFor(s: SleeperRosterSettings | null | undefined): number | null {
+  if (!s || typeof s.ppts !== 'number' || !Number.isFinite(s.ppts)) return null;
+  return Math.round((s.ppts + num(s.ppts_decimal) / 100) * 100) / 100;
 }
 
 /** Win percentage with a tie as half a win; 0 when no games. */
@@ -117,6 +131,7 @@ export function currentStandings(
       games: wins + losses + ties,
       winPct: winPct(wins, losses, ties),
       pointsFor: pointsFor(s),
+      maxPf: maxPointsFor(s),
       isYou: myRosterId != null && r.roster_id === myRosterId,
     };
   });

@@ -12,7 +12,7 @@ import { RowAction } from './StatusRow';
 
 interface Props {
   rosterId: number | null;
-  /** The percentage and the "View" link both open Standings on Projected. */
+  /** The percentage and the "View" link both open the Standings table. */
   onDetails: () => void;
   /** Opens the outlook selector with the suggestion marked. Saves nothing. */
   onReviewOutlook: (recommended: ProjectionOutlook) => void;

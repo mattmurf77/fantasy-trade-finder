@@ -21,13 +21,14 @@
 //   5. Standings is a root-stack route registered unconditionally with
 //      HeaderBack, and the screen mounts exactly one FeedbackFAB
 //      aboveTabBar={false};
-//   6. the outlook query is enabled only on Projected; the initial segment
-//      is Projected only for the route param `segment: 'projected'` (Home's
-//      playoff tile), Current otherwise, and the param fires no event;
-//   7. standings_segment_changed sits in a tap handler, never an effect;
+//   6. no outlook (simulation) request from Standings: its one forecast
+//      read is the saved weekly result; the route param `segment` is
+//      accepted but never read, so every way in opens the Record view;
+//   7. standings_segment_changed (now the Record | Points pill) sits in a
+//      tap handler, never an effect;
 //   8. the deep link exists;
 //   9. the Season-outlook calibration rules hold where the renderer lives
-//      (it stays in LeagueSummaryScreen and Standings imports it);
+//      (LeagueSummaryScreen, its only host since the single table);
 //  10. the roster/user queries keep staleTime 5 * 60_000 and are
 //      Sleeper-gated.
 //
@@ -308,62 +309,59 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
     '5g. the FAB sits outside every branch (one mount in every state)');
 }
 
-// ═══ 6. The outlook query runs only on Projected ═══════════════════════════
-// Sabotage caught: `enabled` losing the segment clause fires the 10,000-sim
-// request on every Standings open.
+// ═══ 6. No simulation on open; the segment param is accepted, not read ═══
+// Sabotage caught: the outlook (10,000-sim) query coming back to this page,
+// the forecast read losing its flag/platform gate or its shared key, or the
+// old `{ segment }` param steering the page again.
 {
-  const outlook = callsTo(st, 'useQuery').find((c) =>
-    /queryKey: \['league-outlook', leagueId, 'consensus'\]/.test(flat(st, c)));
-  const t = outlook ? flat(st, outlook) : '';
-  assert(callsTo(st, 'getOutlook').length === 1 && /queryFn: \(\) => getOutlook\(leagueId!, 'consensus'\)/.test(t),
-    "6a. one outlook query, on the shared ['league-outlook', leagueId, 'consensus'] key");
-  assert(/enabled: !batchProjections && segment === 'projected' && oddsEnabled && isSleeper && !!leagueId,/.test(t),
-    "6b. legacy compute enabled only outside stored batch mode, on Projected + odds + Sleeper + league");
+  assert(callsTo(st, 'getOutlook').length === 0 && !/\bgetOutlook\b|league-outlook/.test(stCode),
+    '6a. Standings makes no outlook request (no getOutlook, no league-outlook key)');
+  const fc = callsTo(st, 'useQuery').find((c) =>
+    /queryKey: \['league-projection-batch', userId, leagueId\]/.test(flat(st, c)));
+  const t = fc ? flat(st, fc) : '';
+  assert(!!fc && /queryFn: \(\) => getLeagueProjectionBatch\(leagueId!\)/.test(t) && /enabled: forecastEnabled,/.test(t),
+    "6b. one forecast read, the SAVED weekly result, on the shared ['league-projection-batch', userId, leagueId] key");
   // (the printer normalises 60_000 to 60000)
   assert(/staleTime: 60_?000\b/.test(t), '6c. staleTime 60_000');
-  const odds = declOf(st, 'oddsEnabled');
-  assert(!!odds && flat(st, odds.initializer) === "useFlag('outlook.odds')", "6d. oddsEnabled = useFlag('outlook.odds')");
-  // 6e–6h: the initial segment. Sabotage caught: Standings ignoring the
-  // param (the playoff tile lands on Current again), or a param that opens
-  // Projected by default / for any value (the Standings row lands there).
-  const segDecl = findAll(st, (n) => ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) &&
-    n.name.elements[0] && n.name.elements[0].getText(st) === 'segment')[0];
-  const init = segDecl && segDecl.initializer && isCallTo(segDecl.initializer, 'useState') ? segDecl.initializer : null;
+  const fe = declOf(st, 'forecastEnabled');
+  const bp = declOf(st, 'batchProjections');
+  assert(!!fe && flat(st, fe.initializer) === 'batchProjections && isSleeper && !!leagueId && !!userId' &&
+      !!bp && flat(st, bp.initializer) === "useFlag('league.projections')" && !/useFlag\('outlook\.odds'\)/.test(stCode),
+    "6d. the read is gated on useFlag('league.projections') + Sleeper + league + user; outlook.odds is not read here");
+  // 6e–6h: every way in opens the Record view. Execute the initial view
+  // against each way Standings can be opened.
+  const viewDecl = findAll(st, (n) => ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) &&
+    n.name.elements[0] && n.name.elements[0].getText(st) === 'view')[0];
+  const init = viewDecl && viewDecl.initializer && isCallTo(viewDecl.initializer, 'useState') ? viewDecl.initializer : null;
   const initText = init && init.arguments[0] ? flat(st, init.arguments[0]) : '';
-  assert(!!init && init.typeArguments && init.typeArguments[0].getText(st) === 'Segment' &&
-      /\broute\.params\b/.test(initText),
-    '6e. the segment state is seeded from route.params');
-  // Execute the seed against each way Standings can be opened.
+  assert(!!init && init.typeArguments && init.typeArguments[0].getText(st) === 'StandingsView' &&
+      !/route/.test(initText),
+    '6e. the view state is not seeded from the route');
   let seed = null;
   try {
     // eslint-disable-next-line no-new-func
     seed = new Function('route', `return (${initText});`);
   } catch (e) { /* reported below */ }
   const cases = [
-    [undefined, 'current', 'no params (Home Standings row, deep link)'],
-    [{}, 'current', 'empty params'],
-    [{ segment: 'current' }, 'current', "segment: 'current'"],
-    [{ segment: 'bogus' }, 'current', 'an unknown segment (e.g. a hand-typed deep-link query)'],
-    [{ segment: 'projected' }, 'projected', "segment: 'projected' (Home's playoff tile)"],
+    [undefined, 'no params (Home Standings row, playoff tiles, deep link)'],
+    [{}, 'empty params'],
+    [{ segment: 'current' }, "segment: 'current'"],
+    [{ segment: 'bogus' }, 'an unknown segment (a hand-typed deep-link query)'],
+    [{ segment: 'projected' }, "segment: 'projected' (an installed pre-table build's playoff tile)"],
   ];
-  const wrong = seed ? cases.filter(([params, want]) => seed({ params }) !== want) : cases;
-  assert(wrong.length === 0, '6f. initial segment: Projected only for { segment: \'projected\' }, Current otherwise',
-    wrong.map(([, want, label]) => `${label} should open ${want}`).join('; '));
-  const routeDecl = declOf(st, 'route');
-  assert(!!routeDecl && flat(st, routeDecl.initializer) === "useRoute<RouteProp<StandingsParams, 'Standings'>>()",
-    '6g. route comes from useRoute, typed to the Standings params');
-  // The param is not a user selection on this screen: it seeds state once and
-  // never routes through selectSegment, an effect or an event.
-  const effectsReadingRoute = findAll(st, (n) => (isCallTo(n, 'useEffect') || isCallTo(n, 'useFocusEffect') ||
-    isCallTo(n, 'useLayoutEffect')) && /route\.params/.test(flat(st, n)));
-  assert(effectsReadingRoute.length === 0 && count(stCode, 'route.params') === 1 &&
-      !/selectSegment\(route|track\([^)]*route/.test(stCode),
-    '6h. the param is read once, as the useState seed: no effect, no selectSegment, no event');
+  const wrong = seed ? cases.filter(([params]) => seed({ params }) !== 'record') : cases;
+  assert(wrong.length === 0, '6f. every way in opens the Record view; { segment } changes nothing',
+    wrong.map(([, label]) => label).join('; '));
+  assert(!/useRoute/.test(stCode) && count(stCode, 'route.params') === 0,
+    '6g. the screen never reads the route (the param is accepted by the type, never read)');
+  const effects = findAll(st, (n) => isCallTo(n, 'useEffect') || isCallTo(n, 'useFocusEffect') ||
+    isCallTo(n, 'useLayoutEffect'));
+  assert(effects.length === 0, '6h. no effect on this page: nothing fires on mount');
 }
 
 // ═══ 7. standings_segment_changed: a changing tap only ═════════════════════
 // Sabotage caught: emitting from an effect (fires on mount and on any
-// re-render), or without the no-change guard (re-tap of the active segment).
+// re-render), or without the no-change guard (re-tap of the active view).
 {
   const tracks = findAll(st, (n) => isCallTo(n, 'track') && n.arguments[0] &&
     ts.isStringLiteral(n.arguments[0]) && n.arguments[0].text === 'standings_segment_changed');
@@ -371,19 +369,19 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
   const tr = tracks[0];
   assert(!!tr && !enclosingEffect(tr), '7b. the emitter is not inside any effect');
   const fnDecl = tr && ancestors(tr).find((a) => ts.isVariableDeclaration(a));
-  assert(!!fnDecl && fnDecl.name.getText(st) === 'selectSegment',
-    '7c. the emitter lives in the selectSegment tap handler');
+  assert(!!fnDecl && fnDecl.name.getText(st) === 'selectView',
+    '7c. the emitter lives in the selectView tap handler (the Record | Points pill)');
   const body = fnDecl ? flat(st, fnDecl.initializer) : '';
-  assert(body.indexOf('if (next === segment) return;') >= 0 &&
-      body.indexOf('if (next === segment) return;') < body.indexOf("track('standings_segment_changed'"),
-    '7d. a re-tap of the active segment emits nothing');
+  assert(body.indexOf('if (next === view) return;') >= 0 &&
+      body.indexOf('if (next === view) return;') < body.indexOf("track('standings_segment_changed'"),
+    '7d. a re-tap of the active view emits nothing');
   assert(!!tr && flat(st, tr) === "track('standings_segment_changed', { segment: next }, 'Standings')",
     "7e. props are exactly {segment} on screen 'Standings' (the taxonomy row)");
-  const cur = byTestId(st, 'standings.segment.current')[0];
-  const proj = byTestId(st, 'standings.segment.projected')[0];
-  assert(!!cur && !!proj && attrText(st, cur, 'onPress') === "() => selectSegment('current')" &&
-      attrText(st, proj, 'onPress') === "() => selectSegment('projected')",
-    '7f. both segment buttons route through selectSegment');
+  const rec = byTestId(st, 'standings.view.record')[0];
+  const pts = byTestId(st, 'standings.view.points')[0];
+  assert(!!rec && !!pts && attrText(st, rec, 'onPress') === "() => selectView('record')" &&
+      attrText(st, pts, 'onPress') === "() => selectView('points')",
+    '7f. both pill segments route through selectView');
   assert(!/standings_segment_changed/.test(lsCode), '7g. no other screen emits it');
 }
 
@@ -397,24 +395,26 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
 
 // ═══ 9. Season-outlook calibration, wherever the renderer lives ════════════
 // The renderer stays in LeagueSummaryScreen (check-outlook-bands.js pins
-// playoffBand + its thresholds THERE); Standings imports it rather than
-// re-drawing it. Sabotage caught: a local copy in Standings that renders a
-// percentage, title odds, or records during beta.
+// playoffBand + its thresholds THERE), now its only host: the single
+// standings table replaced the Projected segment that also mounted it.
+// Sabotage caught: a copy in Standings that renders a band, title odds, or
+// records during beta.
 {
-  assert(/import \{ SeasonOutlookSection, OutlookUnsupportedRow \} from '\.\/LeagueSummaryScreen';/.test(stCode),
-    '9a. StandingsScreen imports SeasonOutlookSection + OutlookUnsupportedRow from LeagueSummaryScreen');
+  assert(!/from '\.\/LeagueSummaryScreen'/.test(stCode),
+    '9a. StandingsScreen imports nothing from LeagueSummaryScreen (no outlook renderer)');
   const localCopy = findAll(st, (n) => ts.isFunctionDeclaration(n) && n.name &&
     /^(SeasonOutlookSection|OutlookRow|OutlookUnsupportedRow|OutlookStrip|playoffBand|orderOutlookTeams|roundedPct)$/.test(n.name.text));
-  assert(localCopy.length === 0 && findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'SeasonOutlookSection').length === 1 &&
-      findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'OutlookUnsupportedRow').length === 1,
-    '9b. Standings renders the shared section and unsupported row, and defines no outlook renderer of its own');
+  assert(localCopy.length === 0 && findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'SeasonOutlookSection').length === 0 &&
+      findAll(st, (n) => isJsxEl(n) && tagOf(st, n) === 'OutlookUnsupportedRow').length === 0,
+    '9b. Standings mounts no Season-outlook section or row and defines no outlook renderer of its own');
   assert(!/title_pct|playoff_pct|projected_wins|projected_seed/.test(stCode),
-    '9c. StandingsScreen reads no odds field itself');
+    '9c. StandingsScreen reads no outlook odds field');
   const pctLits = findAll(st, (n) => (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ||
     ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n) || ts.isJsxText(n)) && /%/.test(n.text));
-  assert(pctLits.length === 0, '9d. StandingsScreen renders no percentage');
-  assert(/export function SeasonOutlookSection\(/.test(lsCode) && /export function OutlookUnsupportedRow\(/.test(lsCode),
-    '9e. the shared renderers are exported from LeagueSummaryScreen');
+  assert(pctLits.length === 0, '9d. StandingsScreen writes no percentage itself (the forecast odds format lives in utils/standingsTable)');
+  assert(/\nfunction SeasonOutlookSection\(/.test(lsCode) && /\nfunction OutlookUnsupportedRow\(/.test(lsCode) &&
+      !/export function (SeasonOutlookSection|OutlookUnsupportedRow)\(/.test(lsCode),
+    '9e. the renderers are local to LeagueSummaryScreen (its only host), no longer exported');
   const fn = (name) => findAll(ls, (n) => ts.isFunctionDeclaration(n) && n.name && n.name.text === name)[0];
   const section = fn('SeasonOutlookSection');
   const row = fn('OutlookRow');
@@ -465,8 +465,8 @@ assert(/arrivalScrollRef\.current = intent\.side === 'sell' \? 'end' : 'list';/.
 // ═══ 11. testIDs + Chalkline ═══════════════════════════════════════════════
 {
   const stText = read(ST_REL);
-  for (const id of ['standings.screen', 'standings.segment.current', 'standings.segment.projected',
-    'standings.current.table', 'standings.current.unavailable']) {
+  for (const id of ['standings.screen', 'standings.view.record', 'standings.view.points',
+    'standings.table', 'standings.current.unavailable']) {
     assert(stText.includes(`testID="${id}"`), `11a. testID ${id} is a static literal in StandingsScreen`);
   }
   assert(read(NAV_REL).includes('testID="standings.back-btn"'), '11b. testID standings.back-btn in RootNav');

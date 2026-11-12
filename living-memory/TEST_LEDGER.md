@@ -9,6 +9,15 @@
 - **Decision:** none. SD 25 and the independent draw stand. Write-up: `docs/plans/league-projections/calibration-check/README.md`.
 - **Tests:** `test_projection_calibration_stats.py` 8 passed (synthetic: independence gives a ratio near 1; planted team effect and drift are recovered); digest test passed.
 
+## 2026-11-12 — Standings single table (D-254), branch `feat/standings-single-table`
+
+- **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 184 of 184 `check-*.js`, with the new `check-standings-table.js` at 105 of 105; testid-lint OK. Backend: the digest test, every analytics-taxonomy test and the 19 tests that read `mobile/src`: 512 passed; `test_league_projection_median.py` 32 passed. Backend change is comments only in the taxonomy.
+- **What is pinned:** sorting for every column both ways with ties and with missing values last; the odds and points formats; the dash rules; which line the open team shows per view; no segments; the pill and its event; one table; the open card's border, radius and no shadow; the status line; the shared forecast key; no simulation request reachable from the page; league switch closes the open team and keeps view and sort; the layout arithmetic at 375pt; `LeagueProjectionSection` gone.
+- **Sabotages, red then restored (45, subagent; checksums unchanged).** Four assertions were weak on the first pass and were tightened.
+- **Main session:** read the screen's data flow.
+- **Not verified:** anything on a device: column widths, the two-line headings, large text sizes, the open card.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — League rankings playoff tile; roster-changed card wording and count (D-253, G-078), branch `feat/league-rankings-playoff-tile`
 
 - **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 183 of 183 `check-*.js`, including the new `check-league-rankings-playoff-tile.js` and `check-roster-setup.js` at 166 passed; testid-lint OK. Backend: the digest test, the home-hub taxonomy test and every backend test that reads `mobile/src`: 483 passed (on the tile commit; later commits change no file those read). No backend code changed.

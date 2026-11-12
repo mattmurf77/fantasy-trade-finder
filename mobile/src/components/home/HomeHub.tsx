@@ -160,11 +160,11 @@ export default function HomeHub() {
     track('home_tile_tapped', { tile: 'standings' }, 'Home');
     navigation.navigate('Standings');
   };
-  // The playoff tile's percentage and "View": the same page, opened on its
-  // Projected segment (full projected standings + Max PF draft order).
+  // The playoff tile's percentage and "View": the same page, whose one
+  // table carries the projected record, playoff odds and Max PF.
   const onProjections = () => {
     track('home_tile_tapped', { tile: 'standings' }, 'Home');
-    navigation.navigate('Standings', { segment: 'projected' });
+    navigation.navigate('Standings');
   };
   const onOverallRank = () => {
     track('home_tile_tapped', { tile: 'overall_rank' }, 'Home');
