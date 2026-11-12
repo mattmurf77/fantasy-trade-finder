@@ -25,6 +25,7 @@
 | `files/values-players.csv` | `data_loader.VALUES_URL` | `backend/data_loader.py` | Per-player consensus dynasty trade values (0–10000 scale), both 1QB and Superflex/2QB columns. **This is the pipeline that seeds Elo** — every ranking pool build reads it. |
 | `files/values.csv` | `data_loader.PICK_VALUES_URL` | `backend/data_loader.py` | DynastyProcess's **combined** file — same player rows as `values-players.csv` PLUS `pos == "PICK"` rows: per-slot current-year pick prices (`"2026 Pick 1.01"` … `"2026 Pick 5.12"`) and future-year rungs (`"2027 Early 1st"`, `"2028 2nd"`, …). FTF reads it **only** for the PICK rows, via `load_pick_slot_values`. |
 | `files/values-players.csv` **at a historical commit** | `dp_values_history.COMMITS_URL` + `RAW_URL_TEMPLATE` | `backend/dp_values_history.py` | **Dated boards.** The DynastyProcess repo keeps the full git history of `values-players.csv` (weekly-ish commits back to ~2020-09), so a past season can be priced with the board that existed then. Two GETs: `api.github.com/repos/dynastyprocess/data/commits?path=files/values-players.csv&per_page=1&until=<date>` resolves the nearest commit at-or-before a date, then `raw.githubusercontent.com/dynastyprocess/data/<sha>/files/values-players.csv` fetches that revision. **Research/validation only** — no route, no flag, and nothing in the product runtime imports it; the shipped Elo-seed pipeline still reads the live file above. |
+| The whole `dynastyprocess/data` repository, **as a local git clone** | `universe_values.DP_REPO_URL` | `backend/universe_values.py` (CLI `scripts/universe_values.py`) | **Research store for the Sleeper trade-universe study** (`docs/plans/sleeper-trade-universe/values-history.md`). The operator runs `clone-dp` once (`git clone --filter=blob:none --no-checkout`); `build-dp` then reads `values-players.csv`, `values.csv` (PICK rows) or `values-picks.csv`, and HEAD's `db_playerids.csv` at each commit date from 2024 on through `git cat-file`. A blobless clone fetches each needed file revision lazily: about 150 weekly boards x 2 files of ~50 KB, plus one `db_playerids.csv`, so roughly 300 small fetches and ~20 MB of blobs. Writes only `data/sleeper-universe/values.sqlite` (git-ignored). Research only; the app never imports it. |
 | `files/db_playerids.csv` | `espn_service.PLAYERIDS_URL` | `backend/espn_service.py` | **Third** DynastyProcess file, same repo — an ID crosswalk (`sleeper_id`, `espn_id`, `mfl_id`, `sportradar_id`, `yahoo_id`, `ktc_id`, `merge_name`/`name`) used to id-match players across platforms: ESPN roster imports (`map_rosters`), the Fleaflicker `sportradar_id` join, and the KTC blend's id-based matching (`get_crosswalk().by_ktc_id` / `.by_mfl_id`, see below). Not part of the values pipeline itself, but same source and same trust boundary — documented here rather than a fourth file. |
 
 All are plain GET requests with `User-Agent: FantasyTradeFinder/1.0`, `timeout=10`–`30`s. The UA is not optional on `raw.githubusercontent.com` — a bare `curl` gets a redirect stub instead of the file.
@@ -50,6 +51,12 @@ All are plain GET requests with `User-Agent: FantasyTradeFinder/1.0`, `timeout=1
 - The live resolve+fetch path (`resolve_commit` / `fetch_values_csv`, `allow_network=True`) is exercised only by `scripts/dp_values_history_capture.py` when minting new fixtures. Both calls are wrapped in `observe_call("dynastyprocess", "values_history", phase="commits"|"raw")`.
 - DP commits weekly, so a board resolved for date D was scraped up to 7 days earlier — always in the safe direction (a board can never carry information from after the date it prices). Pinned by `test_every_indexed_snapshot_exists_and_carries_no_look_ahead`.
 - The name → Sleeper-id join reuses the shipped crosswalk (`db_playerids.csv` bundled snapshot + `data_loader.DP_TO_SLEEPER_NAME`), position-strict, with a suffix-stripping tier and an optional caller-supplied tier. Measured unmatched rates and the one non-trivial miss ("Ken Walker III" on the 2022 board) are in `docs/feedback/items/169-outlook-league-summary/dated-values-revalidation-2026-08-09.md` §2.3.
+
+**Clone-based history (`universe_values.py`, trade-universe research store):**
+- Not fetched at runtime. One operator-run `git clone --filter=blob:none --no-checkout` (commits and trees only), then `build-dp` reads file revisions from the clone; git fetches each missing blob once, lazily.
+- One board per UTC commit day of `values-players.csv` (the day's last commit), from 2024-01-01 plus the last board before it. The 2022-2025 fixtures above show a weekly cadence (each board's commit is 6 days before its Thursday target date, Friday commits).
+- Headers are checked, not assumed: every board must hold `player, pos, value_1qb, value_2qb` and nothing outside the twelve known columns; an unknown layout or pick label fails the whole build, lists every offending commit, and writes nothing. `inspect-dp` lists each distinct header and the commit range it covers.
+- Join: `fp_id` -> `db_playerids.fantasypros_id` first (position-strict), then the same name tiers as `dp_values_history` (tier 1 + suffix-stripped tier 2). Unmapped rows are stored by `fp_id`, or `name:<player>|<pos>` when the row has none.
 
 **`db_playerids.csv` (ID crosswalk):**
 - Lazy 24h in-memory TTL (`espn_service._CROSSWALK_TTL_SECONDS`), first fetched on first `get_crosswalk()` call after boot (not eagerly at startup).
@@ -111,7 +118,22 @@ From `values.csv`, only rows with `pos == "PICK"`: the `player` column doubles a
 
 ## Related: KeepTradeCut blend
 
-`data_loader.py` also blends a second, unauthenticated consensus source — KeepTradeCut's dynasty-rankings page HTML (`keeptradecut.com`, scraped once per 24h TTL, `_fetch_ktc_html` / `_ktc_consensus`) — into the DynastyProcess baseline before Elo seeding (`_apply_consensus_blend`, feedback #145/#148). DP remains the pool's spine (universe, crosswalk, value scale); KTC only contributes an ordering opinion (`ktc_blend_weight`) and a TE-premium multiplier for `sf_tep` (`tep_te_uplift`). It is fail-soft everywhere — any KTC problem leaves the maps DP-only. KTC is a **separate external call surface** from DynastyProcess (different host, different fetch/parse path, unsanctioned HTML scrape vs. a published CSV) and is out of scope for this document; see `docs/runbook.md` § "consensus seed blend" and `data_loader.py`'s module comments for the full design. It does not yet have its own `docs/integrations/` page.
+`data_loader.py` also blends a second, unauthenticated consensus source — KeepTradeCut's dynasty-rankings page HTML (`keeptradecut.com`, scraped once per 24h TTL, `_fetch_ktc_html` / `_ktc_consensus`) — into the DynastyProcess baseline before Elo seeding (`_apply_consensus_blend`, feedback #145/#148). DP remains the pool's spine (universe, crosswalk, value scale); KTC only contributes an ordering opinion (`ktc_blend_weight`) and a TE-premium multiplier for `sf_tep` (`tep_te_uplift`). It is fail-soft everywhere — any KTC problem leaves the maps DP-only. KTC is a **separate external call surface** from DynastyProcess (different host, different fetch/parse path, unsanctioned HTML scrape vs. a published CSV) and is out of scope for this document; see `docs/runbook.md` § "consensus seed blend" and `data_loader.py`'s module comments for the full design. It does not yet have its own `docs/integrations/` page; its research-only history reader is described below.
+
+
+### KeepTradeCut history (research store, `backend/ktc_history.py`)
+
+The operator states the KeepTradeCut agreement covers reading historical values from the site. `scripts/universe_values.py pull-ktc` (run by the operator; never by the app or by tests) reads:
+
+| Page | Count | What is read |
+|---|---|---|
+| `keeptradecut.com/dynasty-rankings` | 1 | The `ktc-players` JSON list (current top 500, including about 36 `RDP` pick entries), parsed with the app's own `_KTC_PLAYERS_ELEMENT` / `_KTC_PLAYERS_LITERAL` |
+| `keeptradecut.com/dynasty-rankings/players/<slug>` | one per entry, plus an optional `--extra` list | The `pd-oneqb` and `pd-superflex` JSON blocks: daily `overallValue` (crowd value), `vftValueHistory`, `blendValueHistory`, each `[{"d": "YYMMDD", "v": int}]` back to 2020 |
+
+- **Rate:** one request every 3 s by default (`--interval`, floor 1 s), the app's browser headers plus `Accept-Encoding: gzip`, back-off on 429 / 5xx / network errors (honours `Retry-After`), no retry on 404, and a hard stop after 3 consecutive 403/429 answers. About 540 pages, about 2.3 GB of HTML uncompressed, roughly 30 to 45 minutes.
+- **Stored:** per page a gzip JSON checkpoint under `data/sleeper-universe/ktc/pages/` with the parsed series and the entry's identity (a restart skips finished pages); raw HTML only with `--keep-html`. `ingest-ktc` turns the checkpoints into daily boards (`source = "ktc"`, crowd value, from 2024-01-01) in `data/sleeper-universe/values.sqlite`.
+- **No TE premium history:** the player page's `tep`/`tepp`/`teppp` objects hold only adjacent-player lists, so the stored `sf` is plain superflex, unlike the blend's live `superflexValues.tep.value`.
+- **Matching:** `playerID` -> `db_playerids.ktc_id`, then `mflid` -> `mfl_id`, then name + position; never across positions. Unmapped entries are stored by KTC id.
 
 ## Instrumentation guidance
 
@@ -146,6 +168,7 @@ See `docs/config-reference.md` for the full env var table.
 - `backend/data_loader.py` — fetch, parse, Elo-seed mapping, KTC blend
 - `backend/espn_service.py` — `db_playerids.csv` crosswalk fetch/cache/fallback (`get_crosswalk`, `fetch_crosswalk`, `PLAYERIDS_URL`)
 - `backend/dp_values_history.py` — dated `values-players.csv` boards from the repo's git history (`resolve_commit`, `fetch_values_csv`, `values_as_of`); capture script `scripts/dp_values_history_capture.py`; fixtures `backend/tests/fixtures/dp-values-history/`
+- `backend/universe_values.py` + `backend/ktc_history.py` — research store of dated DP and KTC values for the Sleeper trade-universe study; CLI `scripts/universe_values.py`; note `docs/plans/sleeper-trade-universe/values-history.md`
 - `backend/server.py` — `_load_dp_maps`, `_ensure_universal_pools`, `_build_universal_pools_locked`, `_DP_FETCH_RETRY_SECONDS`
 - `docs/architecture.md` — data-flow diagram (External → `DP[DynastyProcess CSV]`)
 - `docs/runbook.md` — "Consensus QB values" and "consensus seed blend" troubleshooting entries

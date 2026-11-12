@@ -9,7 +9,8 @@ per-script traps.
 never point them at production. Every `outlook_*` analysis script is read-only and safe
 anywhere; `deck_eval.py` writes only a temporary scratch SQLite it creates (it refuses any
 other database); the two `*_capture.py` scripts hit the network (public Sleeper / GitHub
-endpoints only) and write fixtures.
+endpoints only) and write fixtures; `universe_values.py clone-dp` / `pull-ktc` hit GitHub /
+KeepTradeCut and write only under the git-ignored `data/sleeper-universe/`.
 
 ## Seeding / demo
 
@@ -33,6 +34,7 @@ endpoints only) and write fixtures.
 - `outlook_pick_capital_hypothesis.py` — offline test of the #169 operator's draft-pick-capital hypotheses (1a "more picks → in-season upgrades" vs 1b "more picks → rebuild signal, sheds players") against the same 6 seasons. No network, no DB. Verdict: `docs/feedback/items/169-outlook-league-summary/hypothesis-pick-capital-2026-08-09.md`
 
 - `dp_values_history_capture.py` — one-time NETWORK capture of **dated** DynastyProcess value boards (`values-players.csv` at a historical commit) into `backend/tests/fixtures/dp-values-history/`. Run once; re-run only to add seasons/weeks. Reads two public GitHub endpoints, writes only fixtures. Module: `backend/dp_values_history.py`.
+- `universe_values.py` — dated DynastyProcess and KeepTradeCut values for the Sleeper trade-universe research store (`data/sleeper-universe/values.sqlite`, git-ignored; never production). Subcommands: `clone-dp` (NETWORK: blobless clone of dynastyprocess/data), `inspect-dp`, `build-dp` (offline over the clone, but a blobless clone makes git fetch file revisions lazily), `pull-ktc` (NETWORK: ~540 KTC pages at one per 3 s, browser headers from `data_loader`, hard stop on repeated 403/429, page checkpoints so a restart resumes), `ingest-ktc`, `load-csv`, `coverage`, `value-on`. An unknown DP header or pick label fails `build-dp` and lists the commits; nothing is written until the whole history parses. Raw KTC HTML is not kept unless `--keep-html`. Modules: `backend/universe_values.py`, `backend/ktc_history.py`; note: `docs/plans/sleeper-trade-universe/values-history.md`.
 - `outlook_preseason_backtest.py` — offline backtest of the **preseason `roster_value`** strength source: rewinds standings AND rosters (real week-1 rosters from `/matchups/1`) AND values (kickoff-day dated board), then scores as-of week 0 against reality. Verdict: `docs/feedback/items/169-outlook-league-summary/dated-values-revalidation-2026-08-09.md`. No network, no DB.
 - `outlook_pick_capital_dated_values.py` — offline re-test of hypothesis 1b's Δ-roster-value sub-test with period-correct boards (three pricings: published PPG control, contemporaneous, kickoff-board-both-ends). Same report.
 - `outlook_idp_pricing_backtest.py` — offline five-variant backtest of **BUG-5** (the value board prices QB/RB/WR/TE only, so 8 of FFv3's 15 starting slots price at 0.0): status quo vs the IDP slot-eligibility fix vs a league-mean fallback vs two coverage attenuations, scored **split by league** so the IDP and non-IDP leagues are separable. Also carries `legacy_select()`, the verbatim pre-BUG-5 selection, used as the oracle by `backend/tests/test_outlook_idp_pricing.py`. Verdict: `docs/feedback/items/169-outlook-league-summary/idp-pricing-2026-08-09.md`. No network, no DB.

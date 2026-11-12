@@ -69,6 +69,8 @@ an old job during polling or refill an offer removed by #419's disposition check
 | `pick_values.py` | 317 | Shared draft-pick value ladder. Deliberately standalone so `database.py` can price picks without importing `server.py` (it imports `trade_service` lazily). |
 | `data_loader.py` | 873 | Fetches the DynastyProcess consensus CSVs (`values-players.csv`, plus `values.csv` read only for `pos == "PICK"`) + optional KTC blend, and seeds Elo. Seams: `FTF_DP_VALUES_FILE`, `FTF_DP_PICK_VALUES_FILE`, `FTF_KTC_VALUES_FILE`. |
 | `dp_values_history.py` | 355 | Dated DP value boards — `values_as_of(date)`; backs backtests. |
+| `universe_values.py` | 847 | **Research only, never imported by the app.** Dated value store for the Sleeper trade-universe study (`data/sleeper-universe/values.sqlite`): DP history from a local clone of dynastyprocess/data, `value_on` / `pick_value_on` lookups, coverage report. CLI `scripts/universe_values.py`. |
+| `ktc_history.py` | 426 | **Research only.** KeepTradeCut history reader (rankings page + per-player pages, polite fetcher, page checkpoints) feeding the same store as `source = "ktc"`. |
 | `feature_flags.py` | 935 | 171 flag keys, all defaulting **False** in code; `config/features.json` (or `FTF_FLAGS`) flips them. |
 | `experiments.py` | 742 | Layered A/B + multivariate assignment: deterministic, stateless, fail-open. Tester allowlist. |
 | `entitlements.py` | 362 | `pro` / `ad_free` resolution, billing-webhook projection, manual grants. |

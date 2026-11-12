@@ -53,6 +53,7 @@ fixtures live in `backend/tests/fixtures/`.
 | `probe_season_forecasts.py` | Public weekly stat-forecast horizon probe; optional actually captured snapshot for prospective evidence |
 | `outlook_pick_capital_capture.py` | Captures `traded_picks` + trade transactions from Sleeper's public API into `backend/tests/fixtures/outlook-hypotheses/` |
 | `dp_values_history_capture.py` | Captures **dated** DynastyProcess value boards into `backend/tests/fixtures/dp-values-history/`. Module: `backend/dp_values_history.py` |
+| `universe_values.py` | Dated DynastyProcess + KeepTradeCut values (2024 on) for the Sleeper trade-universe research store, into `data/sleeper-universe/values.sqlite` (git-ignored). Network only in `clone-dp` (a blobless git clone; `build-dp` may then fetch file revisions lazily) and `pull-ktc` (about 540 KeepTradeCut pages, one every 3 s, checkpointed). `inspect-dp`, `build-dp`, `ingest-ktc`, `coverage`, `value-on` are offline. Modules: `backend/universe_values.py`, `backend/ktc_history.py`. [Design note](../docs/plans/sleeper-trade-universe/values-history.md) |
 
 These read public endpoints and write only local captures. Re-run only to refresh/extend fixtures.
 
