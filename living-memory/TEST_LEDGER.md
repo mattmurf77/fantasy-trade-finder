@@ -1,3 +1,24 @@
+## 2026-11-12 — Free Agents: overall positional rank, league selector header (D-249), branch `fix/free-agents-header-rank`
+
+- **Full backend suite (Opus subagent, no edits in flight):** 15,402 passed, 42 skipped, 0 failed. Targeted: `test_free_agents.py`, `test_free_agents_route.py`, `test_fa_move_route.py`, `test_fa_move_capability.py`, `test_verified_reads.py`: 244 passed.
+- **App (subagent):** `tsc --noEmit` clean; 181 of 181 `check-*.js` including the new `check-free-agents-header.js` (23 assertions); testid-lint OK.
+- **What is pinned:** the rank counts rostered players and the caller's own roster; it does not depend on the position filter or on which rosters loaded; it follows the caller's board; picks are never ranked; ties keep pool order. The page mounts the global top bar through the custom header, keeps its JS back control, its fallback to the tabs and FeedbackFAB; the league is in the query key; a league switch drops an open claim and the claim sheet is gated on the league it was opened in.
+- **Sabotages, red then restored (27, subagent; checksums identical after each):** 4 on the rank (free-agent pool only, picks ranked, consensus instead of the caller's board, ties by id) and 23 on the header, screen and claim guards. One guard assertion did not go red at first (a prefix match) and was tightened.
+- **Main session:** read the service, header, screen and claim sheet diffs.
+- **Not verified:** anything on a device (header layout, the bell and gear from a pushed page); that the rank matches the Overall ranks page for a user who has not ranked. Operator checklist: scope.md.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-12 — Release: sell bonus, test profile, in-app claims (dark) on `main` at `12ac0f1d`; TestFlight 1.22.0 (187)
+
+- **CI on the merged heads:** #667 `c618c77f` and #669 `0b49ca38` green on all four checks (`backend-tests`, `mobile-typecheck`, `web-structure`, `maestro-testid-lint`). #669 contained #667 and #668, so #668 landed inside it; `origin/main`'s tree is identical to `0b49ca38`'s.
+- **Full backend suite, main session, on `0b49ca38`, no edits in flight:** 15,396 passed, 42 skipped, 0 failed (21 min).
+- **App, main session, clean checkout of `0b49ca38` after `npm ci`:** `tsc --noEmit` clean; 180 of 180 `check-*.js`; testid-lint OK.
+- **A date-expired test, fixed:** `test_trade_interest_disposition.py::test_batched_5000_row_history_measurement` failed CI on #667 and #668 (1 failed of about 15,270 each) and would have failed every branch from 2026-11-12T12:00Z: likes seeded at 2026-08-14T12:00Z against a 90-day cutoff read from the unpinned server clock. The fixture now pins `server.datetime` too. Other tests seed fixed August dates; none failed, but the same pattern is worth a sweep.
+- **Production (read-only checks):** deploy of `12ac0f1d` live 14:36 UTC; the binding backfill reports 2 considered, 2 already bound; `GET /api/feature-flags` shows `dev.test_profile` true, `mfl.send_add_drop` and `sleeper.send_add_drop` false; no errors or tracebacks in the logs from 14:33 to 14:40 UTC. Env `FOUNDER_ACCOUNTS` and `TEST_PROFILE_ACCOUNTS` were set to the operator's account (confirmed against the verified session and Sleeper's username lookup) before this deploy.
+- **TestFlight:** EAS production build 1.22.0 (187) from a clean checkout of `12ac0f1d`, auto-submit scheduled.
+- **Not verified:** anything on a device; the founder and test-profile capabilities under the operator's own session; live ESPN, MFL or Sleeper.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — In-app add/drop: MFL adapter, dark, on per-user bindings (D-248), branch `feat/in-app-claims`
 
 - **Full backend suite (Opus subagent, no edits in flight, on the branch with main, the sell bonus branch's base and the test profile merged):** 15,340 passed, 42 skipped, **1 failed**: `test_trade_interest_disposition.py::test_batched_5000_row_history_measurement`. Not this branch: the test seeded likes at 2026-08-14T12:00Z and pinned only `database.datetime`, while `server._project_trade_dispositions` takes its 90-day cutoff from the real clock, so it began failing everywhere at 2026-11-12T12:00Z (it also failed CI on #667). Fixed by pinning the server clock in the fixture (main session); the file is 21 of 21 after.
