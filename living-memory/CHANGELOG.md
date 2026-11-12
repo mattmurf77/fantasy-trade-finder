@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Founders' review: player label page (D-242)
+
+- **What:** a founder-only section in Calibration to review and correct the win-now engine's player labels, by position, with the tier board's tap-then-band interaction and a per-position summary of corrections.
+- **Rules:** one label per player; a correction is about future value only; QB corrections apply per QB format (superflex or 1-QB), other positions everywhere.
+- **State:** flag on, but nothing shows until `FOUNDER_ACCOUNTS` is set on the server. Corrections affect decks only once revision 5 serves. Needs the next app build.
+- Not verified on a device.
+
 ## 2026-11-11 — Combined release: pick pricing on, rank content off the card, Keep is hard, season signal stage A (D-237 to D-241)
 
 - **One branch, one deploy:** league-mate outlooks from the forecast (D-237), win-now season signal (D-238), no position ranks on the card (D-239), next-draft firsts priced by projected slot (D-240), Keep as a hard rule (D-241). `DECK_PIPELINE_VERSION` 27.

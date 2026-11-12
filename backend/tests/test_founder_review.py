@@ -419,7 +419,7 @@ def test_the_pipeline_version_is_pinned_for_the_override_seam():
     assert server.DECK_PIPELINE_VERSION == 28 and server.DECK_PIPELINE_PINS[28] == "f9dc5f829bcd9a92"
 
 
-def test_the_flag_ships_off_everywhere():
+def test_the_flag_defaults_off_in_code_and_ships_on():
     assert ff.DEFAULT_FLAGS["founder.review"] is False
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]

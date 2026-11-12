@@ -1,3 +1,13 @@
+## 2026-11-12 — Founders' review label page (D-242), branch `feat/founder-label-review`
+
+- **Full backend suite (Opus subagent, before merging main):** 14,995 passed, 42 skipped, 0 failed. **Main session after merging main:** `test_founder_review.py`, the pipeline digest, the paywall table and the median-setting file: 93 passed. CI is the full re-run.
+- **App (subagent):** `tsc --noEmit` clean; 176 of 176 `check-*.js`; testid-lint OK. `check-founder-review.js` is new (49 checks; re-run by the main session).
+- **What is pinned:** access (flag off, allow-list unset, unlisted account, unverified session, device id never grants); the (engine label, override) table case by case; a QB override applies only in leagues of its QB format; no overrides is byte-identical; overrides reach plan fit, the conflict rule, the card labels and the admin route; the digest moves only for a league the override can affect; `DECK_PIPELINE_VERSION` 28.
+- **Sabotages, red then restored (18, subagent):** in the PR body.
+- **Main session change:** the flag ships true (inert without `FOUNDER_ACCOUNTS`); the test that pinned it false now pins code default false and shipped true.
+- **Not verified:** anything on a device; the runbook's account-id lookup against production.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Combined release branch (D-237 to D-241), branch `release/2026-11-12-train`
 
 - **Full backend suite (main session) on the combination of league-mate outlooks, rank removal, win-now, pick pricing and the Keep rule, with `picks.projected_slot_value` and `trade.season_signal` on:** **14,934 passed, 42 skipped, 0 failed.** Run before main's median-league merge and two test-only app edits; after that merge the projection, pick, season, fit, digest, untouchable and paywall files were re-run green. CI is the full re-run on the final head.
