@@ -138,13 +138,14 @@ def usable(evidence):
 
 
 # Founders' review (docs/plans/founder-review/design.md §2): a founder's label override
-# is a judgment of the player's FUTURE axis only; whether he starts stays this league's.
-# Scope (operator ruling 2026-11-12): a QB override holds for the leagues of one QB
+# is the label the engine uses for that player (any of the four, for any rostered
+# QB / RB / WR / TE, including one the rule leaves unlabelled); whether he starts
+# (`startable`, the starter line, the lineup) stays this league's (scope.md addendum
+# 2026-11-12). Scope (operator ruling 2026-11-12): a QB override holds for the leagues of one QB
 # format (superflex / 2QB, or single-QB); an RB / WR / TE override holds everywhere.
 OVERRIDE_LABELS = ("cornerstone", "win_now", "rebuild", "depth")
 SCOPE_ALL, SCOPE_SUPERFLEX, SCOPE_SINGLE_QB = "all", "superflex", "single_qb"
 OVERRIDE_SCOPES = (SCOPE_ALL, SCOPE_SUPERFLEX, SCOPE_SINGLE_QB)
-_FUTURE_YES = frozenset(("cornerstone", "rebuild"))
 
 
 def is_superflex(slots):
@@ -167,17 +168,19 @@ def override_scope(position, slots):
 def with_label_overrides(evidence, overrides):
     """The evidence with the founder's overrides that can reach this league attached as
     `label_overrides` ({player_id: {"label", "scope"}}) and its digest recomputed over
-    them. `overrides`: iterable of (player_id, scope, label) rows. Kept: players projected
-    here whose row's scope is `all` or this league's QB format (`qb_scope` of the
+    them. `overrides`: iterable of (player_id, scope, label) rows. Kept: players in this
+    league whose row's scope is `all` or this league's QB format (`qb_scope` of the
     evidence's slots). Nothing kept (no rows, other players, the other QB format): the
-    same object back, so evidence, digest and request hash are byte-identical."""
+    same object back, so evidence, digest and request hash are byte-identical.
+    "In this league" = projected here (`players`) or rostered here without a projection
+    (`unprojected`): an override labels an unprojected player too."""
     if not usable(evidence) or not overrides:
         return evidence
-    projected = evidence.get("players") or {}
+    known = set(evidence.get("players") or {}) | set(evidence.get("unprojected") or ())
     here = {SCOPE_ALL, qb_scope(evidence.get("slots"))}
     relevant = {}
     for pid, scope, label in sorted((str(p), s, l) for p, s, l in overrides):
-        if pid in projected and scope in here and label in OVERRIDE_LABELS:
+        if pid in known and scope in here and label in OVERRIDE_LABELS:
             relevant[pid] = {"label": label, "scope": scope}
     if not relevant:
         return evidence
@@ -189,15 +192,11 @@ def with_label_overrides(evidence, overrides):
     return out
 
 
-def overridden_label(label, startable, override):
-    """design.md §2.1: the label after a founder override. Only a labelled projected
-    player (startable True or False) moves; the starts axis is never changed."""
-    if override not in OVERRIDE_LABELS or startable is None or label is None:
-        return label
-    future = override in _FUTURE_YES
-    if startable:
-        return "cornerstone" if future else "win_now"
-    return "rebuild" if future else "depth"
+def overridden_label(label, override):
+    """design.md §2.1 (amended 2026-11-12): the label after a founder override is the
+    override itself, whatever the rule said (a label or none) and whether or not he starts
+    here. Whether he starts here (`startable`) is never changed by it."""
+    return override if override in OVERRIDE_LABELS else label
 
 
 def require_viewer_projected(evidence, *, roster, position, market, inactive=()):
@@ -231,9 +230,13 @@ def league_profile(evidence, *, rosters, position, market, age, slots=None, inac
     rosters: {team_id: [asset ids]} (picks included); position: {id: "QB"|"RB"|"WR"|"TE"|"PICK"|…};
     market: {id: dynasty market value}; age: {id: age or None}; inactive: ids that cannot
     start (injured out, reserve, taxi). Slots default to the evidence's.
-    Founder overrides in `evidence["label_overrides"]` apply per `overridden_label` when
-    their scope is this player's here (`override_scope`: a QB's must match the league's QB
-    format); a player whose label they change also carries `engine_label`. None: unchanged.
+    Founder overrides in `evidence["label_overrides"]` apply per `overridden_label` to a
+    QB / RB / WR / TE (never a pick) when their scope is this player's here
+    (`override_scope`: a QB's must match the league's QB format), whether he is labelled,
+    borderline or unprojected here; a player whose label they change also carries
+    `engine_label` (possibly None). `startable` and `future` are never changed, so a label
+    can disagree with `startable`, and an unprojected player can carry a label with
+    `future` None. No override: unchanged.
     """
     if not usable(evidence):
         return None
@@ -261,21 +264,22 @@ def league_profile(evidence, *, rosters, position, market, age, slots=None, inac
             continue
         if pid not in ppg or pos not in POSITIONS or line[pos] is None:
             players[pid] = {"label": None, "future": None, "startable": None}
-            continue
-        pts = ppg[pid]
-        future = round(max(0.0, value - RATE * max(0.0, pts - line[pos])), 2)
-        if pts >= line[pos] + margin[pos] - _EPS:
-            startable = True
-            label = "win_now" if future < FUTURE_FLOOR or past_cliff(pos, age.get(pid)) else "cornerstone"
-        elif pts <= line[pos] - margin[pos] + _EPS:
-            startable = False
-            label = "rebuild" if value >= FILLER_FLOOR and young(pos, age.get(pid)) else "depth"
         else:
-            startable, label = None, None  # borderline
-        players[pid] = {"label": label, "future": future, "startable": startable}
+            pts = ppg[pid]
+            future = round(max(0.0, value - RATE * max(0.0, pts - line[pos])), 2)
+            if pts >= line[pos] + margin[pos] - _EPS:
+                startable = True
+                label = "win_now" if future < FUTURE_FLOOR or past_cliff(pos, age.get(pid)) else "cornerstone"
+            elif pts <= line[pos] - margin[pos] + _EPS:
+                startable = False
+                label = "rebuild" if value >= FILLER_FLOOR and young(pos, age.get(pid)) else "depth"
+            else:
+                startable, label = None, None  # borderline
+            players[pid] = {"label": label, "future": future, "startable": startable}
         entry = overrides.get(pid)
-        if entry and entry.get("scope") == override_scope(pos, lineup_slots):
-            founder = overridden_label(label, startable, entry.get("label"))
+        if entry and pos in POSITIONS and entry.get("scope") == override_scope(pos, lineup_slots):
+            label = players[pid]["label"]
+            founder = overridden_label(label, entry.get("label"))
             if founder != label:
                 players[pid] = {**players[pid], "label": founder, "engine_label": label}
     return {"rules_version": LABEL_RULES_VERSION, "line": line, "margin": margin,

@@ -1,12 +1,13 @@
 import { api, ApiError, type RequestOptions } from './client';
-import type { FounderLabel, FounderRow, QbScope, ReviewPosition } from '../utils/founderReview';
+import type { Band, FounderLabel, FounderRow, QbScope, ReviewPosition } from '../utils/founderReview';
 
 // Founders' review (docs/plans/founder-review/design.md §5). Every route 404s
 // unless the SERVER says this session is a founder's (flag `founder.review`,
 // env FOUNDER_ACCOUNTS, a verified session). The app reads no flag and keeps no
 // list: the capability answer is the only gate.
 
-export interface FounderCorrection { from: FounderLabel; to: FounderLabel; count: number; }
+// A side the engine (or the founder) leaves unlabelled is 'none'.
+export interface FounderCorrection { from: Band; to: Band; count: number; }
 
 export interface FounderSummary {
   positions: Record<ReviewPosition, { moved: number; corrections: FounderCorrection[] }>;

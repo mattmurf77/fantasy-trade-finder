@@ -55,6 +55,13 @@ single-QB league, and vice versa. This takes the operator's leaning with one cor
 
 ### 2.1 The rule, case by case (`season_value.league_profile`)
 
+> **Amended 2026-11-12** (operator: "For founder's review player labels, remove the controls limiting which
+> label I can assign"; [scope.md addendum](scope.md#addendum-2026-11-12--any-label-for-any-player)). The table
+> below is superseded: the stored override **is** the label the engine uses, in every row, including the two
+> "no label" rows (an unprojected player's override now joins the evidence too: `with_label_overrides` keeps
+> players in `players` or `unprojected`). Whether he starts (`startable`), his future value, the starter line
+> and the lineup are still never changed. The table is kept as the record of D-242's rule.
+
 Columns: the stored override. Rows: what the engine computed for that player **in this league**.
 
 | Engine label here (why) | → `cornerstone` | → `win_now` | → `rebuild` | → `depth` |
@@ -78,9 +85,24 @@ line, the margin, starters — is unchanged; a changed player's entry gains `eng
 the override) so the review page can show "engine: Win-now piece". A borderline or unprojected player keeps
 no label: the engine does not know whether he starts here, and the override says nothing about that.
 
-### 2.2 The page cannot ask for an incoherent move
+### 2.2 Any label for any player (amended 2026-11-12)
 
-Bands a selected player may be moved to: a starter (`startable` true) → Cornerstone or Win-now piece; a bench
+The founder may move any player on the page to any of the four labels: a starter to Rebuild piece or Depth, a
+bench player to Cornerstone or Win-now piece, a borderline or unprojected player (the No label band) to any
+label, and a mixed selection together. Every chip is a button; every "Move to" chip is enabled once anyone is
+selected (`utils/founderReview.targetsFor`). What the founder places is what the engine uses, in every league
+the override reaches (RB / WR / TE everywhere; a QB in leagues of that QB format), whether or not the player
+starts there: the label and `startable` may disagree, and each consumer reads the label as given (scope.md
+addendum, consumer table).
+
+Moving a player back to the engine's own label here **clears** his override. For a player the engine leaves
+unlabelled, "the engine's label" is the No label band: no chip moves a player into it, so **Reset to engine**
+does (it puts every row of the position back on the engine's band, No label included) and Save sends a `clear`.
+His chip notes "engine: No label" while he carries a label, and says why the engine has none (near the starter
+line / no projection) while he is in No label. The server keeps `movable_to` on every row, now always all four,
+for builds up to 1.22.0 (187) that still enable chips from it; the client no longer reads it.
+
+**Superseded (D-242 as first built):** Bands a selected player may be moved to: a starter (`startable` true) → Cornerstone or Win-now piece; a bench
 player (`startable` false) → Rebuild piece or Depth; borderline / unprojected → none (his row is shown in "No
 label", read-only, with the reason). A target chip is enabled only when it is legal for every selected
 player. So what the founder places is exactly what the engine shows in this league; in other leagues the same
@@ -111,7 +133,7 @@ judgment (it is about an NFL player, not a person; deleting it would silently ch
   the worker and the admin/founder label routes) reads every override row inside its existing `try` and
   calls `season_value.with_label_overrides(evidence, overrides)`.
 - `with_label_overrides` (pure) keeps only override rows for players **projected in this league**
-  (`evidence["players"]`) whose scope is `all` or this league's QB format, attaches them as
+  (`evidence["players"]`; since 2026-11-12 also players rostered here without a projection, `evidence["unprojected"]`) whose scope is `all` or this league's QB format, attaches them as
   `evidence["label_overrides"]` (`{player_id: {"label", "scope"}}`) and **recomputes `evidence["digest"]`**
   over the evidence including them. No relevant override ⇒ the same object back:
   byte-identical evidence, digest, request hash, cards.

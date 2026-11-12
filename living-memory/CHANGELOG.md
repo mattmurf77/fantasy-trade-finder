@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Founders' review: any label for any player (D-251)
+
+- **What changed:** the label page no longer restricts starters to Cornerstone / Win-now and bench players to Rebuild / Depth, and unlabelled players can be given a label. Mixed selections move together.
+- **How it is applied:** the label you set is the label the engine uses, in every league that label reaches (QBs per QB format; RB, WR and TE everywhere).
+- **Build 187** gets it on deploy, except returning an engine-unlabelled player to No label, which needs the next build.
+- **Open:** whether labels should differ per league; what Win-now means for a player with no projection.
+
 ## 2026-11-12 — Usage Trends: Last week | Last 3 weeks (D-250)
 
 - **What it is:** a second pill under "Biggest jumps | Weekly share". Last 3 weeks orders and words the list by each player's three-week average, and a jump is that average against his three weeks before.

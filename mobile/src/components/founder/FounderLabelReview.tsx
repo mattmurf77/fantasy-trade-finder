@@ -31,9 +31,10 @@ import LabelBandBoard from './LabelBandBoard';
 // server-gated (404 for anyone else), so this file reads no flag.
 //
 // Interaction = the tier board's (D-233): tap players, then a "Move to" chip
-// in the pinned footer. A chip is enabled only when it is legal for every
-// selected player (utils/founderReview.targetsFor). Save sends changed players
-// only; Reset to engine resets the visible position locally (Save commits).
+// in the pinned footer. Any label for any player (amended 2026-11-12): every
+// chip is enabled once a player is selected (utils/founderReview.targetsFor).
+// Save sends changed players only; Reset to engine resets the visible
+// position locally, unlabelled players back to No label (Save commits).
 // The pinned footer reports its height through setPinnedBottomBarHeight
 // (no second FeedbackFAB: a tab-stack screen, RootNav's mount covers it).
 

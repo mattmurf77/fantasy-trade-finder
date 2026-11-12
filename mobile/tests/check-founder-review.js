@@ -5,10 +5,12 @@
 // WHY THIS EXISTS. The page is invisible to everyone but the founder, so its
 // failure modes are silent: a section that renders off a local flag or list
 // instead of the server's answer, a band order or label vocabulary that drifts
-// from the server's (backend/founder_review.py), a footer chip that moves a
-// starter into "Rebuild piece" (a claim the engine refuses), a Save that sends
-// every row instead of the changed ones, a Reset that leaves edits behind, or
-// an empty state that hides why there are no labels.
+// from the server's (backend/founder_review.py), a chip or player the client
+// still locks (amended 2026-11-12: any label for any player, the unlabelled
+// band and mixed selections included), a Save that sends every row instead of
+// the changed ones, a Reset that leaves edits behind (or cannot return an
+// unlabelled player to No label), or an empty state that hides why there are
+// no labels.
 //
 // HONEST LABEL (G-035): §1-§3 and §8 prove the PRESENCE of exact wirings in
 // source; §4-§7 transpile and EXECUTE src/utils/founderReview.ts under node.
@@ -104,16 +106,22 @@ assert(/BANDS\.map\(\(b\) =>/.test(BOARD), '2f. the board renders every band fro
 
 // ── 3. Tap-then-band wiring (the tier board's interaction) ───────────────
 assert(/onPress=\{\(\) => onToggle\(row\.id\)\}/.test(BOARD), '3a. tapping a chip toggles its selection');
-assert(/const readOnly = row\.movable_to\.length === 0;/.test(BOARD) && /if \(readOnly\) \{\s*return \(\s*<View/.test(BOARD),
-  '3b. a No-label chip (nothing movable) is a read-only View, not a button');
+assert(!/readOnly/.test(BOARD) && (BOARD.match(/<Pressable\b/g) || []).length === 1
+  && /accessibilityActions=\{LABELS\.filter\(\(l\) => l !== band\)/.test(BOARD),
+  '3b. every chip (No label included) is a button with a VoiceOver "Move to" action for each other label');
 assert(/const targets = targetsFor\(posRows, selected\);/.test(REVIEW)
   && /const enabled = targets\.includes\(c\.label\);/.test(REVIEW) && /disabled=\{!enabled\}/.test(REVIEW),
-  '3c. a Move-to chip is enabled only when legal for every selected player');
+  '3c. a Move-to chip is enabled from targetsFor (all four once anyone is selected)');
+for (const [name, src] of [['utils/founderReview', code(UTIL_SRC).replace(/movable_to: FounderLabel\[\];/, '')],
+  ['LabelBandBoard', BOARD], ['FounderLabelReview', REVIEW]]) {
+  assert(!/movable_to/.test(src), `3e. ${name} does not read the server's movable_to (the rule is the client's own)`);
+}
 assert(/onPress=\{\(\) => moveTo\(selected, c\.label\)\}/.test(REVIEW)
   && /setDraft\(\(d\) => applyMove\(d, rows, ids, label\)\);/.test(REVIEW),
   '3d. tapping a chip moves the selection through applyMove');
 
 // ── 4. Executed: targets and moves ───────────────────────────────────────
+// movable_to as the OLD server sent it: the client must not be limited by it.
 const row = (id, label, startable, extra = {}) => ({
   id, name: id, position: 'RB', team: 'AAA', age: 25, ppg: 10, line: 9, value: 1000, future: 0,
   startable, label, engine_label: label, override: null, why_unlabelled: label ? null : 'borderline',
@@ -121,14 +129,22 @@ const row = (id, label, startable, extra = {}) => ({
   ...extra,
 });
 const rows = [row('s1', 'win_now', true), row('s2', 'cornerstone', true), row('b1', 'depth', false), row('n1', null, null)];
-assert(JSON.stringify(U.targetsFor(rows, ['s1', 's2'])) === JSON.stringify(['cornerstone', 'win_now']),
-  '4a. starters may go to Cornerstone or Win-now only');
-assert(U.targetsFor(rows, ['s1', 'b1']).length === 0, '4b. a starter + a bench player together: no legal target');
-assert(U.targetsFor(rows, ['n1']).length === 0 && U.targetsFor(rows, []).length === 0, '4c. no label / no selection: none');
+const ALL = JSON.stringify(['cornerstone', 'win_now', 'rebuild', 'depth']);
+assert(JSON.stringify(U.targetsFor(rows, ['s1', 's2'])) === ALL && JSON.stringify(U.targetsFor(rows, ['b1'])) === ALL,
+  '4a. a starter may be given any label, and so may a bench player');
+assert(JSON.stringify(U.targetsFor(rows, ['s1', 'b1', 'n1'])) === ALL, '4b. a mixed selection (starter + bench + unlabelled) may be moved together');
+assert(JSON.stringify(U.targetsFor(rows, ['n1'])) === ALL && U.targetsFor(rows, []).length === 0,
+  '4c. an unlabelled player may be given any label; no selection: no target');
 let draft = U.applyMove({}, rows, ['s1'], 'cornerstone');
 assert(draft.s1 === 'cornerstone' && U.bandOf(rows[0], draft) === 'cornerstone', '4d. a move places the player in the band');
 assert(U.engineNote(rows[0], draft) === 'engine: Win-now piece', '4e. a moved player shows "engine: <label>"');
-assert(Object.keys(U.applyMove({}, rows, ['b1'], 'cornerstone')).length === 0, '4f. an illegal move is ignored');
+const mixed = U.applyMove({}, rows, ['s1', 'b1', 'n1'], 'rebuild');
+assert(JSON.stringify(mixed) === JSON.stringify({ s1: 'rebuild', b1: 'rebuild', n1: 'rebuild' })
+  && U.engineNote(rows[3], mixed) === 'engine: No label' && U.bandOf(rows[3], mixed) === 'rebuild',
+  '4f. starter -> Rebuild, bench -> Rebuild, unlabelled -> Rebuild in one move; the unlabelled one notes "engine: No label"');
+assert(JSON.stringify(U.savePayload('L1', rows, mixed)) === JSON.stringify(
+  { league_id: 'L1', set: { s1: 'rebuild', b1: 'rebuild', n1: 'rebuild' }, clear: [] }),
+  '4h. those moves save as sets');
 assert(Object.keys(U.applyMove(draft, rows, ['s1'], 'win_now')).length === 0, '4g. moving back to the server label drops the edit');
 
 // ── 5. Changed count and Save sends only changed players ─────────────────
@@ -159,6 +175,17 @@ const fresh = U.resetToEngine(U.applyMove({}, rows, ['s1'], 'cornerstone'), rows
 assert(U.changedIds(rows, fresh).length === 0, '6c. reset clears unsaved moves (0 changed)');
 assert(Object.keys(U.resetToEngine(draft, withOverride, 'QB')).length === Object.keys(draft).length,
   '6d. reset touches only the visible position');
+// An unlabelled player with a saved label (engine: none, server label: depth).
+const unl = [row('u1', 'depth', null, { engine_label: null, override: 'depth', why_unlabelled: 'unprojected' })];
+const back = U.resetToEngine({}, unl, 'RB');
+assert(U.bandOf(unl[0], back) === 'none' && JSON.stringify(U.changedIds(unl, back)) === JSON.stringify(['u1'])
+  && JSON.stringify(U.savePayload('L1', unl, back)) === JSON.stringify({ league_id: 'L1', set: {}, clear: ['u1'] }),
+  '6e. reset returns an unlabelled player to No label, and Save clears his override');
+assert(U.engineNote(unl[0], {}) === 'engine: No label' && U.engineNote(unl[0], back) === null
+  && U.unlabelledWhy(unl[0]) === 'no projection',
+  '6f. his note reads "engine: No label" until he is back in No label, which says why');
+assert(U.changedIds(rows, U.resetToEngine(U.applyMove({}, rows, ['n1'], 'win_now'), rows, 'RB')).length === 0,
+  '6g. reset drops an unsaved move of an unlabelled player (0 changed)');
 
 // ── 7. Empty state names the server's reason ─────────────────────────────
 assert(/testID="founder-review\.empty"[\s\S]{0,160}emptyReason\(pageQ\.data\?\.evidence\?\.reason\)/.test(REVIEW),

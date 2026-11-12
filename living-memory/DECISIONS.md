@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-251 — A founder label is the label: any of the four for any player, applied as given wherever its scope reaches
+
+**Date:** 2026-11-12 · **Who:** the operator: "For founder's review player labels, remove the controls limiting which label I can assign". Applying a stored label literally in every league its scope reaches, and leaving the unprojected Win-now case to the age rule, are the builder's and the main session's calls, put to the operator. Plan: [`../docs/plans/founder-review/scope.md`](../docs/plans/founder-review/scope.md) (addendum 2026-11-12). Amends D-242.
+**Context:** D-242 let a starter be only Cornerstone or Win-now, a bench player only Rebuild or Depth, and left a borderline or unprojected player unmovable. A stored override was read as a judgment of the player's future only and translated per league by whether he starts there.
+**Decision:** Every row is movable to all four labels, mixed selections included, and the engine uses the stored label as given (`season_value.overridden_label`), for labelled, borderline and unprojected players alike. `startable` and `future` are never changed, so a label may disagree with them. Scope is unchanged (QB per QB format, RB / WR / TE everywhere), as are the founder-only routes. "Back to engine" for a player the engine leaves unlabelled is the No label band and saves as a clear.
+**Consequences:**
+- A stored label no longer translates per league: an RB made Cornerstone is Cornerstone in every league, including one where he sits. Production held no stored overrides when this shipped (read-only count), so nothing existing changed meaning. Per-league labels would need a per-league key: open with the operator.
+- For an All-in or Contending viewer, an unprojected player's label is not read (`_season_lean` returns before it); the age rule decides. Every other consumer reads it. Open with the operator.
+- The server change reaches TestFlight 1.22.0 (187) on deploy: all chips light for any selection. On 187 an engine-unlabelled player who has been given a label cannot be returned to No label (Reset skips him); the next build fixes that.
+- A player rostered after the league's forecast snapshot shows back in No label after Save until the next weekly forecast.
+- The pipeline digest did not change; `season_value.py` is in the engine code hash, so stored pages go cold once on deploy. The win-now engine (revision 5) is still not serving.
+
 ## D-250 — Usage Trends gets a period: Last week or Last 3 weeks, measured against the weeks before
 
 **Date:** 2026-11-12 · **Who:** the operator: "Should let users toggle between last week and last three for usage rates". Applying the period to both orders, the baseline, the two-game rule and what "Back or new" becomes are the builder's and the main session's calls, reported to the operator for correction. Plan: [`../docs/plans/usage-trends/scope-period-toggle.md`](../docs/plans/usage-trends/scope-period-toggle.md). Adds to D-203 and D-205.

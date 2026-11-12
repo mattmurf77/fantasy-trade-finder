@@ -69,7 +69,7 @@ def rows(search, stored, slots):
     always `rebuild` and are left out). `label` is the label the engine uses here (after
     any override), `engine_label` the rule's own, `override` the stored value in the scope
     this league reads for him (`all`, or the league's QB format for a QB; possibly set in
-    another league), `movable_to` the bands a move may target here.
+    another league), `movable_to` the bands a move may target here (all four, always).
     stored: {(player_id, scope): label}."""
     profile, ppg = search._profile, search._season_ppg
     out = []
@@ -81,6 +81,7 @@ def rows(search, stored, slots):
             info = profile["players"].get(pid) or {}
             player = search.players[pid]
             label = info.get("label")
+            engine_label = info.get("engine_label", label)
             startable = info.get("startable")
             out.append({
                 "id": pid, "name": player.name, "position": pos,
@@ -88,30 +89,26 @@ def rows(search, stored, slots):
                 "ppg": ppg.get(pid), "line": profile["line"].get(pos),
                 "value": round(search.market.get(pid, 0.0), 1), "future": info.get("future"),
                 "startable": startable, "label": label,
-                "engine_label": info.get("engine_label", label),
+                "engine_label": engine_label,
                 "override": stored.get((pid, override_scope(pos, slots))),
-                "why_unlabelled": (None if label is not None else
+                # Why the ENGINE leaves him unlabelled here (also when an override labels him).
+                "why_unlabelled": (None if engine_label is not None else
                                    "unprojected" if pid not in ppg else "borderline"),
-                "movable_to": movable_to(label, startable),
+                # design.md §2.2 (amended 2026-11-12): any label for any player. Kept on
+                # every row because builds up to 1.22.0 (187) enable chips from it.
+                "movable_to": list(LABELS),
             })
     out.sort(key=lambda r: (-(r["value"] or 0.0), r["id"]))
     return out
 
 
-def movable_to(label, startable):
-    """design.md §2.2: a starter may be a cornerstone or a win-now piece; a bench player a
-    rebuild piece or depth; a borderline or unprojected player cannot be moved here."""
-    if label is None or startable is None:
-        return []
-    return ["cornerstone", "win_now"] if startable else ["rebuild", "depth"]
-
-
 def summary(player_rows, overrides_total):
     """Aggregates only (design.md §6): per position, players moved here and the most
-    common engine -> founder corrections. No player ids."""
+    common engine -> founder corrections. No player ids. A side with no label is
+    "none" (the band's name), e.g. a borderline player given a label."""
     positions = {}
     for pos in POSITIONS:
-        moved = Counter((r["engine_label"], r["label"]) for r in player_rows
+        moved = Counter((r["engine_label"] or "none", r["label"] or "none") for r in player_rows
                         if r["position"] == pos and r["label"] != r["engine_label"])
         positions[pos] = {"moved": sum(moved.values()),
                           "corrections": [{"from": a, "to": b, "count": n}
