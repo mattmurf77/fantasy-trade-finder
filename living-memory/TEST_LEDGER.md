@@ -1,3 +1,12 @@
+## 2026-11-12 — Release: Free Agents, Usage Trends period, founder labels, league selector pages on `main` at `8d1bcefa`; TestFlight 1.22.0 (188)
+
+- **CI on the merged heads:** #671 `8ca71525`, #672 `4f972e2e`, #673 `fbc8cdc2` and #674 `968ddb02` each green on all four checks before its merge. The four were stacked; after each merge `origin/main`'s tree was identical to the merged head's.
+- **App, main session, clean checkout of `8d1bcefa` after `npm ci`:** `tsc --noEmit` clean; 182 of 182 `check-*.js`; testid-lint OK.
+- **Production (read-only checks):** deploys live at 17:21 (#672), 17:42 (#673) and 18:14 UTC (#674); no errors or tracebacks in the logs around each.
+- **TestFlight:** EAS production build 1.22.0 (188) from the clean checkout of `8d1bcefa`, auto-submit scheduled.
+- **Not verified:** anything on a device (the new headers are the first custom native-stack headers in the app); the corrected free-agent ranks and the opened-up label chips under the operator's own session on build 187; live Usage Trends numbers under the three-week period.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — League selector header on four more pushed pages (D-252), branch `feat/league-selector-pushed-pages`
 
 - **App (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 182 of 182 `check-*.js`, including the new `check-league-header-pages.js` (43 assertions) and the updated `check-home-destinations.js` 5d and `check-usage-trends.js` 2p2; testid-lint OK.
