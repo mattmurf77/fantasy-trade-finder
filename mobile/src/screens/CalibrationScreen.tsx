@@ -23,7 +23,8 @@ import {
 } from '../api/grading';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 import { getFounderCapability } from '../api/founder';
-import FounderLabelReview from '../components/founder/FounderLabelReview';
+import FounderReview from '../components/founder/FounderReview';
+import { confirmLeaveNotes } from '../components/founder/RuleWaterfallReview';
 
 // Calibration — in-app blind grading of today's trade engine vs the value
 // core (docs/plans/blind-grading/, lld.md §10). Open to every app user since
@@ -42,7 +43,9 @@ import FounderLabelReview from '../components/founder/FounderLabelReview';
 // section, "Grading | Founders' review", rendered ONLY when the server's
 // capability probe (GET /api/founder/capability) answers 200 for this
 // session. No flag or local list is read here; a 404 hides the control and
-// Grading renders exactly as before.
+// Grading renders exactly as before. Inside it, FounderReview offers "Player
+// labels | Trade rules" (the decline waterfall) when the server has that
+// route; leaving with unsaved rule notes asks first (confirmLeaveNotes).
 //
 // A TAB-stack screen: it mounts NO FeedbackFAB — RootNav's single global
 // mount already covers it (#188; a second one is the #196/#197 double-FAB
@@ -670,7 +673,7 @@ export default function CalibrationScreen() {
             testID="calibration.segment.grading"
             accessibilityRole="button"
             accessibilityState={{ selected: !showFounder }}
-            onPress={() => setSection('grading')}
+            onPress={() => confirmLeaveNotes(() => setSection('grading'))}
             style={[styles.sectionBtn, !showFounder && styles.sectionBtnActive]}
           >
             <Text variant="label" style={!showFounder ? styles.sectionTextActive : undefined}>Grading</Text>
@@ -688,7 +691,7 @@ export default function CalibrationScreen() {
       ) : null}
       {showFounder ? (
         hasLeague
-          ? <FounderLabelReview leagueId={leagueId as string} />
+          ? <FounderReview leagueId={leagueId as string} leagueName={league?.league_name ?? null} />
           : <View style={styles.content}><Text variant="body" testID="calibration.no-league">{COPY.noLeague}</Text></View>
       ) : (
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
