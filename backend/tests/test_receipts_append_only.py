@@ -176,9 +176,16 @@ class Scan:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", SyntaxWarning)   # a repo file's "\ " escape
             tree = ast.parse(source)
+        # Parents live in a map on this scanner, never on the nodes: Python
+        # shares one Load / Store / operator object across every parsed file,
+        # so an attribute set on a node there outlives this test and pulls a
+        # whole module's tree into any later deepcopy of any tree (it broke
+        # test_research_trade_pipeline with a RecursionError, 2026-11-12).
+        self._tree = tree                     # keeps ids stable for the map
+        self._parents = {}
         for node in ast.walk(tree):
             for child in ast.iter_child_nodes(node):
-                child._t10_parent = node
+                self._parents[id(child)] = node
         self.imports = {a.asname or a.name: a.name for n in ast.walk(tree)
                         if isinstance(n, ast.ImportFrom) for a in n.names}
         self._scope(tree, "<module>", "module", _State())
@@ -443,9 +450,8 @@ class Scan:
     def _flag(self, rule, node, why):
         self.findings.append(f"{self.rel}:{getattr(node, 'lineno', '?')}: {rule}: {why}")
 
-    @staticmethod
-    def _parent(node):
-        return getattr(node, "_t10_parent", None)
+    def _parent(self, node):
+        return self._parents.get(id(node))
 
     def _chain_top(self, node):
         while True:
