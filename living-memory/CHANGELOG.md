@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-11 — Forecasts for league-median leagues; the median setting is stored when a league is linked (D-236)
+
+- A Sleeper league that plays the league median now gets a playoff forecast: two results a week (head-to-head and against the median), in completed and simulated weeks, with seeding on the combined record. Other leagues' forecasts are unchanged and nothing re-runs.
+- New column `leagues.median_game`, written at link and refreshed on sync. Not sent to clients yet.
+- `POST /api/cron/league-projections {"retry_unsupported": true}` re-attempts a league whose format has just become supported.
+- Still to do: stop registering completed-season leagues as forecast targets (found, not built).
+
 ## 2026-11-11 — Rules-first deck construction is on (D-235, ADR-030); repeat cap 5 of 30
 
 - **What changed:** the deck rules now decide which trades are built, before ranking, and the whole eligible deck is built with the page-first search (about 0.35 s of CPU a search against 4.0 s on the recorded requests). No 150-card cap. `trade.fast_deck` is retired; the switch is `deck.rules_first`.
