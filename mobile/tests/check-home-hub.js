@@ -15,7 +15,7 @@
 //     the 5-minute staleTime (check-session-seed.js S-2's rule, for Home).
 //
 // Sections 1–12 are the twelve items of §6.3, in order; 13 is the playoff
-// tile's Projected entry (TF 1.22.0 build 185).
+// tile's way to the full projections (TF 1.22.0 build 185).
 //
 // Dependency-free: text assertions over comment-stripped source.
 // Run: node tests/check-home-hub.js
@@ -289,7 +289,7 @@ const handler = (name) => {
 {
   const hits = homeSrc.filter((f) => /getOutlook|league-outlook/.test(f.code)).map((f) => f.rel);
   assert(hits.length === 0, '7. no getOutlook / league-outlook anywhere under components/home',
-    `found in ${hits.join(', ')} — projections live on the Standings page, behind its Projected tab (R4)`);
+    `found in ${hits.join(', ')} — projections live on the Standings page's table, which reads only the saved forecast (R4)`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -381,9 +381,10 @@ const handler = (name) => {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 13 — Standings opens on Current from the Standings row and on Projected
-//      from the playoff tile (TF 1.22.0 build 185 feedback: the tile is the
-//      way to the full projections, so it must not land on Current).
+// 13 — the Standings row and the playoff tile both open Standings, with NO
+//      params: the single table (2026-11-12) has no segments, its one table
+//      carries the projections the tile points at (TF 1.22.0 build 185
+//      feedback: the tile is the way to the full projections).
 // ═══════════════════════════════════════════════════════════════════════
 {
   const body = (name) => handler(name).split('\n').slice(1).map((l) => l.trim());
@@ -391,12 +392,12 @@ const handler = (name) => {
   assert(row.length === 2
     && row[0] === "track('home_tile_tapped', { tile: 'standings' }, 'Home');"
     && row[1] === "navigation.navigate('Standings');",
-    '13a. onStandings tracks the standings tile, then opens Standings with NO params (Current)');
+    '13a. onStandings tracks the standings tile, then opens Standings with NO params');
   const proj = body('onProjections');
   assert(proj.length === 2
     && proj[0] === "track('home_tile_tapped', { tile: 'standings' }, 'Home');"
-    && proj[1] === "navigation.navigate('Standings', { segment: 'projected' });",
-    "13b. onProjections tracks the same tile, then opens Standings with { segment: 'projected' }");
+    && proj[1] === "navigation.navigate('Standings');",
+    '13b. onProjections tracks the same tile, then opens the same Standings table (no { segment } param)');
   const ready = (/<StatusRow\s+testID="home\.status\.standings"\s+label="Standings"\s+state="ready"[\s\S]*?\/>/.exec(hub) || [''])[0];
   assert(/onPress=\{onStandings\}/.test(ready), '13c. the ready Standings row presses onStandings');
   const banner = (/<HomePlayoffBanner[\s\S]*?\/>/.exec(hub) || [''])[0];

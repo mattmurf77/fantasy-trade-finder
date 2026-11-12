@@ -153,10 +153,11 @@ type AuthStack = {
   // Usage Trends (flag usage_trends.enabled) — `ownership` pre-selects the
   // filter (the Free Agents link opens it on 'free_agents').
   UsageTrends: { ownership?: 'all' | 'rostered' | 'free_agents' } | undefined;
-  // Home hub (docs/plans/home-engagement/scope.md R5) — Current | Projected
-  // standings, pushed from Home's Standings row. The screen reads the
-  // session league; `segment: 'projected'` (Home's playoff tile) opens it on
-  // Projected, absent = Current.
+  // Home hub (docs/plans/home-engagement/scope.md R5) — the one standings
+  // table (scope-standings-table.md), pushed from Home and League rankings.
+  // The screen reads the session league. `segment` is ACCEPTED, never sent
+  // and never read: builds before the single table (and their deep links)
+  // passed `{ segment: 'projected' }`, and it must still land without error.
   Standings: { segment?: 'projected' } | undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the

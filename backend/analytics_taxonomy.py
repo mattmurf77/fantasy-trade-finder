@@ -755,8 +755,11 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # EMITTERS SHIP (Phase 1 foundations), and both land in
     # analytics_queries.NON_INTENT_EVENTS in this same commit.
     #   home_tile_tapped          — any tap on a Home hub tile, row or button.
-    #   standings_segment_changed — the Standings page's Current | Projected
-    #                               control, on a user tap only (never mount).
+    #   standings_segment_changed — the Standings page's view control, on a
+    #                               user tap only (never mount). Since the
+    #                               single table (2026-11-12) that is the
+    #                               Record | Points pill; before it, the
+    #                               Current | Projected segment.
     "home_tile_tapped",
     "standings_segment_changed",
     # ── Usage Trends, 2026-10-10 (docs/plans/usage-trends/scope.md §1) ──────
@@ -2084,9 +2087,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # a Seller tapping Sell took the suggestion. No league id, no team, no
     # player, no device platform (a user_events COLUMN, never a prop).
     "home_tile_tapped":            frozenset({"tile", "position", "band"}),
-    # `segment` ∈ current | projected — the segment the tap SELECTED.
-    # Projected is the only path that runs the outlook simulation, so this
-    # row is also the denominator for that request's cost.
+    # `segment` — the view the tap SELECTED: record | points from the single
+    # standings table (2026-11-12, docs/plans/home-engagement/
+    # scope-standings-table.md); current | projected on older builds (the
+    # retired segment, whose Projected tap ran the outlook simulation).
+    # Neither new value runs anything: the table reads the saved forecast.
     "standings_segment_changed":   frozenset({"segment"}),
     # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
     # Both props are version INTS (major*10000 + minor*100 + patch, see
