@@ -81,16 +81,18 @@ def week_complete(season, week, state) -> bool | None:
 
 
 def matchup_phase(week, roster_id, pws, winners: list) -> str:
-    """regular before the playoff start week; from it on, 'playoff' if the
-    roster has a winners-bracket game in round (week - pws + 1), else
-    'consolation'. One week per round is assumed; two-week rounds would be
-    labelled 'consolation' in their second week (a pilot check)."""
+    """'regular' before the playoff start week. From it on, 'playoff' if the
+    roster is still in the winners bracket in round (week - pws + 1): it plays
+    in that round or in a later one. A seed with a first-round bye plays no
+    round-1 game but plays round 2, so its bye week is 'playoff'. Else
+    'consolation'. One week per round is assumed; two-week rounds would label
+    the second week by the next round (a pilot check)."""
     if not pws or week < pws:
         return "regular"
     rnd = week - pws + 1
-    if any(b.get("r") == rnd and roster_id in (b.get("t1"), b.get("t2")) for b in winners):
-        return "playoff"
-    return "consolation"
+    last = max((b.get("r") or 0 for b in winners
+                if roster_id in (b.get("t1"), b.get("t2"))), default=0)
+    return "playoff" if last >= rnd else "consolation"
 
 
 def bundle_rows(bundle: dict, nfl_state: dict | None = None) -> dict:
@@ -130,6 +132,11 @@ def bundle_rows(bundle: dict, nfl_state: dict | None = None) -> dict:
     rows["roster_weeks"], rows["matchups"] = [], []
     for week, ms in sorted((bundle.get("matchups") or {}).items(), key=lambda kv: int(kv[0])):
         week = int(week)
+        for m in ms:
+            # A commissioner's score override (custom_points) is the score.
+            m["points_original"] = m.get("points")
+            if m.get("custom_points") is not None:
+                m["points"] = m["custom_points"]
         has_points = int(any((m.get("points") or 0) > 0 for m in ms))
         done = week_complete(season, week, nfl_state)
         played = has_points if done is None else int(bool(done) and bool(has_points))
@@ -154,6 +161,8 @@ def bundle_rows(bundle: dict, nfl_state: dict | None = None) -> dict:
                 "league_id": lid, "week": week, "roster_id": rid,
                 "matchup_id": m.get("matchup_id"), "opponent_roster": opp[0] if opp else None,
                 "paired": int(bool(opp)), "points": m.get("points"),
+                "points_original": m.get("points_original"),
+                "custom": int(m.get("custom_points") is not None),
                 "phase": matchup_phase(week, rid, pws, winners), "played": played})
     rows["transactions"] = []
     seen = set()

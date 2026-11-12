@@ -145,12 +145,13 @@ def outcome_rows(conn, league_id, final_standings: list) -> list:
     seed = {rid: i for i, rid in enumerate(seeds, 1)}
     out = []
     for rid in rids:
-        if rid in wplace:
+        if lg["status"] != "complete":
+            # A bracket published before the playoffs only projects seeds.
+            finish, basis = None, "season_in_progress"
+        elif rid in wplace:
             finish, basis = wplace[rid], "winners_bracket"
         elif rid in lplace and cut:
             finish, basis = cut + lplace[rid], "losers_bracket"
-        elif not win and lg["status"] != "complete":
-            finish, basis = None, "season_in_progress"
         elif rank.get(rid) is not None and not win:
             # No playoff bracket at all (playoffs off: playoff_week_start 0,
             # bracket null): the finish is the final regular-season rank, so
@@ -159,13 +160,14 @@ def outcome_rows(conn, league_id, final_standings: list) -> list:
         else:
             finish, basis = None, "unknown"
         has_bracket = bool(win)
+        done = lg["status"] == "complete" and has_bracket
         out.append({"league_id": league_id, "roster_id": rid,
-                    "seed": seed.get(rid) if has_bracket else None,
-                    "made_playoffs": int(rid in playoff) if has_bracket else None,
+                    "seed": seed.get(rid) if done else None,
+                    "made_playoffs": int(rid in playoff) if done else None,
                     "playoff_round_reached": max_round.get(rid),
                     "winners_place": wplace.get(rid), "losers_place": lplace.get(rid),
                     "final_place": finish, "finish_basis": basis,
-                    "champion": int(wplace.get(rid) == 1) if has_bracket else None})
+                    "champion": int(wplace.get(rid) == 1) if done else None})
     return out
 
 
@@ -187,7 +189,12 @@ def check_reported(conn, league_id, final_standings: list) -> dict:
         for k, dk in (("fpts", "points_for"), ("fpts_against", "points_against")):
             if r[k] is not None and abs(float(r[k]) - float(d[dk])) > 0.011:
                 kinds[dk] += 1
+    rec = not any(k in kinds for k in ("wins", "losses", "ties", "roster_missing_from_matchups"))
+    pts = not any(k in kinds for k in ("points_for", "points_against"))
+    # Records and points are judged apart: a stat correction after the week
+    # moves Sleeper's fpts without any bug here, and never changes a record.
     return {"league_id": league_id, "status": status, "matched": int(not kinds),
+            "record_matched": int(rec), "points_matched": int(pts),
             "kinds_json": json.dumps(dict(sorted(kinds.items())), sort_keys=True)}
 
 

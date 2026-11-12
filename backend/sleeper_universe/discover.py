@@ -27,6 +27,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from .client import RequestFailed
+from . import identity as ident
 from .identity import harvest
 
 KEPT_STATUSES = frozenset({"in_season", "post_season", "complete"})
@@ -44,21 +45,28 @@ def classify(obj: dict) -> str | None:
     n = obj.get("total_rosters") or s.get("num_teams")
     if not isinstance(n, int) or not 8 <= n <= 16:
         return "team_count"
-    if obj.get("status") not in KEPT_STATUSES:
+    if _status(obj) not in KEPT_STATUSES:
         return "not_started"
     return None
 
 
 def _prev(obj) -> str | None:
-    p = obj.get("previous_league_id")
-    return None if p in (None, "", "0", 0) else str(p)
+    p = ident._id(obj.get("previous_league_id"))
+    return None if p in (None, "0") else p
 
 
 def _season(obj) -> int | None:
-    try:
-        return int(obj.get("season"))
-    except (TypeError, ValueError):
-        return None
+    s = ident._season(obj.get("season")) if isinstance(obj, dict) else None
+    return int(s) if s else None
+
+
+def _lid(obj) -> str | None:
+    return ident._id(obj.get("league_id")) if isinstance(obj, dict) else None
+
+
+def _status(obj) -> str | None:
+    """Every value discovery writes goes through the allow-list validators."""
+    return ident._enum(obj.get("status"), ident.LEAGUE_STATUS)
 
 
 class Discoverer:
@@ -116,8 +124,21 @@ class Discoverer:
                                 (merged,))
 
     def _resolve_seed(self, seed: str, line_no: int):
+        """Seed rule: ``id:<digits>`` is a user id; ``user:<name>`` is a
+        username; a bare line of 15 or more digits is a user id (Sleeper user
+        ids are 18-19 digits); anything else, including a shorter all-digit
+        line, is a username resolved through ``/user/<name>``."""
         seed = seed.strip()
-        if seed.isdigit():
+        if seed.startswith("id:"):
+            uid = seed[3:].strip()
+            if uid.isdigit():
+                return uid
+            self.stats["seeds_unresolved"] += 1
+            self.emit(f"seed line {line_no}: 'id:' must be followed by digits")
+            return None
+        if seed.startswith("user:"):
+            seed = seed[5:].strip()
+        elif seed.isdigit() and len(seed) >= 15:
             return seed
         try:
             obj = self._get(f"/user/{quote(seed, safe='')}")
@@ -179,7 +200,7 @@ class Discoverer:
 
     # -- leagues --------------------------------------------------------------
     def consider(self, obj: dict, hop: int) -> None:
-        lid = str(obj.get("league_id") or "")
+        lid = _lid(obj)
         season = _season(obj)
         if not lid or season is None or self.store.league_row(lid) is not None:
             return
@@ -188,19 +209,27 @@ class Discoverer:
         reason = classify(obj)
         if reason:
             self.store.add_league(lid, season, hop, self._neighbour_lineage(lid, obj),
-                                  _prev(obj), False, reason, obj.get("status"))
+                                  _prev(obj), False, reason, _status(obj))
             return
+        if self.cap_reached():
+            # Joining a kept lineage is allowed; a new lineage is deferred
+            # BEFORE any walk-back request is spent on it.
+            known = self._neighbour_lineage(lid, obj)
+            if not self.store.lineage_exists(known):
+                self.store.add_league(lid, season, hop, None, _prev(obj), False,
+                                      "cap_reached", _status(obj))
+                return
         chain = self._walk_back(obj)
         lineage = self._lineage_for(chain)
         if not self.store.lineage_exists(lineage) and self.cap_reached():
             for o in chain:
-                self.store.add_league(str(o["league_id"]), _season(o), hop, lineage,
-                                      _prev(o), False, "cap_reached", o.get("status"))
+                self.store.add_league(_lid(o), _season(o), hop, lineage,
+                                      _prev(o), False, "cap_reached", _status(o))
             return
         for o in chain:
             r = classify(o)
-            self.store.add_league(str(o["league_id"]), _season(o), hop, lineage,
-                                  _prev(o), r is None, r, o.get("status"))
+            self.store.add_league(_lid(o), _season(o), hop, lineage,
+                                  _prev(o), r is None, r, _status(o))
 
     def _walk_back(self, obj: dict) -> list[dict]:
         """[obj, its predecessor, ...] while unindexed and inside the range."""
@@ -216,7 +245,8 @@ class Discoverer:
                 self.stats["failed_requests"] += 1
                 break
             ps = _season(pobj) if isinstance(pobj, dict) else None
-            if ps is None or ps < self.min_season or ps not in self.seasons:
+            if ps is None or ps < self.min_season or ps not in self.seasons \
+                    or _lid(pobj) != prev:
                 break
             chain.append(pobj)
             cur = pobj
@@ -233,7 +263,7 @@ class Discoverer:
         return lid
 
     def _lineage_for(self, chain: list[dict]) -> str:
-        succ = self.store.successor_of(str(chain[0]["league_id"]))
+        succ = self.store.successor_of(_lid(chain[0]))
         prev = _prev(chain[-1])
         pred = self.store.league_row(prev) if prev else None
         a = succ["lineage_id"] if succ is not None and succ["lineage_id"] else None
@@ -242,7 +272,7 @@ class Discoverer:
             self.store.relabel_lineage(a, b)
             self.stats["lineage_merges"] += 1
             return b
-        return a or b or str(chain[0]["league_id"])
+        return a or b or _lid(chain[0])
 
     def _extend_lineages_back(self):
         """Seasons were added: walk kept leagues back into the new range."""
@@ -258,11 +288,11 @@ class Discoverer:
                     self.stats["failed_requests"] += 1
                     break
                 ps = _season(pobj) if isinstance(pobj, dict) else None
-                if ps is None or ps not in self.seasons:
+                if ps is None or ps not in self.seasons or _lid(pobj) != cur_prev:
                     break
                 r = classify(pobj)
-                self.store.add_league(str(pobj["league_id"]), ps, row["hop"], lineage,
-                                      _prev(pobj), r is None, r, pobj.get("status"))
+                self.store.add_league(_lid(pobj), ps, row["hop"], lineage,
+                                      _prev(pobj), r is None, r, _status(pobj))
                 cur_prev = _prev(pobj)
 
     def _revive_deferred(self):

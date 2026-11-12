@@ -35,11 +35,14 @@ def test_report_numbers_on_known_world(tmp_path):
     assert rep["traded_picks"]["total"] == 6 and rep["traded_picks"]["drafted"] == 3
     assert rep["traded_picks"]["share_resolved_to_slot"] == 0.5
     assert rep["lineage_depth_seasons"] == {"1": 2, "3": 1}
-    assert "mystery_move" in rep["transaction_types_seen"]
+    assert "other" in rep["transaction_types_seen"]   # an unknown type, visible as other
     assert rep["transactions_by_type_status"]["waiver/failed"] > 0
     assert rep["standings_vs_reported"]["league_seasons"] == 5
-    assert rep["standings_vs_reported"]["agree"] == 4
-    assert rep["standings_vs_reported"]["disagreement_kinds_rosters"] == {"wins": 1}
+    assert rep["standings_vs_reported"]["agree"] == 3
+    assert rep["standings_vs_reported"]["records_agree"] == 4
+    assert rep["standings_vs_reported"]["points_agree"] == 4
+    assert rep["standings_vs_reported"]["disagreement_kinds_rosters"] == {"points_for": 1, "wins": 1}
+    assert rep["leg_time_inversions"] == 0
     assert rep["unplayed_weeks"]["without_pairing"] > 0
     assert rep["last_pull_leak_scan_ok"] is True
 

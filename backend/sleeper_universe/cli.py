@@ -108,6 +108,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hops", type=int, default=2)
     p.add_argument("--cap", type=int, default=3000, help="max kept lineages")
     p.add_argument("--limit", type=int, default=None, help="max league-seasons to pull this run")
+    p.add_argument("--retry-failed", action="store_true",
+                   help="pull again league-seasons that failed MAX_PULL_ATTEMPTS times")
     p.add_argument("--refresh-incomplete", action="store_true",
                    help="re-pull league-seasons whose status was not 'complete'")
     p.add_argument("--rate", type=float, default=DEFAULT_RATE,
@@ -155,7 +157,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
 
     if args.command == "report":
         rep = build_report(store.conn)
-        leak = leak_scan(data_dir, ring, exclude=_exclusions(args, data_dir))
+        leak = leak_scan(data_dir, ring, report_mode=True)
         if args.json:
             log(json.dumps({"report": rep, "leak_scan": leak}, indent=2, sort_keys=True))
         else:
@@ -182,7 +184,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
     tclock = clock or time.monotonic
     t0 = tclock()
     run_id = store.start_run(args.command, _now(), params, code_version())
-    status, summary, leak, state, code = "error", {}, None, None, 1
+    status, summary, state, code = "error", {}, None, 1
     try:
         if args.command == "run":
             pull_est, disc_est = planned_budget(args.cap, len(seasons))
@@ -199,6 +201,8 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
             del seeds
             log(f"discover: {json.dumps(summary['discover'])}")
         if args.command in ("pull", "run"):
+            if args.retry_failed:
+                log(f"retry-failed: {store.reset_failures()} failed league-seasons requeued")
             queued = len(store.leagues_to_pull(seasons, args.refresh_incomplete))
             n = min(queued, args.limit) if args.limit is not None else queued
             log(f"pull plan: {n} league-seasons x {REQUESTS_PER_LEAGUE_SEASON} = about "
@@ -213,10 +217,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
                 log(f"null answers accepted as none, by endpoint: {json.dumps(dict(client.nulls))}")
             summary["derive"] = derive_all(store.conn)
             log(f"derive: {json.dumps(summary['derive'])}")
-        leak = leak_scan(data_dir, ring, names=col.names, raw_ids=col.raw_user_ids,
-                         exclude=_exclusions(args, data_dir))
-        log(f"leak scan: {'PASS' if leak['ok'] else 'FAIL'} ({leak['files_scanned']} files)")
-        status, code = ("ok", 0) if leak["ok"] else ("leak_scan_failed", 4)
+        status, code = "ok", 0
     except HardStop as e:
         status, code = e.status, e.exit_code
         log(str(e))
@@ -226,20 +227,18 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
     finally:
         summary["null_as_none"] = dict(client.nulls)
         store.finish_run(run_id, _now(), status, client.requests, round(tclock() - t0, 3),
-                         summary, leak, state)
+                         summary, None, state)
         store.close()
+    # The scan runs after everything the run writes, finish_run included. Its
+    # own result (file names and counts only) is the one write after it.
+    leak = leak_scan(data_dir, ring, names=col.names, raw_ids=col.raw_user_ids)
+    log(f"leak scan: {'PASS' if leak['ok'] else 'FAIL'} ({leak['files_scanned']} files)")
+    store = Store(data_dir)
+    store.record_leak(run_id, leak)
+    store.close()
+    if not leak["ok"] and code == 0:
+        code = 4
     return code
-
-
-def _exclusions(args, data_dir: Path):
-    from .identity import KEY_FILE
-    ex = [SEED_FILE, KEY_FILE]
-    if args.seeds is not None:
-        try:
-            ex.append(str(Path(args.seeds).resolve().relative_to(Path(data_dir).resolve())))
-        except ValueError:
-            pass
-    return tuple(ex)
 
 
 if __name__ == "__main__":

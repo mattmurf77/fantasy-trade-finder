@@ -102,9 +102,14 @@ def test_games_back(full):
 def test_reported_mismatch_is_reported(full):
     w, c = full
     rows = {r["league_id"]: dict(r) for r in c.execute("SELECT * FROM standings_checks")}
+    # league C: a wrong record, points right; league B: a stat correction on
+    # one roster's points, records right. Judged apart, both reported.
     assert rows[L(301)]["matched"] == 0
     assert json.loads(rows[L(301)]["kinds_json"]) == {"wins": 1}
-    assert all(r["matched"] == 1 for lid, r in rows.items() if lid != L(301))
+    assert (rows[L(301)]["record_matched"], rows[L(301)]["points_matched"]) == (0, 1)
+    assert json.loads(rows[L(201)]["kinds_json"]) == {"points_for": 1}
+    assert (rows[L(201)]["record_matched"], rows[L(201)]["points_matched"]) == (1, 0)
+    assert all(r["matched"] == 1 for lid, r in rows.items() if lid not in (L(301), L(201)))
 
 
 def test_outcomes_from_both_brackets(full):

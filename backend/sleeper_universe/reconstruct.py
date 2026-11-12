@@ -3,9 +3,22 @@
 Model. A played week's matchup snapshot (``roster_weeks``) is taken as the
 roster at the END of that leg. Replaying a leg's completed transactions on
 the previous snapshot should land on the next one; ``verify_season`` measures
-exactly that. Events are always ordered by timestamp (``status_updated``, then
-``created``, then id), never by an assumed leg: the docs do not say which leg
-offseason trades are booked under.
+exactly that. Events are always ORDERED by timestamp (``status_updated``, then
+``created``, then id): the docs do not say which leg offseason trades are
+booked under.
+
+Where a leg is used, and why that is the only option: a snapshot carries a
+week number and no time, so the only link between a transaction and a
+snapshot is the transaction's leg. Legs are used for exactly that and nothing
+else: "after snapshot w" is ``leg > w`` (``_forward_base``, ``in_season_state``),
+"up to the first snapshot f" is ``leg <= f`` (``backward_state``), and the
+verifier's interval is ``a < leg <= b``. Which events come before the trade
+is always decided by timestamp, and the forward method selects this season's
+events by timestamp alone. ``in_season_state`` picks its base snapshot as the
+latest one before the trade's leg: a trade with no snapshot before its leg
+(leg 1, or a leg-0 offseason row) goes to forward/backward. The report counts
+transactions whose leg goes backwards in time order (``leg_time_inversions``),
+so the pilot shows how far legs and timestamps agree.
 
 Three methods, chosen per trade:
 

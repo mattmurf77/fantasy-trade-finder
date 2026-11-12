@@ -185,7 +185,8 @@ class World:
             "company_id": None, "shard": 7, "last_message_id": "123456789012345678",
             "metadata": {"latest_league_winner_roster_id": "1", "auto_continue": "on",
                          "custom_text": "Secret commissioner note text"},
-            "settings": {"type": 2, "best_ball": 0, "num_teams": n, "playoff_teams": 4,
+            "settings": {"type": 2, "best_ball": 0, "num_teams": n,
+                         "playoff_teams": spec.get("playoff_teams", 4),
                          "playoff_week_start": pws, "waiver_type": 2, "waiver_budget": 100,
                          "league_average_match": int(spec.get("median", 0)),
                          "taxi_slots": 2, "reserve_slots": 2, "trade_deadline": 11,
@@ -340,7 +341,8 @@ class World:
         table = {rid: {"w": 0, "l": 0, "t": 0, "pf": 0.0, "pa": 0.0} for rid in owners}
         for w in range(1, min(played, reg) + 1):
             rows = week_points[w]
-            pts = {r["roster_id"]: r["points"] for r in rows}
+            pts = {r["roster_id"]: (r["custom_points"] if r.get("custom_points") is not None
+                                    else r["points"]) for r in rows}
             bym = {}
             for r in rows:
                 if r["matchup_id"] is not None:
@@ -366,10 +368,13 @@ class World:
                 table[r]["pf"] += p
         self.truth_standings[lid] = table
         mis = spec.get("misreport")
+        corr = spec.get("fpts_correction")     # (rid, delta): a stat correction
         roster_rows = []
         for rid in owners:
             tr = table[rid]
             pf, pa = round(tr["pf"], 2), round(tr["pa"], 2)
+            if corr and corr[0] == rid:
+                pf = round(pf + corr[1], 2)
             settings = {"wins": tr["w"] + (mis[1] if mis and mis[0] == rid else 0),
                         "losses": tr["l"], "ties": tr["t"],
                         "fpts": int(pf), "fpts_decimal": int(round((pf - int(pf)) * 100)),
@@ -402,6 +407,21 @@ class World:
             # Sleeper answers null for a bracket that does not exist (live, 2026-11-12).
             self.routes[f"league/{lid}/winners_bracket"] = None
             self.routes[f"league/{lid}/losers_bracket"] = None
+        elif spec.get("status", "complete") == "complete" and spec.get("playoff_teams") == 6:
+            # Six teams: seeds 1 and 2 (rosters 1, 2) have a first-round bye.
+            win = [{"r": 1, "m": 1, "t1": 3, "t2": 6, "w": 3, "l": 6},
+                   {"r": 1, "m": 2, "t1": 4, "t2": 5, "w": 4, "l": 5},
+                   {"r": 2, "m": 3, "t1": 1, "t2": 4, "w": 1, "l": 4, "t2_from": {"w": 2}},
+                   {"r": 2, "m": 4, "t1": 2, "t2": 3, "w": 3, "l": 2, "t2_from": {"w": 1}},
+                   {"r": 2, "m": 5, "t1": 6, "t2": 5, "w": 5, "l": 6, "p": 5,
+                    "t1_from": {"l": 1}, "t2_from": {"l": 2}},
+                   {"r": 3, "m": 6, "t1": 1, "t2": 3, "w": 1, "l": 3, "p": 1,
+                    "t1_from": {"w": 3}, "t2_from": {"w": 4}},
+                   {"r": 3, "m": 7, "t1": 4, "t2": 2, "w": 2, "l": 4, "p": 3,
+                    "t1_from": {"l": 3}, "t2_from": {"l": 4}}]
+            lose = [{"r": 1, "m": 8, "t1": 7, "t2": 8, "w": 7, "l": 8, "p": 1}]
+            self.routes[f"league/{lid}/winners_bracket"] = win
+            self.routes[f"league/{lid}/losers_bracket"] = lose
         elif spec.get("status", "complete") == "complete":
             win = [{"r": 1, "m": 1, "t1": 1, "t2": 4, "w": 1, "l": 4},
                    {"r": 1, "m": 2, "t1": 2, "t2": 3, "w": 2, "l": 3},
@@ -415,7 +435,13 @@ class World:
             self.routes[f"league/{lid}/winners_bracket"] = win
             self.routes[f"league/{lid}/losers_bracket"] = lose
         else:
-            self.routes[f"league/{lid}/winners_bracket"] = []
+            # In season: Sleeper already publishes the bracket, with projected
+            # round-1 teams and no results (lakeview-2026 capture).
+            self.routes[f"league/{lid}/winners_bracket"] = [
+                {"r": 1, "m": 1, "t1": 1, "t2": 4, "w": None, "l": None},
+                {"r": 1, "m": 2, "t1": 2, "t2": 3, "w": None, "l": None},
+                {"r": 2, "m": 3, "t1": None, "t2": None, "w": None, "l": None, "p": 1,
+                 "t1_from": {"w": 1}, "t2_from": {"w": 2}}]
             self.routes[f"league/{lid}/losers_bracket"] = []
         return {rid: set(v) for rid, v in rosters.items()}
 
@@ -468,6 +494,9 @@ class World:
         if spec.get("bye_week") == w:
             # one unpaired roster with a lone matchup id
             rows[-1]["matchup_id"] = 99
+        for rid, value in (spec.get("custom") or {}).get(w, {}).items():
+            # A commissioner's score override for that roster-week.
+            next(r for r in rows if r["roster_id"] == rid)["custom_points"] = value
         if spec.get("tie_week") == w:
             rows[1]["points"] = rows[0]["points"]
         return rows
@@ -563,14 +592,15 @@ def standard_world() -> World:
         {"n": 201, "season": 2026, "prev": L(200), "teams": 10,
          "owners": {1: 3, **{r: 8 + r for r in range(2, 11)}}, "status": "in_season",
          "reg_weeks": 6, "played": 3, "median": 1, "divisions": 2, "tie_week": 1,
-         "bye_week": 2, "unpaired_future": True,
+         "bye_week": 2, "unpaired_future": True, "fpts_correction": (2, 0.5),
          "script": [(week_ts(2026, 2, 5), lambda api, ts: _trade(
              api, 2, ts, [(1, 2, 0), (2, 1, 0)]))]},
     ])
     w.lineage([
         {"n": 301, "season": 2025, "teams": 8,
          "owners": {1: 10, **{r: 18 + r for r in range(2, 9)}}, "status": "complete",
-         "reg_weeks": 3, "played": 5, "misreport": (3, 1),
+         "reg_weeks": 3, "played": 6, "misreport": (3, 1), "playoff_teams": 6,
+         "custom": {2: {5: 0.5}},
          "script": [(week_ts(2025, 2, 5), lambda api, ts: _trade(
              api, 2, ts, [(1, 2, 0), (2, 1, 0)])),
                     (week_ts(2025, 3, 5), lambda api, ts: _trade(

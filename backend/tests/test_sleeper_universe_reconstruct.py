@@ -79,10 +79,10 @@ def test_every_complete_row_counts_whatever_its_type(full):
     txid = w.truth_trades[L(103)][3]          # week 3 trade, roster 4 involved
     got = _check(w, c, L(103), txid, "in_season")
     assert pid in got["rosters"][4]
-    mys = c.execute("SELECT drops_json FROM transactions WHERE type='mystery_move'").fetchone()
+    mys = c.execute("SELECT drops_json FROM transactions WHERE type='other'").fetchone()
     dropped = next(iter(json.loads(mys[0])))
     sd = rc.load_season(c, L(103))
-    assert any(t["type"] == "mystery_move" for t in sd.txns)
+    assert any(t["type"] == "other" for t in sd.txns)
     assert dropped not in sd.snapshots[3][6]
 
 

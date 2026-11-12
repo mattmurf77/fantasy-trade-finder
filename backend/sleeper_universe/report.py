@@ -1,25 +1,42 @@
 """Pilot report (research-plan §8.2), aggregates only, and the leak scan.
 
-Leak scan method. Every file under the data folder is read (``.gz`` files
-decompressed; the SQLite file read both as raw bytes and cell by cell), except
-the operator's own inputs: the seed file and the key file. It fails on:
+Leak scan method. Every file under the data folder is read, except exactly two
+operator inputs at its top level, ``seeds.txt`` and ``hmac.key`` (the key is
+refused there anyway). gzip data is recognised by its magic bytes whatever the
+file name (so ``.tmp`` files are read too); the SQLite file is read as raw
+bytes (which covers column names, the schema and free pages; the store also
+runs with ``secure_delete`` so deleted rows are zeroed) and cell by cell
+(text, integer and real cells; JSON cells parsed). It fails on:
 
 a. a dropped field NAME (``identity.NAME_KEYS``: username, display_name,
-   team_name, name, avatar, metadata, ...) appearing as a JSON key in any file
-   or as a column of any table;
-b. a raw Sleeper user id: every 15-20 digit run in every file is HMAC'd with
-   the run's key and looked up in ``user_keys`` (every key the crawler ever
-   produced) -- so raw ids are found without ever storing them; plus, during
-   a pull run, a direct search for the raw ids held in memory;
-c. during a pull run only: the name VALUES seen in name fields (held in
-   memory, never written) compared with every string the store holds (every
-   JSON key and value, every SQLite text cell and the strings inside JSON
-   cells). Exact match, names of 4+ characters, excluding the store's own
-   vocabulary (statuses, positions, codes). The store keeps no free text, so a
-   leaked name would be a whole value; a name embedded inside a longer
-   string is not looked for.
+   team_name, name, avatar, metadata, ``p_nick_*``, ...) as a JSON key in any
+   file or as a column of any table;
+b. a raw Sleeper user id. Every digit run is examined: a run of 12-20 digits
+   whole, and every 15-20 digit window inside any run of 15 or more (so an id
+   glued to neighbouring digits in a SQLite record is still found). Each
+   candidate is HMAC'd and looked up in ``user_keys`` (every key the crawler
+   ever produced), so raw ids are found without storing them; during a run
+   the raw ids seen are also held in memory and matched directly, which also
+   covers users the crawler never hashed;
+c. during a run only: a NAME VALUE seen in a name field (held in memory,
+   never written). All decoded text of every file (raw files, the SQLite
+   bytes and cells, any text file) is split into words (``\\w+``); a name hits
+   when its word sequence appears anywhere, so a name inside a longer string
+   is found when it sits on word boundaries, and a name whose first word has
+   6+ characters is found glued inside a longer word. Names that are a single word of
+   1-2 characters, or a single all-digit word, or in the store's own
+   vocabulary, are not value-checked (they would hit everywhere).
 
-Output never contains an id or a name: only file names and hit counts.
+d. any number cell of 1e15 or more (no stored number is that large; an id
+   stored as a number is caught even after a REAL lost its low digits).
+
+Not detectable by value, by design: an id in another encoding (hex, base64);
+an id of a user the crawler never saw; a name glued to other text inside a
+word, when the name's first word is under 6 characters.
+
+What ``report`` cannot check, stated in its output: name values (never
+stored) and raw ids of users the crawler never hashed (only a run's memory
+has them). Output never contains an id or a name: only file names and counts.
 """
 from __future__ import annotations
 
@@ -35,7 +52,10 @@ from pathlib import Path
 from .identity import KEY_FILE, NAME_KEYS
 from .store import DB_NAME, SEED_FILE
 
-ID_RE = re.compile(rb"(?<![0-9])[0-9]{15,20}(?![0-9])")
+DIGITS_RE = re.compile(r"[0-9]{12,}")
+WORD_RE = re.compile(r"\w+")
+REPORT_CANNOT_CHECK = ("name values (never stored; only a run's own scan checks them)",
+                       "raw ids of users the crawler never hashed (only a run's memory has them)")
 EST_REQUESTS_PER_LEAGUE_SEASON = 44
 
 BACKWARD_NOTE = ("backward reconstruction cannot see roster changes before week 1 "
@@ -73,8 +93,77 @@ VOCAB = frozenset({
     "BN", "TAXI", "IR", "IDP_FLEX", "DL", "LB", "DB", "nfl"})
 
 
-def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None,
-              exclude=(SEED_FILE, KEY_FILE)) -> dict:
+def id_candidates(text: str) -> set:
+    """Digit runs of 12-20 whole, plus every 15-20 digit window inside a run
+    of 15 or more digits."""
+    out = set()
+    for m in DIGITS_RE.finditer(text):
+        run = m.group()
+        n = len(run)
+        if n <= 20:
+            out.add(run)
+        if n >= 15:
+            for width in range(15, min(20, n) + 1):
+                for i in range(n - width + 1):
+                    out.add(run[i:i + width])
+    return out
+
+
+GLUE_MIN = 6
+_HEXKEY_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+class _NameIndex:
+    """Word sequences of the names worth checking, by first word; plus, for
+    first words of 6+ characters, containment inside a longer word (a name
+    glued to other text, 'junksecretuser1'), cached per distinct word."""
+
+    def __init__(self, names):
+        self.by_first = defaultdict(set)
+        for n in names or ():
+            if not isinstance(n, str) or n in VOCAB:
+                continue
+            words = tuple(WORD_RE.findall(n))
+            if not words or (len(words) == 1 and (len(words[0]) < 3 or words[0].isdigit())):
+                continue
+            self.by_first[words[0]].add(words)
+        self.long_first = [w for w in self.by_first if len(w) >= GLUE_MIN]
+        self.cache: dict = {}
+
+    def __len__(self):
+        return sum(len(v) for v in self.by_first.values())
+
+    def _glued(self, word):
+        if word not in self.cache:
+            if word.isdigit() or _HEXKEY_RE.match(word) or len(word) <= GLUE_MIN:
+                self.cache[word] = ()
+            else:
+                self.cache[word] = tuple(f for f in self.long_first if f in word and f != word)
+        return self.cache[word]
+
+    def hits(self, text: str) -> int:
+        if not self.by_first:
+            return 0
+        words = WORD_RE.findall(text)
+        found = set()
+        for i, w in enumerate(words):
+            for first in (w, *self._glued(w)):
+                for seq in self.by_first.get(first, ()):
+                    if tuple(words[i + 1:i + len(seq)]) == seq[1:]:
+                        found.add(seq)
+        return len(found)
+
+
+def _decode(blob: bytes) -> bytes:
+    if blob[:2] == b"\x1f\x8b":
+        try:
+            return gzip.decompress(blob)
+        except (OSError, EOFError):
+            return blob
+    return blob
+
+
+def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=False) -> dict:
     data_dir = Path(data_dir)
     db = data_dir / DB_NAME
     known = set()
@@ -82,79 +171,92 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None,
         c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         known = {r[0] for r in c.execute("SELECT user_key FROM user_keys")}
         c.close()
-    names = {n for n in (names or ()) if len(n) >= 4 and n not in VOCAB}
+    idx = _NameIndex(names)
     raw_ids = {str(i) for i in (raw_ids or ())}
-    excluded = {str(x) for x in exclude}
+    excluded = {data_dir / SEED_FILE, data_dir / KEY_FILE}
     res = {"ok": True, "files_scanned": 0, "bytes_scanned": 0, "field_hits": {},
            "id_hits": {}, "raw_id_hits": {}, "name_hits": {},
-           "excluded": sorted(excluded), "name_values_checked": len(names),
-           "raw_ids_checked": len(raw_ids)}
+           "excluded": sorted(str(p.relative_to(data_dir)) for p in excluded),
+           "name_values_checked": len(idx), "numeric_hits": {},
+           "raw_ids_checked": len(raw_ids),
+           "not_checked": list(REPORT_CANNOT_CHECK) if report_mode else []}
+    checked: dict = {}
 
     def bump(kind, label, n):
         if n:
             res[kind][label] = res[kind].get(label, 0) + n
 
-    def check_ids(label, blob: bytes):
-        toks = {m.decode() for m in ID_RE.findall(blob)}
-        bump("id_hits", label, sum(1 for t in toks if ring.user_key(t) in known))
-        bump("raw_id_hits", label, len(toks & raw_ids))
+    def ids_in(label, text):
+        hit_key = hit_raw = 0
+        for cand in id_candidates(text):
+            if cand not in checked:
+                checked[cand] = ring.user_key(cand) in known
+            hit_key += checked[cand]
+            hit_raw += cand in raw_ids
+        bump("id_hits", label, hit_key)
+        bump("raw_id_hits", label, hit_raw)
 
     for path in sorted(p for p in data_dir.rglob("*") if p.is_file()):
-        rel = str(path.relative_to(data_dir))
-        if path.name in excluded or rel in excluded:
+        if path in excluded:
             continue
+        rel = str(path.relative_to(data_dir))
         res["files_scanned"] += 1
         keys: set = set()
-        name_hit: set = set()
         if path.name == DB_NAME:
-            # Raw bytes in chunks (the file can be gigabytes), then cell by cell.
             with open(path, "rb") as f:
                 tail = b""
                 while True:
-                    chunk = f.read(64 << 20)
+                    chunk = f.read(32 << 20)
                     if not chunk:
                         break
                     res["bytes_scanned"] += len(chunk)
-                    check_ids(rel, tail + chunk)
-                    tail = chunk[-24:]
+                    text = (tail + chunk).decode("utf-8", "replace")
+                    ids_in(rel, text)
+                    bump("name_hits", rel, idx.hits(text))
+                    tail = chunk[-256:]
             c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table'"
                                   " AND name NOT LIKE 'sqlite_%'"):
-                keys.update(r[1] for r in c.execute(f"PRAGMA table_info({t})"))
-                for row in c.execute(f"SELECT * FROM {t}"):
+                keys.update(r[1] for r in c.execute(f"PRAGMA table_info('{t}')"))
+                label = f"{rel}:{t}"
+                for row in c.execute(f"SELECT * FROM '{t}'"):
                     for v in row:
-                        if not isinstance(v, str):
+                        if isinstance(v, bool) or v is None:
                             continue
-                        if v in names:
-                            name_hit.add(v)
-                        if len(v) > 64:   # may span overflow pages in the raw bytes
-                            check_ids(f"{rel}:{t}", v.encode("utf-8"))
-                        if v[:1] in "[{":
-                            strings: list = []
-                            try:
-                                _walk(json.loads(v), keys, strings)
-                            except ValueError:
-                                pass
-                            name_hit.update(x for x in strings if x in names)
+                        if isinstance(v, (int, float)):
+                            # Nothing the store keeps as a number reaches 1e15
+                            # (timestamps are ~1.7e12; ids are TEXT). A number
+                            # that large is an id stored as a number, whose
+                            # low digits a REAL may already have lost.
+                            if abs(v) >= 1e15:
+                                bump("numeric_hits", label, 1)
+                            if isinstance(v, int) or v.is_integer():
+                                ids_in(label, str(int(v)))
+                        else:
+                            text = v if isinstance(v, str) else bytes(v).decode("utf-8", "replace")
+                            ids_in(label, text)
+                            bump("name_hits", label, idx.hits(text))
+                            if text[:1] in "[{":
+                                try:
+                                    _walk(json.loads(text), keys, [])
+                                except ValueError:
+                                    pass
             c.close()
         else:
-            blob = path.read_bytes()
-            if path.suffix == ".gz":
-                blob = gzip.decompress(blob)
+            blob = _decode(path.read_bytes())
             res["bytes_scanned"] += len(blob)
-            check_ids(rel, blob)
-            strings = []
+            text = blob.decode("utf-8", "replace")
+            ids_in(rel, text)
+            bump("name_hits", rel, idx.hits(text))
             try:
-                _walk(json.loads(blob), keys, strings)
+                _walk(json.loads(text), keys, [])
             except ValueError:
-                strings.append(blob.decode("utf-8", "replace"))
-            name_hit.update(x for x in strings if x in names)
-        bump("name_hits", rel, len(name_hit))
+                pass
         hits = _field_hit(keys)
         if hits:
             res["field_hits"][rel] = hits
     res["ok"] = not (res["field_hits"] or res["id_hits"] or res["raw_id_hits"]
-                     or res["name_hits"])
+                     or res["name_hits"] or res["numeric_hits"])
     return res
 
 
@@ -240,6 +342,15 @@ def build_report(conn) -> dict:
     for (sj,) in q("SELECT summary_json FROM runs WHERE summary_json IS NOT NULL"):
         nulls.update((json.loads(sj) or {}).get("null_as_none") or {})
     rep["null_answers_accepted_as_none_by_endpoint"] = dict(sorted(nulls.items()))
+    inv, prev_lid, top = 0, None, 0
+    for r in q("SELECT league_id, leg FROM transactions WHERE status='complete' AND leg IS NOT NULL"
+               " ORDER BY league_id, COALESCE(status_updated, created), transaction_id"):
+        if r["league_id"] != prev_lid:
+            prev_lid, top = r["league_id"], 0
+        if r["leg"] < top:
+            inv += 1
+        top = max(top, r["leg"])
+    rep["leg_time_inversions"] = inv
     rep["transactions_by_type_status"] = {f"{r[0]}/{r[1]}": r[2] for r in q(
         "SELECT type, status, COUNT(*) FROM transactions GROUP BY type, status ORDER BY 1, 2")}
     rep["transaction_types_seen"] = sorted({r[0] for r in q("SELECT DISTINCT type FROM transactions")
@@ -256,13 +367,17 @@ def build_report(conn) -> dict:
     rep["reconstruction_mismatch_causes_by_season"] = {k: dict(v) for k, v in sorted(causes.items())}
     rep["draft_pick_timing"] = ("every pick of a completed draft is timed at the draft's end "
                                 "(Sleeper pick objects carry no timestamp)")
-    sc = q("SELECT status, matched, kinds_json FROM standings_checks")
+    sc = q("SELECT status, matched, record_matched, points_matched, kinds_json FROM standings_checks")
     kinds = Counter()
     for r in sc:
         for k, n in json.loads(r["kinds_json"]).items():
             kinds[k] += n
     rep["standings_vs_reported"] = {
         "league_seasons": len(sc), "agree": sum(r["matched"] for r in sc),
+        "records_agree": sum(r["record_matched"] for r in sc),
+        "points_agree": sum(r["points_matched"] for r in sc),
+        "share_records_agree": round(sum(r["record_matched"] for r in sc) / len(sc), 4) if sc else None,
+        "share_points_agree": round(sum(r["points_matched"] for r in sc) / len(sc), 4) if sc else None,
         "share_agree": round(sum(r["matched"] for r in sc) / len(sc), 4) if sc else None,
         "by_status": {st: {"n": sum(1 for r in sc if r["status"] == st),
                            "agree": sum(r["matched"] for r in sc if r["status"] == st)}

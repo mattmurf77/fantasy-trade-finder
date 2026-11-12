@@ -38,7 +38,6 @@ NAME_KEYS = frozenset({
 USER_ID_KEYS = frozenset({"user_id", "owner_id", "creator", "picked_by"})
 USER_ID_LIST_KEYS = frozenset({"co_owners", "creators"})
 
-_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-]{0,40}$")
 MIN_KEY_CHARS = 32
 MIN_KEY_DISTINCT = 12
 
@@ -72,6 +71,7 @@ class KeyRing:
             raise ValueError("HMAC key must be at least 16 bytes")
         self._key = bytes(key)
         self.source = source
+        self._mac = hmac.new(self._key, b"user:", hashlib.sha256)
 
     @classmethod
     def load(cls, key_path: Path | None = None, env=None, data_dir: Path | None = None
@@ -126,8 +126,9 @@ class KeyRing:
         s = str(user_id).strip()
         if not s or s == "0":
             return None
-        return hmac.new(self._key, b"user:" + s.encode("utf-8"),
-                        hashlib.sha256).hexdigest()[:32]
+        h = self._mac.copy()          # same as hmac.new(key, b"user:" + s)
+        h.update(s.encode("utf-8"))
+        return h.hexdigest()[:32]
 
     def fingerprint(self) -> str:
         """Identifies the key without revealing it (stored in meta so a pull
@@ -170,61 +171,162 @@ def harvest(obj, col: Collector | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Value validators
+# Value validators. Every kept value must have the shape of what the field
+# holds; anything else becomes None (or is dropped from a list or dict) and is
+# counted in ``Collector.dropped``. No validator accepts free text: ids are
+# digits of bounded length, enums come from closed vocabularies, settings and
+# scoring keys from known lists, numbers are bounded so an 18-digit id cannot
+# pass as a setting value.
 # ---------------------------------------------------------------------------
 
-def _token(v):
-    """An id or enum: int, or a short [A-Za-z0-9_.-] string. Else None."""
+_ID_RE = re.compile(r"^\d{1,20}$")              # league / draft / transaction ids
+_PLAYER_RE = re.compile(r"^(\d{1,8}|[A-Z]{2,3})$")  # player id, or a team DEF ('TB', 'LAR')
+_SEASON_RE = re.compile(r"^(19|20|21)\d\d$")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+MAX_SMALL = 10_000           # roster ids, weeks, rounds, slots, bracket fields
+MAX_SETTING = 1_000_000_000  # settings values (an id is ~1e18)
+MAX_POINTS = 1_000_000
+
+LEAGUE_STATUS = frozenset({"pre_draft", "drafting", "in_season", "post_season", "complete"})
+SEASON_TYPE = frozenset({"regular", "pre", "post", "off"})
+SPORT = frozenset({"nfl"})
+TXN_TYPES = frozenset({"trade", "waiver", "free_agent", "commissioner"})
+TXN_STATUS = frozenset({"complete", "failed", "pending"})
+DRAFT_STATUS = frozenset({"pre_draft", "drafting", "paused", "complete"})
+DRAFT_TYPE = frozenset({"snake", "linear", "auction"})
+SLOTS = frozenset({"QB", "RB", "WR", "TE", "K", "DEF", "FLEX", "SUPER_FLEX", "REC_FLEX",
+                   "WRRB_FLEX", "WRTE_FLEX", "RBTE_FLEX", "IDP_FLEX", "DL", "LB", "DB", "DE",
+                   "DT", "CB", "S", "BN", "TAXI", "IR"})
+POSITIONS = frozenset({"QB", "RB", "WR", "TE", "K", "DEF", "DL", "LB", "DB", "DE", "DT",
+                       "CB", "S", "OL", "LS", "P"})
+LEAGUE_SETTINGS = frozenset({
+    "bench_lock", "best_ball", "capacity_override", "commissioner_direct_invite",
+    "daily_waivers", "daily_waivers_base", "daily_waivers_days", "daily_waivers_hour",
+    "daily_waivers_last_ran", "disable_adds", "disable_trades", "divisions", "draft_rounds",
+    "faab_suggestions", "last_report", "last_scored_leg", "league_average_match", "leg",
+    "max_keepers", "max_subs", "num_teams", "offseason_adds", "pick_trading",
+    "playoff_round_type", "playoff_seed_type", "playoff_teams", "playoff_type",
+    "playoff_week_start", "reserve_allow_cov", "reserve_allow_dnr", "reserve_allow_doubtful",
+    "reserve_allow_na", "reserve_allow_out", "reserve_allow_sus", "reserve_slots", "squads",
+    "start_week", "sub_lock_if_starter_active", "sub_start_time_eligibility",
+    "taxi_allow_vets", "taxi_deadline", "taxi_slots", "taxi_years", "trade_deadline",
+    "trade_review_days", "type", "veto_auto_poll", "veto_show_votes", "veto_votes_needed",
+    "waiver_bid_min", "waiver_budget", "waiver_clear_days", "waiver_day_of_week",
+    "waiver_type", "was_auto_archived"})
+ROSTER_SETTINGS = frozenset({
+    "division", "fpts", "fpts_against", "fpts_against_decimal", "fpts_decimal", "losses",
+    "ppts", "ppts_decimal", "ties", "total_moves", "waiver_adjusted", "waiver_budget_used",
+    "waiver_position", "wins"})
+DRAFT_SETTINGS = frozenset({
+    "alpha_sort", "autopause_enabled", "autopause_end_time", "autopause_start_time",
+    "autostart", "cpu_autopick", "enforce_position_limits", "nomination_timer", "pick_timer",
+    "player_type", "reversal_round", "rounds", "teams", "budget"}) | frozenset(
+    "slots_" + s.lower() for s in SLOTS)
+# Scoring keys are '_'-joined segments ('pass_td', 'bonus_rec_te', 'pts_allow_14_20');
+# each segment must be a known word or a number (optionally with 'p', as '40p').
+SCORING_WORDS = frozenset("""
+    0 2pt allow ast att bonus blk blkd cmp comp def down fd ff fg fga fgm fgmiss first
+    fum half hit idp in20 inc int k kick ko kr lng loss lost made miss misc opp own pass pd
+    pick pick6 pr pts punt qb rb rec ret rush sack safe sk solo st tb td te tgt tkl tm wr
+    xp xpm xpmiss yd yds att lost rec own cmp qb_hit opp_own
+""".split())
+_SCORE_NUM = re.compile(r"^\d{1,3}p?$")
+
+
+def _s(v):
     if isinstance(v, bool):
         return None
     if isinstance(v, int):
-        return v
-    if isinstance(v, str) and _TOKEN_RE.match(v):
-        return v
-    return None
+        return str(v)
+    return v if isinstance(v, str) else None
 
 
-def _int(v):
+def _id(v):
+    s = _s(v)
+    return s if s is not None and _ID_RE.match(s) else None
+
+
+def _player(v):
+    s = _s(v)
+    return s if s is not None and _PLAYER_RE.match(s) else None
+
+
+def _season(v):
+    s = _s(v)
+    return s if s is not None and _SEASON_RE.match(s) else None
+
+
+def _enum(v, vocab, other=None):
+    if isinstance(v, str) and v in vocab:
+        return v
+    return other if v is not None else None
+
+
+def _small(v):
     if isinstance(v, bool):
         return int(v)
-    if isinstance(v, int):
-        return v
     if isinstance(v, float) and v.is_integer():
-        return int(v)
-    if isinstance(v, str) and v.lstrip("-").isdigit() and len(v) < 12:
-        return int(v)
-    return None
+        v = int(v)
+    if isinstance(v, str) and v.isdigit() and len(v) <= 5:
+        v = int(v)
+    return v if isinstance(v, int) and -MAX_SMALL < v < MAX_SMALL else None
 
 
-def _num(v):
+def _ts(v):
+    """An epoch-ms timestamp (1973..5138)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return v if 10 ** 11 <= v < 10 ** 14 else None
+
+
+def _pts(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return v if abs(v) < MAX_POINTS else None
+
+
+def _setting(v):
     if isinstance(v, bool):
         return int(v)
-    if isinstance(v, (int, float)):
-        return v
-    return None
+    if v is None:
+        return None
+    return v if isinstance(v, (int, float)) and abs(v) < MAX_SETTING else False
 
 
-def _tokens(v) -> list:
+def _list(v, f) -> list:
     if not isinstance(v, list):
         return []
-    return [t for t in (_token(x) for x in v) if t is not None]
+    return [x for x in (f(i) for i in v) if x is not None]
 
 
-def _ints(v) -> list:
-    if not isinstance(v, list):
-        return []
-    return [i for i in (_int(x) for x in v) if i is not None]
-
-
-def _numeric_dict(d) -> dict:
+def _settings(d, known, col=None, kind="settings") -> dict:
     if not isinstance(d, dict):
         return {}
     out = {}
     for k, v in d.items():
-        if not (isinstance(k, str) and _TOKEN_RE.match(k)):
-            continue
-        if v is None or isinstance(v, (bool, int, float)):
+        val = _setting(v)
+        if k in known and val is not False:
+            out[k] = val
+        elif col is not None:
+            col.dropped[f"{kind}_key_or_value"] += 1
+    return out
+
+
+def scoring_key_ok(k) -> bool:
+    if not isinstance(k, str) or not 0 < len(k) <= 40:
+        return False
+    return all(seg in SCORING_WORDS or _SCORE_NUM.match(seg) for seg in k.split("_"))
+
+
+def _scoring(d, col=None) -> dict:
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for k, v in d.items():
+        if scoring_key_ok(k) and _pts(v) is not None:
             out[k] = v
+        elif col is not None:
+            col.dropped["scoring_key_or_value"] += 1
     return out
 
 
@@ -253,15 +355,27 @@ LEAGUE_FIELDS = ("league_id", "previous_league_id", "season", "season_type",
                  "settings")
 
 
-def strip_league(obj, ring: KeyRing, col=None) -> dict | None:
+def strip_league(obj, ring: KeyRing | None = None, col=None) -> dict | None:
+    """Also used by discovery on every listed league, before anything is written."""
     if not isinstance(obj, dict):
         return None
     _note_dropped(col, "league", obj, LEAGUE_FIELDS)
-    out = {k: _token(obj.get(k)) for k in LEAGUE_FIELDS[:10]}
-    out["roster_positions"] = _tokens(obj.get("roster_positions"))
-    out["scoring_settings"] = _numeric_dict(obj.get("scoring_settings"))
-    out["settings"] = _numeric_dict(obj.get("settings"))
-    return out
+    return {
+        "league_id": _id(obj.get("league_id")),
+        "previous_league_id": _id(obj.get("previous_league_id")),
+        "season": _season(obj.get("season")),
+        "season_type": _enum(obj.get("season_type"), SEASON_TYPE),
+        "sport": _enum(obj.get("sport"), SPORT),
+        "status": _enum(obj.get("status"), LEAGUE_STATUS),
+        "total_rosters": _small(obj.get("total_rosters")),
+        "draft_id": _id(obj.get("draft_id")),
+        "bracket_id": _id(obj.get("bracket_id")),
+        "loser_bracket_id": _id(obj.get("loser_bracket_id")),
+        "roster_positions": _list(obj.get("roster_positions"),
+                                  lambda x: _enum(x, SLOTS, "OTHER")),
+        "scoring_settings": _scoring(obj.get("scoring_settings"), col),
+        "settings": _settings(obj.get("settings"), LEAGUE_SETTINGS, col, "league_settings"),
+    }
 
 
 ROSTER_FIELDS = ("roster_id", "league_id", "owner_id", "co_owners", "players",
@@ -275,17 +389,17 @@ def strip_rosters(rows, ring: KeyRing, col=None) -> list:
             continue
         _note_dropped(col, "roster", r, ROSTER_FIELDS)
         out.append({
-            "roster_id": _int(r.get("roster_id")),
-            "league_id": _token(r.get("league_id")),
+            "roster_id": _small(r.get("roster_id")),
+            "league_id": _id(r.get("league_id")),
             "owner_key": _ukey(ring, col, r.get("owner_id")),
             "co_owner_keys": [k for k in (_ukey(ring, col, u) for u in
                                           (r.get("co_owners") or [])) if k],
-            "players": _tokens(r.get("players")),
-            "starters": _tokens(r.get("starters")),
-            "reserve": _tokens(r.get("reserve")),
-            "taxi": _tokens(r.get("taxi")),
-            "keepers": _tokens(r.get("keepers")),
-            "settings": _numeric_dict(r.get("settings")),
+            "players": _list(r.get("players"), _player),
+            "starters": _list(r.get("starters"), _player),
+            "reserve": _list(r.get("reserve"), _player),
+            "taxi": _list(r.get("taxi"), _player),
+            "keepers": _list(r.get("keepers"), _player),
+            "settings": _settings(r.get("settings"), ROSTER_SETTINGS, col, "roster_settings"),
         })
     return out
 
@@ -331,18 +445,22 @@ TXN_FIELDS = ("transaction_id", "type", "status", "leg", "roster_ids",
               "settings", "metadata", "created", "status_updated", "creator")
 
 
-def _player_map(d) -> dict:
+def _player_map(d, col=None) -> dict:
     if not isinstance(d, dict):
         return {}
     out = {}
     for k, v in d.items():
-        kt, vi = _token(str(k)), _int(v)
-        if kt is not None and vi is not None:
-            out[str(kt)] = vi
+        p, r = _player(k), _small(v)
+        if p is not None and r is not None:
+            out[p] = r
+        elif col is not None:
+            col.dropped["player_map_entry"] += 1
     return out
 
 
 def strip_transactions(rows, ring: KeyRing, col=None) -> list:
+    """``type``: one of TXN_TYPES, anything else 'other' (counted in the
+    report, so a new type is visible without its text being stored)."""
     out = []
     for t in rows if isinstance(rows, list) else []:
         if not isinstance(t, dict):
@@ -350,32 +468,31 @@ def strip_transactions(rows, ring: KeyRing, col=None) -> list:
         _note_dropped(col, "transaction", t, TXN_FIELDS)
         settings = t.get("settings") if isinstance(t.get("settings"), dict) else {}
         out.append({
-            "transaction_id": _token(t.get("transaction_id")),
-            "type": _token(t.get("type")),
-            "status": _token(t.get("status")),
-            "leg": _int(t.get("leg")),
-            "roster_ids": _ints(t.get("roster_ids")),
-            # Roster ids. An entry that is not a small int is dropped.
-            "consenter_ids": [i for i in _ints(t.get("consenter_ids")) if abs(i) < 1000],
-            "adds": _player_map(t.get("adds")),
-            "drops": _player_map(t.get("drops")),
+            "transaction_id": _id(t.get("transaction_id")),
+            "type": _enum(t.get("type"), TXN_TYPES, "other"),
+            "status": _enum(t.get("status"), TXN_STATUS, "other"),
+            "leg": _small(t.get("leg")),
+            "roster_ids": _list(t.get("roster_ids"), _small),
+            "consenter_ids": _list(t.get("consenter_ids"), _small),
+            "adds": _player_map(t.get("adds"), col),
+            "drops": _player_map(t.get("drops"), col),
             "draft_picks": [{
-                "season": _token(p.get("season")),
-                "round": _int(p.get("round")),
-                "roster_id": _int(p.get("roster_id")),
-                "previous_owner_id": _int(p.get("previous_owner_id")),
-                "owner_id": _int(p.get("owner_id")),
+                "season": _season(p.get("season")),
+                "round": _small(p.get("round")),
+                "roster_id": _small(p.get("roster_id")),
+                "previous_owner_id": _small(p.get("previous_owner_id")),
+                "owner_id": _small(p.get("owner_id")),
             } for p in (t.get("draft_picks") or []) if isinstance(p, dict)],
             "waiver_budget": [{
-                "sender": _int(w.get("sender")),
-                "receiver": _int(w.get("receiver")),
-                "amount": _num(w.get("amount")),
+                "sender": _small(w.get("sender")),
+                "receiver": _small(w.get("receiver")),
+                "amount": _pts(w.get("amount")),
             } for w in (t.get("waiver_budget") or []) if isinstance(w, dict)],
-            "settings": {k: _num(settings.get(k)) for k in ("seq", "waiver_bid")
-                         if _num(settings.get(k)) is not None},
+            "settings": {k: _pts(settings.get(k)) for k in ("seq", "waiver_bid")
+                         if _pts(settings.get(k)) is not None},
             "notes_code": notes_code(t.get("metadata")),
-            "created": _num(t.get("created")),
-            "status_updated": _num(t.get("status_updated")),
+            "created": _ts(t.get("created")),
+            "status_updated": _ts(t.get("status_updated")),
             "creator_key": _ukey(ring, col, t.get("creator")),
         })
     return out
@@ -391,15 +508,15 @@ def strip_matchups(rows, ring: KeyRing, col=None) -> list:
         _note_dropped(col, "matchup", m, fields)
         pp = m.get("players_points") if isinstance(m.get("players_points"), dict) else {}
         out.append({
-            "roster_id": _int(m.get("roster_id")),
-            "matchup_id": _int(m.get("matchup_id")),
-            "points": _num(m.get("points")),
-            "custom_points": _num(m.get("custom_points")),
-            "players": _tokens(m.get("players")),
-            "starters": _tokens(m.get("starters")),
-            "starters_points": [x for x in (_num(v) for v in (m.get("starters_points") or [])) if x is not None],
-            "players_points": {str(k): _num(v) for k, v in pp.items()
-                               if _token(str(k)) is not None and _num(v) is not None},
+            "roster_id": _small(m.get("roster_id")),
+            "matchup_id": _small(m.get("matchup_id")),
+            "points": _pts(m.get("points")),
+            "custom_points": _pts(m.get("custom_points")),
+            "players": _list(m.get("players"), _player),
+            "starters": _list(m.get("starters"), _player),
+            "starters_points": _list(m.get("starters_points"), _pts),
+            "players_points": {_player(k): _pts(v) for k, v in pp.items()
+                               if _player(k) is not None and _pts(v) is not None},
         })
     return out
 
@@ -418,20 +535,20 @@ def strip_drafts(rows, ring: KeyRing, col=None) -> list:
         s2r = d.get("slot_to_roster_id") if isinstance(d.get("slot_to_roster_id"), dict) else {}
         order = d.get("draft_order") if isinstance(d.get("draft_order"), dict) else {}
         out.append({
-            "draft_id": _token(d.get("draft_id")),
-            "league_id": _token(d.get("league_id")),
-            "season": _token(d.get("season")),
-            "season_type": _token(d.get("season_type")),
-            "status": _token(d.get("status")),
-            "type": _token(d.get("type")),
-            "start_time": _num(d.get("start_time")),
-            "last_picked": _num(d.get("last_picked")),
-            "settings": _numeric_dict(d.get("settings")),
-            "slot_to_roster_id": {str(k): _int(v) for k, v in s2r.items()
-                                  if _int(k) is not None and _int(v) is not None},
-            "draft_order": {k: _int(v) for k, v in
+            "draft_id": _id(d.get("draft_id")),
+            "league_id": _id(d.get("league_id")),
+            "season": _season(d.get("season")),
+            "season_type": _enum(d.get("season_type"), SEASON_TYPE),
+            "status": _enum(d.get("status"), DRAFT_STATUS, "other"),
+            "type": _enum(d.get("type"), DRAFT_TYPE, "other"),
+            "start_time": _ts(d.get("start_time")),
+            "last_picked": _ts(d.get("last_picked")),
+            "settings": _settings(d.get("settings"), DRAFT_SETTINGS, col, "draft_settings"),
+            "slot_to_roster_id": {str(_small(k)): _small(v) for k, v in s2r.items()
+                                  if _small(k) is not None and _small(v) is not None},
+            "draft_order": {k: _small(v) for k, v in
                             ((_ukey(ring, col, u), s) for u, s in order.items())
-                            if k and _int(v) is not None},
+                            if k and _small(v) is not None},
         })
     return out
 
@@ -448,16 +565,16 @@ def strip_draft_picks(rows, ring: KeyRing, col=None) -> list:
         _note_dropped(col, "draft_pick", p, PICK_FIELDS)
         md = p.get("metadata") if isinstance(p.get("metadata"), dict) else {}
         out.append({
-            "draft_id": _token(p.get("draft_id")),
-            "pick_no": _int(p.get("pick_no")),
-            "round": _int(p.get("round")),
-            "draft_slot": _int(p.get("draft_slot")),
-            "roster_id": _int(p.get("roster_id")),
-            "player_id": _token(p.get("player_id")),
+            "draft_id": _id(p.get("draft_id")),
+            "pick_no": _small(p.get("pick_no")),
+            "round": _small(p.get("round")),
+            "draft_slot": _small(p.get("draft_slot")),
+            "roster_id": _small(p.get("roster_id")),
+            "player_id": _player(p.get("player_id")),
             "is_keeper": bool(p.get("is_keeper")),
             "picked_by_key": _ukey(ring, col, p.get("picked_by")),
             # The only metadata field kept: the drafted player's position.
-            "position": _token(md.get("position")),
+            "position": _enum(md.get("position"), POSITIONS),
         })
     return out
 
@@ -469,10 +586,10 @@ def strip_traded_picks(rows, ring: KeyRing, col=None) -> list:
         if not isinstance(p, dict):
             continue
         _note_dropped(col, "traded_pick", p, fields)
-        out.append({"season": _token(p.get("season")), "round": _int(p.get("round")),
-                    "roster_id": _int(p.get("roster_id")),
-                    "owner_id": _int(p.get("owner_id")),
-                    "previous_owner_id": _int(p.get("previous_owner_id"))})
+        out.append({"season": _season(p.get("season")), "round": _small(p.get("round")),
+                    "roster_id": _small(p.get("roster_id")),
+                    "owner_id": _small(p.get("owner_id")),
+                    "previous_owner_id": _small(p.get("previous_owner_id"))})
     return out
 
 
@@ -483,10 +600,25 @@ def strip_bracket(rows, ring: KeyRing, col=None) -> list:
         if not isinstance(b, dict):
             continue
         _note_dropped(col, "bracket", b, fields)
-        row = {k: _int(b.get(k)) for k in ("r", "m", "t1", "t2", "w", "l", "p")}
+        row = {k: _small(b.get(k)) for k in ("r", "m", "t1", "t2", "w", "l", "p")}
         for k in ("t1_from", "t2_from"):
             v = b.get(k)
-            row[k] = ({kk: _int(vv) for kk, vv in v.items() if kk in ("w", "l")}
+            row[k] = ({kk: _small(vv) for kk, vv in v.items() if kk in ("w", "l")}
                       if isinstance(v, dict) else None)
         out.append(row)
     return out
+
+
+def strip_state(st) -> dict | None:
+    """``/state/nfl``: only these fields, each shape-checked."""
+    if not isinstance(st, dict):
+        return None
+    out = {"season": _season(st.get("season")), "week": _small(st.get("week")),
+           "season_type": _enum(st.get("season_type"), SEASON_TYPE),
+           "leg": _small(st.get("leg")), "display_week": _small(st.get("display_week")),
+           "previous_season": _season(st.get("previous_season")),
+           "league_season": _season(st.get("league_season")),
+           "season_start_date": (st.get("season_start_date")
+                                 if isinstance(st.get("season_start_date"), str)
+                                 and _DATE_RE.match(st["season_start_date"]) else None)}
+    return {k: v for k, v in out.items() if v is not None}

@@ -98,12 +98,7 @@ def fetch_bundle(client, ring, col, league_id: str) -> dict:
 
 def fetch_nfl_state(client) -> dict | None:
     """``/state/nfl`` once per run: which NFL week is in progress."""
-    st = client.get("/state/nfl")
-    if not isinstance(st, dict):
-        return None
-    keep = ("season", "week", "season_type", "leg", "display_week", "previous_season",
-            "league_season", "season_start_date")
-    return {k: ident._token(st.get(k)) for k in keep if st.get(k) is not None}
+    return ident.strip_state(client.get("/state/nfl", expect=dict))
 
 
 def pull(store, client, ring, col, *, seasons, run_id, limit=None,
@@ -122,7 +117,7 @@ def pull(store, client, ring, col, *, seasons, run_id, limit=None,
         try:
             bundle = fetch_bundle(client, ring, col, lid)
         except LeagueGone:
-            store.record_failure(lid, season, run_id, "not_found")
+            store.record_failure(lid, season, run_id, "not_found", permanent=True)
             stats["gone"] += 1
             continue
         except (RequestFailed, LeagueMismatch) as e:

@@ -23,6 +23,7 @@ from pathlib import Path
 DB_NAME = "universe.sqlite"
 SEED_FILE = "seeds.txt"
 SCHEMA_VERSION = "1"
+MAX_PULL_ATTEMPTS = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -44,7 +45,8 @@ CREATE TABLE IF NOT EXISTS pull_checkpoints (
   league_id TEXT PRIMARY KEY, season INTEGER, completed_at TEXT, run_id INTEGER,
   requests INTEGER, seconds REAL, league_status TEXT, raw_path TEXT);
 CREATE TABLE IF NOT EXISTS pull_failures (
-  league_id TEXT PRIMARY KEY, season INTEGER, run_id INTEGER, kind TEXT);
+  league_id TEXT PRIMARY KEY, season INTEGER, run_id INTEGER, kind TEXT,
+  attempts INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS leagues (
   league_id TEXT PRIMARY KEY, season INTEGER, previous_league_id TEXT,
   status TEXT, teams INTEGER, roster_positions_json TEXT, n_starters INTEGER,
@@ -70,8 +72,8 @@ CREATE TABLE IF NOT EXISTS roster_weeks (
   PRIMARY KEY (league_id, week, roster_id));
 CREATE TABLE IF NOT EXISTS matchups (
   league_id TEXT, week INTEGER, roster_id INTEGER, matchup_id INTEGER,
-  opponent_roster INTEGER, paired INTEGER, points REAL, phase TEXT,
-  played INTEGER, PRIMARY KEY (league_id, week, roster_id));
+  opponent_roster INTEGER, paired INTEGER, points REAL, points_original REAL,
+  custom INTEGER, phase TEXT, played INTEGER, PRIMARY KEY (league_id, week, roster_id));
 CREATE TABLE IF NOT EXISTS transactions (
   league_id TEXT, transaction_id TEXT, type TEXT, status TEXT, leg INTEGER,
   created REAL, status_updated REAL, creator_key TEXT, roster_ids_json TEXT,
@@ -127,13 +129,26 @@ CREATE TABLE IF NOT EXISTS outcomes (
   final_place INTEGER, finish_basis TEXT, champion INTEGER,
   PRIMARY KEY (league_id, roster_id));
 CREATE TABLE IF NOT EXISTS standings_checks (
-  league_id TEXT PRIMARY KEY, status TEXT, matched INTEGER, kinds_json TEXT);
+  league_id TEXT PRIMARY KEY, status TEXT, matched INTEGER, record_matched INTEGER,
+  points_matched INTEGER, kinds_json TEXT);
 CREATE TABLE IF NOT EXISTS reconstruction_checks (
   league_id TEXT, kind TEXT, week INTEGER, roster_id INTEGER, matched INTEGER,
   n_missing INTEGER, n_extra INTEGER, n_no_add_event INTEGER,
   n_no_drop_event INTEGER, n_wrong_roster INTEGER, n_other INTEGER,
   PRIMARY KEY (league_id, kind, week, roster_id));
 """
+
+# Columns added after the first stores were built (the pilot's store dates
+# from 611dc85e). ``Store`` adds any that are missing; rows pulled before have
+# NULL there (custom_points overrides need a re-pull: --refresh-incomplete
+# does not cover completed seasons, so re-pull explicitly if they matter).
+MIGRATIONS = (
+    ("matchups", "points_original", "REAL"),
+    ("matchups", "custom", "INTEGER"),
+    ("standings_checks", "record_matched", "INTEGER"),
+    ("standings_checks", "points_matched", "INTEGER"),
+    ("pull_failures", "attempts", "INTEGER DEFAULT 1"),
+)
 
 BASE_TABLES = ("leagues", "league_members", "rosters", "roster_weeks", "matchups",
                "transactions", "traded_picks", "brackets")
@@ -159,13 +174,23 @@ class Store:
         # Autocommit; save_league_season opens its own explicit transaction.
         self.conn.isolation_level = None
         self.conn.execute("PRAGMA journal_mode=DELETE")
+        # Deleted rows are overwritten with zeros, so a replaced league-season
+        # leaves nothing behind in free pages.
+        self.conn.execute("PRAGMA secure_delete=ON")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
                           (SCHEMA_VERSION,))
         try:
             os.chmod(self.db_path, 0o600)
         except OSError:
             pass
+
+    def _migrate(self) -> None:
+        for table, col, decl in MIGRATIONS:
+            cols = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
     def close(self):
         self.conn.close()
@@ -205,6 +230,12 @@ class Store:
             (finished_at, status, _j(dict(request_counts)), sum(request_counts.values()),
              seconds, _j(summary or {}), _j(nfl_state) if nfl_state is not None else None,
              _j(leak) if leak is not None else None, run_id))
+
+    def record_leak(self, run_id, leak) -> None:
+        self.conn.execute(
+            "UPDATE runs SET leak_scan_json=?, status=CASE WHEN ?=0 AND status='ok'"
+            " THEN 'leak_scan_failed' ELSE status END WHERE run_id=?",
+            (_j(leak), int(bool(leak.get("ok"))), run_id))
 
     # -- discovery ---------------------------------------------------------
     def add_user_keys(self, keys) -> None:
@@ -294,6 +325,10 @@ class Store:
 
     # -- pull ---------------------------------------------------------------
     def leagues_to_pull(self, seasons, refresh_incomplete=False):
+        """Queued league-seasons. A league that failed is retried on later
+        runs, after everything that has not failed (so it cannot eat
+        ``--limit``), and dropped from the queue after MAX_PULL_ATTEMPTS
+        failures (a deleted league: at once). ``--retry-failed`` resets."""
         q = ",".join("?" * len(seasons))
         cond = "c.league_id IS NULL"
         if refresh_incomplete:
@@ -301,8 +336,14 @@ class Store:
         return self.conn.execute(
             f"SELECT li.league_id, li.season, li.lineage_id, li.hop FROM league_index li"
             f" LEFT JOIN pull_checkpoints c ON c.league_id=li.league_id"
+            f" LEFT JOIN pull_failures f ON f.league_id=li.league_id"
             f" WHERE li.kept=1 AND li.season IN ({q}) AND ({cond})"
-            f" ORDER BY li.hop, li.lineage_id, li.season, li.league_id", tuple(seasons)).fetchall()
+            f" AND COALESCE(f.attempts, 0) < ?"
+            f" ORDER BY COALESCE(f.attempts, 0), li.hop, li.lineage_id, li.season, li.league_id",
+            (*seasons, MAX_PULL_ATTEMPTS)).fetchall()
+
+    def reset_failures(self) -> int:
+        return self.conn.execute("DELETE FROM pull_failures").rowcount
 
     def raw_path(self, season, league_id) -> Path:
         return self.data_dir / "raw" / str(season) / f"{league_id}.json.gz"
@@ -352,7 +393,9 @@ class Store:
             c.execute("ROLLBACK")
             raise
 
-    def record_failure(self, league_id, season, run_id, kind):
-        self.conn.execute("INSERT OR REPLACE INTO pull_failures VALUES (?,?,?,?)",
-                          (league_id, season, run_id, kind))
-        self.conn.commit()
+    def record_failure(self, league_id, season, run_id, kind, permanent=False):
+        self.conn.execute(
+            "INSERT INTO pull_failures (league_id, season, run_id, kind, attempts)"
+            " VALUES (?,?,?,?,?) ON CONFLICT(league_id) DO UPDATE SET run_id=excluded.run_id,"
+            " kind=excluded.kind, attempts=MAX(excluded.attempts, attempts + 1)",
+            (league_id, season, run_id, kind, MAX_PULL_ATTEMPTS if permanent else 1))
