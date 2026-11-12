@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-253 — League rankings shows Home's playoff tile; the full projected standings live only on the Standings page
+
+**Date:** 2026-11-12 · **Who:** the operator: "we should hide the Projected standings section in the same tile that we show on the home page. So that projected standings aren't presented directly on the league rankings page but instead via the dedicated Projected standings page". Reusing the one tile component and the navigation for the legacy push are the builder's and the main session's calls. Plan: [`../docs/plans/home-engagement/scope.md`](../docs/plans/home-engagement/scope.md) (addendum 2026-11-12).
+**Context:** League rankings rendered the whole `LeagueProjectionSection` inline, a second copy of what the Standings page shows under Projected.
+**Decision:** Under `league.projections`, League rankings mounts `HomePlayoffBanner` (the same component, query key and pure logic as Home) in that slot. Its percentage and "View" open Standings on Projected; "Review outlook" opens the Trade DNA sheet with the suggestion marked, as on Home. `LeagueProjectionSection` is mounted only by `StandingsScreen`. Taps emit Home's `home_tile_tapped` with the League rankings screen name; no new event.
+**Consequences:**
+- A non-Sleeper league, or one with no forecast, shows what the tile shows on Home for that case (nothing for non-Sleeper).
+- From the legacy root-stack push, "Review outlook" pops to the tabs first (`popTo('Main', …)`): a bare `navigate('Trades')` is not handled from the root stack. That path is checked by code walk only.
+- The older `outlook.odds` strip, shown when batch projections are off, is unchanged. The website's league page still shows projected standings inline.
+- App-only; needs the next build.
+
 ## D-252 — The league selector header goes on Standings, Usage Trends, Track record and Win Now
 
 **Date:** 2026-11-12 · **Who:** the operator: "Yes add the selector to the recommended pages", answering the list in D-249. Which state each page drops on a switch is the builder's and the main session's call. Plan: [`../docs/plans/free-agents-header-rank/scope.md`](../docs/plans/free-agents-header-rank/scope.md) (addendum 2026-11-12). Extends D-249.

@@ -22,6 +22,8 @@ Mobile only. Web and the extension have no Home.
 
 No league id, team, player or device platform rides in any prop.
 
+**2026-11-12:** League Rankings mounts the same playoff tile. Its two links emit the same `home_tile_tapped` (`tile: standings` for the percentage / View, `tile: outlook` for Review outlook) with screen `LeagueRankings` (League tab) or `LeagueSummary` (legacy root push) instead of `Home`. No new name, prop or value; filter on `screen` to separate them.
+
 ## Why both are non-intent
 
 `INTENT_EVENTS` is derived by subtraction. Home is the **launch tab**, so a tile tap is often a session's first event; counted as intent it would turn every "open, tap, leave" into a user-day and step-change DAU on ship day. The destination's own events already carry intent: `league_candidate_pinned`, `find_trades_tapped`, `match_opened`. The Standings segment is a lens switch on a read-only page.
