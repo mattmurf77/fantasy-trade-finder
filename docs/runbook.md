@@ -2037,3 +2037,19 @@ Use a Render token limited to reading metrics for the Fleeced database. Set GitH
 **Re-check offline (operator):** `PYTHONHASHSEED=0 python -m backend.eval.served_deck_replay --dir data/prod-requests [--latest] [--limit N]` replays recorded owner requests both ways in one process and prints aggregates only: served-set equality, first card the same, cards shared in the first 30, page = gated, served sizes, CPU per search for both paths, guard removals (must be 0) and fallbacks. Exit 0 when every request has the same served set and page = gated. It cannot replay decline-window suppression, dispositions, likes-you or revised-offer injection, so production serves fewer cards than it shows.
 
 **Guardrail tests:** `backend/tests/test_rules_first_deck.py` (served-deck acceptance, predicate equivalence, page = gated) and `backend/tests/test_trade_fast_deck.py` (worker wiring, flag-off identity, fallback logging).
+
+## Founders' review
+
+**What it is:** the founder-only label review in Calibration ([design](plans/founder-review/design.md)). Three conditions, all server-side; any one missing ⇒ every `/api/founder/*` route 404s and the app shows no "Grading | Founders' review" control.
+
+**Enable for an account (one-time):**
+
+1. Find the account id — never put it in the repo. It is the session's `user_id` (the account's working key): your **Sleeper user id** when your account is bound to Sleeper (the usual case: `users.sleeper_user_id` for your `username`, or `accounts.sleeper_user_id`), else `accounts.account_user_id(<account_id>)` for an Apple-only account. Look it up read-only against production (`DATABASE_URL_PROD` in `secrets.local.env`; `backend/tools/prod_analytics.py` forces a read-only session), e.g. `select sleeper_user_id from users where username = '<your Sleeper username>'`. Then sign in on your device and make sure the session is **verified** (Sleeper link or Apple sign-in).
+2. In the Render dashboard (web service → Environment), set `FOUNDER_ACCOUNTS=<account id>` (comma-separate several). Save; Render restarts the service. The value is read on every request.
+3. Turn the flag on: `"founder.review": true` in `config/features.json` and deploy (or an `FTF_FLAGS` override plus `POST /api/feature-flags/reload`).
+4. Open the app, Calibration tab: the control appears (the app asks `GET /api/founder/capability` each launch; force-quit if it was open).
+
+**Symptoms:** no control → check all three (flag, env var spelled exactly, session verified; a username-only Sleeper sign-in is never a founder). Empty page "No saved season forecast…" → the league has no current saved forecast (run it from Standings › Projected); only Sleeper leagues have one.
+
+**Undo an override:** move the player back to the band showing "engine: …" and Save (clears the row), or Reset to engine + Save for a position. Overrides reach users only once bilateral revision 5 serves (`owner_bilateral_revision_5_enabled` = 1).
+
