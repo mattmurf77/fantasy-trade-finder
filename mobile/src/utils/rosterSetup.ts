@@ -341,6 +341,23 @@ export function newAssetIds(
   return current.filter((id) => !s.has(id));
 }
 
+/** The roster-changed card's title: what the new asset ids hold, players
+ *  and picks named apart ("12 new players and 3 new picks on your roster").
+ *  `pickIds` are the owned picks' ids on the same roster read; any new id
+ *  that is not one of them is a player. */
+export function newOnRosterTitle(
+  newIds: readonly string[],
+  pickIds: readonly string[],
+): string {
+  const picks = new Set(pickIds);
+  const pickCount = newIds.filter((id) => picks.has(id)).length;
+  const playerCount = newIds.length - pickCount;
+  const players = `${playerCount} new ${playerCount === 1 ? 'player' : 'players'}`;
+  const picksPart = `${pickCount} new ${pickCount === 1 ? 'pick' : 'picks'}`;
+  const parts = pickCount === 0 ? players : playerCount === 0 ? picksPart : `${players} and ${picksPart}`;
+  return `${parts} on your roster`;
+}
+
 // ── Entry decisions ─────────────────────────────────────────────────────
 
 export interface PassTriggerInput {

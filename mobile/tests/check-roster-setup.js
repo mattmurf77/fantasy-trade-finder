@@ -270,6 +270,26 @@ assert(
   u.newAssetIds(['a', 'b', 'c'], ['a', 'x']).join(',') === 'b,c' && u.newAssetIds(['a'], ['a', 'b']).length === 0,
   '9i. new assets = current minus seen; removals never prompt (AC-10)',
 );
+// The roster-changed title names players and picks apart (operator 2026-11-12).
+const titleIds = (n, prefix) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+for (const [players, picks, want] of [
+  [1, 0, '1 new player on your roster'],
+  [15, 0, '15 new players on your roster'],
+  [0, 1, '1 new pick on your roster'],
+  [0, 3, '3 new picks on your roster'],
+  [1, 1, '1 new player and 1 new pick on your roster'],
+  [12, 3, '12 new players and 3 new picks on your roster'],
+]) {
+  const got = u.newOnRosterTitle([...titleIds(players, 'pl'), ...titleIds(picks, 'pk')], [...titleIds(picks, 'pk'), 'pk_old']);
+  assert(got === want, `9i2. roster-changed title: ${players} player(s), ${picks} pick(s) → "${want}"`, got);
+}
+assert(
+  CARD.includes(": newOnRosterTitle(newIds, roster.picks.map((p) => p.pick_id));")
+    && !/new on your roster/.test(CARD)
+    && CARD.includes('accessibilityLabel={title}') && CARD.includes('{title}</ChalkText>')
+    && CARD.includes('`${title}. Set them so your trades use them.`'),
+  '9i3. the card title, collapsed row, its label and the body all use newOnRosterTitle over the card\'s own picks',
+);
 const base = {
   flagOn: true, leagueId: 'L1', isDemo: false, hydrated: true, hasRecord: false,
   assetCount: 5, alreadyPushedThisSession: false,

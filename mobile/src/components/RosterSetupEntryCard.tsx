@@ -13,6 +13,7 @@ import {
   ladderOnShow,
   ladderOnSnooze,
   newAssetIds,
+  newOnRosterTitle,
   type PromptKind,
 } from '../utils/rosterSetup';
 
@@ -27,7 +28,8 @@ import {
 // TradesScreen's committed-pass points.
 //
 //    - `skipped` record → "Set up your roster" (opens the full step);
-//    - `done` record whose roster gained assets → "N new on your roster"
+//    - `done` record whose roster gained assets → "N new players [and M
+//      new picks] on your roster" (`newOnRosterTitle`)
 //      (opens Step 1 filtered to them). Losing assets never prompts.
 //    Snooze grammar = QuickSetPromptCard's: Not now → one re-offer in a later
 //    session → retired. A retired entry card COLLAPSES to a one-line row
@@ -116,7 +118,7 @@ export default function RosterSetupEntryCard({
 
   const title = kind === 'entry'
     ? 'Set up your roster'
-    : `${newIds.length} new on your roster`;
+    : newOnRosterTitle(newIds, roster.picks.map((p) => p.pick_id));
 
   if (view === 'collapsed') {
     return (

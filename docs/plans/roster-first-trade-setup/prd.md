@@ -82,7 +82,7 @@ A manual entry opens on Step 1 with the saved states. The rank step is offered b
 
 The store records the asset IDs the user saw (players and pick IDs). On each TradesHome focus, the client compares the current roster with that snapshot:
 
-- **New assets only** (a trade received, a draft pick made, a waiver add): show a TradesHome card, "3 new on your roster: set them", which opens Step 1 **filtered to the new assets**. Their rank step is offered only for positions that gained a player.
+- **New assets only** (a trade received, a draft pick made, a waiver add): show a TradesHome card, "3 new players on your roster: set them" (picks are named apart: "1 new pick", "2 new players and 1 new pick"; wording revised 2026-11-12), which opens Step 1 **filtered to the new assets**. Their rank step is offered only for positions that gained a player.
 - **Assets only removed**: no prompt. The `asset_preferences` rows for departed assets go inert, because the engine only meets IDs on someone's roster. Leave them; they are harmless and come back to life if the asset returns.
 - **A rookie draft completes**: the `draft_context` status flips to `drafted` (`server.py:21817-21826` already reads it). Draft picks become players, so this counts as "new assets".
 
@@ -219,7 +219,7 @@ Flag **on**:
 - AC-7. With a `trade_block` player and the flag on, the owner and bilateral constructors raise that player's give-side interest and count him as `declared` intent. With the flag off, card output is byte-identical (pytest, both arms).
 - AC-8. Exiting through Done forces exactly one deck regeneration. Exiting with no changes forces none.
 - AC-9. Skip at any point returns to the deck at the next card with no reload, stores `skipped`, and shows the entry card on TradesHome.
-- AC-10. A roster that gains assets after completion shows the "N new on your roster" card. Opening it lists only the new assets. A roster that only lost assets shows nothing.
+- AC-10. A roster that gains assets after completion shows the "N new players [and M new picks] on your roster" card. Opening it lists only the new assets. A roster that only lost assets shows nothing.
 - AC-11. The analytics events in analytics.md fire with exactly the specced props. They are registered in `analytics_taxonomy.py` and classified in `analytics_queries.NON_INTENT_EVENTS` **in the same commit as the emitters**.
 - AC-12. There is no `FeedbackFAB` mount in the new screen (tab stack), and the pinned footer reports its height.
 
