@@ -4687,7 +4687,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 29
+DECK_PIPELINE_VERSION = 30
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4851,6 +4851,7 @@ DECK_PIPELINE_PINS = {
     27: "68bb3f499c837968",  # Keep is a hard rule (model_config owner_untouchable_hard, default 1): _owner_selected_assignment keeps the knob in the request hash while on and drops it at 0, so a knob-0 unit hashes as before; the rule itself lives in trade_gen_owner (engine code hash); knob 0: hash, terms and order unchanged.
     28: "f9dc5f829bcd9a92",  # Founders' review (docs/plans/founder-review/): _season_evidence attaches the founder's label overrides that reach this league (season_value.with_label_overrides: players projected here, scope `all` or the league's QB format) and recomputes the evidence digest over them, so the request hash moves with them; league_profile applies them to the future axis only; no override that reaches the league: the same evidence object, digest, hash, terms and order.
     29: "02e724a78ba569ee",  # Founders' review, use case 2: _run_trade_job takes a per-job rule_waterfall_probe (default None), called once after the rules-first rules are built and before the fit context and generation; only the founder's private diagnostic job passes one, and it always stops that job there; None (every real job): the same calls, terms, order and payload.
+    30: "8b2ee05d3e179b04",  # Sell bonus (model_config season_sell_bonus_tanking 0.05 / season_sell_bonus_rebuilding 0.03; revision 5 only): _owner_selected_assignment pops both with the other season knobs when revision 5 is not selected, and keeps each in the request hash only while above 0, so a bonus-0 unit hashes as before; the rule lives in trade_gen_bilateral_season / trade_first_page (engine code hash); bonus 0 or revision 5 not selected: hash, terms and order unchanged. Shipped in the same bump as the viewer label fit (season_viewer_label_fit, default 1): a Rebuilding / Tanking viewer's re-scored team plan reads the season label table, never milder than the age rule.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -22838,8 +22839,18 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False, seas
         # Revision 5's selector and season knobs never reshuffle revision 2-4 units.
         for key in ("owner_bilateral_revision_5_enabled", "season_conflict_demotion",
                     "season_partner_matching", "season_shed_weight_tanking",
-                    "season_shed_weight_rebuilding"):
+                    "season_shed_weight_rebuilding", "season_viewer_label_fit",
+                    "season_sell_bonus_tanking", "season_sell_bonus_rebuilding"):
             canonical["config"].pop(key, None)
+    else:
+        if canonical["config"].get("season_viewer_label_fit") != 1.0:
+            # The viewer's label fit off is the rule every revision 5 unit before it was
+            # built under: it keeps their hashes. On (the default) it is a new unit.
+            canonical["config"].pop("season_viewer_label_fit", None)
+        for key in ("season_sell_bonus_tanking", "season_sell_bonus_rebuilding"):
+            # A sell bonus <= 0 is off: it keeps the hashes of units built before it.
+            if not canonical["config"].get(key, 0) > 0:
+                canonical["config"].pop(key, None)
     if season_evidence is not None:
         canonical["season_evidence"] = (
             {"digest": season_evidence.get("digest")} if season_evidence.get("digest")

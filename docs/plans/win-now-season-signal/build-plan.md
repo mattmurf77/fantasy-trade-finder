@@ -69,6 +69,11 @@ Dependency order. "Collides with rules-first" names the files both builds edit.
   season-scored in the shed direction as a ranking term only (lld §3.1, two knobs
   `season_shed_weight_tanking` 1.0 / `_rebuilding` 0.5, popped from every other search's config),
   with the points mirror conflict (`CONFLICT_ADD`) and `viewer.season_direction`; I4 restated.
+- *Amended 2026-11-12, operator direction:* the viewer's label fit (`season_viewer_label_fit`,
+  default 1): a Rebuilding / Tanking viewer's re-scored team plan reads the mirror label table
+  with stage 2 off; order only (`_plan_asset` untouched). Stage 2 is partner matching only from
+  now on. Tests and sabotages: `test_trade_gen_bilateral_season.py` (the `test_label_fit_*`
+  block), the I18 admissibility audit and page-equals-gated cases. See the README's amendment.
 
 ### WI-3 · Backend · Card copy
 

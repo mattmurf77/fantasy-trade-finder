@@ -26,6 +26,13 @@
 - **Linking** runs the production flows on all three platforms. Nothing is sent to a platform and no league-mate is notified from a test profile.
 - **State:** flag `dev.test_profile` on; env `TEST_PROFILE_ACCOUNTS` holds the operator's account only. Two independent reviews; all findings fixed. Needs the next app build. Not verified on a device or against live platforms: the checklist is design.md §9.3.
 
+## 2026-11-12 — Win-now engine: Tanking and Rebuilding teams are steered to move older producers (D-243, D-244)
+
+- **Label fit:** for a Tanking or Rebuilding manager's own side the engine reads the player labels, and for win-now pieces and older cornerstones uses whichever of the label and the age rule is the stronger sell.
+- **Sell bonus:** cards that send win-now pieces or older cornerstones get a small boost, and cards that take them on a small reduction (0.05 Tanking, 0.03 Rebuilding). Same cards, new order.
+- **Measured on the real ranker:** Tanking's first 30 go from 15 to 19 cards sending a win-now piece on the fixture league, keeping 17 of 30; Rebuilding 13 to 19, keeping 22.
+- **State:** both are settings and only matter once the win-now engine (revision 5) serves, which it does not yet.
+
 ## 2026-11-12 — Two league-mates can link the same ESPN or MFL league (D-246, G-077)
 
 - **The bug:** a second manager linking the same league overwrote the first one's team: the league vanished for them, or they saw the other roster, or were told they had used the wrong account; the second linker could not send at all. Same defect on MFL and Fleaflicker.
