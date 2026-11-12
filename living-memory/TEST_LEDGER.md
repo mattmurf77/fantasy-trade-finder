@@ -1,3 +1,11 @@
+## 2026-11-12 — Projected standings: free-agent summary line removed, branch `fix/projection-drop-fa-fill-line`
+
+- **App and web (Opus subagent, no edits in flight):** `tsc --noEmit` clean; 182 of 182 `check-*.js`; testid-lint OK. Backend: the digest test, every backend test that reads `mobile/src` or `web/js`, and the league-projection tests: 636 passed. Full backend suite: CI on the PR.
+- **What is pinned:** the helper and its three wordings are gone from the app section, the helper file and the web script; with free-agent counts present no line renders; the status line, the incomplete sentence and the per-row free-agent marker still render.
+- **Sabotages, red then restored (9, subagent; checksums unchanged):** 4 on the app, 5 on the web.
+- **Not verified:** anything on a device.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Release: Free Agents, Usage Trends period, founder labels, league selector pages on `main` at `8d1bcefa`; TestFlight 1.22.0 (188)
 
 - **CI on the merged heads:** #671 `8ca71525`, #672 `4f972e2e`, #673 `fbc8cdc2` and #674 `968ddb02` each green on all four checks before its merge. The four were stacked; after each merge `origin/main`'s tree was identical to the merged head's.

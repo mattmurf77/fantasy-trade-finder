@@ -6,7 +6,7 @@ import {ink, chalk, ice, space, radii} from '../theme/chalkline';
 import {useSession} from '../state/useSession';
 import {useFlag} from '../state/useFeatureFlags';
 import {getLeagueProjectionBatch, type ProjectionResult, type ProjectionTeam, type ProjectionWeek} from '../api/leagueProjections';
-import {freeAgentFillSentence, incompleteSentence, lineupRowText} from '../utils/projectionCoverage';
+import {incompleteSentence, lineupRowText} from '../utils/projectionCoverage';
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const number = (n: number | null) => n == null ? 'Unavailable' : n.toFixed(1);
@@ -54,7 +54,6 @@ export default function LeagueProjectionSection() {
   const lastSaved = !!result && (query.isError || state !== 'current' || data?.model_current === false);
   const incomplete = result?.coverage?.estimate_status === 'incomplete';
   const missingSlots = result?.coverage?.missing_lineup_slots;
-  const freeAgentLine = freeAgentFillSentence(result?.coverage);
   return <View style={styles.section} testID="league-projections.section">
     <Text variant="heading">Projected standings</Text>
     {status ? <Text variant="bodySm">{status}</Text> : null}
@@ -63,7 +62,6 @@ export default function LeagueProjectionSection() {
         incomplete ? 'Incomplete' : null,
         result.coverage?.estimated ? 'Partial Sleeper data' : null, result.provisional ? 'Provisional' : null].filter(Boolean).join(' · ')}</Text>
       {incomplete ? <Text variant="bodySm" style={styles.text} testID="league-projections.incomplete">{incompleteSentence(missingSlots)}</Text> : null}
-      {freeAgentLine ? <Text variant="bodySm" style={styles.text} testID="league-projections.free-agents">{freeAgentLine}</Text> : null}
       <ProjectionTables key={`${userId}:${leagueId}:${data.run.run_id}`} result={result} />
     </> : !query.isLoading ? <>
       <Text variant="bodySm">Current standings are still available.</Text>
