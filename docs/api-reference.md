@@ -950,12 +950,16 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                            "positions": [ { "pos": "RB", "before": 5, "after": 5 },
                                           { "pos": "WR", "before": 6, "after": 8 } ] } ] },
                                                // (2026-11-11, additive; v stays "fit-2") the
-                                               // app's before/after table: every position the
-                                               // rank facts cover, held ranks (before == after,
-                                               // what holds.* states) plus `ranks`, in QB, RB,
-                                               // WR, TE order. A rank move under the noise bar is
-                                               // in neither. Always present on a team; [] when
-                                               // no rank can be stated. Older apps ignore it.
+                                               // app's before/after table: every ranked position
+                                               // the trade touches for this team, with its true
+                                               // rank before and after (before == after when it
+                                               // holds), in QB, RB, WR, TE order. Includes a rank
+                                               // move under the noise bar, which stays out of
+                                               // `ranks` and leaves the lead at flat.* (the bar
+                                               // governs only `ranks` and the lead). Never makes
+                                               // the block shown on its own. Always present on a
+                                               // team; [] when no rank can be stated or only
+                                               // picks move. Older apps ignore it.
                                                // Revision 5 (owner-v2-bilateral-5) adds You-side
                                                // lead codes conflict.you, conflict_plan.you,
                                                // season_win_now.you, season_starter.you,

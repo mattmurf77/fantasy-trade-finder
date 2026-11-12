@@ -28,8 +28,10 @@ docs/plans/offer-learnings/scope-fit-block-v3.md. Replaces WS4's `fit_lines`
 - prepared inventories accept the card and carry the block in its public
   record; the worker attaches the context once per job;
 - registration of the flag in all mirrors;
-- `positions` (2026-11-11, the app's before/after table): held plus moves in
-  QB, RB, WR, TE order, noise-level moves out, empty with no rank rows, and
+- `positions` (2026-11-11, the app's before/after table): every touched
+  ranked position with its true before and after in QB, RB, WR, TE order,
+  noise-level moves included (they stay out of `ranks` and keep the `flat.*`
+  lead, and do not make the block shown), empty with no rank rows, and
   `v`/`lead`/`ranks`/`tag` byte-identical to the pre-`positions` payload.
 """
 import ast
@@ -222,7 +224,7 @@ def test_picks_have_no_rank_and_a_pick_only_side_shows_none():
     assert side(out, "them")["ranks"] == [{"pos": "QB", "before": 3, "after": 1}]
     pick_for_pick = tn._fit_rank_rows(context(), "opp", ["vpk"], ["opk"],
                                       {"vpk": {"pos": "PICK"}, "opk": {"pos": "PICK"}})
-    untouched = {"moves": [], "held": [], "touched": False}
+    untouched = {"moves": [], "held": [], "all": [], "touched": False}
     assert pick_for_pick == {"them": untouched, "you": untouched}
 
 
@@ -530,10 +532,11 @@ def test_template_table_tags_and_version_are_pinned():
 
 # ── positions: the app's before/after table (2026-11-11) ───────────────────
 
-def test_positions_are_held_and_moves_in_position_order_on_random_leagues():
+def test_positions_are_every_touched_position_in_position_order_on_random_leagues():
     # Independent of _fit_rank_rows' lists: from compute_power_rankings
-    # before and after, every touched position whose rank holds (before ==
-    # after) or moves past the noise bar, in QB, RB, WR, TE order.
+    # before and after, every touched position with its true before and
+    # after (held, moved past the noise bar, or moved under it), in QB, RB,
+    # WR, TE order.
     rng = random.Random(23)
     held_seen = moved_seen = noise_seen = 0
     for league in range(40):
@@ -579,26 +582,59 @@ def test_positions_are_held_and_moves_in_position_order_on_random_leagues():
                         expected.append({"pos": pos, "before": b, "after": a})
                         moved_seen += 1
                     else:
-                        noise_seen += 1         # out of the table, as out of both lists
+                        expected.append({"pos": pos, "before": b, "after": a})
+                        noise_seen += 1         # in the table, though in neither list
                 assert tn._fit_positions(rows[label]) == expected, (league, label)
-    assert held_seen > 50 and moved_seen > 50
+    assert held_seen > 50 and moved_seen > 50 and noise_seen > 0
 
 
-@pytest.mark.parametrize("sent,shown", [(147.5, True), (147.4, False)])
-def test_a_noise_level_move_is_not_in_positions(sent, shown):
-    # The noise-bar league above: under the bar WR's rank still differs, so
-    # it is neither a move nor held, and the table leaves it out.
+def noise_league(sent):
+    """The noise-bar league above: WR x 4000, viewer 3000, opp 2900, y 1000
+    (median 2950, bar 147.5); the viewer sends a `sent` WR for a pick."""
     players = {**{f"{u}w": Player(f"{u}w", f"{u} W", "WR", "TST", 26) for u in "mxyo"},
                "mw2": Player("mw2", "Sent W", "WR", "TST", 26),
                "pk": Player("pk", "2028 2nd", "PICK", "PICK", None)}
     values = {"mw": 3000 - sent, "mw2": sent, "xw": 4000, "ow": 2900, "yw": 1000, "pk": 500}
     rosters = {"me": ["mw", "mw2"], "x": ["xw"], "opp": ["ow", "pk"], "y": ["yw"]}
+    return players, values, rosters
+
+
+def noise_block(sent, viewer):
+    players, values, rosters = noise_league(sent)
+    p = {"generator": "owner_v2_bilateral", "generator_version": "owner-v2-bilateral-2",
+         "eligible": True, "assets": [{"id": "mw2", "market": sent}, {"id": "pk", "market": 500}],
+         "viewer": viewer, "counterparty": team()}
+    return tn.fit_block(p, card(["mw2"], ["pk"]), players, context(rosters, values, players))
+
+
+@pytest.mark.parametrize("sent,moved", [(147.5, True), (147.4, False)])
+def test_a_noise_level_move_is_in_positions_but_not_in_ranks(sent, moved):
+    # Under the bar WR's rank still differs (2nd -> 3rd for the viewer, 3rd ->
+    # 2nd for them): it is neither a move nor held, so `ranks` stays empty and
+    # the lead stays "Little change in league rank", but the table shows the
+    # true before and after (operator, 2026-11-11).
+    players, values, rosters = noise_league(sent)
     rows = tn._fit_rank_rows(context(rosters, values, players), "opp", ["mw2"], ["pk"],
                              {"mw2": {"pos": "WR"}, "pk": {"pos": "PICK"}})
-    assert tn._fit_positions(rows["you"]) == (
-        [{"pos": "WR", "before": 2, "after": 3}] if shown else [])
-    assert tn._fit_positions(rows["them"]) == (
-        [{"pos": "WR", "before": 3, "after": 2}] if shown else [])
+    assert tn._fit_positions(rows["you"]) == [{"pos": "WR", "before": 2, "after": 3}]
+    assert tn._fit_positions(rows["them"]) == [{"pos": "WR", "before": 3, "after": 2}]
+    # Shown through the viewer's plan lead; the other team has only the WR.
+    out = noise_block(sent, team("rebuilder", benefits=["outlook"]))
+    them = side(out, "them")
+    assert them["positions"] == [{"pos": "WR", "before": 3, "after": 2}]
+    if moved:
+        assert them["ranks"] == [{"pos": "WR", "before": 3, "after": 2}]
+        assert them["lead"] == {"code": "shifts.them", "text": "Up at WR"}
+    else:
+        assert them["ranks"] == []
+        assert them["lead"] == {"code": "flat.them", "text": "Little change in league rank"}
+
+
+def test_noise_level_positions_do_not_make_the_block_shown():
+    # No plan or need lead on either side and only a noise-level WR move: the
+    # block is still omitted, though `positions` would have a row for each team.
+    assert noise_block(147.4, team()) is None
+    assert noise_block(147.5, team()) is not None         # a real move still shows it
 
 
 # The block for block(["vte"], ["orb"]) as origin/main served it before
