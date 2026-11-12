@@ -33,7 +33,7 @@ Design and findings: [design.md](design.md). Parent scope (product behaviour, st
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | updated | § Free-agent moves: heading flags, "MFL leagues (D1 Update 1)" paragraph |
-| `living-memory/LLD.md` | n/a here | the builder was told not to touch `living-memory/`; the convention (two locks per platform: flag + verified-shape constant; credential deletion withdraws grants) is owed by the merging session |
+| `living-memory/LLD.md` | updated | "A platform write goes live behind two locks" (2026-11-12, D-248), written by the merging session |
 | `docs/architecture.md` | n/a because | no module added or re-wired: `mfl_write` gains functions, `server.py`'s D1 block gains an MFL branch |
 | `living-memory/HLD.md` | waived | not an architecture shift (no new module/client/flow); and not writable by this builder |
 | `docs/cross-client-invariants.md` | n/a because | no shared constant changed (the timeout, codes and `league_platform` set are unchanged) |
@@ -42,7 +42,7 @@ Design and findings: [design.md](design.md). Parent scope (product behaviour, st
 | `docs/config-reference.md` | updated | `mfl.send_add_drop` row; the Sleeper row's Update 1 sentence |
 | `docs/data-dictionary.md` | updated | `platform_write_consents`: credential deletion withdraws |
 | `docs/runbook.md` | updated | § Free-agent moves kill switch: MFL bullet |
-| ADR or `DECISIONS.md` entry | owed | design.md §9 decisions 1–6 await the operator; the merging session records the answers |
+| ADR or `DECISIONS.md` entry | updated | D-248 (two locks, MFL merged dark); design.md §9 decisions 1–6 still await the operator |
 
 ## 5. Ship gate declaration
 

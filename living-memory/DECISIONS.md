@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-248 — In-app add/drop goes platform by platform behind two locks: a flag and a verified write shape
+
+**Date:** 2026-11-12 · **Who:** the operator: "create add /drop and waiver claim transactions directly from the app rather than send the user to sleeper/espn or mfl". Merging the MFL adapter dark, and the two-lock rule, are the builder's and the main session's calls. Plan: [`../docs/plans/in-app-claims/`](../docs/plans/in-app-claims/).
+**Context:** The D1 flow (`sleeper.send_add_drop`) was built and left dark because Sleeper's write shape was never captured. MFL documents its import API; ESPN has no known shape. A wrong write shape changes a real roster.
+**Decision:** One move contract with one adapter per platform. A platform's path is live only when its flag is on **and** its verified-shape constant is true (`mfl_write.FA_MOVE_SHAPES_VERIFIED`, set only by the commit that pins one supervised real transaction). The MFL adapter (`fcfsWaiver` add and add+drop) is merged with both locks off: the capability block and the 404 are byte-identical to before. MFL blind-bid claims stay off even after the first lock opens. Deleting a platform credential withdraws that platform's write consents.
+**Consequences:**
+- Nothing changes for any user and nothing can be submitted from the app on any platform.
+- Open with the operator (design.md §9): run the Sleeper capture session; make one hand-made MFL transaction to verify the shape and get the final MFL consent text; schedule an ESPN capture before building for ESPN.
+- The server does not refuse a drop of a Keep player; the sheet never offers one.
+- Rejected: shipping the MFL path on the documented shape alone.
+
 ## D-247 — The onboarding test profile is a second identity derived from the operator's own id, living in its own namespace
 
 **Date:** 2026-11-12 · **Who:** the operator: "take on the identity of a new app user so I can test onboarding… ensure that my actual user data is retained and ensure that I can decide when to flip back"; 2026-11-11 "League linking is the one thing I really want to be able to test"; 2026-11-12 "I want to cover sleeper testing too". The namespace design, the fences and the flag being on are the builder's and the main session's calls. Plan: [`../docs/plans/onboarding-test-profile/`](../docs/plans/onboarding-test-profile/). (D-243 and D-244 are on the seller-labels branch.)
