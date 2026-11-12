@@ -88,7 +88,7 @@ from .data_loader import (load_consensus_maps, seed_elo_for_players,
                           normalise_name)
 from .database import (
     init_db,
-    upsert_user, upsert_league, AccountGone,
+    upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
     load_recent_league_likes, find_live_trade_like, find_prior_trade_signal,
@@ -30164,6 +30164,9 @@ def session_init():
                     platform         = authoritative["platform"],
                     require_user     = True,
                     only_if_exists   = _league_existed or _platform_linked,
+                    # League median, from the league payload S0 already
+                    # read (no extra call); None for a platform league.
+                    median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
                 )
                 if authoritative["platform"] == "sleeper" and is_enabled("league.projections"):
                     try:
@@ -44474,7 +44477,7 @@ def cron_league_projections():
     _require_cron_auth()
     from .league_projections.batch import dispatch
     data = request.get_json(silent=True) if request.content_length else {}
-    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete"}:
+    if not isinstance(data, dict) or set(data) - {"initial", "limit", "user_id", "league_id", "retry_incomplete", "retry_unsupported"}:
         return jsonify(error="invalid_projection_dispatch"), 400
     try:
         return jsonify(dispatch(_sleeper_get, foreground_busy=_projection_foreground_busy, **data))

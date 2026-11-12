@@ -62,6 +62,29 @@ def semantic_facts(value):
     return value
 
 
+def league_format(median_game):
+    """Explicit week shape, on every snapshot and result: clients never infer it."""
+    return {"median_game": bool(median_game), "games_per_week": 2 if median_game else 1}
+
+
+def median_outcomes(scores):
+    """Each team's result against the week's league median (Sleeper
+    `league_average_match`): 0 win, 1 loss, 2 tie, in the order given.
+
+    The median is taken over every team's score that week. A score above it
+    wins, below it loses; with an even count that is the mean of the two middle
+    scores, so the top half wins. A score exactly equal to it is a tie (not
+    observed in Sleeper data; see docs/plans/league-projections/median-leagues-scope.md).
+    Exact for Decimal and float: no midpoint is computed.
+    """
+    ordered = sorted(scores)
+    n = len(ordered)
+    if not n:
+        return []
+    low, high = ordered[(n - 1) // 2], ordered[n // 2]
+    return [0 if s > low and s >= high else 1 if s < high and s <= low else 2 for s in scores]
+
+
 def score(stats, coefficients, supported_keys, *, inapplicable_keys=()):
     """Unknown/missing events are not zeros. A provider must attest applicability.
 
