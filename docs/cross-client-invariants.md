@@ -643,6 +643,20 @@ The trade card's fit block (`fit_block`, template `fit-2`) shows numbers and wor
 
 ---
 
+## Win-now season signal (`season_block`, flag `trade.season_signal`)
+
+The card's `season_block` (version `"season-1"`) and revision 5's You-side fit-block leads are composed on the server from the frozen proof (`trade_narrative.season_block`, `SEASON_TEMPLATES`, `SEASON_FIT_TEMPLATES`). Clients print `line`, `labels[].text` and `conflict.text` verbatim and never re-derive a label, a number or a sentence:
+
+- **Version.** Clients accept exactly `v === "season-1"` and drop the whole block otherwise (and on any malformed field).
+- **Label strings.** `label` → `text`: `win_now` "Win-now piece", `cornerstone` "Cornerstone", `rebuild` "Rebuild piece" (`trade_narrative.SEASON_LABELS`). `depth` and no label print nothing; picks and unprojected players are never labelled. The printed label is the label revision 5's plan fit read (`season-labels-1`).
+- **Conflict codes.** `conflict.board.above`, `conflict.board.below`, `conflict.target`, `conflict.position`, `conflict.trade_block`, `conflict.trade_away` (`SEASON_TEMPLATES`); fit-block lead codes `conflict.you`, `conflict_plan.you`, `season_win_now.you`, `season_starter.you`, `season_shed.you`. Clients switch on none of them.
+- **Plan names in copy.** `championship` "All-in", `contender` "Contending", `rebuilder` "Rebuilding", `jets` "Tanking" (the outlook tag vocabulary above); "Rebuild-leaning" for a roster read in `season_shed.you`.
+- **Hidden on an edited card**, as the fit block is.
+
+**Locations to update together:** `backend/trade_narrative.py` (`SEASON_*`), `backend/season_value.py` (labels, thresholds), `mobile/src/api/trades.ts` (normalizer), `mobile/src/components/TradeCard.tsx`, `mobile/tests/check-season-signal.js`, `docs/api-reference.md` (`season_block`).
+
+---
+
 ## Owner trial metadata and ordering
 
 Owner trial metadata is additive to the existing card/idea shapes:

@@ -53,6 +53,14 @@ def fixture_rows(league_key="fixture-league-12"):
     from .. import trade_gen_bilateral_season as r5
     from .season_replay import fixture_evidence, fixture_world
     search = r5._Search(**fixture_world("championship"), season_evidence=fixture_evidence())
+    return rows_from_search(search, league_key)
+
+
+def rows_from_search(search, league_key):
+    """One league's rows from a revision 5 search built with usable evidence (the viewer is
+    its `user_id`). Shared by `--fixture` and the admin route of WI-5. Public NFL ids and
+    names only: no user id, team name or manager name."""
+    from .. import trade_gen_bilateral_season as r5
     profile, ppg = search._profile, search._season_ppg
     viewer = search.teams[search.user_id]
     players = []

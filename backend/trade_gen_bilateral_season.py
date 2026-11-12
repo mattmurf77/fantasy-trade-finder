@@ -411,6 +411,42 @@ class SeasonLayer:
             if adjustment:
                 data[name] = _shift(data[name], moved, adjustment, rescored)
 
+    # --- what the page search's bounds read (WI-8; trade_first_page) ------------
+
+    def _page_bound_terms(self, team):
+        """The season inputs of one team that `trade_first_page`'s admissible bounds read
+        (hld §11 point 4), or None when the team's `_lineup` is revision 2's and its
+        support never moves up after eligibility (the demotion only lowers it).
+
+        - "lineup": {id: Asset} the values this team's `_lineup` reads (projected, active
+          players at RATE x ppg), with "fill" {position: RATE x free-agent level}, what an
+          empty slot adds; None when `_lineup` is revision 2's for this team.
+        - "shed": for a shed-scored team, {"rate": weight x RATE, "points": its season
+          lineup now (points a week), "starters": {id: ppg} of that lineup, "levels":
+          {position: free-agent level}, "team_plan": (outgoing, incoming) -> the re-scored
+          team plan `_season_signal` gives this side}; else None.
+        - "nonnegative": every projected ppg and free-agent level is >= 0 (the bounds'
+          premise; the page search declines the request otherwise).
+        Reads only; changes no card, term or order."""
+        scored, shed = self._season_scored(team), self._season_shed(team)
+        if not (scored or shed):
+            return None
+        fill = self.season_evidence.get("free_agent_level") or {}
+        levels = {pos: float(fill.get(pos) or 0.0) for pos in owner._POSITIONS}
+        terms = {"lineup": None, "fill": None, "shed": None,
+                 "nonnegative": all(v >= 0 for v in self._season_ppg.values())
+                 and all(v >= 0 for v in levels.values())}
+        if scored:
+            terms["lineup"] = {pid: asset for pid, asset in self._season_assets.items()
+                               if pid not in team["inactive"]}
+            terms["fill"] = {pos: RATE * level for pos, level in levels.items()}
+        if shed:
+            points, starters, _ = self._season_total(team["roster"], team)
+            terms["shed"] = {"rate": self.season_shed_weight[team["outlook"]] * RATE, "points": points,
+                             "starters": {pid: self._season_ppg[pid] for pid in starters}, "levels": levels,
+                             "team_plan": lambda outgoing, incoming: self._shed_parts(team, outgoing, incoming)[2]}
+        return terms
+
     def _decision(self, card, data, reason, eligible=False):
         # Before bilateral-1 builds the weaker/total support block from the sides,
         # and after utility and eligibility: the push-down cannot reject a card.
@@ -451,10 +487,21 @@ def _rank(cards):
     return previous._rank(cards, version=VERSION)
 
 
+def term_precedence(cards):
+    """Revision 2's term precedence under this version (`_rank` applies it; the page
+    search keys its family completion on a generator having one)."""
+    return previous.term_precedence(cards, version=VERSION)
+
+
 def generate_bilateral_trades(**kwargs):
     started = perf_counter()
     search = _GenerationSearch(**kwargs)
     cards, raw = incumbent._generate_with_search(search, ranker=_rank, version=VERSION)
+    return cards, _generation_report(search, cards, raw, started)
+
+
+def _generation_report(search, cards, raw, started):
+    """The generation report over `raw` (shared with rules-first's gated full solve)."""
     report, counts, season = raw.as_dict(), Counter(), Counter()
     for card in cards:
         data = card.owner_evaluation.as_dict()
@@ -482,4 +529,4 @@ def generate_bilateral_trades(**kwargs):
             "shed_weights": dict(search.season_shed_weight),
             "conflict_demotion": search.season_conflict_demotion, **dict(season)},
         elapsed_seconds=round(perf_counter() - started, 6))
-    return cards, owner.OwnerGenerationReport(owner._dump(report))
+    return owner.OwnerGenerationReport(owner._dump(report))

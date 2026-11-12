@@ -664,7 +664,15 @@ depends on how the owner deck was built (ADR-030, `deck.rules_first`):
 recorded without applying the legacy divergence/relaxation discount.
 
 The once-per-run selected `bakeoff_runs.config_json` contains the full captured
-input ledger; organic runs store it under `config_json.owner_request`. Each
+input ledger; organic runs store it under `config_json.owner_request`. With flag
+`trade.season_signal` on, an organic trade job's owner request also carries
+`season_evidence` (schema `season-evidence-1`: state, reason, run id, model version,
+weeks, slots, `players` {id: {ppg, games}}, `unprojected`, `free_agent_level`, digest,
+`as_of`) beside `input_evidence`, whatever revision is selected; only its digest (or,
+when unavailable, its state and reason) joins the request hash. The per-impression
+`owner_request` keeps the card's assets' rows only. Under revision 5 the frozen proof
+(`valuation_json`) adds a private `season_signal` object (lld §4). The slim form keeps
+`season_evidence`. Each
 joins the package-scoped impression record by request hash and capture time,
 including board/pool values, lineup context, rosters and preferences. Capture
 timestamps are not market source timestamps:

@@ -956,6 +956,35 @@ Shape of each card in `/api/trades`, `/api/trades/status` snapshots, and `/api/t
                                                // WR, TE order. A rank move under the noise bar is
                                                // in neither. Always present on a team; [] when
                                                // no rank can be stated. Older apps ignore it.
+                                               // Revision 5 (owner-v2-bilateral-5) adds You-side
+                                               // lead codes conflict.you, conflict_plan.you,
+                                               // season_win_now.you, season_starter.you,
+                                               // season_shed.you (shape unchanged; apps print text)
+  "season_block":    {                         // OPTIONAL — win-now season signal (flag
+                                               // trade.season_signal, and trade.fit_first_copy's
+                                               // conditions: an owner card with the job's fit
+                                               // context). Only on owner-v2-bilateral-5 cards whose
+                                               // frozen proof holds usable season evidence and a
+                                               // season-scored viewer (or a saved Rebuilding /
+                                               // Tanking plan), and only when there is something
+                                               // to show: absent otherwise, never null or {}.
+                                               // Composed by trade_narrative.season_block from the
+                                               // proof alone; clients print it verbatim.
+                       "v": "season-1",        // clients accept exactly this version, drop otherwise
+                       "line": "Season +2.1 pts/wk · Dynasty cost 3%",   // OPTIONAL (scored viewer)
+                       "season_pts_week": 2.1, "dynasty_pct": 3.0,
+                       "dynasty_dir": "cost"|"gain"|"even",              // with `line`
+                       "weeks": 4, "as_of": "2026-11-10",                // forecast horizon, capture date
+                       "labels": [ { "id": "<player id>", "label": "win_now"|"cornerstone"|"rebuild",
+                                     "text": "Win-now piece"|"Cornerstone"|"Rebuild piece",
+                                     "starts_for_you": true } ],          // OPTIONAL: printed labels only
+                       "conflict": { "code": "conflict.board.above"|"conflict.board.below"|
+                                             "conflict.target"|"conflict.position"|
+                                             "conflict.trade_block"|"conflict.trade_away",
+                                     "text": "You rank … above market, but this moves away from All-in" } },
+                                               // OPTIONAL: the plan-conflict rule fired
+                                               // (season_value.plan_conflict). Strings: docs/
+                                               // cross-client-invariants.md § Win-now season signal
   "match_context":   { ... },                  // optional roster-fit context
   "lane":            "window" | "value",       // OPTIONAL — flag trade.lanes; absent when the
                                                // user has no declared/seeded window
@@ -1440,6 +1469,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 | GET | `/api/admin/config` | Read all `model_config` entries. **Auth: X-Cron-Secret** |
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value (hot-reloads ranking + trade math). **M-rail (fit-challenger PR-M, additive):** optional body `source` (string, truncated to 64 chars, default `"admin-api"`) attributes the write; the route funnels through `database.set_config`, which stamps `model_config.updated_at` and appends a `model_config_changes` row in the same transaction; the response gains `old_value`. `scripts/set_knob.py` is the blessed operator CLI (`source='operator'`) — it goes through this route because only the route triggers the live `reload_config()` pair. **`app_min_version` (B8):** the value must also pass `backend/app_version_policy.validate_app_min_version`. It must be 0, or a version int ≤ 99999 and ≤ the next minor above `mobile/app.json`; otherwise the route returns **400** `{"error": "<reason>"}` and writes nothing (set_knob.py refuses the same values before calling). **Auth: X-Cron-Secret** |
 | POST, DELETE | `/api/admin/trades/gate-miss-test` | **S0 test hook (TestFlight step A10).** POST `{league_id, kind: "withhold" | "check_error", ttl_s}` (`ttl_s` in (0, 900]; else 400 `invalid_ttl_s`; 400 `invalid_kind` / `invalid_league_id`) forces one gate miss on that league until the TTL ends, whatever `trade_i1_mode` and `trade_gate_miss_mode` say: `withhold` serves the building shape plus `wait_reason: "roster_check"`, `check_error` serves `status: "error"`, `error: "roster_check_unavailable"`. Applies to serves that carry cards; other leagues are untouched. DELETE `{league_id}` clears it (`{cleared}`). In-process admin test state, lost on restart; set, apply, expiry and clear are logged (`[i1] gate-miss test`). See [S0 roster check at serve](#s0-roster-check-at-serve). **Auth: X-Cron-Secret** |
+| GET | `/api/admin/season-signal/labels` | Win-now season signal label review (`?user_id=<account id>&league_id=`; docs/plans/win-now-season-signal/lld.md §8). Read only, not flag-gated; never calls a provider. From stored state only: the league's `league_members` rosters, the consensus pool for the league's scoring format, and the account's last saved league forecast (`league_projections`; `server._season_evidence` with the snapshot's own slots). Returns the rows `backend/eval/season_label_review.py write --rows` reads (`schema: "season-label-review-1"`): `league_key` (`"league-" + sha256(league_id)[:10]`), `label_rules_version`, `line` (`{pos: starter-line points/wk}`), `players` (every rostered non-pick player: `id`, `name`, `position`, `age`, `ppg`, `line`, `value` (consensus), `future`, `startable`, `label`), `own` (the account's players: `id`, `name`, `position`, `ppg`, `starts_for_you`), plus `evidence` (`state`, `reason`, `weeks`, `captured_at`). Public NFL ids and names only: no user id, team or manager name; boards are consensus, no private board is read. Without usable evidence: 200 with empty `players` / `own` / `line` and `evidence.reason`. **400** `user_id_and_league_id_required`; **404** `league_not_found` (no stored league or members) / `not_a_member` (the account has no team in it). **Auth: X-Cron-Secret** |
 | GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`). **Auth: X-Cron-Secret** |
 | PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`). **Auth: X-Cron-Secret** |
 | GET | `/api/trades/flags/admin` | Operator readback of bad-trade flags (`?since_id=N&limit=M`, max 500) → `{items, count, next_since_id}` — same paging contract as `/api/feedback/admin`. **Auth: X-Cron-Secret** |
