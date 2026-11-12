@@ -17041,15 +17041,25 @@ def get_mfl_credential(user_id: str) -> dict | None:
     return d
 
 
-def delete_mfl_credential(user_id: str) -> None:
-    """Remove a user's stored MFL cookie (disconnect / dead-cookie cleanup)."""
+def delete_mfl_credential(user_id: str, *, withdrawn_via: str = "disconnect") -> int:
+    """Remove a user's stored MFL cookie (disconnect / dead-cookie cleanup).
+
+    D1 Update 1 (in-app-claims design.md §4), the Sleeper rule
+    (`delete_sleeper_credential`): the deletion also ends any open MFL
+    roster-move grant in the SAME transaction, so a reconnect always means
+    re-consent. `withdrawn_via`: 'disconnect' (the default, every pre-Update-1
+    caller) | 'credential_expired' | 'credential_rejected'. Returns the
+    number of withdrawal rows appended (0 when no grant was open, which is
+    always the case until MFL has a consent version)."""
     if not user_id:
-        return
+        return 0
     with engine.begin() as conn:
         conn.execute(
             delete(mfl_credentials_table)
             .where(mfl_credentials_table.c.user_id == user_id)
         )
+        return withdraw_platform_write_grants(
+            user_id, "mfl", withdrawn_via, datetime.now(timezone.utc), conn=conn)
 
 
 def upsert_espn_league(league_id: str, user_id: str, name: str,

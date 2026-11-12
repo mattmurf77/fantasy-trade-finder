@@ -39980,7 +39980,9 @@ def league_free_agents_route():
         "drop_candidates": {"players": [{"id","name","position","value",
                                          "tier"},...],
                             "untouchables_excluded": int} | null
-          # #179 claim sheet — Sleeper leagues only. The caller's roster
+          # #179 claim sheet — Sleeper leagues, and MFL leagues while their
+          # moves are live (D1 Update 1; roster_capacity then carries a null
+          # limit). The caller's roster
           # priced on their board, value-ASCENDING (least valuable first),
           # capped at 8; untouchables (asset_prefs) never appear, and the
           # count tells the sheet they were withheld.
@@ -40172,6 +40174,30 @@ def league_free_agents_route():
                 "players":                cand_rows,
                 "untouchables_excluded":  cand_excluded,
             }
+        elif _fa_move_live("mfl") and _fa_move_league_platform(league_id) == "mfl":
+            # D1 Update 1 (in-app-claims design.md §4): a live MFL league gets
+            # the drop list too, from the caller's franchise row; its roster
+            # limit and waiver settings aren't stored, so both stay unknown
+            # (null) and MFL decides. Unreachable while `mfl.send_add_drop`
+            # is off or the MFL shapes are unverified.
+            _cred, _row, mfl_fid = _fa_move_mfl_binding(str(g_user_id), league_id)
+            mfl_roster = _fa_move_mfl_my_roster(league_id, mfl_fid) if mfl_fid else None
+            if mfl_roster is not None:
+                roster_capacity = {"my_count": len(mfl_roster), "limit": None,
+                                   "open_slots": None}
+                untouchable_ids = set()
+                try:
+                    ap = load_asset_preferences(user_id=g_user_id, league_id=league_id)
+                    untouchable_ids = {str(x) for x in ap.get("untouchables", [])}
+                except Exception as ap_err:
+                    log.warning("free-agents: asset-prefs read failed for %s "
+                                "(drop candidates unfiltered): %s", league_id, ap_err)
+                cand_rows, cand_excluded = compute_drop_candidates(
+                    pool_players=pool_players, seed_elo=seed, user_elo=user_elo,
+                    user_roster=mfl_roster, exclude_ids=untouchable_ids,
+                    tier_fn=fa_tier_fn)
+                drop_candidates = {"players": cand_rows,
+                                   "untouchables_excluded": cand_excluded}
 
         free_agents = compute_free_agents(
             pool_players = pool_players,
@@ -40241,8 +40267,10 @@ _FA_MOVE_SURFACES = ("free_agents", "usage_trends")
 _FA_MOVE_ATTEMPT_ID_RE = re.compile(r"[A-Za-z0-9._-]{8,64}")
 # Player ids (FTF canonical = Sleeper): ASCII digits, or a team-defense code.
 _FA_MOVE_PLAYER_ID_RE = re.compile(r"[0-9]{1,12}|[A-Z]{2,4}")
-# Each platform's server-only kill switch. MFL and ESPN add theirs in Update 1.
-_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop"}
+# Each platform's server-only kill switch. MFL's is Update 1
+# (docs/plans/in-app-claims/design.md); ESPN has none until its write shapes
+# are captured, so an ESPN league stays `unsupported`.
+_FA_MOVE_FLAGS = {"sleeper": "sleeper.send_add_drop", "mfl": "mfl.send_add_drop"}
 
 # Contract §5: request receipt to response is at most 76 s. A 30 s preflight
 # budget, checked immediately before the platform write (the
@@ -40290,6 +40318,9 @@ def _fa_move_live(platform: str) -> bool:
         return False
     if platform == "sleeper":
         return bool(_sleeper_write.FA_MOVE_SHAPES_CAPTURED)
+    if platform == "mfl":
+        from . import mfl_write as _mfl_write
+        return bool(_mfl_write.FA_MOVE_SHAPES_VERIFIED)
     return False
 
 
@@ -40462,6 +40493,8 @@ def _fa_move_capability(sess, league_id: str, live_rosters) -> tuple[dict, dict]
     and local leagues → 'unsupported'. `claims` only under R15.8 D5. Draft
     copy is served only in 'submit' mode (fa_move_copy's docstring)."""
     platform = _fa_move_league_platform(league_id)
+    if platform == "mfl" and _fa_move_live(platform):
+        return _fa_move_capability_mfl(sess, league_id)
     if platform != "sleeper":
         return {"mode": "unsupported", "claims": False,
                 "league_platform": platform if platform in _FA_MOVE_PLATFORMS else None,
@@ -40918,6 +40951,10 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
         return _fa_move_error("move_in_progress", 409,
                               _fa_copy.message(key, platform, add=names.get(add_id)),
                               title=_fa_copy.UNKNOWN_TITLE)
+    if platform == "mfl":
+        # Steps 8-13 for MFL (in-app-claims design.md §4): its own credential,
+        # league binding and roster read, the same consent and move record.
+        return _fa_move_core_mfl(sess, req, now, t0)
     # 8. The credential.
     cred = get_sleeper_credential(user_id)
     if not cred:
@@ -41132,6 +41169,323 @@ def _fa_move_core(sess, body) -> tuple[dict, int]:
                 _invalidate_league_members_cache(league_id)
         except Exception:
             log.exception("fa move: roster save failed (league %s)", league_id)
+            stamp = False
+    if status == 200:
+        _fa_move_event(user_id, "fa_move_write_succeeded", {
+            "move_kind": kind, "has_drop": bool(drop_id), "has_bid": bid is not None,
+            "result": result, "attempt_id": attempt_id, "league_platform": platform,
+        }, league_id=league_id)
+    if stamp:
+        _fa_move_stamp_async(league_id)
+    return payload, status
+
+
+# ── D1 Update 1: MFL free-agent moves (docs/plans/in-app-claims/design.md) ──
+# Reached only when `_fa_move_live("mfl")`: `mfl.send_add_drop` on AND
+# mfl_write.FA_MOVE_SHAPES_VERIFIED (False until one supervised real MFL
+# transaction is recorded). Until then the capability answers `unsupported`
+# for an MFL league and the move route 404s at step 6, exactly as before
+# Update 1. The MFL path reuses everything platform-neutral (the attempt_id
+# replay, the double-move block, consent, the `sent`/`result` rows, the
+# outcome classification, the roster save); what differs is the credential
+# (the MFL session cookie, bound to `mfl_username`), the league binding (the
+# linker's franchise on the leagues row), the live `rosters` export and the
+# crosswalk from FTF (Sleeper) ids to MFL ids.
+
+def _fa_move_mfl_binding(user_id: str, league_id: str):
+    """(cred, row, my_fid): the caller's stored MFL credential, the league
+    row, and their franchise id when the row is bound to them (else None)."""
+    from .database import get_mfl_credential, get_platform_league
+    cred = get_mfl_credential(user_id)
+    row = get_platform_league(league_id, "mfl")
+    my_fid = None
+    if row and str(row.get("user_id") or "") == str(user_id):
+        my_fid = str(row.get("platform_my_team") or "").strip() or None
+    return cred, row, my_fid
+
+
+def _fa_move_mfl_account(cred) -> str:
+    """The platform account a grant is bound to: the MFL username, lowered,
+    so a re-link that only changes its case keeps the grant (assumes MFL
+    usernames are case-insensitive; UNVERIFIED). Empty when unknown."""
+    return str((cred or {}).get("mfl_username") or "").strip().lower()
+
+
+def _fa_move_mfl_my_roster(league_id: str, my_fid: str) -> list[str] | None:
+    """The caller's stored roster (FTF ids) from the league_members snapshot,
+    keyed by the franchise's member id. None when no row is stored."""
+    member = _mfl_member_id(league_id, my_fid)
+    for r in load_league_members(league_id):
+        if str(r.get("user_id")) == member:
+            return [str(p) for p in (r.get("player_ids") or []) if p not in (None, "")]
+    return None
+
+
+def _fa_move_capability_mfl(sess, league_id: str) -> tuple[dict, dict]:
+    """Contract §1 for a live MFL league. The 11-06 binary has no MFL connect
+    screen (contract §6), so anything but `connect: ok` answers `unsupported`
+    (scope §E: never `submit` to an MFL user who can't connect from the sheet).
+    `claims` stays false: MFL claims need their own consent version and a
+    verified claim shape (design.md §5)."""
+    user_id = str(sess.get("user_id") or "")
+    now = _fa_move_now()
+    cred, _row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    if not cred or not account:
+        connect = "not_linked"
+    elif not my_fid:
+        connect = "other_account"
+    elif not (sess.get("verified") or _synthetic_demo_session(sess)):
+        connect = "unverified"
+    else:
+        connect = "ok"
+    grant = _fa_move_grant(user_id, "mfl", account, now) if account else None
+    rows = {pid: {"move_mode": "handoff", "move_line": _fa_copy.row_line(reason, "mfl")}
+            for pid, reason in _fa_move_blocks(user_id, str(league_id), now).items()}
+    return {
+        "mode": "submit" if connect == "ok" else "unsupported",
+        "claims": _fa_move_claims_enabled("mfl"),
+        "league_platform": "mfl",
+        "connect": connect,
+        "consent_until": grant["expires_at"] if grant else None,
+        "copy": _fa_copy.move_copy("mfl", include_drafts=True),
+    }, rows
+
+
+def _fa_move_drop_mfl_credential(user_id: str, sess, via: str) -> None:
+    """A dead or rejected MFL cookie: delete it (the trade send's treatment)
+    and end any open MFL roster-move grant, so a reconnect means re-consent
+    (consent.md §4.4, the Sleeper rule). Never raises."""
+    from .database import delete_mfl_credential
+    sess.pop("mfl_cookie", None)
+    try:
+        if delete_mfl_credential(user_id, withdrawn_via=via):
+            _fa_move_event(user_id, "fa_move_consent_withdrawn",
+                           {"via": via, "league_platform": "mfl"}, touch_user=False)
+    except Exception:
+        log.exception("fa move (mfl): credential delete failed")
+
+
+def _fa_move_core_mfl(sess, req: dict, now: datetime, t0: float) -> tuple[dict, int]:
+    """Steps 8-13 of `_fa_move_core` for an MFL league (scope §B3's order):
+    8 credential + league binding → 9 consent (committed before any MFL
+    call) → 10 pre-write reads (crosswalk, host, the live rosters export,
+    ownership, availability) → 11 the claim gate → the preflight budget →
+    12-13 `_fa_move_send`. MFL's roster limit isn't stored, so a full roster
+    is MFL's to refuse (10f), never guessed here."""
+    from . import mfl_service as _mfl
+    from . import mfl_write as _mfl_write
+    platform = "mfl"
+    user_id = str(sess.get("user_id") or "")
+    league_id = req["league_id"]
+    add_id, drop_id, kind = req["add_player_id"], req["drop_player_id"], req["move_kind"]
+    # 8. The credential and the league binding.
+    cred, row, my_fid = _fa_move_mfl_binding(user_id, league_id)
+    account = _fa_move_mfl_account(cred)
+    cookie = _mfl_cookie_for(sess, user_id) if cred else None
+    if not cred or not account or not cookie:
+        return _fa_move_error(f"{platform}_not_linked", 409,
+                              _fa_copy.message("not_linked", platform))
+    # The league row's name: never `_fa_league_meta`, a Sleeper read.
+    league_name = str((row or {}).get("name") or "").strip() or None
+    if not my_fid:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    # 9. Consent: a grant is committed here, before any MFL call.
+    refusal, grant = _fa_move_consent_step(user_id, platform, account, req, now)
+    if refusal is not None:
+        return refusal
+    # 10. Pre-write reads. Nothing is sent if any of them fails or refuses.
+    names = _player_names_by_id([p for p in (add_id, drop_id) if p])
+    add_name, drop_name = names.get(add_id), names.get(drop_id) if drop_id else None
+    inverse = _sleeper_to_mfl_map()
+    mfl_add, mfl_drop = inverse.get(add_id), inverse.get(drop_id) if drop_id else None
+    if mfl_add is None or (drop_id and mfl_drop is None):
+        missing = add_name if mfl_add is None else drop_name
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unmapped", platform, add=missing))
+
+    def _read_failed():
+        return _fa_move_error(f"{platform}_write_failed", 502,
+                              _fa_copy.message("write_failed_roster_read", platform),
+                              kind="roster_read")
+
+    year = int(row.get("platform_season") or _MFL_DEFAULT_YEAR)
+    host = row.get("platform_host")
+    try:
+        if not host:
+            host = _mfl.resolve_host(league_id, year)
+        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+    except _mfl.MflAuthError as e:
+        log.warning("fa move (mfl): rosters read auth-rejected: %s", type(e).__name__)
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_expired")
+        return _fa_move_error(f"{platform}_expired", 409, _fa_copy.message("expired", platform))
+    except Exception as e:
+        log.warning("fa move (mfl): rosters read failed: %s", type(e).__name__)
+        return _read_failed()
+    if not isinstance(raw, dict) or "rosters" not in raw:
+        return _read_failed()
+    norm = _mfl_write.normalize_franchise_id
+    held_by: dict[str, set] = {}
+    for fid, ids in _mfl.parse_roster_ids(raw).items():
+        try:
+            held_by[norm(fid)] = {str(i) for i in ids}
+        except _mfl_write.MflWriteError:
+            continue
+    try:
+        mine_mfl = held_by.get(norm(my_fid))
+    except _mfl_write.MflWriteError:
+        mine_mfl = None
+    if mine_mfl is None:
+        return _fa_move_error(f"{platform}_not_linked", 409, _fa_copy.message(
+            "not_linked_other_account", platform, league=league_name))
+    if str(mfl_add) in mine_mfl:
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_already_yours", platform, add=add_name))
+    if any(str(mfl_add) in ids for ids in held_by.values()):
+        return _fa_move_error("player_unavailable", 422, _fa_copy.message(
+            "player_unavailable", platform, add=add_name))
+    if drop_id and str(mfl_drop) not in mine_mfl:
+        return _fa_move_error("asset_not_owned", 422, _fa_copy.message(
+            "asset_not_owned", platform, drop=drop_name))
+    # 11. The claim gate: MFL claims stay off (design.md §5). Waiver status
+    # can't be read before the tap, so an add of a player MFL holds on
+    # waivers is MFL's to refuse (10f), never sent as a claim.
+    if kind == "claim" and not _fa_move_claims_enabled(platform):
+        return _fa_move_error("waiver_claim_unsupported", 422, _fa_copy.message(
+            "waiver_claim_unsupported", platform, add=add_name))
+    if _fa_move_preflight_over_budget(t0):
+        return _read_failed()
+    fa_req = _mfl_write.FaMoveRequest(
+        league_id=league_id, add_player_id=str(mfl_add),
+        drop_player_id=str(mfl_drop) if drop_id else None,
+        move_kind=kind, faab_bid=req["faab_bid"])
+
+    def _write():
+        return _mfl_write.fa_move(cookie, host, year, fa_req)
+
+    def _on_auth():
+        _fa_move_drop_mfl_credential(user_id, sess, "credential_rejected")
+
+    my_players = _fa_move_mfl_my_roster(league_id, my_fid)
+    return _fa_move_send(
+        sess=sess, req=req, platform=platform, platform_user_id=account, now=now,
+        grant=grant, write=_write, auth_error=_mfl_write.MflWriteAuthError,
+        write_error=_mfl_write.MflWriteError, on_auth=_on_auth,
+        add_name=add_name, drop_name=drop_name, league_name=league_name,
+        member_id=_mfl_member_id(league_id, my_fid), my_players=my_players)
+
+
+def _fa_move_send(*, sess, req: dict, platform: str, platform_user_id: str, now: datetime,
+                  grant, write, auth_error, write_error, on_auth, add_name, drop_name,
+                  league_name, member_id: str, my_players: list[str] | None) -> tuple[dict, int]:
+    """Steps 12-13 for a platform past its pre-write reads: the grant re-read,
+    the `sent` row (atomic double-move block), the ONE platform call, the
+    `result` row, the roster save on `complete`, the event. The same rules as
+    `_fa_move_core`'s Sleeper tail, which keeps its own copy until the Sleeper
+    capture lands (design.md §4: one refactor, one review). `write()` returns
+    the adapter's neutral result; it is called at most once and never retried.
+    `my_players` is the caller's stored roster (FTF ids), or None (no save)."""
+    user_id = str(sess.get("user_id") or "")
+    league_id, attempt_id = req["league_id"], req["attempt_id"]
+    add_id, drop_id, kind, bid = (req["add_player_id"], req["drop_player_id"],
+                                  req["move_kind"], req["faab_bid"])
+    # The grant again, right before the `sent` row: a withdrawal during the
+    # preflight stops the move.
+    if _fa_move_grant(user_id, platform, platform_user_id, _fa_move_now()) is None:
+        return _fa_move_consent_required(user_id, platform, platform_user_id, _fa_move_now())
+    record = {"attempt_id": attempt_id, "user_id": user_id, "platform": platform,
+              "platform_user_id": platform_user_id, "league_id": league_id,
+              "consent_id": grant["consent_id"], "move_kind": kind,
+              "add_player_ids": json.dumps([add_id]),
+              "drop_player_ids": json.dumps([drop_id] if drop_id else []),
+              "faab_bid": bid}
+    claim_now = _fa_move_now()
+    sent_id, rival = _fa_db.claim_platform_write_move(
+        {**record, "phase": "sent", "sent_at": claim_now.isoformat()},
+        lambda rows: _fa_move_block_reasons(rows, claim_now, checked_at=now).get(add_id),
+        since=claim_now - _FA_MOVE_PENDING_CLAIM_BLOCK)
+    if rival or not sent_id:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        return _fa_move_error("move_in_progress", 409,
+                              _fa_copy.message(key, platform, add=add_name),
+                              title=_fa_copy.UNKNOWN_TITLE)
+    rival = _fa_move_blocks(user_id, league_id, _fa_move_now(), before_id=sent_id,
+                            checked_at=now).get(add_id)
+    if rival:
+        key = "move_in_progress_pending_claim" if rival == "pending_claim" else "move_in_progress"
+        payload, status = _fa_move_error("move_in_progress", 409,
+                                         _fa_copy.message(key, platform, add=add_name),
+                                         title=_fa_copy.UNKNOWN_TITLE)
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": "error", "error_code": "move_in_progress",
+            "response_status": status, "response_json": json.dumps(payload)})
+        return payload, status
+    reported = None
+    try:
+        reported = write()
+    except auth_error as e:
+        log.warning("fa move (%s) auth-rejected: %s", platform,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        try:
+            on_auth()
+        except Exception:
+            log.exception("fa move (%s): dropping the rejected credential failed", platform)
+        payload, status = _fa_move_error(f"{platform}_rejected", 409,
+                                         _fa_copy.message("rejected", platform))
+        result = "error"
+    except write_error as e:
+        log.warning("fa move (%s) write-failed [%s]: %s", platform, e.kind,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        # 'input' is decided before any byte is sent, like 'config'.
+        payload, status, result = _fa_move_write_failure(
+            "config" if e.kind == "input" else e.kind, platform)
+    except Exception:
+        log.exception("fa move (%s): unexpected error during the platform write", platform)
+        payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN, platform)
+    if reported is not None:
+        move_status, result = reported.get("status"), reported.get("result")
+        if move_status not in ("complete", "pending") or result not in ("accepted", "partial"):
+            log.warning("fa move (%s): unreadable adapter result; outcome unknown", platform)
+            payload, status, result = _fa_move_write_failure(_write_outcome.OUTCOME_UNKNOWN,
+                                                             platform)
+            reported = None
+    added = dropped = []
+    if reported is not None:
+        fallback = result == "accepted"
+        added = [str(p) for p in (reported.get("added") or ([add_id] if fallback else []))]
+        dropped = [str(p) for p in (reported.get("dropped")
+                                    or ([drop_id] if fallback and drop_id else []))]
+        title, lines = _fa_copy.result_copy(
+            status=move_status, result=result, platform=platform,
+            add=add_name or "This player", drop=(drop_name or "That player") if drop_id else None,
+            league=league_name or "your league", added=added, dropped=dropped, bid=bid)
+        payload = {"status": move_status, "move_kind": kind, "result": result,
+                   "league_platform": platform, "attempt_id": attempt_id,
+                   "title": title, "lines": lines}
+        if reported.get("transaction_id"):
+            payload["platform_transaction_id"] = str(reported["transaction_id"])
+        status = 200
+    try:
+        _fa_db.record_platform_write_move({
+            **record, "phase": "result", "result": result,
+            "status": payload.get("status") if status == 200 else None,
+            "platform_transaction_id": payload.get("platform_transaction_id"),
+            "error_code": None if status == 200 else payload.get("error"),
+            "response_status": status, "response_json": json.dumps(payload)})
+    except Exception:
+        log.exception("fa move (%s): the result row failed (attempt %s)", platform, attempt_id)
+    stamp = False
+    if status == 200 and payload["status"] == "complete" and my_players is not None:
+        try:
+            held = set(my_players)
+            new_roster = ([p for p in my_players if p not in set(dropped)]
+                          + [p for p in added if p not in held])
+            stamp = _fa_db.set_league_member_roster(league_id, member_id, new_roster)
+            if stamp:
+                _invalidate_league_members_cache(league_id)
+        except Exception:
+            log.exception("fa move (%s): roster save failed (league %s)", platform, league_id)
             stamp = False
     if status == 200:
         _fa_move_event(user_id, "fa_move_write_succeeded", {

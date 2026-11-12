@@ -492,7 +492,11 @@ had already dropped from its export stayed in `platform_future_picks` until
 | W1 | Propose a trade | `https://{host}/{year}/import?TYPE=tradeProposal&L={id}&OFFEREDTO={ffff}&WILL_GIVE_UP={a,b}&WILL_RECEIVE={c,d}&EXPIRES={unix}&JSON=1[&COMMENTS=…]` | GET | `mfl_write.propose_trade()`; called from `server.py` `POST /api/trades/propose-mfl` |
 | W2 | Respond to a pending trade | `https://{host}/{year}/import?TYPE=tradeResponse&L={id}&TRADE_ID={t}&RESPONSE=accept\|reject\|revoke&JSON=1` | GET | `mfl_write.respond_trade()`; called from `server.py` `POST /api/trades/respond-mfl` (same flag + hard-verified gate as propose; revoke is the near-term use — TRADE_ID comes from export #10, pendingTrades) |
 
-Both hit the league's assigned `wwwNN` host, same as exports (§1's gotcha —
+| W3 | Free-agent add / add+drop (D1 Update 1, dark) | `https://{host}/{year}/import?TYPE=fcfsWaiver&L={id}&ADD={mfl_id}[&DROP={mfl_id}]&JSON=1` | GET | `mfl_write.fa_move()`; called from `server.py` `POST /api/league/free-agents/move` (`_fa_move_core_mfl`) |
+| W4 | Blind-bid waiver claim (built, **never called**: `claims: false`) | `…/import?TYPE=blindBidWaiverRequest&L={id}&PICKS={add}_{bid}_{drop\|0000}&JSON=1` | GET | `mfl_write.build_fa_move_params()` only |
+| W5 | Priority waiver claim (built, **never called**) | `…/import?TYPE=waiverRequest&L={id}&ROUND={n}&PICKS={add}_{drop}&JSON=1` | GET | `mfl_write.build_fa_move_params()` only |
+
+W1–W5 all hit the league's assigned `wwwNN` host, same as exports (§1's gotcha —
 whether imports strictly require it is a TODO(live-verify), but the wwwNN host
 is correct either way). `EXPIRES` defaults to now + 7 days
 (`DEFAULT_EXPIRES_SECONDS`), stated explicitly rather than leaning on MFL's
@@ -508,6 +512,16 @@ API-key path for writes. The route decrypts via `server._mfl_cookie_for`
 (HTTP 401/403 **or** an auth-flavored `<error>` body) raises
 `MflWriteAuthError`, the route drops the stored credential and returns
 409 `mfl_auth_expired` → the client re-prompts the #177 sign-in.
+
+### Free-agent moves (W3–W5, D1 Update 1)
+
+Design: [docs/plans/in-app-claims/design.md](../plans/in-app-claims/design.md). **UNVERIFIED:** the parameter names come from MFL's api_info (read 2026-11-11), not from a recorded request; no W3–W5 import has ever been sent. `mfl_write.FA_MOVE_SHAPES_VERIFIED` / `FA_CLAIM_SHAPE_VERIFIED` stay false until one supervised real transaction is recorded, and `fa_move()` refuses before building or sending while they are. Gated by `mfl.send_add_drop` (default false) on top.
+
+- **Never `REPLACE`** on W4/W5: MFL documents that it *replaces* the user's other claims in that round. Never `FRANCHISE_ID` (commissioner impersonation). Both pinned by `test_mfl_fa_move.py`.
+- **Ids:** FTF (Sleeper) ids crosswalk server-side through `_sleeper_to_mfl_map()`; a miss refuses the move before any MFL call.
+- **Pre-flight:** the same `rosters` export as the trade send (#5, owner cookie, `raise_auth=True`) for ownership and availability. MFL's roster limit, waiver type, FAAB balance and a player's waiver status are not read: MFL decides, and its refusal is shown as "didn't accept this move" (10f).
+- **Answer:** the same `_parse_import_response` as W1/W2: `OK` → the move is `complete` (W3) or `pending` (W4/W5); `<error>` → refused; empty or unrecognised → outcome unknown, never retried. MFL returns no transaction id or player list.
+- **Safe to log:** league id, host, year, import `TYPE`, the MFL player ids and bid (MFL's own public ids), HTTP status, `MflWriteError.kind`, MFL's `<error>` text (truncated to 500, log only, never returned). **Must redact:** the `Cookie` header / `MFL_USER_ID` value (never logged, never an event property; pinned by `test_the_cookie_is_never_logged_or_returned`) and the `mfl_username` (the consent row holds it; it is not logged).
 
 ### Asset ids (`WILL_GIVE_UP` / `WILL_RECEIVE`, comma-separated)
 

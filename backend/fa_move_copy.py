@@ -401,6 +401,11 @@ _MESSAGES = {
                         "player to drop."),                             # 10b
     "player_unavailable": "{add} is no longer a free agent, so nothing was sent.",  # 10c
     "player_already_yours": "{add} is already on your roster, so nothing was sent.",
+    # MFL / ESPN: the player has no id on that platform in the crosswalk.
+    # DRAFT (in-app-claims design.md §6), awaiting marketing; served only once
+    # that platform's moves are live.
+    "player_unmapped": ("Fleeced couldn't match {add} to {platform}, so nothing was sent. "
+                        "You can still make this move in {platform}."),
     "waiver_bid_over_budget": ("Your bid is more than the ${remaining} you have left, so "
                                "nothing was sent. Lower it to make the claim."),  # 10d
     "move_kind_changed": ("{add}'s waiver status changed, so nothing was sent. The button now "
