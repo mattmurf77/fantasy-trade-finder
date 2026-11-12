@@ -12,6 +12,29 @@
 ---
 
 
+## 2026-11-11 — Combined release: pick pricing on, rank content off the card, Keep is hard, season signal stage A (D-237 to D-241)
+
+- **One branch, one deploy:** league-mate outlooks from the forecast (D-237), win-now season signal (D-238), no position ranks on the card (D-239), next-draft firsts priced by projected slot (D-240), Keep as a hard rule (D-241). `DECK_PIPELINE_VERSION` 27.
+- **On at deploy:** `picks.projected_slot_value`, `trade.partner_outlook_projection`, `owner_untouchable_hard` 1, `trade.season_signal` (stage A only: evidence and one log line per job; revision 2 still serves). **Off:** `trade.fit_position_ranks`; revision 5 (`owner_bilateral_revision_5_enabled` 0).
+- **What users see on the current build:** a 2027 1st reads "2027 1.0x · projected" and is priced by where the team is projected to pick; no rank table or rank sentences on cards; no Keep players in generated cards; league-mates' tags follow the forecast.
+- **Needs the next app build:** the PROJECTED / PROJ tag, "Team fit" heading, season line and labels, the why-pass frame.
+- **Not verified:** real forecasts were not priced before shipping; nothing on a device.
+
+## 2026-11-11 — League-mates' assumed outlooks come from the saved forecast (D-237)
+
+- **Why:** a league-mate with almost no playoff chance read "Looks contending", because the roster read calls nearly every team contending.
+- **What changed (server):** an undeclared league-mate is assumed Rebuilding at or below a 45% playoff chance in the viewer's saved forecast and Contending above it; the roster read is the fallback. The trade engine, the card's "Them" tag and Team Review use the same value. Flag `trade.partner_outlook_projection`, on.
+- **Effect on decks:** on synthetic 12-team leagues 6 to 7 of 11 assumed outlooks changed and 8 to 10 of the top 30 cards stayed the same.
+- **Limits:** Sleeper leagues with a usable forecast only; never an assumed Tanking or All-in. Not verified on a device or against production.
+
+## 2026-11-11 — Win-now season signal built and merged dark (D-238)
+
+- **What is in:** generator revision 5 (season points from the saved forecast, player labels, plan conflict, the shed curve for Rebuilding and Tanking), its join with rules-first construction, the server wiring and `season_block` payload, an admin label-review route, and the app's season line, label tags and conflict sentence.
+- **Off:** flag `trade.season_signal` false and knob `owner_bilateral_revision_5_enabled` 0, so decks and cards are unchanged.
+- **Build time, revision 5 on the page path:** 0.36 to 0.92 s on 12 to 16 team test leagues (single runs), against 3.1 to 7.4 s for the full solve.
+- **Next:** stage A (flag on, evidence recorded, revision 2 still serving), then the label review, then revision 5. The app part needs the next TestFlight build.
+- Not verified in production or on a device.
+
 ## 2026-11-11 — Forecasts for league-median leagues; the median setting is stored when a league is linked (D-236)
 
 - A Sleeper league that plays the league median now gets a playoff forecast: two results a week (head-to-head and against the median), in completed and simulated weeks, with seeding on the combined record. Other leagues' forecasts are unchanged and nothing re-runs.

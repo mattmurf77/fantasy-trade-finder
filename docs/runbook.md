@@ -591,6 +591,14 @@ curl -H "X-Cron-Secret: $CRON_SECRET" -X PUT .../api/admin/config/<key> # update
 See [config-reference.md](config-reference.md) for keys. All `/api/admin/*`
 endpoints, `/api/debug/log`, and `/api/feature-flags/reload` share this auth.
 
+**Keep / untouchable rule (`owner_untouchable_hard`).** 1 (default) = a generated owner card never
+sends a manager's Keep player (the viewer's own give pin excepted). To restore the older
+premium-return rule without a deploy: `PUT .../api/admin/config/owner_untouchable_hard` with
+`{"value": 0}`; back with `{"value": 1}`. Takes effect on the next deck request (the knob is in
+every job's and stored page's request signature, so nothing built under the other value is served).
+Expect thinner decks for users with many Keep marks; the roster-setup guard note past ~40% Keep
+is the user-facing warning.
+
 ---
 
 ## Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)

@@ -525,6 +525,11 @@ export default function InLeagueCalculator({
         // without a second lookup. Server-authoritative; never inferred.
         pickSource: p.source ?? null,
         pickSeason: p.season,
+        // Projected draft slot — copied verbatim, keys added only when the
+        // server sent them (an old server's CalcPlayer is unchanged); the
+        // rows validate through utils/projectedPick.
+        ...(p.proj_slot !== undefined ? { proj_slot: p.proj_slot } : {}),
+        ...(p.proj_name !== undefined ? { proj_name: p.proj_name } : {}),
       };
     }
     return m;

@@ -1,3 +1,31 @@
+## 2026-11-12 — Combined release branch (D-237 to D-241), branch `release/2026-11-12-train`
+
+- **Full backend suite (main session) on the combination of league-mate outlooks, rank removal, win-now, pick pricing and the Keep rule, with `picks.projected_slot_value` and `trade.season_signal` on:** **14,934 passed, 42 skipped, 0 failed.** Run before main's median-league merge and two test-only app edits; after that merge the projection, pick, season, fit, digest, untouchable and paywall files were re-run green. CI is the full re-run on the final head.
+- **App (main session):** `tsc --noEmit` clean; **175 of 175** `check-*.js`; testid-lint OK. Two checks were updated for the combined card: the season check accepts `displayName` on the player name line (projected picks), and the fit-block check's sandbox defines an absent season block.
+- **Pipeline pins:** 23 league-mate outlooks, 24 rank removal, 25 season signal, 26 projected slot value, 27 Keep rule. Each branch pinned 23 on its own; the combined digests were recomputed at each merge.
+- **One cross-feature finding:** with rank content off, a team with only a rank fact is left out of the fit block, so the league-mate outlook tag test now turns rank content on explicitly.
+- **Per-feature evidence:** pick pricing (builder's full suite 14,628 passed; 34 sabotages; replay of 23 recorded requests on invented forecasts: totals conserved, 1 to 2 decks over the 20% size bar, smallest deck 78 cards); rank removal (builder's full suite 14,543 passed; 14 sabotages); Keep rule (builder's full suite 14,555 passed; 6 sabotages; knob 0 byte-identical); entries above for D-237 and D-238.
+- **Not verified:** real forecasts priced by the new pick rule (a local read of production forecast data was refused by the permission system); anything on a device; production behaviour.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
+## 2026-11-11 — League-mate outlooks from the saved forecast (D-237), branch `feat/partner-outlook-from-projection`
+
+- **Full suite (main session, after merging main):** **14,573 passed, 42 skipped, 0 failed.** `test_partner_outlook_projection.py` is new, 41 cases.
+- **What they pin:** the 45% boundary and two bands only; a saved outlook always wins; every unusable forecast (stale, incomplete, old model, refresh failed, pending, unsupported, no run, non-Sleeper) gives the roster read; a co-owned roster maps to its primary owner and an unmappable one keeps the roster read; one forecast read per job; the engine, the fit tag and Team Review agree; the read is in the request signature; flag off is byte-identical; rules-first page equals the gated full solve with projection reads.
+- **Sabotages, red then restored (15, Opus subagent; 1 in the main session):** listed in the PR body. Main session: with the wire-source map emptied the tag reads `projection`, which installed builds drop; the tag test went red.
+- **Review fix (main session):** the "Them" tag's wire `source` stays `roster` for a projection read, so build 186 keeps the tag.
+- **Synthetic 12-team leagues:** 6 to 7 of 11 assumed outlooks changed; top-30 overlap 8 to 10 of 30.
+- **Not verified:** production behaviour; anything on a device. Check after deploy: a league-mate with a low playoff chance reads "Looks rebuilding" on a card.
+
+## 2026-11-11 — Win-now season signal: server wiring, rules-first join, app card (D-238), branch `feat/season-signal-wi1`
+
+- **Full backend suite (main session, after merging main):** 14,759 passed, 42 skipped, **2 failed**, both `test_paywall_gate_allowlist.py`: the new admin route was not classified. Fixed (`NEVER_GATE`); those tests and `test_season_signal_worker.py` re-run green (31). The suite was not re-run in full after that one-line fix or after the later merge of main; CI is the full re-run.
+- **App (main session, after merging main):** `tsc --noEmit` clean; 174 of 174 `check-*.js`; testid-lint OK. `check-season-signal.js` is new (11 checks; 20 sabotages red then restored by the builder).
+- **Server wiring (`test_season_signal_worker.py`, 23):** flag off byte-identical; one forecast read per job; revision 2 never receives the evidence; a read failure serves today's deck; league-mates never count toward completeness; non-Sleeper is refused before any read; the admin route refuses without the secret; revision 5 presents and carries `season_block`; the knobs stay out of revisions 2 to 4's hash; the digest, never `as_of`, enters the hash; the pipeline bump. 11 sabotages red then restored.
+- **Rules-first join:** exhaustive admissibility audits on 7 small worlds; page equals gated, proof for proof, on 16 worlds (fixture league with real captured evidence, synthetic 12, 14 and 16 teams), and the first 5 and 30 cards equal the gated deck's. Three bound sabotages red then restored. Replay of 40 recorded requests under revisions 1 and 2: served set equal 40 of 40, 0 fallbacks.
+- **Not verified:** production; anything on a device; the `season-signal:` log line through a real job. `league.projections_provider_approved` is false in the repo config, so stage A records `no_forecast` unless production has it on.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-11 — League-median forecasts and the stored league setting (D-236), branch `feat/projection-median-leagues`
 
 - **New: `test_league_projection_median.py` (32) and `test_league_median_setting.py` (16); `test_league_projection_batch.py` now 40.** Main session re-run of the three files: 88 passed. `-k "league_projection or cron"`: 640 passed (subagent). Full suite before the retry option was added: **14,556 passed, 42 skipped, 0 failed**; CI on the PR head covers the final tree.

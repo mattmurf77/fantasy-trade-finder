@@ -305,7 +305,9 @@ def test_m6_02_slot_values_do_not_reach_the_valuation_lanes(module):
 #                           still reaches the engine only through named
 #                           functions in this module.
 _DP_READERS = {"market_pick_pool_value", "market_pick_slot_value",
-               "market_anchor_season"}
+               "market_anchor_season",
+               # projected slot value: the per-slot curve's SHAPE (2026-11-11)
+               "projected_slot_curve"}
 
 
 def test_m6_02b_pick_values_reads_dp_only_through_the_m6b_seam():

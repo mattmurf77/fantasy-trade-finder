@@ -471,6 +471,7 @@ def _partners(
     my_needs: list[str],
     pick_share_by_owner: dict[str, float],
     first_round_by_owner: dict[str, int],
+    member_outlook_sources: dict[str, str] | None = None,
 ) -> dict:
     """Who to deal with. Two lists, and a member may legitimately appear in
     both — a league-mate pointed the opposite way who is ALSO deep exactly
@@ -480,6 +481,10 @@ def _partners(
 
     `not_sure` members are excluded from `opposed_window` entirely. Inference
     that declined to commit must not be laundered into a recommendation.
+
+    `member_outlook_sources` (trade.partner_outlook_projection; None when the
+    flag is off, so the rows are byte-identical): where each member's read came
+    from, `projection` or `roster`, stamped on its row as `outlook_source`.
     """
     rank_of = {t["user_id"]: i + 1 for i, t in enumerate(
         sorted(teams, key=lambda t: float(t.get("value") or 0.0), reverse=True))}
@@ -504,6 +509,8 @@ def _partners(
             "inferred_outlook": w,
             "pick_capital_share": round(float(pick_share_by_owner.get(uid, 0.0)), 4),
             "first_round_picks": int(first_round_by_owner.get(uid, 0)),
+            **({"outlook_source": member_outlook_sources.get(uid, "roster")}
+               if member_outlook_sources is not None else {}),
         })
     # A contender is shopping for the picks a rebuilder holds; a rebuilder is
     # shopping for the vets the best rosters hold. Sort accordingly.
@@ -569,6 +576,7 @@ def build_team_review(
     window_odds: dict | None = None,
     window_odds_reason: str | None = None,
     window_projection: dict | None = None,
+    member_outlook_sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Assemble the six beats. Returns the full payload including
     `meta.beats_skipped`, which is AUTHORITATIVE: the client renders
@@ -601,6 +609,7 @@ def build_team_review(
         my_needs=list(roster_profile.get("position_needs") or []),
         pick_share_by_owner=pick_share_by_owner or {},
         first_round_by_owner=first_round_by_owner or {},
+        member_outlook_sources=member_outlook_sources,
     )
 
     skipped: list[str] = []

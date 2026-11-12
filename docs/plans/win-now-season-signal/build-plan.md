@@ -65,6 +65,10 @@ Dependency order. "Collides with rules-first" names the files both builds edit.
 
 - **Collides with rules-first:** nothing (it edits no `trade_gen_*` or `bakeoff_runner`).
 - **Size:** ~380 lines + ~600 of tests. One to two sessions.
+- *Amended 2026-11-11, operator direction:* Rebuilding / Tanking viewers (saved or read) are
+  season-scored in the shed direction as a ranking term only (lld §3.1, two knobs
+  `season_shed_weight_tanking` 1.0 / `_rebuilding` 0.5, popped from every other search's config),
+  with the points mirror conflict (`CONFLICT_ADD`) and `viewer.season_direction`; I4 restated.
 
 ### WI-3 · Backend · Card copy
 
@@ -85,6 +89,9 @@ Dependency order. "Collides with rules-first" names the files both builds edit.
 
 - **Collides with rules-first:** nothing.
 - **Size:** ~150 lines + ~350 of tests. One session.
+- *Amended 2026-11-11, operator direction:* `season_shed.you` (`Tanking: -3.2 pts/wk, adds
+  {asset}`), the points conflict lead for Rebuilding / Tanking (`Away from Tanking: +2.1 pts/wk`),
+  and the season line for these viewers (lld §5.1).
 
 ### WI-4 · Backend · Operator tools
 
@@ -100,6 +107,9 @@ Dependency order. "Collides with rules-first" names the files both builds edit.
 - **Collides with rules-first:** imports its `backend/eval/served_deck_replay.py` stand-in if that
   has merged; otherwise carries a stand-in marked for removal.
 - **Size:** ~320 lines + ~150 of tests. One session.
+- *Amended 2026-11-11, operator direction:* the replay reports Rebuilding / Tanking before/after
+  (points, shedding, adding, deck, first-30 overlap, set identity) and measures stage 2 by the
+  partner's plan and source, with the corrected bars of validation §7.
 
 ### WI-5 · Backend · Worker wiring, flag, admin route, payload
 

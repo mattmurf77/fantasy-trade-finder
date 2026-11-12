@@ -27,19 +27,32 @@ Sabotage proof (page-first-4, 2026-11-10): skip_family_completion
 completed), accept_beyond_horizon (exact prefix = whole ranked list) and
 cap_counts_as_complete (a cap inside completion ignored) each turned the
 revision-2 parity tests (the cap test for the last) red; green on revert.
+
+Revision 5 (WI-8, 2026-11-11): the exhaustive admissibility audit over seven
+season worlds (All-in, Contending, Rebuilding, Tanking viewers; stage 2), the
+season screen path, the season lineup memo (equal to the season lineup, tagged
+apart from revision 2's), revision 2 after revision 5 on one memo, and the
+unsupported cases (an overridden ``_lineup`` without the hook; a negative ppg
+or fill). Sabotages, each red then green on revert: bound a season team's
+lineup from ``_lineup_assets`` (4 audits red); ignore the shed term in the
+bounds (5 audits red); key a season lineup with revision 2's content key (the
+tag test and the revision-2-after-5 test red; the latter's card comparison
+too, with its tag assertion removed).
 """
 
 import json
 import random
 import sys
 import threading
+from collections import Counter
 from functools import lru_cache
+from types import SimpleNamespace
 
 import pytest
 
 from backend import (feature_flags, ranking_service, trade_first_page as fp, trade_gen_bilateral as bilateral,
-                     trade_gen_bilateral_candidate as candidate, trade_gen_owner as owner,
-                     trade_service as ts)
+                     trade_gen_bilateral_candidate as candidate, trade_gen_bilateral_season as season,
+                     trade_gen_owner as owner, trade_service as ts)
 from backend.eval import synthetic_league
 from backend.ranking_service import Player
 from backend.trade_roster import Asset
@@ -601,9 +614,11 @@ def test_lineup_memo_leaves_overridden_lineups_alone():
     assert "_lineup" not in vars(search)
 
 
-def test_a_finished_search_is_freed_without_the_cycle_collector(monkeypatch):
+@pytest.mark.parametrize("generator", [bilateral, season])
+def test_a_finished_search_is_freed_without_the_cycle_collector(monkeypatch, generator):
     # The memo's shadow lives on the search; it must not make a reference cycle
-    # that keeps every finished search alive until a full collection.
+    # that keeps every finished search alive until a full collection (revision 5:
+    # with usable evidence, so the season key family is used too).
     import gc
     import weakref
     created, init = [], bilateral._Search.__init__
@@ -614,7 +629,8 @@ def test_a_finished_search_is_freed_without_the_cycle_collector(monkeypatch):
     enabled = gc.isenabled()
     gc.disable()
     try:
-        fp.first_page(k=5, generator=bilateral, **small())
+        kwargs = small() if generator is bilateral else season_small("championship", 1)
+        fp.first_page(k=5, generator=generator, **kwargs)
         assert created and created[0]() is None
     finally:
         if enabled:
@@ -775,3 +791,153 @@ def test_stop_holds_exactly_the_full_generators_top_k_plus_lookahead(generator, 
     held = [identity(card) for card, _ in resumable.prefix(30)]
     expected = [identity(c) for c in sorted(full_solve(generator, seed), key=fp._quality)[:30 + fp._LOOKAHEAD]]
     assert len(held) == 61 and held == expected
+
+
+# ── Revision 5 (WI-8): the season layer on the page path ──────────────────────
+# Bounds read a season-scored team's lineup through ``_page_bound_terms``, never
+# ``_lineup_assets``; the shed term (the one post-eligibility move that can RAISE a
+# support) is bounded as points shed; the conflict demotion only lowers support.
+
+SEASON_SLOTS = ["QB", "RB", "RB", "WR", "WR", "WR", "TE"]   # synthetic_league's estimated slots
+FREE_AGENT_LEVEL = {"QB": 12.0, "RB": 7.0, "WR": 7.5, "TE": 5.0}
+
+
+def season_evidence(context, seed, *, fill=FREE_AGENT_LEVEL):
+    """Constructed usable season evidence for a synthetic league (no projection run
+    exists for synthetic players): ppg ~ sqrt(market) / 6 with noise, so many starters
+    sit below the free-agent level, except players 30 and older, who score 10-18 a week
+    whatever their market (win-now pieces); ~8% of players unprojected; every TE of teams 1-3
+    (and the viewer's for odd seeds) unprojected, so some lineups have an empty slot
+    the free-agent level fills. Deterministic per seed."""
+    rng = random.Random(seed)
+    players = {}
+    for pid in sorted(context["players"]):
+        position = context["players"][pid].position
+        if position == "PICK" or rng.random() < .08:
+            continue
+        if position == "TE" and pid[1:3] in ("01", "02", "03", *(("00",) if seed % 2 else ())):
+            continue
+        value = ts.elo_to_value(context["seed_elo"][pid])
+        ppg = value ** .5 / 6 * rng.uniform(.6, 1.4)
+        if (context["players"][pid].age or 0) >= 30:
+            ppg = rng.uniform(10, 18)  # a cheap productive veteran: season value far above dynasty
+        players[pid] = {"ppg": round(ppg, 2), "games": 4}
+    return {"schema": 1, "state": "usable", "reason": None, "source": "synthetic", "run_id": "synthetic",
+            "captured_at": "2026-11-01T00:00:00+00:00", "weeks": [10, 11, 12, 13], "slots": list(SEASON_SLOTS),
+            "players": players, "unprojected": [], "free_agent_level": dict(fill),
+            "digest": "synthetic-%d" % seed}
+
+
+def season_small(outlook, seed, matching=0.0, **overrides):
+    context = small(seed=seed, viewer_outlook=outlook, **overrides)
+    return {**context, "season_evidence": season_evidence(context, seed),
+            "config": {"season_partner_matching": matching}}
+
+
+# (viewer outlook, seed, season_partner_matching): every scored and shed direction,
+# and stage 2, where league-mates are season-scored and shed-scored too.
+_SEASON_AUDIT = [("championship", 1, 0.0), ("contender", 2, 0.0), ("rebuilder", 3, 0.0), ("jets", 4, 0.0),
+                 ("championship", 5, 1.0), ("jets", 6, 1.0), ("not_sure", 7, 1.0)]
+
+
+@pytest.mark.parametrize("outlook,seed,matching", _SEASON_AUDIT)
+def test_revision_5_bounds_are_admissible_over_the_exhaustive_universe(outlook, seed, matching, crown):
+    """I18's direct form: every level of every candidate bounds the exact weaker support
+    of the proof the generator returns, after the shed term and the demotion; the
+    support level is exact unless the demotion fired. Sabotages: bound a season team's
+    lineup from ``_lineup_assets``; ignore the shed term in the bounds."""
+    search = season._GenerationSearch(**season_small(outlook, seed, matching))
+    eligible, moved = 0, Counter()
+    with search.ts._cfg_override(search.config), search.ts.stud_tax_override("market"):
+        for (screened, pre, priced, support), give, receive, member in fp.screened_universe(search):
+            assert screened, (give, receive)
+            assert support <= priced + 1e-9 and priced <= pre + 1e-9
+            proof = search.evaluate(fp._card(search, member, give, receive))
+            if not proof.eligible:
+                continue
+            eligible += 1
+            data = proof.as_dict()
+            weaker = data["bilateral"]["weaker_support"]
+            assert weaker <= support + 1e-9, (give, receive)
+            if not data["season_signal"]["conflict"]["demotion"]:
+                assert support - weaker <= 1e-9  # the support level is the exact score
+            else:
+                moved["demoted"] += 1
+            for side in ("viewer", "counterparty"):
+                adjustments = data[side]["support"].get("season_adjustments") or {}
+                moved["shed_up"] += adjustments.get("season_lineup_shed", 0) > 1e-6
+                moved["season_need"] += data[side].get("season") is not None and data[side]["need_utility"] > 1e-6
+    assert eligible > 20
+    # Not vacuous: the season terms the bounds must cover actually moved supports.
+    if outlook in ("rebuilder", "jets") or matching:
+        assert moved["shed_up"] > 0
+    if outlook in ("championship", "contender") or matching:
+        assert moved["season_need"] > 0
+
+
+def test_revision_5_screen_uses_the_season_terms_and_the_inlined_screen_stays_revision_2s():
+    # With usable evidence the screen bounds through ``_Member.pre`` (season terms);
+    # without, revision 5 takes the inlined, bit-identical screen of revision 2.
+    on = fp.PageSearch(generator=season, **season_small("championship", 1))
+    assert on.bounds.generic and set(on.bounds.season) == {"me"}
+    off = fp.PageSearch(generator=season, **{**season_small("championship", 1), "season_evidence": None})
+    base = fp.PageSearch(generator=candidate, **small(seed=1, viewer_outlook="championship"))
+    assert not off.bounds.generic and off.bounds.season == {} and off.bounds.shed_rate == {}
+    assert sorted(off.heap) == sorted(base.heap)
+
+
+def test_season_lineup_memo_equals_the_season_lineup_and_is_tagged():
+    search = season._Search(**season_small("championship", 2, 1.0))
+    memo = fp._LineupMemo(cap=10_000)
+    memo.install(search)
+    teams = list(search.teams.values())
+    scored = [t for t in teams if search._season_scored(t)]
+    assert scored and len(scored) < len(teams)  # both key families in play
+    for team in teams:
+        for pid in sorted(team["roster"])[:6]:
+            for roster in (team["roster"] - {pid}, team["roster"] | {"p00_00"}):
+                assert search._lineup(roster, team) == type(search)._lineup(search, roster, team)
+    tagged = [key for key in memo._entries if key[0] == fp._SEASON_KEY]
+    assert tagged and len(tagged) < len(memo._entries)
+    assert all(len(key) == 4 for key in tagged)
+    assert all(len(key) == 3 and key[0] != fp._SEASON_KEY for key in memo._entries if key not in tagged)
+
+
+def test_revision_2_after_revision_5_on_the_same_league_is_revision_2s(monkeypatch):
+    """Sabotage: key a season lineup like revision 2's (shared memo key)."""
+    context = synthetic_league.build(seed=7, teams=6, players_per_team=12, viewer_outlook="championship")
+    evidence = season_evidence(context, 7)
+    monkeypatch.setattr(fp, "_LINEUP_MEMO", fp._LineupMemo(cap=50_000))
+    expected, _ = fp.PageSearch(generator=candidate, **context).take(60)
+    fp._LINEUP_MEMO.clear()
+    fp.PageSearch(generator=season, **context, season_evidence=evidence).take(60)
+    assert any(key[0] == fp._SEASON_KEY for key in fp._LINEUP_MEMO._entries)
+    hits = fp._LINEUP_MEMO.hits
+    after, report = fp.PageSearch(generator=candidate, **context).take(60)
+    assert fp._LINEUP_MEMO.hits > hits  # revision 2 shares the revision-2 entries
+    assert report.as_dict()["complete"]
+    assert [identity(c) for c in after] == [identity(c) for c in expected]
+    assert [c.owner_evaluation.snapshot_json for c in after] == [c.owner_evaluation.snapshot_json for c in expected]
+
+
+def test_an_overridden_lineup_without_the_bound_hook_is_unsupported():
+    class Override(bilateral._Search):
+        def _lineup(self, roster, team):
+            return super()._lineup(roster, team)
+    module = SimpleNamespace(_Search=Override, _rank=bilateral._rank, ARM=bilateral.ARM, VERSION="override")
+    with pytest.raises(fp.Unsupported) as raised:
+        fp.PageSearch(generator=module, **small())
+    assert raised.value.reason == "lineup_override_without_bound_terms"
+
+
+@pytest.mark.parametrize("where", ["ppg", "fill"])
+def test_a_negative_season_input_is_unsupported(where):
+    kwargs = season_small("jets", 4)
+    evidence = kwargs["season_evidence"]
+    if where == "ppg":
+        evidence["players"][sorted(evidence["players"])[0]]["ppg"] = -1.0
+    else:
+        evidence["free_agent_level"]["TE"] = -0.5
+    with pytest.raises(fp.Unsupported) as raised:
+        fp.PageSearch(generator=season, **kwargs)
+    assert raised.value.reason == "negative_season_value"

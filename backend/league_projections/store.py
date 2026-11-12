@@ -18,7 +18,15 @@ def maintenance():
     t = table()
     now = datetime.now(timezone.utc)
     from .batch import settings
-    retention = settings()["retention_days"]
+    options = settings()
+    retention = options["retention_days"]
+    # Decision 8 (operator, 2026-11-11): complete weekly BASELINE runs are
+    # kept for `baseline_retention_days` so the season's forecasts can be
+    # scored against the final order. Absent = `retention_days`, unchanged.
+    # A run kept only for scoring drops its snapshot (the pick odds live in
+    # result_json), so the extension costs the result, not the capture.
+    keep_days = options.get("baseline_retention_days", retention)
+    cutoff = (now - timedelta(days=retention)).isoformat()
     with db.engine.begin() as conn:
         conn.execute(update(t).where(t.c.status == "running", t.c.expires_at <= now.isoformat(), t.c.retry_count < 1)
                      .values(status="queued", retry_count=t.c.retry_count + 1, worker_token=None,
@@ -26,7 +34,22 @@ def maintenance():
         conn.execute(update(t).where(t.c.status.in_(("queued", "running")), t.c.expires_at <= now.isoformat())
                      .values(status="failed", reason="job_deadline_exceeded", updated_at=now.isoformat()))
         retained = select(db.league_projection_targets_table.c.last_success_id).where(db.league_projection_targets_table.c.last_success_id.is_not(None))
-        conn.execute(delete(t).where(t.c.created_at < (now - timedelta(days=retention)).isoformat(), t.c.run_id.not_in(retained)))
+        kept = []
+        if keep_days > retention:
+            old = conn.execute(select(t.c.run_id, t.c.input_json).where(
+                t.c.created_at < cutoff, t.c.created_at >= (now - timedelta(days=keep_days)).isoformat(),
+                t.c.status == "complete", t.c.run_id.not_in(retained))).all()
+            kept = [run_id for run_id, text in old if _is_baseline(text)]
+            if kept:
+                conn.execute(update(t).where(t.c.run_id.in_(kept), t.c.snapshot_json.is_not(None)).values(snapshot_json=None))
+        conn.execute(delete(t).where(t.c.created_at < cutoff, t.c.run_id.not_in(retained), t.c.run_id.not_in(kept)))
+
+
+def _is_baseline(input_json):
+    try:
+        return json.loads(input_json or "{}").get("kind") == "baseline"
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def create(user_id, league_id, inputs, *, target_lease=None, snapshot=None):

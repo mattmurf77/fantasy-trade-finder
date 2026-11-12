@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player, FitBlockTeam } from '../shared/types';
+import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player, FitBlockTeam, SeasonBlock, SeasonLabel } from '../shared/types';
 import type { CalcGap } from './calc';
 
 // ── Paged deck responses (200 ms path: E2, P1, P2) ───────────────────
@@ -99,6 +99,50 @@ function asArray<T>(res: any): T[] {
   if (Array.isArray(res?.trades)) return res.trades as T[];
   if (Array.isArray(res?.matches)) return res.matches as T[];
   return [];
+}
+
+// ── Season block (win-now season signal, template season-1) ─────────
+// lld §5.2 / §5.3. Validated field by field: an unknown `v` drops the whole
+// block; any malformed or over-long piece is dropped on its own (never
+// truncated: the app prints server text verbatim or not at all). With no
+// line, label or conflict left the block is undefined, as the server never
+// sends an empty one. Pure, no imports: tests/check-season-signal.js runs it.
+export const SEASON_LINE_MAX = 80;
+export const SEASON_LABEL_TEXT_MAX = 24;
+export const SEASON_CONFLICT_MAX = 200;
+export const SEASON_LABELS_MAX = 12;
+export function normalizeSeasonBlock(raw: any): SeasonBlock | undefined {
+  if (!raw || typeof raw !== 'object' || raw.v !== 'season-1') return undefined;
+  const text = (s: any, max: number): s is string =>
+    typeof s === 'string' && s.length > 0 && s.length <= max;
+  const finite = (n: any): n is number => typeof n === 'number' && Number.isFinite(n);
+  const block: SeasonBlock = { v: 'season-1' };
+  if (text(raw.line, SEASON_LINE_MAX)) block.line = raw.line;
+  if (finite(raw.season_pts_week)) block.season_pts_week = raw.season_pts_week;
+  if (finite(raw.dynasty_pct) && raw.dynasty_pct >= 0) block.dynasty_pct = raw.dynasty_pct;
+  if (raw.dynasty_dir === 'cost' || raw.dynasty_dir === 'gain' || raw.dynasty_dir === 'even') {
+    block.dynasty_dir = raw.dynasty_dir;
+  }
+  if (Number.isInteger(raw.weeks) && raw.weeks >= 0) block.weeks = raw.weeks;
+  if (raw.as_of === null || (typeof raw.as_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.as_of))) {
+    block.as_of = raw.as_of;
+  }
+  if (Array.isArray(raw.labels)) {
+    const seen = new Set<string>();
+    const labels: SeasonLabel[] = [];
+    for (const l of raw.labels) {
+      if (labels.length >= SEASON_LABELS_MAX) break;
+      if (!text(l?.id, 64) || seen.has(l.id) || typeof l?.label !== 'string'
+          || !text(l?.text, SEASON_LABEL_TEXT_MAX)) continue;
+      seen.add(l.id);
+      labels.push({ id: l.id, label: l.label, text: l.text, starts_for_you: l.starts_for_you === true });
+    }
+    if (labels.length) block.labels = labels;
+  }
+  if (typeof raw.conflict?.code === 'string' && text(raw.conflict?.text, SEASON_CONFLICT_MAX)) {
+    block.conflict = { code: raw.conflict.code, text: raw.conflict.text };
+  }
+  return block.line || block.labels || block.conflict ? block : undefined;
 }
 
 // ── Trade-card normalizer ────────────────────────────────────────────
@@ -224,6 +268,7 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
               : [],
           }))
       : [];
+  const seasonBlock = normalizeSeasonBlock(raw?.season_block);
   // WS8 revised-offer card (flag trade.next_move): validated so a malformed
   // payload degrades to an ordinary card.
   const revisedOffer: { kind: 'revision' | 'middle_ground'; line: string } | undefined =
@@ -328,6 +373,8 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
     partner_fit:        partnerFit,
     // WS4b fit block — only well-formed teams pass; none ⇒ key absent.
     ...(fitTeams.length ? { fit_block: { v: 'fit-2' as const, teams: fitTeams } } : {}),
+    // Season signal — only a block with something to show; otherwise absent.
+    ...(seasonBlock ? { season_block: seasonBlock } : {}),
     // WS8 — only a well-formed revised_offer passes; otherwise key absent.
     ...(revisedOffer ? { revised_offer: revisedOffer } : {}),
     match_context:      matchContext,

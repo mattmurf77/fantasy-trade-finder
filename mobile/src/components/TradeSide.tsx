@@ -1,6 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MemberEnteredMarker from './MemberEnteredMarker';
+import ProjectedPickTag from './ProjectedPickTag';
+import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import { Button, Card, Icon, TickLabel } from './chalkline';
@@ -71,7 +73,11 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
         {players.length === 0 ? (
           <Text style={styles.empty}>No players yet — add someone to start the trade.</Text>
         ) : (
-          players.map((p) => (
+          players.map((p) => {
+            // Projected draft slot (utils/projectedPick): a valid pair prints
+            // `proj_name` and the flare tag; otherwise `p.name`, as before.
+            const proj = projectedPick(p);
+            return (
             <View key={p.id} style={[styles.row, compact && styles.rowCompact]}>
               {/* #320 — fixed-width chip slot: PICK (4 chars) is wider than
                   QB/RB/WR/TE, so a self-sized chip pushed pick rows' names
@@ -93,12 +99,25 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                     never dropped — the hex is a cross-client data
                     encoding). Still one line: wrapping was declined. */}
                 {compact ? (
-                  <Text style={[type.title, styles.compactName]} numberOfLines={1}>
-                    {p.name}
+                  <Text
+                    style={[type.title, styles.compactName]}
+                    numberOfLines={1}
+                    accessibilityLabel={proj ? `${proj.name}, ${projectedPickA11y(proj)}` : undefined}
+                  >
+                    {proj ? proj.name : p.name}
                   </Text>
                 ) : (
-                  <Text style={type.title}>{p.name}</Text>
+                  <Text
+                    style={type.title}
+                    accessibilityLabel={proj ? `${proj.name}, ${projectedPickA11y(proj)}` : undefined}
+                  >
+                    {proj ? proj.name : p.name}
+                  </Text>
                 )}
+                {/* The tag gets its own line under the name: column mode's
+                    meta line is already chip + text + tier on ~97pt, and
+                    the name line is one line by ruling (#411). */}
+                {proj ? <ProjectedPickTag short={compact} /> : null}
                 <View style={compact ? styles.compactMetaLine : undefined}>
                   {compact ? (
                     // #411 — the chip leads the meta line. flexShrink 0: a
@@ -182,7 +201,8 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                 <Icon name="x" size={16} />
               </Pressable>
             </View>
-          ))
+            );
+          })
         )}
 
         {/* Wrapped rather than ref-forwarded: `Button` is shared across the
