@@ -26,7 +26,7 @@ The build sits beside Test Stages and does not change it. Its leagues live in a 
 
 - **New or changed tables/columns:** none. Every row the test profile writes uses existing account-scoped tables, keyed by its own id. Reset is a scoped `DELETE`, not a migration.
 - **New feature flag:** `dev.test_profile`.
-  - Default `False` in `feature_flags.py` and `false` in `config/features.json`.
+  - Default `False` in `feature_flags.py`. Shipped `true` in `config/features.json` from 2026-11-12 (D-247); it stays inert for every account not in the env var.
   - Mirrored in `backend/tests/fixtures/flags/{release,onboarding-v2,profiles-on}.json`.
   - Graduation criterion: none. It is an operator tool and stays an allow-listed tool.
 - **New env var:** `TEST_PROFILE_ACCOUNTS`, a comma-separated list of real working keys (Sleeper user id or `acct_*`).

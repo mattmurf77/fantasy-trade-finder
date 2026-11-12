@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-12 — Onboarding test profile: be a new user with your own leagues, then switch back (D-247)
+
+- **What it is:** Settings › Testing gains "Test profile" for allow-listed accounts. It signs the device in as a brand-new user whose only link to the real account is that it can reach the same ESPN, MFL and Sleeper leagues. A banner shows while it is active, with Switch back and Reset.
+- **Real data:** untouched. The test profile's rows live under their own ids; tests compare the real account's rows byte for byte before and after a full onboarding.
+- **Linking** runs the production flows on all three platforms. Nothing is sent to a platform and no league-mate is notified from a test profile.
+- **State:** flag `dev.test_profile` on; env `TEST_PROFILE_ACCOUNTS` holds the operator's account only. Two independent reviews; all findings fixed. Needs the next app build. Not verified on a device or against live platforms: the checklist is design.md §9.3.
+
 ## 2026-11-12 — Two league-mates can link the same ESPN or MFL league (D-246, G-077)
 
 - **The bug:** a second manager linking the same league overwrote the first one's team: the league vanished for them, or they saw the other roster, or were told they had used the wrong account; the second linker could not send at all. Same defect on MFL and Fleaflicker.

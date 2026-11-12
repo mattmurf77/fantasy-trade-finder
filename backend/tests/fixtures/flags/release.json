@@ -196,7 +196,7 @@
   "testing.stage_users": false,
   "testing.timing_readout": false,
   "_comment_test_profile": "Onboarding test profile (docs/plans/onboarding-test-profile/, backend/test_profile.py). dev.test_profile gates /api/test-profile/* and the Settings > Testing row \"Test onboarding as a new user\". It is inert unless the account is ALSO listed in the server env var TEST_PROFILE_ACCOUNTS (comma-separated real working keys); the tester allow-list and device ids are never consulted. Default false.",
-  "dev.test_profile": false,
+  "dev.test_profile": true,
   "_comment_tiktok_discovery": "2026-07-26 TikTok-discovery deck engine (docs/plans/tiktok-discovery/). Flags flipped ON per-wave at each TestFlight ship. deck.value_model stays dark until an F8 replay win (PRD F6 gate). F8 eval harness is unflagged operator tooling.",
   "deck.signal_v2": true,
   "deck.thompson_v2": true,

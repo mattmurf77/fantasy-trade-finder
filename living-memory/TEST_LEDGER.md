@@ -1,3 +1,14 @@
+## 2026-11-12 — Onboarding test profile (D-247), branch `feat/onboarding-test-profile`
+
+- **Full backend suite (Opus subagent, no edits in flight, before the last merge of main):** 15,168 passed, 0 failed. **Main session after merging main (#666 included) and turning the flag on:** the four `test_test_profile*.py` files, the pipeline digest, `test_receipts_append_only.py`, `test_platform_league_binding.py` and `test_research_trade_pipeline.py`: 229 passed. The full suite after the merge is the CI run on the PR.
+- **App (main session):** `tsc --noEmit` clean; `check-test-profile.js` 98 checks, `check-test-profile-swap.js` 3,364 checks (every crash point of the device swap), settings IA and update gate pass; testid-lint OK. Subagent: 178 of 178 `check-*.js` before the merge.
+- **What is pinned:** allow-list and flag inertness; no request can name a target id; a normal sign-up never mints a `qa_tp_` id; every onboarding gate reads as a new user; the real account's rows byte-identical after a full onboarding on ESPN, MFL and Sleeper; zero pushes, inbox rows or platform writes from a test profile; the request fence over path, query, form and body; the database write fence; crons, learning signals and analytics skip it; reset covers every identity column in the schema; a dead test token never mints a real session; isolation holds on real background threads.
+- **Reviews:** two independent read-only reviews (isolation; impact on real users). Four medium and eleven low findings, all fixed, each with a sabotage-proven test (design.md §13, §14).
+- **Sabotages:** every test red on its break and green on restore. Three removals stay green because another layer holds; they are listed in design.md §13 as expected.
+- **`test_receipts_append_only.py`:** main's version (#666, parent map) replaces the branch's narrower patch.
+- **Not verified:** anything on a device (stash and restore, the banner, the re-link prompt); live ESPN, MFL or Sleeper sign-in inside the profile; a real Postgres instance. The operator checklist is design.md §9.3.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Per-user team binding for linked platform leagues (D-246), branch `fix/platform-league-user-binding`
 
 - **Full backend suite (Opus subagent, no edits in flight):** 15,094 passed, 42 skipped, **1 failed**: `test_research_trade_pipeline.py::test_instrumentation_preserves_function_result_and_rejects_drift`, a `RecursionError` in `copy.deepcopy` of a small AST, unrelated to the touched code; it passes 4 of 4 alone. Not shown to fail on main. CI is the re-run.

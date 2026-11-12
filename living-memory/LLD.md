@@ -218,6 +218,7 @@ Changes to any of these MUST update [`../docs/cross-client-invariants.md`](../do
 4. **Goal-driven execution** — define verifiable success criteria; loop until met.
 
 ### Specific patterns
+- **A `qa_tp_` id is a test profile, as a pure function of the id** (2026-11-12, D-247). `qa_tp_<real>` user, `qa_tp:<real>:<native>` league, `qa_tpo_<hex>` league-mate; classify with `test_profile.is_test_profile_id` / `is_test_league_id` / `is_test_world_id`, never a substring match. A linking route stores a platform league id through `test_profile.storage_league_id` and builds platform URLs through `native_league_id`; a Sleeper read with a session id goes through `server._sleeper_identity`. A new background loader over users or leagues skips test-world ids. AST tests fail on a site that skips a seam.
 - **A per-user fact never lives on a shared row** (2026-11-12, D-246, G-077). "My team" in a linked ESPN / MFL / Fleaflicker league is a `platform_league_bindings` row read through `database.get_platform_binding`; the shared `leagues` and `league_members` rows hold league facts only. No binding fails closed. Test any per-user fact about a league with two users in that league.
 - **Layer code is pure where possible.** `ranking_service.py` and `trade_service.py` operate on inputs + return outputs; persistence is wrapped at the route layer.
 - **No magic numbers in service code.** Tunables go in `config/features.json` or `model_config` table. Document new keys in [`../docs/config-reference.md`](../docs/config-reference.md).

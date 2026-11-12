@@ -1,5 +1,19 @@
 # Decisions — Fantasy Trade Finder
 
+## D-247 — The onboarding test profile is a second identity derived from the operator's own id, living in its own namespace
+
+**Date:** 2026-11-12 · **Who:** the operator: "take on the identity of a new app user so I can test onboarding… ensure that my actual user data is retained and ensure that I can decide when to flip back"; 2026-11-11 "League linking is the one thing I really want to be able to test"; 2026-11-12 "I want to cover sleeper testing too". The namespace design, the fences and the flag being on are the builder's and the main session's calls. Plan: [`../docs/plans/onboarding-test-profile/`](../docs/plans/onboarding-test-profile/). (D-243 and D-244 are on the seller-labels branch.)
+**Context:** Test Stages replays canned states and cannot run the real linking flows. Resetting the operator's own account would destroy real rankings and history. A separate real account cannot reuse the operator's ESPN, MFL and Sleeper leagues.
+**Decision:** A test profile is the id `qa_tp_<real id>`, a pure function of the real working key: nothing stores the mapping and no request can name a target. Its leagues are stored as `qa_tp:<real>:<native id>` and its league-mates as `qa_tpo_<hex>`, written by the production linking flows through one write seam (`test_profile.storage_league_id`) and read back to the platform through `native_league_id`. Sleeper reads use `server._sleeper_identity`, which returns the real id only to make the read. Access needs the flag `dev.test_profile` **and** the real id in env `TEST_PROFILE_ACCOUNTS`; otherwise every route is 404 and a `tp.` token is refused. The flag ships on; the env var holds the operator's account only.
+**Consequences:**
+- Four guards hold isolation, each proven alone by sabotage: a request fence (a real or anonymous caller naming a test league gets 404), a database write fence (a test request cannot write a real id), an outbound chokepoint (no push, inbox row or platform write leaves a test profile), and loader exclusions (crons, global learning signals and analytics skip it).
+- Linking in the test profile uses the operator's real platform sign-ins. The real account may have to sign in to ESPN or MFL again afterwards; the operator accepted that.
+- Reset is a scoped delete driven by the schema: a test fails if a new identity column is not covered or listed with a reason.
+- The device swap (`mobile/src/utils/testProfileSwap.ts`) is crash-safe: the real session is stashed before the switch and restored on any interrupted step.
+- `submit_rankings` now enforces league membership for every user. It was unchecked before.
+- League-mates' names appear in the test profile's own rows, as they do in the real profile.
+- Rejected: wiping the real account; a second real account; a canned linking shortcut (built, then removed on the 2026-11-11 ruling).
+
 ## D-246 — "My team" in a linked ESPN, MFL or Fleaflicker league is a per-user binding, never a league fact
 
 **Date:** 2026-11-12 · **Who:** the operator: "fix the ESPN overwrite bug". The model, the backfill rules and no feature flag are the builder's and the main session's calls. Plan: [`../docs/plans/platform-league-binding/`](../docs/plans/platform-league-binding/). (D-243 to D-245 are taken by work on other branches.)
