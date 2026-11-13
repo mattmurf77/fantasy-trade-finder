@@ -23,9 +23,12 @@ c. during a run only: a NAME VALUE seen in a name field (held in memory,
    bytes and cells, any text file) is split into words (``\\w+``); a name hits
    when its word sequence appears anywhere, so a name inside a longer string
    is found when it sits on word boundaries, and a name whose first word has
-   6+ characters is found glued inside a longer word. Names that are a single word of
-   1-2 characters, or a single all-digit word, or in the store's own
-   vocabulary, are not value-checked (they would hit everywhere).
+   6+ characters is found glued inside a longer word. A name that is a single
+   word the store legitimately holds as a value (``is_stored_scalar``: any
+   number, a player-id or team-code shape, a 1-2 character token, a vocabulary
+   word) cannot be told apart from data: it is not value-checked, and the
+   number of such names is reported as ``ambiguous_names_skipped`` (a team
+   named '2025' failed the pilot's scan against the stored season '2025').
 
 d. any number cell of 1e15 or more (no stored number is that large; an id
    stored as a number is caught even after a REAL lost its low digits).
@@ -110,6 +113,19 @@ def id_candidates(text: str) -> set:
 
 
 GLUE_MIN = 6
+
+
+def is_stored_scalar(word: str) -> bool:
+    """A single word that the store holds as a legitimate value: any number
+    (seasons, ids, points), anything shaped like a player id or team code,
+    a 1-2 character token, or a word of the store's vocabularies (statuses,
+    types, slots, positions, scoring words). A name equal to one of these
+    cannot be told apart from data by string equality."""
+    from . import identity as ident
+    return (word.isdigit() or len(word) < 3 or bool(ident._PLAYER_RE.match(word))
+            or word in VOCAB or word in ident.SLOTS or word in ident.POSITIONS
+            or word in ident.LEAGUE_STATUS or word in ident.TXN_TYPES
+            or word in ident.DRAFT_TYPE or word in ident.SCORING_WORDS)
 _HEXKEY_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -120,11 +136,15 @@ class _NameIndex:
 
     def __init__(self, names):
         self.by_first = defaultdict(set)
-        for n in names or ():
-            if not isinstance(n, str) or n in VOCAB:
+        self.ambiguous = 0
+        for n in set(names or ()):
+            if not isinstance(n, str):
                 continue
             words = tuple(WORD_RE.findall(n))
-            if not words or (len(words) == 1 and (len(words[0]) < 3 or words[0].isdigit())):
+            if not words or (len(words) == 1 and is_stored_scalar(words[0])) or n in VOCAB:
+                # Indistinguishable from a value the store legitimately holds
+                # (a team named '2025' equals a stored season): skipped, COUNTED.
+                self.ambiguous += 1
                 continue
             self.by_first[words[0]].add(words)
         self.long_first = [w for w in self.by_first if len(w) >= GLUE_MIN]
@@ -177,7 +197,8 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
     res = {"ok": True, "files_scanned": 0, "bytes_scanned": 0, "field_hits": {},
            "id_hits": {}, "raw_id_hits": {}, "name_hits": {},
            "excluded": sorted(str(p.relative_to(data_dir)) for p in excluded),
-           "name_values_checked": len(idx), "numeric_hits": {},
+           "name_values_checked": len(idx), "ambiguous_names_skipped": idx.ambiguous,
+           "numeric_hits": {},
            "raw_ids_checked": len(raw_ids),
            "not_checked": list(REPORT_CANNOT_CHECK) if report_mode else []}
     checked: dict = {}
@@ -270,9 +291,36 @@ def _dist(xs) -> dict:
             "max": xs[-1], "min": xs[0]}
 
 
+def _agree(rows, key) -> dict:
+    """Agreement over a 0/1 column. NULL is 'not derived' (a row written by an
+    older derive that had no such column), never counted as a disagreement."""
+    vals = [r[key] for r in rows]
+    yes, no = sum(1 for v in vals if v == 1), sum(1 for v in vals if v == 0)
+    return {"agree": yes, "disagree": no, "not_derived": sum(1 for v in vals if v is None),
+            "share_agree": round(yes / (yes + no), 4) if (yes + no) else None}
+
+
+def derive_status(conn) -> dict:
+    from .derive import DERIVED_VERSION
+    row = conn.execute("SELECT value FROM meta WHERE key='derived_version'").fetchone()
+    have = row[0] if row else None
+    derived = conn.execute("SELECT COUNT(*) FROM pull_checkpoints").fetchone()[0] > 0
+    return {"store": have, "code": DERIVED_VERSION,
+            "current": (not derived) or have == DERIVED_VERSION}
+
+
 def build_report(conn) -> dict:
     q = lambda sql, *a: conn.execute(sql, a).fetchall()  # noqa: E731
     rep: dict = {}
+    ds = derive_status(conn)
+    rep["derived_version"] = ds
+    if not ds["current"]:
+        rep["derive_needed"] = ("derived tables (trades, reconstruction, standings) were "
+                                "written by an older derive; run `derive`, then `report`")
+    rule = conn.execute("SELECT value FROM meta WHERE key='snapshot_rule'").fetchone()
+    rep["snapshot_rule"] = rule[0] if rule else None
+    rep["empty_snapshot_rows_not_compared"] = q(
+        "SELECT COUNT(*) FROM roster_weeks WHERE played=1 AND players_json='[]'")[0][0]
     pulled = q("SELECT league_id, season, requests, seconds FROM pull_checkpoints")
     tcount = {r[0]: r[1] for r in q("SELECT league_id, COUNT(*) FROM trades GROUP BY league_id")}
     rep["league_seasons_pulled"] = len(pulled)
@@ -297,7 +345,7 @@ def build_report(conn) -> dict:
     checks = q("SELECT kind, matched FROM reconstruction_checks")
     rk = defaultdict(lambda: [0, 0])
     for c in checks:
-        rk[c["kind"]][0] += c["matched"]
+        rk[c["kind"]][0] += c["matched"] or 0
         rk[c["kind"]][1] += 1
     rep["reconstruction_match"] = {k: {"matched": v[0], "checked": v[1],
                                        "rate": round(v[0] / v[1], 4) if v[1] else None}
@@ -305,7 +353,7 @@ def build_report(conn) -> dict:
     rep["reconstruction_target"] = 0.98
     ls = q("SELECT league_id, SUM(matched)*1.0/COUNT(*) AS s FROM reconstruction_checks"
            " WHERE kind='in_season' GROUP BY league_id")
-    rep["league_seasons_below_target"] = sum(1 for r in ls if r["s"] < 0.98)
+    rep["league_seasons_below_target"] = sum(1 for r in ls if r["s"] is not None and r["s"] < 0.98)
     rep["trades_by_recon_method"] = {r[0]: r[1] for r in q(
         "SELECT recon_method, COUNT(*) FROM trades GROUP BY recon_method ORDER BY 1")}
     agree = q("SELECT recon_agree, COUNT(*) FROM trades WHERE recon_agree IS NOT NULL"
@@ -370,17 +418,16 @@ def build_report(conn) -> dict:
     sc = q("SELECT status, matched, record_matched, points_matched, kinds_json FROM standings_checks")
     kinds = Counter()
     for r in sc:
-        for k, n in json.loads(r["kinds_json"]).items():
+        for k, n in json.loads(r["kinds_json"] or "{}").items():
             kinds[k] += n
+    both, recs, pts = _agree(sc, "matched"), _agree(sc, "record_matched"), _agree(sc, "points_matched")
     rep["standings_vs_reported"] = {
-        "league_seasons": len(sc), "agree": sum(r["matched"] for r in sc),
-        "records_agree": sum(r["record_matched"] for r in sc),
-        "points_agree": sum(r["points_matched"] for r in sc),
-        "share_records_agree": round(sum(r["record_matched"] for r in sc) / len(sc), 4) if sc else None,
-        "share_points_agree": round(sum(r["points_matched"] for r in sc) / len(sc), 4) if sc else None,
-        "share_agree": round(sum(r["matched"] for r in sc) / len(sc), 4) if sc else None,
-        "by_status": {st: {"n": sum(1 for r in sc if r["status"] == st),
-                           "agree": sum(r["matched"] for r in sc if r["status"] == st)}
+        "league_seasons": len(sc), "agree": both["agree"],
+        "records_agree": recs["agree"], "points_agree": pts["agree"],
+        "share_agree": both["share_agree"], "share_records_agree": recs["share_agree"],
+        "share_points_agree": pts["share_agree"],
+        "not_derived": max(both["not_derived"], recs["not_derived"], pts["not_derived"]),
+        "by_status": {st: _agree([r for r in sc if r["status"] == st], "matched")
                       for st in sorted({r["status"] for r in sc if r["status"]})},
         "disagreement_kinds_rosters": dict(sorted(kinds.items()))}
     rep["standings_rank_rule"] = "combined win pct, then points for, then roster id"
@@ -402,6 +449,8 @@ def build_report(conn) -> dict:
 
 def format_report(rep: dict, leak: dict) -> str:
     lines = ["Sleeper trade universe -- report (aggregates only)", ""]
+    if rep.get("derive_needed"):
+        lines += [f"DERIVE NEEDED: {rep['derive_needed']}", ""]
     for k, v in rep.items():
         lines.append(f"{k}: {json.dumps(v, sort_keys=False)}")
     lines.append("")
@@ -410,6 +459,7 @@ def format_report(rep: dict, leak: dict) -> str:
                  f"field hits {len(leak['field_hits'])} files, id hits {sum(leak['id_hits'].values())}, "
                  f"raw-id hits {sum(leak['raw_id_hits'].values())}, "
                  f"name hits {sum(leak['name_hits'].values())}; "
+                 f"ambiguous names skipped: {leak.get('ambiguous_names_skipped', 0)}; "
                  f"excluded {', '.join(leak['excluded'])})")
     for kind in ("field_hits", "id_hits", "raw_id_hits", "name_hits"):
         for f, n in leak[kind].items():

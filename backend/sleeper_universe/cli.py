@@ -7,7 +7,8 @@ Logs carry league ids and counts only: never a seed, username, user id or name.
 
 Exit codes: 0 ok; 1 error; 3 stopped on 429s; 4 leak scan failed; 5 blocked
 (403 / Cloudflare); 6 a 200 that is not JSON; 7 circuit breaker (outage or
-three failed leagues in a row); 8 another crawler process holds the lock.
+three failed leagues in a row); 8 another crawler process holds the lock;
+9 report: derived tables were written by an older derive (run ``derive``).
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ DEFAULT_SEASONS = (2024, 2025, 2026)
 # time, whatever folder it writes, so the request rate cannot be multiplied.
 LOCK_PATH = Path("/tmp/ftf-sleeper-universe-crawler.lock")
 LOCK_HELD_EXIT = 8
+DERIVE_NEEDED_EXIT = 9
 REQUESTS_PER_LEAGUE_SEASON = 44
 DISCOVERY_REQUESTS_PER_LINEAGE = 8   # estimate; the pilot measures it
 
@@ -116,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"requests per second (max {MAX_RATE})")
     p.add_argument("--max-429", type=int, default=5,
                    help=f"stop after N consecutive 429s (1 to {MAX_429})")
+    p.add_argument("--nfl-schedule", type=Path, default=None,
+                   help="nflverse games CSV; with --player-teams, snapshots use each "
+                        "player's own kickoff (derive, pull, run)")
+    p.add_argument("--player-teams", type=Path, default=None,
+                   help='JSON {"<season>": {"<player_id>": "<team>"}} or {"<player_id>": "<team>"}')
     p.add_argument("--key-file", type=Path, default=None,
                    help="HMAC key file (default ~/.config/ftf-sleeper-universe/hmac.key; "
                         "must be outside the data folder)")
@@ -163,10 +170,12 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
         else:
             log(format_report(rep, leak))
         store.close()
+        if rep.get("derive_needed"):
+            return DERIVE_NEEDED_EXIT
         return 0 if leak["ok"] else 4
 
     if args.command == "derive":
-        log(json.dumps(derive_all(store.conn)))
+        log(json.dumps(derive_all(store.conn, clock=_clock(args))))
         store.close()
         return 0
 
@@ -215,7 +224,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
             log(f"pull: {json.dumps(summary['pull'])}")
             if client.nulls:
                 log(f"null answers accepted as none, by endpoint: {json.dumps(dict(client.nulls))}")
-            summary["derive"] = derive_all(store.conn)
+            summary["derive"] = derive_all(store.conn, clock=_clock(args))
             log(f"derive: {json.dumps(summary['derive'])}")
         status, code = "ok", 0
     except HardStop as e:
@@ -232,13 +241,24 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
     # The scan runs after everything the run writes, finish_run included. Its
     # own result (file names and counts only) is the one write after it.
     leak = leak_scan(data_dir, ring, names=col.names, raw_ids=col.raw_user_ids)
-    log(f"leak scan: {'PASS' if leak['ok'] else 'FAIL'} ({leak['files_scanned']} files)")
+    log(f"leak scan: {'PASS' if leak['ok'] else 'FAIL'} ({leak['files_scanned']} files; "
+        f"ambiguous names skipped: {leak.get('ambiguous_names_skipped', 0)})")
     store = Store(data_dir)
     store.record_leak(run_id, leak)
     store.close()
     if not leak["ok"] and code == 0:
         code = 4
     return code
+
+
+def _clock(args):
+    from .reconstruct import SnapshotClock, load_kickoffs
+    if bool(args.nfl_schedule) != bool(args.player_teams):
+        raise SystemExit("--nfl-schedule and --player-teams go together")
+    if not args.nfl_schedule:
+        return SnapshotClock()
+    return SnapshotClock(load_kickoffs(args.nfl_schedule),
+                         json.loads(Path(args.player_teams).read_text()))
 
 
 if __name__ == "__main__":

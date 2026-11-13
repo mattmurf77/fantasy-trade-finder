@@ -271,7 +271,7 @@ class World:
             sched.append((tw + 1 * HOUR, ("waiver", w)))
             sched.append((tw + 2 * HOUR, ("failed_waiver", w)))
             sched.append((tw + 3 * HOUR, ("free_agent", w)))
-            sched.append((tw + 6 * DAY, ("snapshot", w)))
+            sched.append((sunday_snapshot(season, w), ("snapshot", w)))
         if spec.get("status", "complete") == "complete":
             sched.append((t0 + played * 7 * DAY + DAY, ("post_season", played + 1)))
         # Partial / future weeks for a season in progress.
@@ -318,9 +318,18 @@ class World:
             elif kind == "snapshot":
                 self.truth_week_rosters[(lid, w)] = {r: set(v) for r, v in rosters.items()}
                 week_points[w] = self._week_rows(spec, w, rosters, n, pws, partial=False)
+                if spec.get("empty_row") and spec["empty_row"][0] == w:
+                    # A row Sleeper returns with no players (no lineup set):
+                    # not a snapshot of that roster.
+                    row = next(x for x in week_points[w] if x["roster_id"] == spec["empty_row"][1])
+                    row.update(players=[], starters=[], starters_points=[], players_points={})
         if not draft_done:
             picks = make_picks()
             self._apply_picks(rosters, picks)
+        if spec.get("silent_final_edit"):
+            # An end-of-season roster change with no transaction (a commissioner
+            # edit): visible only in the final /rosters and in what follows.
+            rosters[spec["silent_final_edit"]].add(self.pid())
         self.routes[f"draft/{did}/picks"] = picks
         self.draft_picks_truth = getattr(self, "draft_picks_truth", {})
         self.draft_picks_truth[lid] = picks
@@ -520,6 +529,13 @@ def _trade(api, leg, ts, moves, picks=(), faab=()):
                       faab=[{"sender": a, "receiver": b, "amount": x} for a, b, x in faab])
 
 
+def sunday_snapshot(season, week):
+    """When the simulator takes week ``week``'s matchup snapshot: Sunday 13:00
+    US Eastern (17:00 UTC in September and October, all the simulated weeks).
+    SEASON_START is the Tuesday before NFL week 1's Thursday."""
+    return SEASON_START[season] + 2 * DAY + (week - 1) * 7 * DAY + 3 * DAY + 17 * HOUR
+
+
 def week_ts(season, week, hours):
     return SEASON_START[season] + (week - 1) * 7 * DAY + DAY + hours * HOUR
 
@@ -553,7 +569,11 @@ def standard_world() -> World:
     w.lineage([
         {"n": 101, "season": 2024, "teams": 8, "owners": owners8, "co_owners": {2: [9]},
          "status": "complete", "reg_weeks": 3, "played": 5, "rounds": 10,
+         "empty_row": (3, 8), "silent_final_edit": 6,
          "script": [
+             # booked in leg 2, on the Monday AFTER week 2's snapshot instant
+             (week_ts(2024, 2, 5 * 24 + 18), lambda api, ts: api["txn"](
+                 2, ts, "free_agent", {api["pid"](): 3}, None, [3])),
              (week_ts(2024, 2, 5), lambda api, ts: _trade(
                  api, 2, ts, [(1, 3, 0), (3, 1, 0)], picks=[(2025, 1, 3, 3, 1)])),
              (week_ts(2024, 2, 6), lambda api, ts: _trade(

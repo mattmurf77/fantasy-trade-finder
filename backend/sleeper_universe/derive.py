@@ -15,6 +15,9 @@ from . import standings as stnd
 from .store import DERIVED_TABLES
 
 DAY_MS = 24 * 3600 * 1000
+# Bumped whenever derived tables change meaning or columns; report refuses to
+# read derived tables written by an older derive (exit 9: run derive).
+DERIVED_VERSION = "3"
 RECON_TARGET = 0.98
 STARTUP_DRAFT_MIN_ROUNDS = 10
 
@@ -123,7 +126,10 @@ class _SeasonCache:
     __getitem__ = get
 
 
-def derive_all(conn, log=print) -> dict:
+def derive_all(conn, log=print, clock=None) -> dict:
+    """``clock``: the snapshot clock (reconstruct.SnapshotClock); the fixed
+    Sunday 13:00 Eastern rule when None. Its rule is recorded in meta."""
+    clock = clock or rc.DEFAULT_CLOCK
     conn.execute("BEGIN")
     try:
         for table in DERIVED_TABLES:
@@ -147,7 +153,7 @@ def derive_all(conn, log=print) -> dict:
             _insert(conn, "standings_checks", stnd.check_reported(conn, lid, final))
             sd = seasons[lid]
             prev = seasons.get(sd.previous_league_id) if sd.previous_league_id else None
-            checks = rc.verify_season(sd, prev)
+            checks = rc.verify_season(sd, prev, clock)
             for row in checks:
                 _insert(conn, "reconstruction_checks", row)
             ins = [c for c in checks if c["kind"] == "in_season"]
@@ -202,7 +208,7 @@ def derive_all(conn, log=print) -> dict:
                 st = rc.state_for_trade(sd, prev, {
                     "transaction_id": t["transaction_id"], "leg": t["leg"],
                     "status_updated": t["status_updated"], "created": t["created"],
-                    "roster_ids": t["roster_ids"]})
+                    "roster_ids": t["roster_ids"]}, clock)
                 for rid, players in st["rosters"].items():
                     _insert(conn, "trade_rosters", {
                         "league_id": lid, "transaction_id": t["transaction_id"],
@@ -249,6 +255,9 @@ def derive_all(conn, log=print) -> dict:
                     "recon_method": st["method"], "recon_agree": st["alt_agrees"],
                     "flags_json": _j(sorted(set(flags)))})
                 n_trades += 1
+        conn.execute("INSERT OR REPLACE INTO meta VALUES ('snapshot_rule', ?)", (clock.rule,))
+        conn.execute("INSERT OR REPLACE INTO meta VALUES ('derived_version', ?)",
+                     (DERIVED_VERSION,))
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
