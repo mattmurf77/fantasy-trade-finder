@@ -390,12 +390,17 @@ const planBody = planStart === -1
   const ts = require('typescript');
   const count = (hay, needle) => hay.split(needle).length - 1;
   const fnSrc = (src, name) => (new RegExp(`\\nfunction ${name}\\([\\s\\S]*?\\n\\}\\n`).exec(src) || [''])[0];
+  // The one playoff-odds rule (D-262), executed for real and in scope for
+  // extracted functions that call it.
+  const playoffOdds = {};
+  new Function('exports', ts.transpileModule(read(path.join(ROOT, 'src/utils/playoffOdds.ts')),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(playoffOdds);
   const load = (src, names) => {
     const lib = {};
-    new Function('exports', ts.transpileModule(
+    new Function('exports', 'playoffOddsText', ts.transpileModule(
       `${src}\n${names.map((n) => `exports.${n} = ${n};`).join('\n')}`,
       { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
-    ).outputText)(lib);
+    ).outputText)(lib, playoffOdds.playoffOddsText);
     return lib;
   };
   const body = (name) => {
@@ -419,6 +424,11 @@ const planBody = planStart === -1
           { percent: '45.7%', note: 'From the forecast saved Nov 10.' }],
         [{ playoff_probability: 0.05, captured_at: 'x', current: false }, 'Nov 3',
           { percent: '5.0%', note: 'Last saved Nov 3.' }],
+        // D-262: 100% only with a proven clinch.
+        [{ playoff_probability: 1, captured_at: 'x', current: true }, 'Nov 10',
+          { percent: '>99.9%', note: 'From the forecast saved Nov 10.' }],
+        [{ playoff_probability: 1, captured_at: 'x', current: true, playoff_clinched: true }, 'Nov 10',
+          { percent: '100.0%', note: 'From the forecast saved Nov 10.' }],
       ];
       const bads = cases.filter(([c, d, want]) => JSON.stringify(f(c, d)) !== JSON.stringify(want));
       wrong = bads.length ? bads.map(([c, d]) => `${JSON.stringify(c)} → ${JSON.stringify(f(c, d))}`).join('; ') : '';

@@ -8,6 +8,7 @@ import {lineupRowText} from '../utils/projectionCoverage';
 import {MAXPF_COPY} from '../utils/maxPfMovesCopy';
 import {sectionMounts, isOwnCard, deriveSection} from '../utils/maxPfMoves';
 import {MaxPfMovesBody} from './MaxPfMovesSection';
+import {missOddsText} from '../utils/playoffOdds';
 
 // The saved forecast's per-team detail, mounted inside the Standings table's
 // open team (screens/StandingsScreen). Moved from the retired
@@ -57,7 +58,7 @@ export function ProjectionTeamDetail({team, result, maxPf}: {team: ProjectionTea
     </Disclosure>
     <Disclosure label="Draft pick odds">
       <Text variant="bodySm">Estimates assume regular-season Max PF draft order.</Text>
-      <Text variant="bodySm">Miss playoffs: {pct(team.nonplayoff_probability)}</Text>
+      <Text variant="bodySm">Miss playoffs: {missOddsText(team.nonplayoff_probability, team, 0.1)}</Text>
       <Text variant="bodySm">Pick owner: {names.get(team.pick_owner_roster_id) ?? `Team ${team.pick_owner_roster_id}`} · {result.config.draft_season} round {result.config.draft_round}</Text>
       <Text variant="bodySm">Expected pick if this team misses: {number(team.conditional_expected_pick)}</Text>
       <Disclosure label="Pick odds and range">

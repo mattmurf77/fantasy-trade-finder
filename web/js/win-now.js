@@ -14,6 +14,8 @@
   const finite = n => typeof n === 'number' && Number.isFinite(n);
   const num = n => finite(n) ? n.toFixed(2) : '—';
   const pct = n => finite(n) && n >= 0 && n <= 1 ? `${(100 * n).toFixed(1)}%` : '—';
+  /* A playoff chance (D-262): no clinch proof from this simulator, so 100% / 0% read ">99.9%" / "<0.1%". */
+  const playoffPct = n => finite(n) && n >= 0 && n <= 1 ? window.FTFPlayoffOdds.text(n, null, 0.1) : '—';
   const delta = (before, after, points = false) => {
     if (!finite(before) || !finite(after)) return '—';
     const d = (after - before) * (points ? 100 : 1);
@@ -134,11 +136,11 @@
     const rows = [
       ['Next matchup', 'next_matchup_win_probability', true],
       ['Next 3 weeks', 'next_three_week_expected_wins', false], ['Remaining wins', 'expected_remaining_wins', false], ['Final wins', 'expected_wins', false],
-      ['Make playoffs', 'playoff_probability', true], ['Bye', 'bye_probability', true],
+      ['Make playoffs', 'playoff_probability', true, playoffPct], ['Bye', 'bye_probability', true],
       ...(title ? [['Championship', 'championship_probability', true]] : []),
     ];
-    for (const [label, key, points] of rows) {
-      const format = points ? pct : num;
+    for (const [label, key, points, formatter] of rows) {
+      const format = formatter || (points ? pct : num);
       paragraph(parent, `${label}: ${format(before?.[key])} → ${format(after?.[key])} (${delta(before?.[key], after?.[key], points)})`);
     }
   }
@@ -239,7 +241,7 @@
       const standings = [...(baseline.teams || [])].sort((a, b) => (finite(a.projected_seed) ? a.projected_seed : Infinity) - (finite(b.projected_seed) ? b.projected_seed : Infinity) || a.roster_id - b.roster_id);
       for (const team of standings) {
         const row = el('tr');
-        const cells = [`${num(team.projected_seed)} ${team.username || `Team ${team.roster_id}`}${team.roster_id === baseline.buyer_roster_id ? ' · You' : ''}`, `${num(team.expected_wins)}–${num(team.expected_losses)}–${num(team.expected_ties)}`, pct(team.playoff_probability), pct(team.bye_probability), ...(titleAvailable(baseline.meta) ? [pct(team.championship_probability)] : [])];
+        const cells = [`${num(team.projected_seed)} ${team.username || `Team ${team.roster_id}`}${team.roster_id === baseline.buyer_roster_id ? ' · You' : ''}`, `${num(team.expected_wins)}–${num(team.expected_losses)}–${num(team.expected_ties)}`, playoffPct(team.playoff_probability), pct(team.bye_probability), ...(titleAvailable(baseline.meta) ? [pct(team.championship_probability)] : [])];
         for (const value of cells) row.appendChild(el('td', value)); body.appendChild(row);
         if (team.finish_distribution) { const dist = el('tr'); const cell = el('td', `Finish: ${Object.entries(team.finish_distribution).map(([seed, chance]) => `#${seed} ${pct(chance)}`).join(' · ')}`); cell.colSpan = cells.length; dist.appendChild(cell); body.appendChild(dist); }
       }

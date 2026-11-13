@@ -91,6 +91,7 @@ const context={leagueId:()=>league,userId:()=>user,apiFetch:async(url,options)=>
 const window={FTF_FLAG:key=>!!flags[key],FTFWinNowContext:context,FTFOutlookLabel:appWindow.FTFOutlookLabel,
   FTFReviewOutlook:key=>{reviewed.push(key);return appWindow.FTFReviewOutlook(key);}};
 const reviewed=[];
+vm.runInNewContext(read('playoff-odds.js'),{window});  // index.html loads it first (D-262)
 vm.runInNewContext(source,{window,document:{createElement:t=>new Element(t),getElementById:()=>host},console});
 const load=async next=>{if(next)payload=next;await window.loadLeagueProjectionBatch();};
 const withResult=(coverage,extra)=>({...payload,...extra,run:{run_id:'a'.repeat(32),result:{...result,coverage:{...result.coverage,...coverage}}}});

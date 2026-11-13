@@ -11,7 +11,7 @@ import { gateSignalFor } from '../api/client';
 import { useEntitlements } from '../state/useEntitlements';
 import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
-import { probability, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
+import { probability, playoffChance, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
 
 function Action({label, onPress, disabled = false, selected = false, primary = false, id}: {
@@ -29,7 +29,7 @@ function Metrics({before, after, title}: {before: SeasonTeam; after: SeasonTeam;
     <Text style={s.body}>Next 3 weeks: {numeric(nextThree(before))} → {numeric(nextThree(after))} wins ({impact(nextThree(before), nextThree(after))})</Text>
     <Text style={s.body}>Remaining wins: {numeric(before.expected_remaining_wins)} → {numeric(after.expected_remaining_wins)} ({impact(before.expected_remaining_wins, after.expected_remaining_wins)})</Text>
     <Text style={s.body}>Final wins: {numeric(before.expected_wins)} → {numeric(after.expected_wins)} ({impact(before.expected_wins, after.expected_wins)})</Text>
-    <Text style={s.body}>Make playoffs: {probability(before.playoff_probability)} → {probability(after.playoff_probability)} ({impact(before.playoff_probability, after.playoff_probability, true)})</Text>
+    <Text style={s.body}>Make playoffs: {playoffChance(before.playoff_probability)} → {playoffChance(after.playoff_probability)} ({impact(before.playoff_probability, after.playoff_probability, true)})</Text>
     <Text style={s.body}>Bye: {probability(before.bye_probability)} → {probability(after.bye_probability)} ({impact(before.bye_probability, after.bye_probability, true)})</Text>
     {title && <Text style={s.body}>Championship: {probability(before.championship_probability)} → {probability(after.championship_probability)} ({impact(before.championship_probability, after.championship_probability, true)})</Text>}
   </View>;
@@ -243,7 +243,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
             <Text variant="heading">Projected standings</Text>
             {projectedStandings(baseline?.teams || []).map(team => <View key={team.roster_id} style={s.standing}>
               <Text style={s.label}>Avg finish {numeric(team.projected_seed)} {team.username || `Team ${team.roster_id}`}{team.roster_id === baseline?.buyer_roster_id ? ' · You' : ''}</Text>
-              <Text style={s.body}>W–L–T {numeric(team.expected_wins)}–{numeric(team.expected_losses)}–{numeric(team.expected_ties)} · Playoffs {probability(team.playoff_probability)} · Bye {probability(team.bye_probability)}</Text>
+              <Text style={s.body}>W–L–T {numeric(team.expected_wins)}–{numeric(team.expected_losses)}–{numeric(team.expected_ties)} · Playoffs {playoffChance(team.playoff_probability)} · Bye {probability(team.bye_probability)}</Text>
               {!!team.finish_distribution && <Text style={s.caption}>Finish: {Object.entries(team.finish_distribution).map(([seed, chance]) => `#${seed} ${probability(chance)}`).join(' · ')}</Text>}
               {titleAvailable && <Text style={s.body}>Championship {probability(team.championship_probability)}</Text>}
             </View>)}

@@ -10,6 +10,7 @@ import { track } from '../api/events';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { readMaxPfPrompts, markRulesNoteShown, markDraftOrderAsked } from '../state/maxPfMovesPrompts';
 import { MAXPF_COPY as C } from '../utils/maxPfMovesCopy';
+import type { PlayoffProof } from '../utils/playoffOdds';
 import {
   rowLine1, rowLine1Parts, rowLine2, rowDetail, visibleRows, viewedProps, expandedProps, answeredProps,
   answerLabel, handOffToFinder, questionAutoShown, MAXPF_EVENTS, DRAFT_ORDER_ANSWERS, SCREEN,
@@ -149,13 +150,13 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
       {model.noMovesLine ? <Text variant="bodySm" testID="standings.maxpf.no-moves">{model.noMovesLine}</Text> : null}
       {model.noneAloneLine ? <Text variant="bodySm" testID="standings.maxpf.none-alone">{model.noneAloneLine}</Text> : null}
       {model.head ? <Text variant="label" style={styles.head}>{model.head}</Text> : null}
-      {rows.map((row) => <MoveRow key={row.player_id} row={row} priced={model.priced}
+      {rows.map((row) => <MoveRow key={row.player_id} row={row} priced={model.priced} proof={block.baseline}
         open={openRank === row.rank} onToggle={() => toggleRow(row)} onFindTrades={() => onFindTrades(row)} />)}
       {showAllButton ? <Pressable accessibilityRole="button" testID="standings.maxpf.show-all"
         onPress={() => setShowAll(true)} style={styles.link}>
         <Text variant="bodySm" style={styles.linkText}>{C['C-SHOWALL']}</Text>
       </Pressable> : null}
-      {model.combined.map((entry) => <CombinedLine key={entry.size} entry={entry} priced={model.priced}
+      {model.combined.map((entry) => <CombinedLine key={entry.size} entry={entry} priced={model.priced} proof={block.baseline}
         open={openSize === entry.size} onToggle={() => toggleCombined(entry)} />)}
       {model.foot ? <Text variant="bodySm">{model.foot}</Text> : null}
     </> : null}
@@ -170,12 +171,12 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
   </View>;
 }
 
-function MoveRow({ row, priced, open, onToggle, onFindTrades }: {
-  row: MaxPfMoveRow; priced: boolean; open: boolean; onToggle: () => void; onFindTrades: () => void;
+function MoveRow({ row, priced, proof, open, onToggle, onFindTrades }: {
+  row: MaxPfMoveRow; priced: boolean; proof: PlayoffProof | null | undefined; open: boolean; onToggle: () => void; onFindTrades: () => void;
 }) {
   const p = rowLine1Parts(row);
   const line2 = rowLine2(row, priced);
-  const d = open ? rowDetail(row) : null;
+  const d = open ? rowDetail(row, proof) : null;
   return <View style={styles.row}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.row.${row.rank}`}
       accessibilityLabel={`${rowLine1(row)}${row.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}
@@ -206,12 +207,12 @@ function MoveRow({ row, priced, open, onToggle, onFindTrades }: {
 
 // v1.1 (D-261): "Top 2 together" in the row's construction. Opens to top-3
 // and playoff chance only: no week detail and no Find trades (contract §12).
-function CombinedLine({ entry, priced, open, onToggle }: {
-  entry: MaxPfCombined; priced: boolean; open: boolean; onToggle: () => void;
+function CombinedLine({ entry, priced, proof, open, onToggle }: {
+  entry: MaxPfCombined; priced: boolean; proof: PlayoffProof | null | undefined; open: boolean; onToggle: () => void;
 }) {
   const p = combinedLine1Parts(entry);
   const line2 = combinedLine2(entry, priced);
-  const d = open ? combinedDetail(entry) : null;
+  const d = open ? combinedDetail(entry, proof) : null;
   return <View style={styles.row}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.combined.${entry.size}`}
       accessibilityLabel={`${combinedLine1(entry)}${entry.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}

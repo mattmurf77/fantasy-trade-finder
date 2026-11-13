@@ -22,6 +22,9 @@ export interface ProjectionTeam {
   maxpf_quantiles: Record<string, number>; nonplayoff_probability: number; pick_owner_roster_id: number;
   pick_probabilities: number[]; conditional_expected_pick: number | null; nonplayoff_samples: number;
   owner_expected_nonplayoff_picks: number; owner_probability_at_least_one: number; weeks: ProjectionWeek[];
+  /** D-262: proven from the rules, not the simulations. Absent (a run saved
+   *  before D-262) means not proven. Display through utils/playoffOdds. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 export interface ProjectionResult {
   league_name: string; completed_weeks: number; playoff_spots: number; playoff_byes: number; scoring: Record<string, number>;
@@ -39,6 +42,8 @@ export interface OutlookRecommendation {
   status: 'available' | 'unavailable'; reason: string | null; playoff_probability: number | null;
   recommended_outlook: ProjectionOutlook | null; current_outlook: string | null; differs: boolean;
   suggestion: string | null; explanation: string; captured_at: string | null;
+  /** D-262, on `available` only; absent means not proven. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 // ── Max PF moves (flag `league.max_pf_moves`; contract:
 // docs/plans/league-projections/max-pf-trade-away/contract.md §3). The app
@@ -54,6 +59,9 @@ export interface MaxPfBaseline {
   playoff_probability: number; playoff_band: ProjectionOutlook; pick_if_miss: number | null;
   top3_probability: number; label: string | null; label_slot: number | null;
   pick_value: number | null; pick_value_status: 'priced' | 'not_priced';
+  /** D-262: roster-independent, so they hold for every row's and combined
+   *  entry's playoff chance "after" too. Absent means not proven. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 export interface MaxPfReplacement {player_id: string | null; name: string | null; short_name: string | null; free_agent: boolean; weeks: number}
 export interface MaxPfMoveWeek {

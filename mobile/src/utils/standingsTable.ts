@@ -1,6 +1,8 @@
 // The Standings page's single table (docs/plans/home-engagement/
-// scope-standings-table.md). ZERO runtime imports, so
-// tests/check-standings-table.js can transpile and execute it under plain node.
+// scope-standings-table.md). Its one runtime import is the zero-import
+// playoff-odds rule (./playoffOdds, D-262), so tests/check-standings-table.js
+// can transpile and execute both under plain node.
+import { playoffOddsText, playoffSortKey, type PlayoffProof } from './playoffOdds';
 //
 // One row per team: the current standings (utils/standings.ts, from the
 // session-seeded Sleeper rosters) joined by roster id to the SAVED weekly
@@ -29,8 +31,9 @@ export const DEFAULT_SORT: Record<StandingsView, StandingsSort> = {
 
 export const DASH = '—';
 
-/** Forecast fields the table reads (a structural subset of api/leagueProjections ProjectionTeam). */
-export interface ForecastTeamInput {
+/** Forecast fields the table reads (a structural subset of api/leagueProjections ProjectionTeam).
+ *  `playoff_clinched` / `playoff_eliminated` (D-262) are absent on a run saved before them. */
+export interface ForecastTeamInput extends PlayoffProof {
   roster_id: number;
   modal_record: number[];
   expected_record: number[];
@@ -110,7 +113,8 @@ function sortValue(row: TableRow, column: StandingsColumn): number[] | null {
   switch (column) {
     case 'wl': return [row.winPct, row.pointsFor];
     case 'projWl': return f ? [recordPct(f.modal_record), recordPct(f.expected_record)] : null;
-    case 'playoffs': return f ? [f.playoff_probability] : null;
+    // Proof breaks an equal probability: a proven 100% above ">99%", a proven 0% below "<1%".
+    case 'playoffs': return f ? playoffSortKey(f.playoff_probability, f) : null;
     case 'pf': return [row.pointsFor];
     case 'maxPf': return row.maxPf == null ? null : [row.maxPf];
     case 'projMaxPf': return f ? [f.maxpf_mean] : null;
@@ -150,12 +154,10 @@ export function recordText(rec: readonly number[]): string {
   return (rec[2] ?? 0) > 0 ? `${base}–${rec[2]}` : base;
 }
 
-/** Playoff odds as a whole percent: under 0.5% "<1%", 99.95% and over "100%". */
-export function oddsText(probability: number): string {
-  const p = probability * 100;
-  if (p < 0.5) return '<1%';
-  if (p >= 99.95) return '100%';
-  return `${Math.min(99, Math.max(1, Math.round(p)))}%`;
+/** Playoff odds as a whole percent (D-262): "100%" only when clinched is
+ *  proven and "0%" only when elimination is, else ">99%" / "<1%". */
+export function oddsText(probability: number, proof: PlayoffProof | null | undefined): string {
+  return playoffOddsText(probability, proof, 1);
 }
 
 /** Whole points with thousands commas ("1,498"). No toLocaleString: Hermes' is locale-dependent. */
@@ -176,7 +178,7 @@ export function cellText(row: TableRow, column: StandingsColumn): string {
     case 'team': return row.name;
     case 'wl': return recordText([row.wins, row.losses, row.ties]);
     case 'projWl': return f ? recordText(f.modal_record) : DASH;
-    case 'playoffs': return f ? oddsText(f.playoff_probability) : DASH;
+    case 'playoffs': return f ? oddsText(f.playoff_probability, f) : DASH;
     case 'pf': return pointsText(row.pointsFor);
     case 'maxPf': return row.maxPf == null ? DASH : pointsText(row.maxPf);
     case 'projMaxPf': return f ? pointsText(f.maxpf_mean) : DASH;
@@ -226,7 +228,7 @@ export function openTeamLines(
     : [
       `Record ${recordText([row.wins, row.losses, row.ties])}`,
       f ? `Projected ${recordText(f.modal_record)}` : null,
-      f ? `Playoff odds ${oddsText(f.playoff_probability)}` : null,
+      f ? `Playoff odds ${oddsText(f.playoff_probability, f)}` : null,
     ].filter(Boolean).join(' · ');
   const average = f
     ? `Average final record: ${averageRecordText(f.expected_record)}${playoffByes > 0 ? ` · Bye odds: ${(f.bye_probability * 100).toFixed(1)}%` : ''}`

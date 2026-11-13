@@ -23,6 +23,11 @@ vm.runInNewContext(ts.transpileModule(utilSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, { exports: compiled });
 const model = compiled.homePlayoffBanner;
+// The one playoff-odds rule (D-262), executed for real inside the component.
+const playoffOdds = {};
+vm.runInNewContext(ts.transpileModule(read('src/utils/playoffOdds.ts'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText, { exports: playoffOdds });
 const now = Date.parse('2026-11-07T15:00:00Z');
 function data(probability = .8, state = 'current') {
   return { state, model_current: true, next_attempt_not_before: '2026-11-10T14:30:00Z', run: {
@@ -193,6 +198,7 @@ const modules = {
   '../../state/useSession': { NO_LEAGUE_ID: 'no_league', useSession: select => select(active) },
   '../../state/useFeatureFlags': { useFlag: name => { assert(name in flags, `Unexpected flag: ${name}`); return flags[name]; } },
   '../../utils/homePlayoffBanner': { homePlayoffBanner: (value, roster, failed) => model(value, roster, failed, now) },
+  '../../utils/playoffOdds': playoffOdds,
   '../OutlookBiasReceipt': { outlookDisplayName: value => (value ? NAMES[value] ?? null : null) },
   './StatusRow': { RowAction: 'RowAction' },
 };

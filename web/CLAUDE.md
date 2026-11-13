@@ -49,6 +49,7 @@ of the emoji check — `git grep qa:allow-emoji` lists every one.
 | File | Size | Role |
 |---|---|---|
 | `js/app.js` | ~6.2k lines | Everything: fetch layer, rendering, page routing |
+| `js/playoff-odds.js` | ~25 lines | `window.FTFPlayoffOdds` — the playoff-odds display rule (D-262; `docs/cross-client-invariants.md`): `text` / `miss` / `rank`. 100% only when clinched, 0% only when eliminated. Loaded by `index.html` before `win-now.js` and `league-projections.js`, which print every playoff chance through it. Mirrors `mobile/src/utils/playoffOdds.ts`; executed by `mobile/tests/check-playoff-odds-display.js` |
 | `js/events.js` | ~175 lines | Analytics emission. Events must match `backend/analytics_taxonomy.py`; gated on the `analytics.client_events` flag |
 | `css/styles.css` | ~4.6k lines | Chalkline tokens + all page styles |
 

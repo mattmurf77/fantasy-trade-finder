@@ -3,12 +3,14 @@
 // The app reads every number from the server's `max_pf_moves` block and
 // never re-computes one; this module only decides what shows (§4.3, §6),
 // formats (§11) and fills the copy (§10, utils/maxPfMovesCopy.ts).
-// No React, no I/O. Its one runtime import is the zero-import copy table;
-// tests/check-max-pf-moves.js transpiles both and executes them.
+// No React, no I/O. Its runtime imports are the zero-import copy table and
+// the zero-import playoff-odds rule (D-262); tests/check-max-pf-moves.js
+// transpiles all three and executes them.
 import type {
   MaxPfMoves, MaxPfMoveRow, MaxPfMovesState, MaxPfReplacement, DraftOrderRule, MaxPfCombined,
 } from '../api/leagueProjections';
 import { MAXPF_COPY as C } from './maxPfMovesCopy';
+import { playoffOddsText, type PlayoffProof } from './playoffOdds';
 
 export const MAXPF_VERSION = 1;
 export const ROWS_BEFORE_SHOW_ALL = 5;
@@ -87,6 +89,10 @@ export function formatValueChange(n: number): string {
   return `${r < 0 ? MINUS : '+'}${thousands(r)}`;
 }
 const pair = (now: string, after: string) => `${now}${ARROW}${after}`;
+/** A playoff chance (D-262): whole percent, "100%" / "0%" only when the
+ *  baseline's proof says so. The proof is roster-independent, so the
+ *  baseline's holds for every row's and combined entry's "after" too. */
+const playoffPct = (p: number, proof: PlayoffProof | null | undefined) => playoffOddsText(p, proof, 1);
 
 /** Fills `{key}` placeholders. Unknown keys stay as written. */
 export function fill(template: string, values: Record<string, string | number>): string {
@@ -224,7 +230,7 @@ export function headLine(block: MaxPfMoves): string | null {
   return fill(C['C-HEAD'], { n });
 }
 export function collapsedLine(block: MaxPfMoves): string {
-  return fill(C['C-COLLAPSED'], { playoff: formatPct(block.baseline?.playoff_probability ?? 0) });
+  return fill(C['C-COLLAPSED'], { playoff: playoffPct(block.baseline?.playoff_probability ?? 0, block.baseline) });
 }
 export function ownerLine(block: MaxPfMoves): string {
   return fill(C['C-OWNER'], { owner_name: block.pick_owner?.owner_name ?? '', season: block.draft_season ?? '' });
@@ -261,10 +267,10 @@ export function combinedLine2(entry: MaxPfCombined, isPriced: boolean): string {
   return line;
 }
 /** The opened combined line: top-3 chance and playoff chance only. */
-export function combinedDetail(entry: MaxPfCombined) {
+export function combinedDetail(entry: MaxPfCombined, proof: PlayoffProof | null | undefined) {
   return {
     top3: fill(C['C-OPEN-TOP3'], { now: formatPct(entry.top3_probability.now), after: formatPct(entry.top3_probability.after) }),
-    playoff: fill(C['C-OPEN-PLAYOFF'], { now: formatPct(entry.playoff_probability.now), after: formatPct(entry.playoff_probability.after) }),
+    playoff: fill(C['C-OPEN-PLAYOFF'], { now: playoffPct(entry.playoff_probability.now, proof), after: playoffPct(entry.playoff_probability.after, proof) }),
   };
 }
 
@@ -327,7 +333,7 @@ export interface RowDetail {
   /** C-KEEP-NOTE on a Keep row; null otherwise. */
   keepNote: string | null;
 }
-export function rowDetail(row: MaxPfMoveRow): RowDetail {
+export function rowDetail(row: MaxPfMoveRow, proof: PlayoffProof | null | undefined): RowDetail {
   const { now, after } = row.label;
   let label: string | null = null;
   if (now != null && after != null) {
@@ -337,7 +343,7 @@ export function rowDetail(row: MaxPfMoveRow): RowDetail {
   const bye = byeLine(row);
   return {
     top3: fill(C['C-OPEN-TOP3'], { now: formatPct(row.top3_probability.now), after: formatPct(row.top3_probability.after) }),
-    playoff: fill(C['C-OPEN-PLAYOFF'], { now: formatPct(row.playoff_probability.now), after: formatPct(row.playoff_probability.after) }),
+    playoff: fill(C['C-OPEN-PLAYOFF'], { now: playoffPct(row.playoff_probability.now, proof), after: playoffPct(row.playoff_probability.after, proof) }),
     label,
     replacement: repl && bye ? `${repl} ${bye}` : repl ?? bye,
     weeks: weekLines(row),

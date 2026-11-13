@@ -67,8 +67,10 @@ const run = (rel, requireFn) => {
 const copySrc = read('src/utils/maxPfMovesCopy.ts');
 const utilSrc = read('src/utils/maxPfMoves.ts');
 const copyMod = run('src/utils/maxPfMovesCopy.ts', (r) => { throw new Error(`copy module requires ${r}`); });
+const oddsMod = run('src/utils/playoffOdds.ts', (r) => { throw new Error(`playoffOdds requires ${r}`); });
 const u = run('src/utils/maxPfMoves.ts', (r) => {
   if (r === './maxPfMovesCopy') return copyMod;
+  if (r === './playoffOdds') return oddsMod;
   throw new Error(`maxPfMoves.ts must not require ${r} at runtime`);
 });
 const C = copyMod.MAXPF_COPY;
@@ -111,8 +113,8 @@ const R3 = READY.rows[2];
   const sources = [copySrc, utilSrc, read('src/components/MaxPfMovesSection.tsx')];
   assert(sources.every((s) => !/tank/i.test(s)), 'A3. the word "tank" appears nowhere in the copy, util or component');
   assert(!/^\s*import\s/m.test(copySrc), 'A4. the copy module has zero imports');
-  assert(!/^\s*import\s+(?!type\b)(?![^;]*from '\.\/maxPfMovesCopy')/m.test(utilSrc),
-    'A5. maxPfMoves.ts imports only types and the copy module');
+  assert(!/^\s*import\s+(?!type\b)(?![^;]*from '\.\/(maxPfMovesCopy|playoffOdds)')/m.test(utilSrc),
+    'A5. maxPfMoves.ts imports only types, the copy module and the playoff-odds rule (D-262)');
   assert(!/'(Max PF moves|Show all|Show anyway|Show moves|Keep|Change)'/.test(read('src/components/MaxPfMovesSection.tsx'))
       && /MAXPF_COPY\['C-TITLE'\]/.test(read('src/components/LeagueProjectionDetail.tsx')),
     'A6. the component and detail render copy from the module, not inline literals');
@@ -567,6 +569,26 @@ const R3 = READY.rows[2];
     'O8c. no combined lines outside ready / no_moves');
   assert(/testID=\{`standings\.maxpf\.combined\.\$\{entry\.size\}`\}/.test(comp) && /testID="standings\.maxpf\.none-alone"/.test(comp)
       && /rowHead/.test(combBody), 'O8d. testIDs and the 44pt row construction');
+}
+
+// ═══ P. Playoff chance: 100% / 0% need the baseline's proof (D-262) ══════
+{
+  const at = (p, proof) => withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { playoff_probability: p }, proof) });
+  const r = Object.assign(clone(R1), { playoff_probability: { now: 1, after: 0.97 } });
+  const e = Object.assign(clone(READY.combined?.[0] || {}), { playoff_probability: { now: 0, after: 0 },
+    top3_probability: { now: 0.5, after: 0.5 } });
+  assert(u.collapsedLine(at(1, {})).includes('in >99% of simulations')
+      && u.collapsedLine(at(1, { playoff_clinched: true })).includes('in 100% of simulations')
+      && u.collapsedLine(at(0, {})).includes('in <1% of simulations')
+      && u.collapsedLine(at(0, { playoff_eliminated: true })).includes('in 0% of simulations'),
+    'P1. collapsed sentence: 100% / 0% only with the baseline proof', u.collapsedLine(at(1, {})));
+  assert(u.rowDetail(r, null).playoff === 'Playoff chance >99% → 97%'
+      && u.rowDetail(r, { playoff_clinched: true }).playoff === 'Playoff chance 100% → 97%'
+      && u.combinedDetail(e, null).playoff === 'Playoff chance <1% → <1%'
+      && u.combinedDetail(e, { playoff_eliminated: true }).playoff === 'Playoff chance 0% → 0%',
+    'P2. opened rows and combined lines use the same proof for now and after',
+    `${u.rowDetail(r, { playoff_clinched: true }).playoff} | ${u.combinedDetail(e, null).playoff}`);
+  assert(u.formatPct(1) === '100%' && u.formatPct(0) === '0%', 'P3. top-3 chance keeps formatPct (pick odds are out of scope)');
 }
 
 console.log(failures ? `\n${failures} max-pf-moves check(s) FAILED, ${passes} passed.` : `\nAll max-pf-moves checks passed (${passes}).`);

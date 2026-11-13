@@ -1,6 +1,9 @@
 import type { SeasonMeta, SeasonTeam, WinNowScenario, WinNowObjective } from '../shared/types';
+import { playoffOddsText } from './playoffOdds';
 export const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 export const probability = (n: unknown) => finite(n) && n >= 0 && n <= 1 ? `${(100 * n).toFixed(1)}%` : '—';
+/** A playoff chance (D-262): this simulator carries no clinch proof, so 100% / 0% read ">99.9%" / "<0.1%". */
+export const playoffChance = (n: unknown) => finite(n) && n >= 0 && n <= 1 ? playoffOddsText(n, null, 0.1) : '—';
 export const numeric = (n: unknown) => finite(n) ? n.toFixed(2) : '—';
 export function impact(before: unknown, after: unknown, points = false): string {
   if (!finite(before) || !finite(after)) return '—';
