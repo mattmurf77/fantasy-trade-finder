@@ -1,3 +1,12 @@
+## 2026-11-12 — Release: Max PF moves v1 (flag off) on `main` at `90d8837c`; TestFlight 1.22.0 (191)
+
+- **CI on the merged head:** #684 `4304f3a0` green on all four checks before its merge (backend-tests took 88 minutes).
+- **App, main session, clean checkout of `90d8837c` after `npm ci`:** `tsc --noEmit` clean; `check-max-pf-moves.js` 119 of 119. The full `check-*.js` set and testid-lint ran green in CI on the merged head.
+- **Production (read-only checks):** deploy live at 04:22 UTC on 2026-11-13; no errors or tracebacks in the logs after it; `GET /api/feature-flags` reports `league.max_pf_moves` false.
+- **TestFlight:** EAS production build 1.22.0 (191) from the clean checkout of `90d8837c` (EAS `428eaffc`, submission `92cb9a85`), auto-submit scheduled. No caveat line under the list (operator: "Build without it").
+- **Not verified:** anything on a device; the two new `leagues` columns on the production database beyond a clean boot log; whether the submission reached TestFlight. With the flag off the section does not render, so the app-evidence checklist cannot run until the flag is on.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Max PF moves leave-one-out backtest (research, flag stays off), branch `research/max-pf-moves-backtest`
 
 - **Question (operator decision 11):** is the predicted max PF change accurate enough to show, and does risk 2 (projected best lineup vs hindsight best lineup) need a caveat line or a tier 3 fix?
