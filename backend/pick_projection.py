@@ -26,6 +26,14 @@ Because every column sums to 1, sum_r ratio_r = n: the league's total value
 of next-draft firsts is unchanged (zero-sum), and a forecast that knows
 nothing (uniform rows) prices every pick at exactly G.
 
+The slot a projected pick's LABEL names (operator ruling 2026-11-12, D-257)
+is a rank, not a rounded mean: order the league's teams by expected slot
+E_r = sum_k k * p_r[k], ascending; team at position j shows "1.<j>". Every
+slot 1..n appears exactly once. Equal E (playoff locks all share the
+playoff slots' midpoint) is broken by expected win-equivalents, fewer first
+(the stronger team picks later), then roster id. The label never moves a
+price: `value` above reads the whole distribution, never the rank.
+
 Anything malformed returns None and the pick prices generically; nothing in
 this module raises on bad input.
 """
@@ -54,6 +62,7 @@ class RunSummary:
     completed_weeks: int
     future_weeks: int
     dists: Mapping[str, tuple]          # str(roster_id) -> n slot probabilities
+    slots: Mapping[str, int]            # str(roster_id) -> label slot 1..n (`slot_ranks`)
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,7 @@ class PickProjection:
     weight: float                       # w, in (0, 1]
     dists: Mapping[str, tuple]
     key: str
+    slots: Mapping[str, int]            # label slots; display only, never priced
 
 
 def _num(value) -> float | None:
@@ -104,6 +114,7 @@ def compact(result_json: Any, *, run_id: str, created_at: str) -> RunSummary | N
             return None
         future = None
         dists: dict[str, tuple] = {}
+        strength: dict[str, float] = {}
         for team in teams:
             rid = team.get("roster_id")
             picks = team.get("pick_probabilities")
@@ -126,13 +137,17 @@ def compact(result_json: Any, *, run_id: str, created_at: str) -> RunSummary | N
             if str(rid) in dists:
                 return None
             dists[str(rid)] = row
+            wins = _win_equivalents(team.get("expected_record"))
+            if wins is not None:
+                strength[str(rid)] = wins
         for k in range(n):
             if abs(sum(row[k] for row in dists.values()) - 1.0) > _SUM_TOLERANCE:
                 return None
         return RunSummary(run_id=str(run_id), created_at=str(created_at),
                           model_version=str(result.get("model_version") or ""),
                           draft_season=season, teams=n, completed_weeks=completed,
-                          future_weeks=future or 0, dists=dists)
+                          future_weeks=future or 0, dists=dists,
+                          slots=slot_ranks(dists, strength))
     except Exception:
         return None
 
@@ -181,7 +196,7 @@ def usable(summary: RunSummary | None, *, model_version: str, now: datetime,
          round(w, 9), rounds]).encode()).hexdigest()[:16]
     return PickProjection(season=summary.draft_season, max_round=rounds,
                           teams=summary.teams, weight=w, dists=summary.dists,
-                          key=key)
+                          key=key, slots=summary.slots)
 
 
 def covers(projection: PickProjection | None, season, round_) -> bool:
@@ -215,8 +230,41 @@ def expected_slot(dist) -> float:
     return sum((k + 1) * p for k, p in enumerate(dist))
 
 
-def projected_slot(dist) -> int:
-    """The slot shown for a projected pick (operator ruling 2026-11-11): the
-    expected slot under the same distribution that set the price, rounded to
-    the nearest whole slot (halves up) and clamped to 1..league size."""
-    return max(1, min(len(dist), math.floor(expected_slot(dist) + 0.5)))
+def _win_equivalents(record) -> float | None:
+    """Expected wins + half the expected ties from a forecast team's
+    `expected_record` ([W, L, T]), or None when it is absent or malformed."""
+    if not isinstance(record, (list, tuple)) or len(record) < 3:
+        return None
+    wins, ties = _num(record[0]), _num(record[2])
+    return None if wins is None or ties is None else wins + 0.5 * ties
+
+
+def _roster_order(rid: str) -> tuple:
+    n = _int(rid)
+    return (0, n, "") if n is not None else (1, 0, rid)
+
+
+def slot_ranks(dists: Mapping[str, tuple], strength: Mapping[str, float] | None = None) -> dict[str, int]:
+    """`{roster_id: label slot}`, a permutation of 1..len(dists) (D-257).
+
+    Ascending expected slot (rounded to 1e-9 so float noise is not an order);
+    ties by `strength` (expected win-equivalents), weaker first; then roster
+    id. `strength` is used only when it covers every team, so one run never
+    mixes the two tie-breaks."""
+    strength = strength or {}
+    if not all(rid in strength for rid in dists):
+        strength = {}
+
+    def key(rid):
+        return (round(expected_slot(dists[rid]), 9), strength.get(rid, 0.0), _roster_order(rid))
+
+    return {rid: j for j, rid in enumerate(sorted(dists, key=key), start=1)}
+
+
+def projected_slot(projection: PickProjection, original_roster_id) -> int | None:
+    """The slot shown for a projected pick: the ORIGINAL team's rank in the
+    league's projected order (`slot_ranks`). The ONE label slot; every
+    surface reaches it through `pick_values.projected_pick_slot`."""
+    if original_roster_id is None:
+        return None
+    return projection.slots.get(str(original_roster_id))

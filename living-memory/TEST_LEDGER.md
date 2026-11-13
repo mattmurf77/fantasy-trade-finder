@@ -1,3 +1,30 @@
+## 2026-11-12 — Projected pick labels as a 1..N rank (D-257), branch `feat/projected-pick-rank`
+
+- **New:** `backend/tests/test_pick_slot_rank.py`, 21 passed. It pins:
+  - a permutation of 1..N for 8, 10, 12 and 14 teams, with and without `expected_record`;
+  - ordering by expected slot;
+  - playoff locks ordered by expected wins, best last; equal wins fall back to roster id; the tie-breaks never mix;
+  - numeric roster ids;
+  - a traded pick shows the original owner's rank;
+  - 12 values equal to those captured from `origin/main` 53711036's own modules, and the rank map is never priced;
+  - an uncovered league or pick has no label;
+  - real `simulate()` output carries the record.
+- **Updated pins:** `test_pick_projection.py` (old rounded-mean label tests removed) and `test_pick_projection_wiring.py` (top-3 1.01, bubble 1.11, contender 1.12).
+- **Related files:** 45 files (every test that touches pick projection, `proj_slot`, pick values, power rankings or league projections, plus the deck digest and arm-A golden), 897 passed. Python 3.12.3 venv. Full suite not run: the change is limited to `pick_projection.py`/`pick_values.py`; `server.py` is untouched.
+- **Sabotages, red then restored (11):**
+  - old rounded mean (17 red);
+  - sort descending (9);
+  - drop the wins tie-break (2);
+  - stronger first (2);
+  - mix tie-breaks (1);
+  - roster id as a string (3);
+  - rank the holder (17);
+  - price off the rank (2);
+  - label without the price gate (1);
+  - `compact` reads the wrong key (2);
+  - a 4-field record demanded (3).
+- **Not verified:** on a device. The manual TestFlight checklist is in the scope doc §3.
+
 ## 2026-11-12 — Team Review: eight fixes (D-255), branch `fix/team-review-current-data`
 
 - **Full backend suite (Opus subagent, no edits in flight, before merging the Standings stack):** 15,448 passed, 42 skipped, 0 failed. New `test_team_review_current_data.py`: 23 passed. The digest test passed: no pipeline bump.

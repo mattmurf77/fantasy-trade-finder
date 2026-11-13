@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Projected pick labels rank 1..N, each slot once (D-257)
+
+- **What changed:** a projected 2027 1st now shows its original team's rank in the league's projected order, so a 12-team league shows 1.01 to 1.12 with no repeats. Before, two teams could share 1.04 and all playoff locks showed 1.10. Ties go to the team with fewer expected wins, so the best team picks last.
+- **Unchanged:** pick values (byte-identical), gates, the PROJECTED tag, traded picks following the original team.
+- **Backend only**, branch `feat/projected-pick-rank`. Not merged. Scope: `docs/plans/pick-value-projected-slot/pick-slot-rank/`.
+
 ## 2026-11-12 — Team Review catches up with the engine (D-255)
 
 - **Fixed:** the firsts count on the Partners step; the playoff figure on the first step now comes from the saved forecast, as on Home; outlook names match the rest of the app and Tanking's hard rules are named; later steps refresh after you confirm an outlook; saving Chase or Shop no longer saves an outlook you did not choose; the Plan step shows Keep and Move and links to Roster setup; Find a Trade offers a fresh deck after a save.

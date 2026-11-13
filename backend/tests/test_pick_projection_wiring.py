@@ -245,7 +245,7 @@ def test_every_surface_prices_the_same_number(world):
     assert pick_vals == expected                                     # the calculator
     power = server._power_picks_by_owner(LEAGUE, FMT)
     by_label = {i["label"]: i["value"] for items in power.values() for i in items}
-    assert by_label["2027 1.02 \u00b7 projected"] == 3349.3
+    assert by_label["2027 1.01 \u00b7 projected"] == 3349.3
     eveners = server._roster_eveners(LEAGUE, "u1", 2800.0, set(), [], lambda pid: 0.0,
                                      scoring_format=FMT)
     ev = {e["id"]: e["value"] for e in eveners}
@@ -281,9 +281,12 @@ def test_deck_rules_read_the_adjusted_value(world, monkeypatch):
 # C. The label tag
 # ═══════════════════════════════════════════════════════════════════════════
 
-TOP3_NAME = "2027 1.02"
-CONTENDER_NAME = "2027 1.09 (from contender)"
-BUBBLE_NAME = "2027 1.07"
+# D-257: the label slot is the team's rank by expected slot. Top 3 (E 2.36)
+# ranks 1st; the nine fillers (E 6.62) 2nd-10th by roster id; bubble (E 6.70)
+# 11th; contender (E 9.39) 12th.
+TOP3_NAME = "2027 1.01"
+CONTENDER_NAME = "2027 1.12 (from contender)"
+BUBBLE_NAME = "2027 1.11"
 MARK = " \u00b7 projected"
 
 
@@ -303,15 +306,15 @@ def test_label_names_the_projected_slot_on_every_adjusted_pick(world):
     assert label(PICKS[4]) == "2027 2nd"                              # round 2
     fields = lambda p: server._owned_pick_projection_fields(p, None, proj, FMT)
     assert fields(PICKS[0]) == _fields(TOP3_NAME)
-    assert fields(PICKS[1]) == {"proj_slot": "1.09", "proj_name": CONTENDER_NAME}
+    assert fields(PICKS[1]) == {"proj_slot": "1.12", "proj_name": CONTENDER_NAME}
     assert fields(PICKS[3]) == {} and fields(PICKS[4]) == {}
 
 
 def test_real_slot_wins_over_the_projection(world):
     order = {"schema": 1, "season": 2027, "teams": 12, "type": "linear",
-             "slots": {str(r): r for r in range(1, 13)}}
+             "slots": {str(r): 13 - r for r in range(1, 13)}}       # projection says 1.01
     proj = server._league_pick_projection(LEAGUE)
-    assert server._owned_pick_label(PICKS[0], order, proj, FMT) == "2027 1.01"
+    assert server._owned_pick_label(PICKS[0], order, proj, FMT) == "2027 1.12"
     assert server._owned_pick_projection_fields(PICKS[0], order, proj, FMT) == {}
 
 
@@ -321,20 +324,20 @@ def test_every_client_surface_carries_the_fields(world, monkeypatch):
     fields at any one site."""
     seed, _u, _m, service = _deck(world)
     card = server.player_to_dict(service._players[PICKS[0]["pick_id"]])
-    assert (card["name"], card["proj_slot"], card["proj_name"]) == (TOP3_NAME + MARK, "1.02", TOP3_NAME)
+    assert (card["name"], card["proj_slot"], card["proj_name"]) == (TOP3_NAME + MARK, "1.01", TOP3_NAME)
     plain = server.player_to_dict(service._players[PICKS[3]["pick_id"]])
     assert plain["name"] == "2028 1st" and "proj_slot" not in plain and "proj_name" not in plain
     ev = {e["id"]: e for e in server._roster_eveners(LEAGUE, "u1", 3000.0, set(), [],
                                                       lambda pid: 0.0, scoring_format=FMT)}
     top = ev[PICKS[0]["pick_id"]]
-    assert (top["name"], top["proj_slot"], top["proj_name"]) == (TOP3_NAME + MARK, "1.02", TOP3_NAME)
+    assert (top["name"], top["proj_slot"], top["proj_name"]) == (TOP3_NAME + MARK, "1.01", TOP3_NAME)
     power = server._power_picks_by_owner(LEAGUE, FMT)
     from backend.power_rankings import compute_power_rankings
     teams = compute_power_rankings([{"user_id": u, "username": u, "player_ids": []}
                                     for u in ("u1", "u2")], {}, {}, picks_by_owner=power)
     items = {i["label"]: i for t in teams for i in t["picks"]["items"]}
     assert (items[TOP3_NAME + MARK]["proj_slot"], items[TOP3_NAME + MARK]["proj_name"]) == \
-        ("1.02", TOP3_NAME)
+        ("1.01", TOP3_NAME)
     assert "proj_slot" not in items["2028 1st"] and "proj_name" not in items["2028 1st"]
     with world.engine.begin() as conn:
         cols = set(db.draft_picks_table.c.keys())

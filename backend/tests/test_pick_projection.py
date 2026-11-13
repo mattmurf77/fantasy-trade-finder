@@ -18,8 +18,9 @@ the worked example is reproduced to the unit:
   * league sizes 8/10/12/14 through the percentile map;
   * a missing per-slot grid falls back to Early/Mid/Late, a rolled grid is
     used as is, and malformed runs price generic without raising;
-  * the projected slot shown on the label: the rounded expected slot, set
-    only on picks the projection priced.
+  * the projected slot shown on the label is set only on picks the
+    projection priced (the slot itself, a 1..n rank since D-257, is pinned
+    in test_pick_slot_rank.py).
 """
 import json
 import random
@@ -408,24 +409,8 @@ def test_bad_created_at_fails_the_age_gate():
 
 # ── the projected slot shown on the label ───────────────────────────────────
 
-def test_projected_slot_is_the_rounded_expected_slot():
-    """Sabotage: use the modal slot → the top-3 team shows 1.01, not 1.02."""
-    proj = _example_projection()
-    assert projected_pick_slot(_row(1), proj, FMT) == 2          # E = 2.36
-    assert projected_pick_slot(_row(2), proj, FMT) == 7          # E = 6.70
-    assert projected_pick_slot(_row(3), proj, FMT) == 9          # E = 9.39
-
-
-def test_playoff_bound_team_shows_the_midpoint_of_the_playoff_slots():
-    """Playoff mass is spread evenly, so a certain playoff team's expected slot
-    is the playoff slots' midpoint: 12 teams / 6 spots → (7+12)/2 = 9.5 → 10."""
-    rows = {str(r): ([1.0 if k == r - 1 else 0.0 for k in range(6)], 0.0) for r in range(1, 7)}
-    rows.update({str(r): ([0.0] * 6, 1.0) for r in range(7, 13)})
-    proj = _projection(_result(rows, playoff=6))
-    assert pp.expected_slot(proj.dists["9"]) == pytest.approx(9.5)
-    assert projected_pick_slot(_row(9), proj, FMT) == 10
-    assert projected_pick_slot(_row(1), proj, FMT) == 1
-
+# The slot's value (rank in the league's projected order, D-257) is pinned in
+# test_pick_slot_rank.py; the rounded-expected-slot pins it replaced are gone.
 
 def test_projected_slot_only_on_picks_the_projection_priced(monkeypatch):
     proj = _example_projection()
@@ -435,13 +420,3 @@ def test_projected_slot_only_on_picks_the_projection_priced(monkeypatch):
     assert projected_pick_slot(_row(1), None, FMT) is None
     monkeypatch.setattr(data_loader, "load_pick_slot_values", lambda fmt="1qb_ppr": {})
     assert projected_pick_slot(_row(1), proj, FMT) is None       # DP down: priced generic
-
-
-@pytest.mark.parametrize("n", [8, 10, 12, 14])
-def test_projected_slot_is_clamped_to_the_league(n):
-    worlds = _worlds(n, n // 2, 20 + n)
-    proj = _projection(_result(worlds, playoff=n // 2))
-    slots = [projected_pick_slot(_row(r), proj, FMT) for r in range(1, n + 1)]
-    assert all(1 <= s <= n for s in slots)
-    assert pp.projected_slot((0.0,) * (n - 1) + (1.0,)) == n
-    assert pp.projected_slot((1.0,) + (0.0,) * (n - 1)) == 1
