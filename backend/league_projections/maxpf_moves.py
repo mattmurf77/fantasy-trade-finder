@@ -405,3 +405,88 @@ def compute(snapshot, result, free_agent_pool, options, *, names=None, trade_dea
                 "passes_threshold": bool(passes)})
     block.update(computed=True, reason=None, rows=rows)
     return block
+
+
+# ---------------------------------------------------------------------------
+# The read (contract §3-§4). Pure: every live value is passed in.
+# ---------------------------------------------------------------------------
+
+_ROW_KEYS = ("rank", "player_id", "name", "short_name", "position", "maxpf_change", "maxpf_change_exact",
+             "lineup_change", "lineup_change_exact", "weeks_affected", "replacements", "replacements_more", "weeks",
+             "playoff_probability", "pick_if_miss", "top3_probability", "label", "label_slot", "passes_threshold")
+NOT_MAXPF = {"reverse_standings", "lottery_or_other"}
+
+
+def _dist(picks, playoff, spots):
+    return list(picks) + [playoff / spots] * spots
+
+
+def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_outlook=None,
+            untouchables=(), cuts=None, price=None):
+    """The `max_pf_moves` block served on the forecast read (contract §3, §4.1).
+
+    view_state     the read's forecast state (`batch.view` after the model check)
+    saved          the saved run's parsed `result_json` with its raw block, or None
+    failure_reason the last attempt's reason (as `recommendation.unusable_reason` takes it)
+    draft_order    {"rule", "set_at"} from the league row
+    saved_outlook  the user's saved outlook id, or None
+    untouchables   the user's Keep player ids for this league
+    cuts           `recommendation.thresholds(...)` for the playoff band
+    price          callable(slot distribution) -> engine value or None (read-time pricing)
+    """
+    from . import recommendation
+    price = price or (lambda dist: None)
+    block = {"version": VERSION, "state": "unavailable", "reason": None, "viewer_roster_id": None, "captured_at": None,
+             "draft_season": None, "draft_round": None,
+             "draft_order": draft_order or {"rule": None, "set_at": None}, "saved_outlook": saved_outlook,
+             "pick_owner": None, "baseline": None, "roster_player_ids": [], "candidates_total": 0, "rows": []}
+    reason = recommendation.unusable_reason(view_state, saved, failure_reason=failure_reason)
+    if reason:
+        return {**block, "reason": reason}
+    viewer = saved.get("viewer_roster_id")
+    team = next((t for t in saved.get("teams", []) if t["roster_id"] == viewer), None)
+    if team is None:
+        return {**block, "reason": "team_not_found"}
+    names = {t["roster_id"]: t["name"] for t in saved["teams"]}
+    block.update(viewer_roster_id=viewer, captured_at=saved.get("captured_at"),
+                 draft_season=saved["config"].get("draft_season"), draft_round=saved["config"].get("draft_round", 1),
+                 pick_owner={"owns_own_pick": team["pick_owner_roster_id"] == viewer,
+                             "owner_roster_id": team["pick_owner_roster_id"],
+                             "owner_name": names.get(team["pick_owner_roster_id"], f"Team {team['pick_owner_roster_id']}")})
+    raw = saved.get("max_pf_moves")
+    if not isinstance(raw, dict) or not raw.get("computed") or raw.get("version") != VERSION:
+        return {**block, "reason": "not_computed"}
+    block.update(roster_player_ids=list(raw.get("roster_player_ids") or []), candidates_total=raw.get("candidates_total", 0))
+    base = raw["baseline"]
+    if not base["weeks_remaining"]:
+        return {**block, "state": "season_over"}
+    deadline = raw.get("trade_deadline")
+    if deadline and saved.get("completed_weeks", 0) >= deadline:
+        return {**block, "state": "after_trade_deadline"}
+    if block["draft_order"].get("rule") in NOT_MAXPF:
+        return {**block, "state": "draft_order_not_maxpf"}
+    spots = int(saved["playoff_spots"])
+    now_value = price(_dist(team["pick_probabilities"], team["playoff_probability"], spots))
+    block["baseline"] = {
+        "weeks_remaining": base["weeks_remaining"], "first_week": base["first_week"], "last_week": base["last_week"],
+        "weeks_excluded_played": base["weeks_excluded_played"],
+        "playoff_probability": team["playoff_probability"],
+        "playoff_band": recommendation.classify(team["playoff_probability"], cuts) if cuts else None,
+        "pick_if_miss": team["conditional_expected_pick"], "top3_probability": base["top3_probability"],
+        "label": base["label"], "label_slot": base["label_slot"],
+        "pick_value": now_value, "pick_value_status": "priced" if now_value is not None else "not_priced"}
+    if team["conditional_expected_pick"] is None:
+        return {**block, "state": "no_miss"}
+    keep = set(map(str, untouchables or ()))
+    rows = []
+    for saved_row in raw.get("rows", []):
+        row = {k: saved_row[k] for k in _ROW_KEYS}
+        value = None
+        if now_value is not None:
+            after = price(_dist(saved_row["after_pick_probabilities"], saved_row["after_playoff_probability"], spots))
+            if after is not None:
+                value = {"now": now_value, "after": after, "change": round(after - now_value, 1)}
+        row.update(pick_value=value, keep=row["player_id"] in keep)
+        rows.append(row)
+    state = "ready" if any(r["passes_threshold"] for r in rows) else "no_moves"
+    return {**block, "state": state, "rows": rows}

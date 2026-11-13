@@ -46480,7 +46480,9 @@ def cron_league_projections():
 from .league_projections.api import install as _install_league_projections
 _install_league_projections(app, require_session=_require_initialized_session,
                             read_denial=_verified_read_denial, write_denial=_verified_write_denial,
-                            league_user_id=_league_user_id, fetch_json=_sleeper_get)
+                            league_user_id=_league_user_id, fetch_json=_sleeper_get,
+                            # Max PF moves: read-time pick values (flag league.max_pf_moves).
+                            pick_projection=_league_pick_projection, active_format=_active_format)
 
 from .win_now_api import install as _install_win_now
 _install_win_now(app, require_session=_require_initialized_session,

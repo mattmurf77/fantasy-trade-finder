@@ -1,19 +1,28 @@
 """Authenticated advisory routes on the existing Flask app."""
+from dataclasses import replace
 from functools import wraps
 import csv
 import io
 import json
+import logging
 
 from flask import Response, jsonify, request
 
 from ..feature_flags import is_enabled
 from .. import database as db
-from . import batch, recommendation, store
+from . import batch, maxpf_moves, recommendation, store
 from .core import Unavailable, VERSION
 from .simulation import config
 
 
-def install(app, *, require_session, read_denial, write_denial, league_user_id, fetch_json):
+log = logging.getLogger(__name__)
+
+
+def install(app, *, require_session, read_denial, write_denial, league_user_id, fetch_json,
+            pick_projection=None, active_format=None):
+    """`pick_projection(league_id)` and `active_format(sess)` (server-private,
+    injected) price the Max PF moves pick values at read time; absent, every
+    pick value reads `not_priced`."""
     def guarded(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -38,11 +47,73 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         context = db.get_league_draft_context(str(sess["league"].league_id)) or {}
         return context.get("platform") or getattr(sess["league"], "platform", "sleeper")
 
-    def public(row):
+    def public(row, parsed=None):
+        # The raw saved Max PF moves block is never served, in any flag state:
+        # the forecast read composes its own `max_pf_moves` (contract §2).
+        # `parsed`: the row's result already decoded by the caller (one decode).
+        result = parsed if parsed is not None else (json.loads(row["result_json"]) if row.get("result_json") else None)
+        if isinstance(result, dict) and "max_pf_moves" in result:
+            result = {k: v for k, v in result.items() if k != "max_pf_moves"}
         return {"run_id": row["run_id"], "status": row["status"], "created_at": row["created_at"],
                 "updated_at": row["updated_at"], "input_hash": row.get("input_hash"),
                 "reason": row.get("reason"), "details": json.loads(row.get("details_json") or "{}"),
-                "result": json.loads(row["result_json"]) if row.get("result_json") else None}
+                "result": result}
+
+    def pricer(sess, league_id, saved):
+        """Engine value of the viewer's own next-year 1st for a slot
+        distribution, with the league's live projected-slot pricing (D-240), or
+        None when that pricing does not apply now."""
+        if pick_projection is None:
+            return None
+        from .. import pick_values
+        try:
+            projection = pick_projection(league_id)
+            if projection is None:
+                return None
+            fmt = active_format(sess) if active_format else "1qb_ppr"
+            cfg = saved.get("config") or {}
+            row = {"season": cfg.get("draft_season"), "round": cfg.get("draft_round", 1),
+                   "original_roster_id": saved.get("viewer_roster_id"), "pool_value": 0}
+            if pick_values.market_pick_pool_value(row["season"], row["round"], fmt) is None:
+                return None
+        except Exception as exc:
+            log.warning("max_pf_moves pricing unavailable: %s", type(exc).__name__)
+            return None
+
+        def price(dist):
+            try:
+                mine = replace(projection, dists={**projection.dists, str(row["original_roster_id"]): tuple(dist)})
+                if pick_values._projection_terms(row, mine, fmt) is None:
+                    return None
+                return round(pick_values.priced_pool_value(row, scoring_format=fmt, mode="market_slots", projection=mine), 1)
+            except Exception as exc:
+                log.warning("max_pf_moves pricing failed: %s", type(exc).__name__)
+                return None
+        return price
+
+    def moves_block(sess, uid, league_id, result, saved):
+        """The composed `max_pf_moves` block (flag `league.max_pf_moves`).
+        Never raises: an unreadable saved run is `unavailable` / `read_failed`."""
+        try:
+            return _moves_block(sess, uid, league_id, result, saved)
+        except Exception as exc:
+            log.warning("max_pf_moves read failed: %s", type(exc).__name__)
+            return {**maxpf_moves.compose("no_run", None), "reason": "read_failed"}
+
+    def _moves_block(sess, uid, league_id, result, saved):
+        preferences = db.load_league_preference(user_id=uid, league_id=league_id) or {}
+        draft_order = db.get_league_draft_order_rule(league_id)
+        try:
+            keep = db.load_asset_preferences(user_id=uid, league_id=league_id).get("untouchables", [])
+        except Exception:
+            keep = []
+        if result["state"] == "unsupported_policy":
+            saved = None
+        block = maxpf_moves.compose(result["state"], saved, failure_reason=result["reason"],
+                                    draft_order=draft_order, saved_outlook=preferences.get("team_outlook"),
+                                    untouchables=keep, cuts=recommendation.thresholds(batch.settings()),
+                                    price=(pricer(sess, league_id, saved) if saved else None))
+        return block
 
     def load(sess, run_id, *, with_snapshot=False):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
@@ -101,7 +172,8 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         result = batch.view(uid, league_id)
         if platform(sess) != "sleeper":
             result.update(state="unsupported_policy", reason="sleeper_only", run=None, attempt=None, next_attempt_not_before=None)
-        run = public(result["run"]) if result["run"] else None
+        raw_saved = json.loads(result["run"]["result_json"]) if result["run"] and result["run"].get("result_json") else None
+        run = public(result["run"], raw_saved) if result["run"] else None
         attempt = run if result["attempt"] is result["run"] else (public(result["attempt"]) if result["attempt"] else None)
         # A forecast from another model version stays on record as the last
         # saved one, dated and stale. It is never shown as current.
@@ -114,6 +186,8 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             result["outlook_recommendation"] = recommendation.build(
                 result["state"], saved, preferences.get("team_outlook"), recommendation.thresholds(batch.settings()),
                 failure_reason=result["reason"])
+        if is_enabled("league.max_pf_moves"):
+            result["max_pf_moves"] = moves_block(sess, uid, league_id, result, raw_saved)
         return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/leagues/<league_id>/draft-order-rule", methods=["POST"])
