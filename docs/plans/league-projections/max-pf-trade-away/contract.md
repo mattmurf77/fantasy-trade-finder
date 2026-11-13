@@ -124,7 +124,7 @@ is read.
 | `position` | `string` | no | S | First of the player's captured `fantasy_positions` (QB, RB, WR, TE, K, DEF, DL, LB, DB, ...) |
 | `maxpf_change` | `number` | no | S | Rest-of-season change to the user's max PF, whole points, ≤ 0. `maxpf_change_exact` rounded half away from zero |
 | `maxpf_change_exact` | `string` | no | S | The exact Decimal sum, e.g. `"-31.24"` |
-| `lineup_change` | `number` | no | S | Rest-of-season change to projected lineup points (lineup lane), whole points, ≤ 0. 0 for a taxi player |
+| `lineup_change` | `number` | no | S | Rest-of-season change to projected lineup points (lineup lane), whole points. Usually ≤ 0; 0 for a taxi player; can be positive when a free agent outprojects the removed player (see `MoveWeek.maxpf_change`) |
 | `lineup_change_exact` | `string` | no | S | Exact Decimal |
 | `weeks_affected` | `number` | no | S | Weeks with a non-zero max PF change |
 | `replacements` | `Replacement[]` | no | S | Who enters the max PF lineup in his place, summed over the weeks. Sorted by `weeks` desc, then `name`. At most 3; see `replacements_more` |
@@ -157,8 +157,8 @@ is read.
 |---|---|---|---|
 | `week` | `number` | no | NFL week |
 | `status` | `'changed' \| 'no_change' \| 'bye' \| 'played' \| 'not_projected'` | no | `changed`: non-zero max PF drop. `no_change`: he does not start in the max PF lineup that week. `bye`: verified bye (`provider.py:451-457`). `played`: the week was excluded because the user's team already has a completed game in it (§13.2). `not_projected` cannot occur in a listed row (unprojected players are excluded, §13.1) and is reserved |
-| `maxpf_change` | `number` | no | That week's max PF change, one decimal, ≤ 0 |
-| `lineup_change` | `number` | no | That week's lineup-lane change, one decimal, ≤ 0 |
+| `maxpf_change` | `number` | no | That week's max PF change, one decimal. Usually ≤ 0. It can be positive: the forecast's free-agent rule fills only open slots and never displaces a rostered starter (D-234, `core.py:197-205`), so when a free agent outprojects the removed player the week's total rises. The row's rest-of-season `maxpf_change` is always < 0 (only drops are listed) |
+| `lineup_change` | `number` | no | That week's lineup-lane change, one decimal; same sign rule |
 | `replaced_by` | `Replacement[]` without `weeks` | no | Players who enter the max PF lineup that week. Empty unless `status == "changed"` |
 
 ### 3.6 The threshold
@@ -502,8 +502,8 @@ Request: `{"rule": "not_sure"}` on an unanswered league → `{"draft_order": {"r
 
 There is no separate read route: the answer is on `max_pf_moves.draft_order`.
 
-App client: add `setDraftOrderRule(leagueId, rule)` to `mobile/src/api/leagueProjections.ts`
-(through `api.post`).
+App client: `setDraftOrderRule(leagueId, rule)` in `mobile/src/api/draftOrderRule.ts` (through
+`api.post`; app builder's choice, 2026-11-12).
 
 ### 7.3 D-240 pick pricing: out of scope
 
@@ -527,9 +527,13 @@ Requires `league.projections` (no forecast without it: `api.py:20`, `service.py:
 | `POST .../draft-order-rule` | 404 `feature_disabled` | §7.2 |
 | Weekly job (`service._run`) | Does no extra work: capture is called without the side channel, no moves step, no extra DB read | Capture fills the side channel; after `simulate` the moves step runs for baseline runs (§13) |
 | Stored `snapshot_json`, `input_hash`, `snapshot_hash`, `model_version` | Unchanged | Also unchanged: the extra free agents and the deadline never enter the snapshot (§13.4) |
-| App | No key → section not rendered | §6 |
+| App | Flag false and no key → section not rendered | §6 |
 
-The app does not read the flag; the presence of the key is the switch.
+The app reads the flag too: the section mounts only when `useFlag('league.max_pf_moves')` is
+on **and** the block is present (app builder, 2026-11-12). The flag reaches the app the way
+`league.projections` does: `GET /api/feature-flags` returns `flags_dict()`, every key of
+`FLAG_KEYS` (`server.py:36601`, `feature_flags.py:1449`), which `mobile/src/api/flags.ts`
+fetches. Pinned by `test_maxpf_moves_analytics.py::test_flags_endpoint_serves_the_flag`.
 
 ## 9. Analytics
 
@@ -603,43 +607,56 @@ English; never "tank", never anything about who to start or bench.
 
 | Value | Rule | Example |
 |---|---|---|
-| Max PF / lineup change, row | Whole number from the integer field; negatives with U+2212 `−`; 0 as `0` | `−31` |
-| Week change | One decimal, `−` | `−7.0` |
+| Max PF / lineup change, row | Whole number from the integer field; negatives with U+2212 `−`, positives with `+`; exactly 0 as `0` | `−31` |
+| Week change | One decimal; `−` / `+` as above; exactly 0 as `0` | `−7.0` |
 | Pick if you miss | One decimal | `3.7 → 3.4` |
 | Probabilities | Whole percent, round half up; `<1%` when 0 < p < 0.005; `>99%` when 0.995 ≤ p < 1; `0%` and `100%` exact | `46% → 62%`, `3% → 1%` |
 | Pick value (baseline) | Whole number, thousands separator | `2,480` |
-| Pick value change | Whole number, leading `+` or `−`, thousands separator | `+169` |
+| Pick value change | Whole number, leading `+` or `−`, thousands separator; a change that rounds to exactly 0 renders `0`, never `+0` | `+169` |
 | Arrows | ` → ` (U+2192, spaces either side) | |
 | Labels | Verbatim from the server, never composed | `1.02` |
 
 ## 12. The Find trades hand-off
 
-On "Find trades for {short_name}" (only on rows with `keep === false`):
+On "Find trades for {short_name}" (only on rows with `keep === false`). Revised 2026-11-12 after
+the app builder found that, on today's flags, TradesHome opens on the canvas, which neither shows
+nor sends store pins (app-evidence.md §3):
 
 ```ts
 const store = useFinderTargets.getState();          // mobile/src/state/useFinderTargets.ts:98-118
 store.setSide('give', [{ id: row.player_id, name: row.name, position: row.position }]);
 store.setSide('receive', []);
 track('finder_target_pinned', { side: 'give', source: 'maxpf_moves' }, 'Standings');
-navigation.navigate('Trades', { screen: 'TradesHome' });   // the League Summary Offer route, LeagueSummaryScreen.tsx:1345
+navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome',
+  params: { canvasPrefill: { give: [row.player_id], receive: [] }, canvasPrefillSeq: Date.now() },
+  pop: true } });
 ```
 
-- It **replaces** both sides (the League Summary "Offer" convention, `LeagueSummaryScreen.tsx:1314-1316`),
-  so an old pin cannot ride along unseen.
-- **No `setHandoff`, no auto-run** in v1. The deck's auto-run needs a scoped opponent except
-  for the calculator origin (`TradesScreen.tsx:3927-3930`), and an auto-run tap would need a
-  new R1 `find_trades_tapped.source` value (`analytics_taxonomy.py:1195-1207`, pinned by
-  `test_time_to_suggestion_events.py:54-58` and `utils/firstCardEvent.ts:13-25`). The user lands
-  on the deck with the player pinned on the give side and taps Find a Trade, which fires R1
-  with `source` absent as today. Auto-run is a follow-up.
+- The store pin and the event stay exactly as before; the existing `canvasPrefill` route param
+  (`CanvasPrefill`, `components/TradeBuildCanvas.tsx:60-70`; MatchesScreen already sends it) puts
+  the player visibly on the canvas's give side, replacing what was there.
+- `popTo('Main', …)` because Standings is a root-stack push. `canvasPrefillSeq` is required:
+  TradesScreen's consumer is keyed on it alone (`TradesScreen.tsx:1362-1368`). `pop: true` keeps
+  a second TradesHome from stacking over a results deck (G-056). No `opponentId` is sent, so the
+  canvas partner becomes the page's scoped opponent.
+- It **replaces** both sides (the League Summary "Offer" convention,
+  `LeagueSummaryScreen.tsx:1314-1316`), so an old pin cannot ride along unseen.
+- **No `setHandoff`, no auto-run** in v1, no new event and no new R1 source. Nothing runs until
+  the user taps Find a Trade. Auto-run is a follow-up.
 - Pins are session-only and clear on league switch (`useFinderTargets.ts:120-138`), unchanged.
 - **Keep / untouchable rows:** the row is listed with the `Keep` tag; the opened row shows
   C-KEEP-NOTE instead of the button. The app does not pin a Keep player. (The engine would
   accept it: a viewer's own give-side pin overrides Keep, `database.py:4023`; v1 does not offer
   that path.)
-- The app builder must confirm, in the code-walk, that TradesScreen shows a give pin set from
-  outside the screen (it reads `pinnedGive` from the store) and that its next Find a Trade
-  sends it.
+- **Known limitation (follow-up, not built):** with `calc.inline_home` OFF (it is true in
+  `config/features.json` today) TradesScreen ignores the prefill (`TradesScreen.tsx:1364`); the
+  give pin is then not shown on the guided landing and is sent only if no model search has run
+  since the screen's last reset. Smallest fix if that flag is ever turned off: a TradesScreen
+  effect that calls `resetDeckForNewTargets()` when the store pins change from outside the
+  screen (about 8 lines).
+
+Accepted on the app side (2026-11-12): an unknown `state` renders nothing; replacement names use
+the full `name`; the draft-order line with "Change" also shows in `no_moves` and `no_miss`.
 
 ## 13. What is saved with the run (backend only)
 
