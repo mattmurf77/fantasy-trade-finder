@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Max PF moves turned on (D-259)
+
+- `league.max_pf_moves` true in `config/features.json` and the three flag fixtures, on the operator's word after the backtest. No caveat line.
+- The list appears after each league's next weekly forecast; needs TestFlight 1.22.0 (191).
+- Backtest write-up: `docs/plans/league-projections/max-pf-trade-away/backtest/README.md`. The shown drop is about a third too small; the list itself is right.
+
 ## 2026-11-12 — Max PF moves v1 built, flag off (D-258)
 
 - **What:** the user's own Standings card gets "Max PF moves": the players whose trade lowers rest-of-season max PF most, who replaces them week by week, and the pick if you miss, top-3 chance, playoff chance, label and pick value before and after. Computed in the weekly forecast job; served on the forecast read. A once-per-league draft-order question hides the list for leagues not on max PF order.

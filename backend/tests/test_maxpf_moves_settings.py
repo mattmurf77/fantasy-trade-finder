@@ -24,14 +24,17 @@ REPO = Path(__file__).resolve().parents[2]
 KEY = "league.max_pf_moves"
 
 
-def test_flag_registered_default_off_everywhere():
+def test_flag_registered_code_default_off_shipped_on():
+    """D-259 (operator, 2026-11-12): the flag ships ON. The code default stays
+    off, so a missing or unreadable features.json still means off; the three
+    flag fixtures mirror the shipped value."""
     assert KEY in feature_flags.FLAG_KEYS
     assert feature_flags.DEFAULT_FLAGS[KEY] is False
     features = json.loads((REPO / "config/features.json").read_text())
-    assert features[KEY] is False and "_comment_league_max_pf_moves" in features
+    assert features[KEY] is True and "_comment_league_max_pf_moves" in features
     for name in ("release", "onboarding-v2", "profiles-on"):
         fixture = json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())
-        assert fixture[KEY] is False, name
+        assert fixture[KEY] is True, name
 
 
 def test_settings_from_config():
