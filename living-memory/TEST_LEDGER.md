@@ -1,3 +1,12 @@
+## 2026-11-12 — Release: Standings table, League rankings tile, Team Review fixes, ranked pick labels on `main` at `4a8cd70d`; TestFlight 1.22.0 (189) and (190)
+
+- **CI on the merged heads:** #677 `247c41e7`, #678 `004d50da`, #680 `b0727aaf`, #679 `fc57b05f`, #681 `26d752a2` and #682 `01184485` each green on all four checks before its merge. #682 was stacked on #681.
+- **App, main session, clean checkout of `c68090d4`:** `tsc --noEmit` clean; `check-team-review.js` 38 of 38. The full `check-*.js` set and testid-lint ran green in CI on the same head.
+- **Production (read-only checks):** #681 deploy live at 00:50 UTC on 2026-11-13; the #682 deploy was started by the merge at 01:13 UTC.
+- **TestFlight:** build 1.22.0 (189) from `ac877b73` (EAS `9d1a4d8f`), auto-submit scheduled. Build 1.22.0 (190) from the clean checkout of `c68090d4` (EAS `91741bb7`, submission `11b3c5c3`), auto-submit scheduled. #682 is server-side only and needs no build.
+- **Not verified:** anything on a device, for 189 or 190: the single Standings table (column widths, the Record | Points pill, the open card), the League rankings playoff tile, the Team Review fixes and the outlook-only Confirm (manual checklist step 11 in `docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md`), and the ranked pick labels on a live league (checklist in `docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md`). Whether either submission reached TestFlight could not be read.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
+
 ## 2026-11-12 — Projected pick labels as a 1..N rank (D-257), branch `feat/projected-pick-rank`
 
 - **New:** `backend/tests/test_pick_slot_rank.py`, 21 passed. It pins:
