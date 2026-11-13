@@ -249,7 +249,13 @@ def test_v1_keys_unchanged():
     out = compose(saved_run(), price=lambda dist: 1000.0)
     assert out["version"] == 1 == maxpf_moves.VERSION
     assert set(out) - set(golden) == {"combined"}
-    _merge_nullable(_types(golden), _types({k: v for k, v in out.items() if k != "combined"}))
+    # D-262 adds exactly two keys to the baseline (additive; the v1 golden is
+    # what build 191 was written against and stays frozen).
+    proof = {"playoff_clinched", "playoff_eliminated"}
+    assert set(out["baseline"]) - set(golden["baseline"]) == proof
+    v1 = {k: v for k, v in out.items() if k != "combined"}
+    v1["baseline"] = {k: v for k, v in out["baseline"].items() if k not in proof}
+    _merge_nullable(_types(golden), _types(v1))
 
 
 # ── settings ────────────────────────────────────────────────────────────

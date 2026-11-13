@@ -5,7 +5,7 @@ import threading
 import time
 
 from ..feature_flags import is_enabled
-from . import provider, store, batch
+from . import provider, store, batch, clinch
 from .core import Unavailable, VERSION
 from .simulation import simulate
 
@@ -156,6 +156,9 @@ def _run(fetch_json, foreground_busy=None):
             result = prior or simulate(snapshot, inputs["config"],
                                        cancelled=lambda: _checkpoint(cancelled, foreground_busy))
             result = {**result, "reused_compatible_result": bool(prior), "verified_at": snapshot["captured_at"]}
+            # Clinched / eliminated from the rules (D-262), on every run and on
+            # a reused prior result too. Never raises; changes no probability.
+            result = clinch.attach(result, snapshot)
             if moves:
                 result = _attach_moves(result, prior, snapshot, sidecar, started, cancelled, foreground_busy)
             elif "max_pf_moves" in result:

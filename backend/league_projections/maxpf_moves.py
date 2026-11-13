@@ -546,6 +546,11 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
         "weeks_excluded_played": base["weeks_excluded_played"],
         "playoff_probability": team["playoff_probability"],
         "playoff_band": recommendation.classify(team["playoff_probability"], cuts) if cuts else None,
+        # D-262: proven from the rules, roster-independent, so they hold for
+        # every row's and combined entry's "after" too. Absent on a run saved
+        # before D-262: False, never proven.
+        "playoff_clinched": bool(team.get("playoff_clinched")),
+        "playoff_eliminated": bool(team.get("playoff_eliminated")),
         "pick_if_miss": team["conditional_expected_pick"], "top3_probability": base["top3_probability"],
         "label": base["label"], "label_slot": base["label_slot"],
         "pick_value": now_value, "pick_value_status": "priced" if now_value is not None else "not_priced"}

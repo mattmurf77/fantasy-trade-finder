@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 
+from .clinch import odds_text
 from .core import VERSION
 
 # The one fixed cut: exactly 45% is Rebuilding, anything above it is
@@ -121,10 +122,13 @@ def build(state, result, current_outlook, cuts, *, failure_reason=None):
     if not valid_probability(probability):
         return _unavailable("team_not_found", current_outlook, result)
     outlook = classify(probability, cuts)
+    clinched, eliminated = bool(team.get("playoff_clinched")), bool(team.get("playoff_eliminated"))
     return {"status": "available", "reason": None, "playoff_probability": probability, "recommended_outlook": outlook,
+            "playoff_clinched": clinched, "playoff_eliminated": eliminated,
             "current_outlook": current_outlook, "differs": outlook != current_outlook,
             "suggestion": SUGGESTIONS[outlook],
-            "explanation": (f"Your team makes the playoffs in {probability * 100:.1f}% of the simulated seasons in the saved forecast. "
+            "explanation": (f"Your team makes the playoffs in {odds_text(probability, clinched=clinched, eliminated=eliminated)} "
+                            "of the simulated seasons in the saved forecast. "
                             "This is a suggestion. Your saved outlook changes only when you choose a new one."),
             "captured_at": result.get("captured_at")}
 
@@ -163,7 +167,8 @@ def saved_chance(view, now=None):
     due = _instant(view.get("next_attempt_not_before"))
     current = (view.get("state") == "current" and result.get("model_version") == VERSION
                and due is not None and now < due)
-    return {"playoff_probability": probability, "captured_at": result.get("captured_at"), "current": current}
+    return {"playoff_probability": probability, "captured_at": result.get("captured_at"), "current": current,
+            "playoff_clinched": bool(team.get("playoff_clinched")), "playoff_eliminated": bool(team.get("playoff_eliminated"))}
 
 
 def load_chance(user_id, league_id):
