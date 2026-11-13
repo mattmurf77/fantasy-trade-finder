@@ -1,0 +1,60 @@
+# Max PF moves: backend build plan (step B)
+
+> Ordered commits for the backend half of v1, on `feat/max-pf-moves`. Contract:
+> [contract.md](contract.md). Scope: [scope.md](scope.md). Written 2026-11-12 against
+> `4a8cd70d`. The app builder works from the contract in parallel; the two halves meet only
+> at the JSON in contract §3 and the route in contract §7.2.
+
+- [Commits](#commits)
+- [Risks and how each is proved](#risks-and-how-each-is-proved)
+- [Follow-ups (not v1)](#follow-ups-not-v1)
+
+## Commits
+
+Every commit runs `python3 -m pytest backend/tests -q` green before the next. Each new test
+is shown red at least once by the sabotage named beside it (sabotage applied, test run, change
+reverted), and the sabotage runs are logged in TEST_LEDGER.
+
+| # | Commit | Files | Tests | Sabotages that must turn them red |
+|---|---|---|---|---|
+| B1 | **Flag and settings.** `league.max_pf_moves` default False; settings object in the config file; a `settings()` parser in the new module that validates the six keys and ranges and is called only when the flag is on | `backend/feature_flags.py`, `config/features.json`, `backend/tests/fixtures/flags/{release,onboarding-v2,profiles-on}.json`, `config/league_projections.json`, `backend/league_projections/maxpf_moves.py` (settings only) | Flag-mirror tests (existing pattern, `test_analytics_taxonomy_fa_move_server.py:126-129`); `test_maxpf_moves.py::test_settings_*` (missing key, bad range rejected); `batch.settings()` output and `view()` unchanged with the new top-level key present | Drop the flag from one fixture; set `simulations_per_candidate` 0 |
+| B2 | **Pure calculation module.** `maxpf_moves.resolve(snapshot, viewer_roster_id, free_agent_pool)` (weekly re-solve, both lanes, replacements, exclusions, played-week rule, contract §13.1-13.2) and `maxpf_moves.compute(snapshot, result, free_agent_pool, settings, *, cancelled)` (candidate cut, paired re-runs, after figures, labels, threshold, contract §13.3). No I/O, no flags; callable by the backtest agent | `backend/league_projections/maxpf_moves.py` | `test_maxpf_moves.py`: parity (nobody removed reproduces `modeled_actual_projection` and `modeled_maxpf_projection` for every non-excluded team-week of the synthetic league, incl. free-agent-filled weeks); hand-built rosters for flex chain, bye week, superflex, two-step position chain, taxi player as the max PF replacement, only tight end (free-agent fill), reserve player (excluded), unprojected player (excluded); exploration §6's worked example gives Sato −31 and Okafor −28 with the named replacements; never raises a total; drop ≤ player's own points; never-starter gives 0; unchanged roster gives exactly 0 pick change; same input twice gives identical output; 5,000-run change within tolerance of a 50,000-run change on a fixture; "after" probabilities in 0..1 and each team's slot row sums to its non-playoff probability; threshold edges (exactly 5 points, exactly 0.1, exactly 0.02) | Use the max PF pool for the lineup lane; skip `free_agent_fill`; use a different seed for the "after" run; drop the clamp; use `>` for `≥` at the threshold |
+| B3 | **Capture side channel.** `provider.capture(..., sidecar=None)`; with a dict, write `free_agents` (top K per slot type per week, contract §13.4) and `trade_deadline`. Nothing else in capture changes | `backend/league_projections/provider.py` | `test_maxpf_moves_capture.py`: on the existing capture fixtures, `capture(sidecar=None)` and `capture(sidecar={})` return snapshots equal by `==` and by `core.digest`, and `store.save_snapshot`'s `input_hash` formula gives the same value; the kept pool contains every free agent `free_agent_fill` used for the viewer, and K is honoured; the existing `test_league_projection_*` capture tests pass untouched | Put the pool in the snapshot; take K = gaps (not gaps + 1) on a fixture where removal opens a second slot |
+| B4 | **Weekly-job hook.** In `service._run`, when the flag is on and the run is a baseline (`kind == "baseline"`) with a fresh capture: pass a sidecar dict to capture; after `simulate` (or a reused `prior`) and before `store.finish`, call `compute` inside a wrapper that never raises, with the deadline and lease checks of contract §13.5; put the block at `result["max_pf_moves"]`. Scenario runs and pre-supplied snapshots are untouched | `backend/league_projections/service.py` | `test_maxpf_moves_job.py`: flag off → stored `result_json`, `snapshot_json`, `input_hash` byte-identical to a run on the pre-change code path for the same fixture, and `compute` is never called (spy); flag on → block present, every other key of `result_json` byte-identical to the flag-off run; `compute` raising → run completes, block `computed: false, reason: failed`; deadline hit → `time_budget`, run completes; prior reuse with an equal `settings_hash` does not recompute, with a different one does; a scenario run never gets a block | Remove the flag check (flag-off spy test red); let the wrapper re-raise; put the step before `simulate` |
+| B5 | **Draft-order storage and route.** Two `leagues` columns + `_migrate_db` rows; `database.get/set_league_draft_order_rule`; `POST /api/leagues/<id>/draft-order-rule` in `league_projections/api.py` (contract §7.2) | `backend/database.py`, `backend/league_projections/api.py` | `test_maxpf_moves_routes.py::test_draft_order_*`: 404 with flag off; 404 for another league; 422 for a non-Sleeper league; 400 for every malformed body (extra key, wrong value, non-object, 1 KB+ → 413); `not_sure` writes nothing; a write is visible to a second user of the same league; unverified session refused by `write_denial`; migration adds both columns to an existing DB | Accept any string; key the write by user; skip the league-match check |
+| B6 | **Read composition.** In `league_projection_latest`: strip `max_pf_moves` from every served `result` (in `public()`); when the flag is on, compose the contract §3 block from the saved block + run + R-time reads (draft order row, saved outlook, untouchables, pick values via injected `pick_projection` and `active_format` callbacks, state per contract §4.1) | `backend/league_projections/api.py`, `backend/server.py` (two extra keyword callbacks at the `_install_league_projections` call, `server.py:46480-46483`), `backend/league_projections/maxpf_moves.py` (pure `compose`) | Flag off → the response JSON of `/latest` and `/projection-runs/<id>` is byte-identical to the pre-change route for a run saved without a block **and** for a run saved with one; flag on → every state in contract §4.1 from a fixture each, in precedence order; every `unavailable` reason; `pick_value` null and `not_priced` when the projection is None; `pick_value.now` equals `pick_values.priced_pool_value` for the user's pick with this run's distribution; `keep` follows `load_asset_preferences`; the example payload in contract §5.1 validates against the composer's output keys and types (a schema test both builders can run) | Stop stripping in `public()`; read `draft_order` from the user's preferences; compute the label at read time from the league's projection instead of the run |
+| B7 | **Analytics registration.** `maxpf_moves_viewed`, `maxpf_move_expanded`, `draft_order_rule_answered` in `analytics_taxonomy.py` (`CLIENT_EVENT_PROPS` and the names set, value comments); `maxpf_moves_viewed` in `NON_INTENT_EVENTS`; `maxpf_moves` added to the `finder_target_pinned.source` comment | `backend/analytics_taxonomy.py`, `backend/analytics_queries.py` | The taxonomy's existing registry tests; a new test that the three names are registered with exactly the contract §9 property names and that only the impression is non-intent | Register `maxpf_moves_viewed` as intent |
+| B8 | **Docs and memory.** Every row of scope §4; D-258 in DECISIONS; CHANGELOG; TEST_LEDGER (suite, sabotages, `FTF_SKIP_SIM_GATE=1` posture); NEXT.md follow-ups; `build-backend.md` code-walk | `docs/*`, `living-memory/*`, this folder | `living-memory-format-check` skill pass | — |
+
+B7 must reach `main` in the same squash-merge as the app's emitter (the repo squash-merges,
+so one PR carrying both halves satisfies "same commit as the emitter").
+
+## Risks and how each is proved
+
+| Risk | Proof |
+|---|---|
+| **Flag off changes the forecast read.** | B6's byte-identity test, on two stored runs (with and without a saved block). The strip runs in every flag state, so a block saved while the flag was on cannot leak after it is turned off |
+| **Flag off does extra work in the job.** | B4 spy: with the flag off, capture is called with `sidecar=None` and `compute` is never imported or called; `settings()` for the moves block is never read |
+| **Keeping extra free agents changes a simulated number, the input hash, dedupe, model version or retention.** | The pool never enters the snapshot (B3 `==` and digest test), so `semantic_facts` → `input_hash` (`store.py:172-181`) and the `prior` dedupe query are unchanged; `snapshot_hash` (`simulation.py:334`) is unchanged; `simulation.py` and `core.VERSION` (`core.py:10`) are not edited (B8 diff check); retention (`store.py:17-52`) is not edited and the block rides inside `result_json` under the existing rules. B4's flag-on test asserts every non-block key of `result_json` is byte-identical to the flag-off run |
+| **The 540-second budget.** Main run is about 16 s on a laptop for 250,000; the moves step is about 3.5 s on a laptop for five weeks left, three times that in week 1, and production is slower. | Hard stop at min(`time_budget_seconds` 60, 480 s after the job started); `simulate`'s own `cancelled` hook (every 500 iterations, `simulation.py:200-201`) checks it, so the stop lands within one checkpoint. 60 s leaves the job's 540 s line (`service.py:83`) and the lease's 600 s write window (`store.py:146`, `:157-158`) untouched. B4 test with a fake clock |
+| **The extra step raises or times out.** | Wrapper catches `Exception` (which includes `Unavailable`) and records `computed: false` with a bounded reason; `store.finish` still runs with the forecast unchanged. B4 tests both paths. No exception text is stored (same rule as `service.py:117-120`) |
+| **The re-solve is not the forecast's own lineup.** | B2 parity test over every team-week, both lanes, including free-agent-filled weeks, with nobody removed |
+| **Removing a player opens a slot the kept pool cannot fill.** | K = gaps + 1 per lane (a maximum assignment loses at most one slot when one player is removed); B3 sabotage with K = gaps |
+| **Paired noise or a sign error.** | B2: unchanged roster gives exactly 0; monotonicity (removal never raises a total); 5,000 vs 50,000 tolerance test |
+| **A week already partly played.** | Excluded and counted (`weeks_excluded_played`); the job's Tuesday 09:30 ET slot (`config/league_projections.json` schedule) is before every game. B2 test with a completed-game fixture |
+| **Pick value disagrees with the trade finder.** | Same formula and live knobs (`_league_pick_projection`, `server.py:20931`); only the distribution is this user's run. B6 equality test with the same distribution. Documented in contract §14 row 10 |
+| **Result size.** | At most 8 rows × at most 18 weeks plus a free-agent pool of at most (slot types × K) per week: a few tens of KB worst case. B4 asserts a ceiling on the fixture |
+| **Account deletion.** | No user id is written to the league row (contract §7.1); the saved block lives in `league_projection_runs`, which deletion already handles |
+
+## Follow-ups (not v1)
+
+For NEXT.md at build end:
+
+1. When a league's answer is `reverse_standings` or `lottery_or_other`, stop projected-slot
+   pick pricing for it (`_league_pick_projection` → None). Contract §7.3.
+2. "Find trades" auto-runs the search: a new R1 source `maxpf_moves` and opponent-less
+   auto-run in TradesScreen. Contract §12.
+3. Tier 2 (the whole trade, exploration §7.2) and the D-238 revision-5 returns that keep max
+   PF down.
+4. Reconcile member-written `leagues.draft_order_rule` with the ESPN/MFL design's
+   operator-set rule (scope Q3).
