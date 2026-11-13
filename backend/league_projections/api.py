@@ -116,6 +116,30 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
                 failure_reason=result["reason"])
         return jsonify({**result, "run": run, "attempt": attempt})
 
+    @app.route("/api/leagues/<league_id>/draft-order-rule", methods=["POST"])
+    @guarded
+    def league_draft_order_rule(sess, league_id):
+        """Max PF moves (contract §7.2): any verified member of the session's
+        league answers how the league orders next year's draft. `not_sure`
+        writes nothing. Returns the stored state."""
+        if not is_enabled("league.max_pf_moves"):
+            return jsonify(error="feature_disabled"), 404
+        _, current_league = identity(sess)
+        if league_id != current_league:
+            return jsonify(error="not_found"), 404
+        if request.content_length and request.content_length > 1024:
+            return jsonify(error="payload_too_large"), 413
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or set(data) != {"rule"} or data["rule"] not in (*db.DRAFT_ORDER_RULES, "not_sure"):
+            raise ValueError("invalid_draft_order_rule")
+        if platform(sess) != "sleeper":
+            raise Unavailable("sleeper_only")
+        stored = (db.get_league_draft_order_rule(league_id) if data["rule"] == "not_sure"
+                  else db.set_league_draft_order_rule(league_id, data["rule"]))
+        if stored is None:
+            return jsonify(error="not_found"), 404
+        return jsonify(draft_order=stored)
+
     @app.route("/api/projection-runs/<run_id>", methods=["GET"])
     @guarded
     def league_projection_get(sess, run_id):
