@@ -142,11 +142,15 @@ class Collector:
     def __init__(self):
         self.raw_user_ids: set[str] = set()
         self.names: set[str] = set()
+        # name -> {source field, e.g. 'draft.picks.first_name'}: reported with a
+        # leak-scan hit instead of the name itself.
+        self.name_sources: dict = {}
         self.user_keys: set[str] = set()
         self.dropped: Counter = Counter()
 
 
-def harvest(obj, col: Collector | None) -> None:
+def harvest(obj, col: Collector | None, kind: str = "payload") -> None:
+    """``kind``: the endpoint class the payload came from (for name sources)."""
     if col is None:
         return
     stack = [obj]
@@ -158,6 +162,8 @@ def harvest(obj, col: Collector | None) -> None:
                 if (ks in NAME_KEYS or ks.startswith("p_nick_")
                         or ks.startswith("team_name")) and isinstance(v, str) and v:
                     col.names.add(v)
+                    field = "p_nick_*" if ks.startswith("p_nick_") else ks
+                    col.name_sources.setdefault(v, set()).add(f"{kind}.{field}")
                 if ks in USER_ID_KEYS and isinstance(v, str) and v.isdigit():
                     col.raw_user_ids.add(v)
                 if ks in USER_ID_LIST_KEYS and isinstance(v, list):

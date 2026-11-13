@@ -19,16 +19,27 @@ b. a raw Sleeper user id. Every digit run is examined: a run of 12-20 digits
    the raw ids seen are also held in memory and matched directly, which also
    covers users the crawler never hashed;
 c. during a run only: a NAME VALUE seen in a name field (held in memory,
-   never written). All decoded text of every file (raw files, the SQLite
-   bytes and cells, any text file) is split into words (``\\w+``); a name hits
-   when its word sequence appears anywhere, so a name inside a longer string
-   is found when it sits on word boundaries, and a name whose first word has
-   6+ characters is found glued inside a longer word. A name that is a single
-   word the store legitimately holds as a value (``is_stored_scalar``: any
-   number, a player-id or team-code shape, a 1-2 character token, a vocabulary
-   word) cannot be told apart from data: it is not value-checked, and the
-   number of such names is reported as ``ambiguous_names_skipped`` (a team
-   named '2025' failed the pilot's scan against the stored season '2025').
+   never written, with the field it came from). Text is split into words
+   (``\\w+``); a name hits when its word sequence appears, inside longer
+   strings too, and a name whose first word has 6+ characters also when glued
+   inside a longer word. Where it is checked:
+   - every decoded SQLite cell, every string and key of a raw gz/JSON file,
+     every line of any other file, and the SQLite schema: every name;
+   - the SQLite file's raw bytes (free pages, overflow): only ASCII names of
+     at least RAW_MIN_CHARS (11) word characters, because binary pages read
+     as text match short names by chance (calculation at RAW_MIN_CHARS). The
+     store runs with ``secure_delete``, so its own deleted rows are zeroed;
+     the raw pass covers pages freed by other writers. Names left out are
+     counted (``names_excluded_from_raw_bytes_pass``).
+   A name made only of words the store legitimately holds as values
+   (``is_stored_scalar``: numbers, player-id or team-code shapes, 1-2
+   character tokens, and every fixed word the crawler writes, from the schema
+   and its own code) cannot be told apart from data ('2025', 'J.J.', 'QB 1'):
+   it is not value-checked and is counted (``ambiguous_names_skipped``).
+   Every hit is reported with its location (``file:table.column``, a JSON key
+   path of the crawler's own keys with any other key shown as ``<key>``,
+   ``file@pageN`` for raw bytes, ``file:lineN``, ``file:schema``), the name's
+   source field and its shape (word count, characters); never the name.
 
 d. any number cell of 1e15 or more (no stored number is that large; an id
    stored as a number is caught even after a REAL lost its low digits).
@@ -113,40 +124,94 @@ def id_candidates(text: str) -> set:
 
 
 GLUE_MIN = 6
+# The raw-bytes pass over SQLite files reads binary pages as text, so a short
+# name will eventually match noise. It only checks names of at least
+# RAW_MIN_CHARS word characters (ASCII). Calculation: treat a noise byte as
+# matching a given word character with probability at least 1/36 (letters and
+# digits; the real alphabet is 63 symbols and word boundaries are also
+# required, so this is conservative). Expected noise matches over a pull are
+# B * N * 36**-c, with B = 3e9 bytes and N = 1e5 names: keeping that below
+# 0.01 needs 36**c >= 3e16, c >= 10.6, so c >= 11 (E ~= 0.002; c = 10 gives
+# ~0.08). Decoded cells, raw gz/JSON files and other files check every
+# non-ambiguous name whatever its length.
+RAW_MIN_CHARS = 11
+ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]+")
+MAX_HIT_LOCATIONS = 200
+_HEXKEY_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+_STORED_WORDS: set | None = None
+
+
+def stored_words() -> set:
+    """Every fixed word the crawler itself can write: table and column names
+    (the schema), and every identifier-like string constant (no whitespace)
+    in this package's code -- field names, enums, codes, labels, flags,
+    statuses. Docstrings and messages (which contain spaces) are not words
+    the store holds."""
+    global _STORED_WORDS
+    if _STORED_WORDS is None:
+        import ast
+        from . import store
+        words = set(WORD_RE.findall(store.SCHEMA))
+        for path in Path(__file__).resolve().parent.glob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            docs = {id(n.body[0].value) for n in ast.walk(tree)
+                    if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef))
+                    and n.body and isinstance(n.body[0], ast.Expr)
+                    and isinstance(n.body[0].value, ast.Constant)}
+            for n in ast.walk(tree):
+                if (isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
+                        and n.value and not any(ch.isspace() for ch in n.value)):
+                    words.update(WORD_RE.findall(n.value))
+        _STORED_WORDS = words
+    return _STORED_WORDS
 
 
 def is_stored_scalar(word: str) -> bool:
-    """A single word that the store holds as a legitimate value: any number
-    (seasons, ids, points), anything shaped like a player id or team code,
-    a 1-2 character token, or a word of the store's vocabularies (statuses,
-    types, slots, positions, scoring words). A name equal to one of these
-    cannot be told apart from data by string equality."""
+    """A word the store legitimately holds as a value: any number (seasons,
+    ids, points), a player-id or team-code shape, a 1-2 character token, or a
+    fixed word the crawler writes (``stored_words``, plus VOCAB). A name made
+    only of such words cannot be told apart from data by equality."""
     from . import identity as ident
     return (word.isdigit() or len(word) < 3 or bool(ident._PLAYER_RE.match(word))
-            or word in VOCAB or word in ident.SLOTS or word in ident.POSITIONS
-            or word in ident.LEAGUE_STATUS or word in ident.TXN_TYPES
-            or word in ident.DRAFT_TYPE or word in ident.SCORING_WORDS)
-_HEXKEY_RE = re.compile(r"^[0-9a-f]{32}$")
+            or word in VOCAB or word in stored_words())
 
 
 class _NameIndex:
     """Word sequences of the names worth checking, by first word; plus, for
     first words of 6+ characters, containment inside a longer word (a name
-    glued to other text, 'junksecretuser1'), cached per distinct word."""
+    glued to other text, 'junksecretuser1'), cached per distinct word.
 
-    def __init__(self, names):
+    ``names``: an iterable of names, or {name: {source field, ...}}. A name
+    whose words are ALL stored scalars ('2025', 'J.J.', 'QB 1') is ambiguous:
+    skipped and counted. ``min_chars``/``ascii``: the raw-bytes variant, which
+    keeps only ASCII names with at least ``min_chars`` word characters and
+    counts the others as ``too_short``."""
+
+    def __init__(self, names, min_chars=0, ascii=False):
+        self.word_re = ASCII_WORD_RE if ascii else WORD_RE
         self.by_first = defaultdict(set)
-        self.ambiguous = 0
-        for n in set(names or ()):
+        self.meta: dict = {}
+        self.ambiguous = self.too_short = 0
+        sources = names if isinstance(names, dict) else {n: () for n in (names or ())}
+        for n, src in sources.items():
             if not isinstance(n, str):
                 continue
             words = tuple(WORD_RE.findall(n))
-            if not words or (len(words) == 1 and is_stored_scalar(words[0])) or n in VOCAB:
-                # Indistinguishable from a value the store legitimately holds
-                # (a team named '2025' equals a stored season): skipped, COUNTED.
+            if not words or n in VOCAB or all(is_stored_scalar(w) for w in words):
+                # Indistinguishable from values the store legitimately holds
+                # (a team named '2025', a player 'J.J.'): skipped, COUNTED.
                 self.ambiguous += 1
                 continue
+            if min_chars:
+                awords = tuple(ASCII_WORD_RE.findall(n))
+                if awords != words or sum(map(len, words)) < min_chars:
+                    self.too_short += 1
+                    continue
             self.by_first[words[0]].add(words)
+            self.meta[words] = {"sources": sorted(src or ()), "words": len(words),
+                                "chars": sum(map(len, words))}
         self.long_first = [w for w in self.by_first if len(w) >= GLUE_MIN]
         self.cache: dict = {}
 
@@ -161,17 +226,39 @@ class _NameIndex:
                 self.cache[word] = tuple(f for f in self.long_first if f in word and f != word)
         return self.cache[word]
 
-    def hits(self, text: str) -> int:
+    def find(self, text: str) -> list:
+        """[(word tuple, character offset)] of every name found in ``text``."""
         if not self.by_first:
-            return 0
-        words = WORD_RE.findall(text)
-        found = set()
+            return []
+        ms = list(self.word_re.finditer(text))
+        words = [m.group() for m in ms]
+        found = []
         for i, w in enumerate(words):
             for first in (w, *self._glued(w)):
                 for seq in self.by_first.get(first, ()):
                     if tuple(words[i + 1:i + len(seq)]) == seq[1:]:
-                        found.add(seq)
-        return len(found)
+                        found.append((seq, ms[i].start()))
+        return found
+
+    def hits(self, text: str) -> int:
+        return len({seq for seq, _ in self.find(text)})
+
+
+def _paths(obj, path="$"):
+    """(key path, string) for every key and string value; list indices are
+    collapsed to [] and only KEYS appear in a path, never values."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            # Only the crawler's own field names are shown; any other key
+            # (it could itself be a name or an id) is '<key>'.
+            p = f"{path}.{k}" if str(k) in stored_words() else f"{path}.<key>"
+            yield p, str(k)
+            yield from _paths(v, p)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _paths(v, path + "[]")
+    elif isinstance(obj, str):
+        yield path, obj
 
 
 def _decode(blob: bytes) -> bytes:
@@ -192,12 +279,15 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
         known = {r[0] for r in c.execute("SELECT user_key FROM user_keys")}
         c.close()
     idx = _NameIndex(names)
+    raw_idx = _NameIndex(names, min_chars=RAW_MIN_CHARS, ascii=True)
     raw_ids = {str(i) for i in (raw_ids or ())}
     excluded = {data_dir / SEED_FILE, data_dir / KEY_FILE}
     res = {"ok": True, "files_scanned": 0, "bytes_scanned": 0, "field_hits": {},
            "id_hits": {}, "raw_id_hits": {}, "name_hits": {},
            "excluded": sorted(str(p.relative_to(data_dir)) for p in excluded),
            "name_values_checked": len(idx), "ambiguous_names_skipped": idx.ambiguous,
+           "names_excluded_from_raw_bytes_pass": raw_idx.too_short,
+           "raw_bytes_min_chars": RAW_MIN_CHARS, "name_hit_locations": [],
            "numeric_hits": {},
            "raw_ids_checked": len(raw_ids),
            "not_checked": list(REPORT_CANNOT_CHECK) if report_mode else []}
@@ -206,6 +296,14 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
     def bump(kind, label, n):
         if n:
             res[kind][label] = res[kind].get(label, 0) + n
+
+    def names_in(index, file_label, text, where):
+        """Record name hits with WHERE they are and WHAT kind of name they
+        were (source field, word count, length); never the name."""
+        for seq, off in index.find(text):
+            bump("name_hits", file_label, 1)
+            if len(res["name_hit_locations"]) < MAX_HIT_LOCATIONS:
+                res["name_hit_locations"].append({"where": where(off), **index.meta[seq]})
 
     def ids_in(label, text):
         hit_key = hit_raw = 0
@@ -224,24 +322,32 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
         res["files_scanned"] += 1
         keys: set = set()
         if path.name == DB_NAME:
+            c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            page = c.execute("PRAGMA page_size").fetchone()[0] or 4096
+            # The schema (table and column names) against every name.
+            for (sql,) in c.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"):
+                names_in(idx, rel, sql, lambda off: f"{rel}:schema")
             with open(path, "rb") as f:
-                tail = b""
+                pos, tail = 0, b""
                 while True:
                     chunk = f.read(32 << 20)
                     if not chunk:
                         break
                     res["bytes_scanned"] += len(chunk)
-                    text = (tail + chunk).decode("utf-8", "replace")
+                    base = pos - len(tail)
+                    text = (tail + chunk).decode("latin-1")   # one char per byte
                     ids_in(rel, text)
-                    bump("name_hits", rel, idx.hits(text))
+                    names_in(raw_idx, rel, text,
+                             lambda off, base=base: f"{rel}@page{(base + off) // page + 1}")
+                    pos += len(chunk)
                     tail = chunk[-256:]
-            c = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
             for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table'"
                                   " AND name NOT LIKE 'sqlite_%'"):
-                keys.update(r[1] for r in c.execute(f"PRAGMA table_info('{t}')"))
+                cols = [r[1] for r in c.execute(f"PRAGMA table_info('{t}')")]
+                keys.update(cols)
                 label = f"{rel}:{t}"
                 for row in c.execute(f"SELECT * FROM '{t}'"):
-                    for v in row:
+                    for col, v in zip(cols, row):
                         if isinstance(v, bool) or v is None:
                             continue
                         if isinstance(v, (int, float)):
@@ -256,7 +362,7 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
                         else:
                             text = v if isinstance(v, str) else bytes(v).decode("utf-8", "replace")
                             ids_in(label, text)
-                            bump("name_hits", label, idx.hits(text))
+                            names_in(idx, rel, text, lambda off, col=col, t=t: f"{rel}:{t}.{col}")
                             if text[:1] in "[{":
                                 try:
                                     _walk(json.loads(text), keys, [])
@@ -268,11 +374,17 @@ def leak_scan(data_dir: Path, ring, *, names=None, raw_ids=None, report_mode=Fal
             res["bytes_scanned"] += len(blob)
             text = blob.decode("utf-8", "replace")
             ids_in(rel, text)
-            bump("name_hits", rel, idx.hits(text))
             try:
-                _walk(json.loads(text), keys, [])
+                obj = json.loads(text)
             except ValueError:
-                pass
+                obj = None
+            if obj is not None:
+                _walk(obj, keys, [])
+                for kpath, val in _paths(obj):
+                    names_in(idx, rel, val, lambda off, kpath=kpath: f"{rel}:{kpath}")
+            else:
+                names_in(idx, rel, text,
+                         lambda off: f"{rel}:line{text.count(chr(10), 0, off) + 1}")
         hits = _field_hit(keys)
         if hits:
             res["field_hits"][rel] = hits

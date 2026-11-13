@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from .client import RequestFailed
+from .client import RequestFailed, endpoint_class
 from . import identity as ident
 from .identity import harvest
 
@@ -87,7 +87,7 @@ class Discoverer:
 
     def _get(self, path, expect=None, null_ok=False):
         obj = self.client.get(path, expect=expect, null_ok=null_ok)
-        harvest(obj, self.col)
+        harvest(obj, self.col, endpoint_class(path))
         return obj
 
     # -- entry -----------------------------------------------------------

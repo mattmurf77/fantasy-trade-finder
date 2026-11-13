@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 
 from . import identity as ident
-from .client import CircuitOpen, RequestFailed
+from .client import CircuitOpen, RequestFailed, endpoint_class
 from .normalise import bundle_rows
 
 LEGS = range(1, 19)
@@ -66,7 +66,7 @@ def fetch_bundle(client, ring, col, league_id: str) -> dict:
         obj = client.get(path, expect=expect, null_ok=null_ok)
         if obj is None and expect is list:
             return []
-        ident.harvest(obj, col)
+        ident.harvest(obj, col, endpoint_class(path))
         return obj
 
     lid = str(league_id)

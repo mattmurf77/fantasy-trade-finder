@@ -240,7 +240,7 @@ def _main(args, data_dir, transport, sleep, clock, env, log) -> int:
         store.close()
     # The scan runs after everything the run writes, finish_run included. Its
     # own result (file names and counts only) is the one write after it.
-    leak = leak_scan(data_dir, ring, names=col.names, raw_ids=col.raw_user_ids)
+    leak = leak_scan(data_dir, ring, names=col.name_sources, raw_ids=col.raw_user_ids)
     log(f"leak scan: {'PASS' if leak['ok'] else 'FAIL'} ({leak['files_scanned']} files; "
         f"ambiguous names skipped: {leak.get('ambiguous_names_skipped', 0)})")
     store = Store(data_dir)
