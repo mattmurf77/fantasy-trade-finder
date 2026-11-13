@@ -492,7 +492,7 @@ session required; `read_denial` and, for POST, `write_denial`, i.e. a verified s
 | Flag | `league.max_pf_moves` off → 404 `{"error": "feature_disabled"}` |
 | Who | Any signed-in, verified user whose current session league is `<league_id>` (`identity(sess)`, `api.py:34-35`; mismatch → 404 `{"error": "not_found"}`). No owner/commissioner check: every member may answer |
 | Platform | Not Sleeper → 422 `{"status": "unsupported_policy", "reason": "sleeper_only", "details": {}}` (the `Unavailable` path, `api.py:28-29`) |
-| Body | `Content-Length` ≤ 1024 else 413 `{"error": "payload_too_large"}`. JSON object with exactly one key `rule` ∈ `maxpf_lowest_first`, `reverse_standings`, `lottery_or_other`, `not_sure`. Anything else → 400 `{"error": "invalid_draft_order_rule"}` |
+| Body | `Content-Length` ≤ 8192 else 413 `{"error": "payload_too_large"}` (the scenario POST's cap; a lower cap would sit below the test-profile fence's body scan limit). An empty body is a 400. The route is classified FREE in `paywall_gate.ROUTES`. JSON object with exactly one key `rule` ∈ `maxpf_lowest_first`, `reverse_standings`, `lottery_or_other`, `not_sure`. Anything else → 400 `{"error": "invalid_draft_order_rule"}` |
 | Effect | `not_sure`: nothing written. Otherwise sets both columns on the `leagues` row. No `leagues` row → 404 `{"error": "not_found"}` |
 | Response 200 | `{"draft_order": {"rule": <stored rule or null>, "set_at": <iso or null>}}`, the stored state after the call |
 | Side effects | None beyond the row. The answer reaches the forecast read on the next `GET .../projection-runs/latest` (R-time read of the row). The app invalidates `['league-projection-batch', userId, leagueId]` after a 200 |
