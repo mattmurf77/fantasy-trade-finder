@@ -6,7 +6,7 @@
 // No React, no I/O. Its one runtime import is the zero-import copy table;
 // tests/check-max-pf-moves.js transpiles both and executes them.
 import type {
-  MaxPfMoves, MaxPfMoveRow, MaxPfMovesState, MaxPfReplacement, DraftOrderRule,
+  MaxPfMoves, MaxPfMoveRow, MaxPfMovesState, MaxPfReplacement, DraftOrderRule, MaxPfCombined,
 } from '../api/leagueProjections';
 import { MAXPF_COPY as C } from './maxPfMovesCopy';
 
@@ -140,14 +140,26 @@ export function rosterChanged(block: MaxPfMoves, liveIds: string[] | null | unde
   for (const id of live) if (!saved.has(id)) return true;
   return false;
 }
-/** Passing rows in rank order, minus players no longer on the live roster. */
+/** v1.1 (D-261, contract §6.5): EVERY saved row in rank order (largest max
+ *  PF drop first), passing or not, in ready AND no_moves, minus players no
+ *  longer on the live roster. */
 export function listedRows(block: MaxPfMoves, liveIds: string[] | null | undefined): MaxPfMoveRow[] {
-  if (block.state !== 'ready') return [];
+  if (!isListState(block.state)) return [];
   const changed = rosterChanged(block, liveIds);
   const live = changed && liveIds ? new Set(liveIds) : null;
   return block.rows
-    .filter((r) => r.passes_threshold === true && (!live || live.has(r.player_id)))
+    .filter((r) => !live || live.has(r.player_id))
     .sort((a, b) => a.rank - b.rank);
+}
+/** v1.1 combined entries, smallest first; one is dropped when ANY of its
+ *  players has left the live roster. Absent on an older server ⇒ none. */
+export function listedCombined(block: MaxPfMoves, liveIds: string[] | null | undefined): MaxPfCombined[] {
+  if (!isListState(block.state)) return [];
+  const changed = rosterChanged(block, liveIds);
+  const live = changed && liveIds ? new Set(liveIds) : null;
+  return (block.combined ?? [])
+    .filter((c) => !live || c.player_ids.every((id) => live.has(id)))
+    .sort((a, b) => a.size - b.size);
 }
 export function visibleRows(listed: MaxPfMoveRow[], showAll: boolean) {
   return {
@@ -231,6 +243,31 @@ export function rowLine2(row: MaxPfMoveRow, isPriced: boolean): string {
   if (isPriced && row.pick_value) line += fill(C['C-ROW-2.value'], { change: formatValueChange(row.pick_value.change) });
   return line;
 }
+// ── Combined lines (v1.1, contract §10 C-COMB-*; no week detail, no hand-off) ─
+export function combinedLine1Parts(entry: MaxPfCombined) {
+  return {
+    label: fill(C['C-COMB-1'], { n: entry.size, names: listText(entry.short_names) }),
+    change: formatPoints(entry.maxpf_change),
+  };
+}
+export function combinedLine1(entry: MaxPfCombined): string {
+  const p = combinedLine1Parts(entry);
+  return `${p.label}  ${p.change}`;
+}
+/** Same words and rules as a row's line 2 (C-ROW-2). */
+export function combinedLine2(entry: MaxPfCombined, isPriced: boolean): string {
+  let line = fill(C['C-ROW-2'], { now: formatPick(entry.pick_if_miss.now), after: formatPick(entry.pick_if_miss.after) });
+  if (isPriced && entry.pick_value) line += fill(C['C-ROW-2.value'], { change: formatValueChange(entry.pick_value.change) });
+  return line;
+}
+/** The opened combined line: top-3 chance and playoff chance only. */
+export function combinedDetail(entry: MaxPfCombined) {
+  return {
+    top3: fill(C['C-OPEN-TOP3'], { now: formatPct(entry.top3_probability.now), after: formatPct(entry.top3_probability.after) }),
+    playoff: fill(C['C-OPEN-PLAYOFF'], { now: formatPct(entry.playoff_probability.now), after: formatPct(entry.playoff_probability.after) }),
+  };
+}
+
 type Named = Pick<MaxPfReplacement, 'player_id' | 'name' | 'free_agent'>;
 /** A replacement's name: free agents marked, an empty slot in words. */
 export function replacementName(r: Named, first = false): string {
@@ -325,6 +362,9 @@ export interface SectionModel {
   rosterChanged: boolean;
   rosterLine: string | null;
   listed: MaxPfMoveRow[];
+  combined: MaxPfCombined[];
+  /** C-NONE-ALONE above the list when nothing listed passes (v1.1). */
+  noneAloneLine: string | null;
   noMovesLine: string | null;
   foot: string | null;
   priced: boolean;
@@ -334,6 +374,8 @@ export function deriveSection(block: MaxPfMoves, liveIds: string[] | null | unde
   const list = isListState(block.state);
   const changed = rosterChanged(block, liveIds);
   const listed = listedRows(block, liveIds);
+  const combined = listed.length > 0 ? listedCombined(block, liveIds) : [];
+  const anyPass = listed.some((r) => r.passes_threshold) || combined.some((c) => c.passes_threshold);
   const open = list && defaultOpen(block);
   const gate = ownerGateActive(block);
   return {
@@ -351,7 +393,10 @@ export function deriveSection(block: MaxPfMoves, liveIds: string[] | null | unde
     rosterChanged: changed,
     rosterLine: changed ? C['C-ROSTER'] : null,
     listed,
-    // Every passing row dropped by the roster check ⇒ C-ROSTER only.
+    combined,
+    noneAloneLine: listed.length > 0 && !anyPass ? C['C-NONE-ALONE'] : null,
+    // A block with no rows ⇒ C-NO-MOVES; every row dropped by the roster
+    // check ⇒ C-ROSTER only.
     noMovesLine: list && listed.length === 0 && !changed ? C['C-NO-MOVES'] : null,
     foot: listed.length > 0 ? C['C-FOOT'] : null,
     priced: priced(block),
@@ -361,13 +406,19 @@ export function deriveSection(block: MaxPfMoves, liveIds: string[] | null | unde
 
 // ── Event properties (contract §9; never a player id or name) ───────────
 export function viewedProps(block: MaxPfMoves, model: SectionModel) {
+  const passing = model.listed.filter((r) => r.passes_threshold).length;
   return {
     state: block.state,
-    n_moves: block.state === 'ready' ? model.listed.length : 0,
+    // v1 meaning kept: passing rows listed, 0 unless ready.
+    n_moves: block.state === 'ready' ? passing : 0,
     band: block.baseline?.playoff_band ?? 'none',
+    // v1.1 (D-261): every listed row, and whether anything listed passes.
+    n_listed: model.listed.length,
+    any_pass: passing > 0 || model.combined.some((c) => c.passes_threshold),
   };
 }
 export const expandedProps = (row: MaxPfMoveRow) => ({ position: row.position, rank: row.rank });
+export const combinedExpandedProps = (entry: MaxPfCombined) => ({ position: 'combined', rank: `combined_${entry.size}` });
 export const PINNED_PROPS = { side: 'give', source: 'maxpf_moves' } as const;
 export const answeredProps = (answer: DraftOrderAnswer, source: 'first_ask' | 'change') => ({ answer, source });
 

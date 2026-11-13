@@ -54,6 +54,8 @@ export const MAXPF_COPY = {
   'C-OWNER.button': 'Show anyway',
   'C-ROSTER': 'Your roster changed after this forecast. The list updates with the next weekly forecast.',
   'C-NO-MOVES': 'No single player moves your projected pick by a visible amount.',
+  'C-NONE-ALONE': 'None of these changes your projected pick on its own.',
+  'C-COMB-1': 'Top {n} together: {names}',
   'C-NO-MISS': 'Your team is not projected to miss the playoffs.',
   'C-NOT-MAXPF': "Your league doesn't set its draft order by max PF, so these moves wouldn't change your pick.",
   'C-NOT-MAXPF.link': 'Change answer',

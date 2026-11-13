@@ -71,6 +71,17 @@ export interface MaxPfMoveRow {
   pick_value: {now: number; after: number; change: number} | null;
   keep: boolean; passes_threshold: boolean;
 }
+/** v1.1 (D-261): the top 2 / top 3 rows removed together (contract §3.7).
+ *  No week detail and no Find trades hand-off. */
+export interface MaxPfCombined {
+  size: number; player_ids: string[]; names: string[]; short_names: string[];
+  maxpf_change: number; maxpf_change_exact: string; lineup_change: number; lineup_change_exact: string;
+  playoff_probability: NowAfter; pick_if_miss: {now: number | null; after: number | null};
+  top3_probability: NowAfter; label: {now: string | null; after: string | null};
+  label_slot: {now: number | null; after: number | null};
+  pick_value: {now: number; after: number; change: number} | null;
+  keep: boolean; passes_threshold: boolean;
+}
 export interface MaxPfMoves {
   version: number; state: MaxPfMovesState; reason: string | null;
   viewer_roster_id: number | null; captured_at: string | null;
@@ -78,6 +89,8 @@ export interface MaxPfMoves {
   saved_outlook: 'championship' | 'contender' | 'rebuilder' | 'jets' | 'not_sure' | null;
   pick_owner: PickOwner | null; baseline: MaxPfBaseline | null; roster_player_ids: string[];
   rows: MaxPfMoveRow[]; candidates_total: number;
+  /** v1.1, additive: absent on an older server, [] outside ready / no_moves. */
+  combined?: MaxPfCombined[];
 }
 export interface ProjectionRun {run_id: string; status: string; reason: string | null; result: ProjectionResult | null}
 export interface ProjectionView {

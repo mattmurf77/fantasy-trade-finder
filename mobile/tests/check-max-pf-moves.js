@@ -15,6 +15,11 @@
 // DIRECTIONS (every backticked string there is in the module, every module
 // string is in the contract), so copy cannot drift from the contract.
 //
+// v1.1 (D-261, group O): every row listed in ready AND no_moves, C-NONE-ALONE
+// exactly when nothing listed passes, the combined lines' strings, roster
+// dropping and Keep, no Find trades on a combined line, an old block (no
+// `combined`) rendering as before, and the two new viewed props.
+//
 // SOURCE PINS cover what cannot be executed: StandingsScreen's flag read and
 // props, the detail mounting the section after Draft pick odds on the own
 // card only, no extra request on open, the component's track calls, the
@@ -100,7 +105,7 @@ const R3 = READY.rows[2];
   const EXAMPLES = ['An empty spot starts instead (1 week).'];
   const values = new Set(Object.values(C));
   const missing = [...contractStrings].filter((s) => !values.has(s) && !EXAMPLES.includes(s));
-  assert(rows.length === 45 && missing.length === 0, 'A1. every §10 string is in the copy module verbatim', missing.join(' | '));
+  assert(rows.length === 48 && missing.length === 0, 'A1. every §10 string is in the copy module verbatim', missing.join(' | '));
   const extra = [...values].filter((s) => !contractStrings.has(s));
   assert(extra.length === 0, 'A2. every copy-module string is a §10 string', extra.join(' | '));
   const sources = [copySrc, utilSrc, read('src/components/MaxPfMovesSection.tsx')];
@@ -180,13 +185,14 @@ const R3 = READY.rows[2];
     'E1. same roster (any order) or no live roster yet ⇒ no notice');
   const live = saved.filter((id) => id !== '8150').concat('99999');
   const m = u.deriveSection(READY, live);
-  assert(m.rosterChanged && m.rosterLine === C['C-ROSTER'] && eq(m.listed.map((r) => r.rank), [2]),
+  assert(m.rosterChanged && m.rosterLine === C['C-ROSTER'] && eq(m.listed.map((r) => r.rank), [2, 3]),
     'E2. a traded-away player drops his row and C-ROSTER shows; the others stay', show(m.listed.map((r) => r.rank)));
   assert(m.listed[0].maxpf_change === -28 && m.listed[0].pick_if_miss.after === 3.3887,
     'E3. numbers on the remaining rows are shown unchanged');
-  const gone = u.deriveSection(READY, saved.filter((id) => id !== '8150' && id !== '6130'));
+  const gone = u.deriveSection(READY, saved.filter((id) => id !== '8150' && id !== '6130' && id !== '11233'));
   assert(gone.listed.length === 0 && gone.rosterLine === C['C-ROSTER'] && gone.noMovesLine === null
-      && gone.head === null && gone.foot === null, 'E4. every passing row dropped ⇒ C-ROSTER only');
+      && gone.noneAloneLine === null && gone.combined.length === 0
+      && gone.head === null && gone.foot === null, 'E4. every row dropped ⇒ C-ROSTER only');
   assert(u.rosterChanged(withBlock(READY, { state: 'no_miss' }), ['1']) === false,
     'E5. the check applies to ready / no_moves only');
   const st = read('src/screens/StandingsScreen.tsx');
@@ -197,7 +203,7 @@ const R3 = READY.rows[2];
 // ═══ F. Threshold filtering and 5-then-Show-all (§6.5) ═══════════════════
 {
   const m = u.deriveSection(READY, READY.roster_player_ids);
-  assert(eq(m.listed.map((r) => r.rank), [1, 2]), 'F1. §5.1 lists only passing rows (rank 3 fails the threshold)');
+  assert(eq(m.listed.map((r) => r.rank), [1, 2, 3]), 'F1. v1.1: §5.1 lists every row, passing or not (rank 3 fails the threshold)');
   const many = withBlock(READY, { rows: Array.from({ length: 8 }, (_, i) =>
     Object.assign(clone(R1), { rank: 8 - i, player_id: `p${i}`, passes_threshold: true })) });
   const listed = u.listedRows(many, null);
@@ -208,10 +214,11 @@ const R3 = READY.rows[2];
     'F3. 8 passing rows ⇒ 5 shown + Show all; Show all reveals all 8');
   const five = u.visibleRows(listed.slice(0, 5), false);
   assert(five.rows.length === 5 && !five.showAllButton && C['C-SHOWALL'] === 'Show all', 'F4. exactly 5 ⇒ no Show all');
-  const nm = u.deriveSection(withBlock(READY, { state: 'no_moves', rows: READY.rows.map((r) => Object.assign(clone(r), { passes_threshold: false })) }), null);
-  assert(nm.listed.length === 0 && nm.noMovesLine === C['C-NO-MOVES'] && nm.baseline !== null && nm.head === null,
-    'F5. no_moves: baseline + C-NO-MOVES, no list');
-  assert(u.listedRows(withBlock(READY, { state: 'no_moves' }), null).length === 0, 'F6. no_moves lists nothing even if rows pass');
+  const nm = u.deriveSection(withBlock(READY, { state: 'no_moves', rows: [], combined: [] }), null);
+  assert(nm.listed.length === 0 && nm.noMovesLine === C['C-NO-MOVES'] && nm.baseline !== null && nm.head === null
+      && nm.noneAloneLine === null, 'F5. a list state with zero rows: baseline + C-NO-MOVES, no list');
+  assert(eq(u.listedRows(withBlock(READY, { state: 'no_moves' }), null).map((r) => r.rank), [1, 2, 3]),
+    'F6. v1.1: no_moves lists its rows too');
   assert(m.head === 'Max PF change over the remaining 5 weeks' && m.foot === C['C-FOOT'], 'F7. a listed row brings C-HEAD and C-FOOT');
 }
 
@@ -372,9 +379,10 @@ const R3 = READY.rows[2];
 // ═══ K. Analytics (§9) ═══════════════════════════════════════════════════
 {
   const m = u.deriveSection(READY, null);
-  assert(eq(u.viewedProps(READY, m), { state: 'ready', n_moves: 2, band: 'jets' }), 'K1. maxpf_moves_viewed {state, n_moves, band} for §5.1');
-  assert(eq(u.viewedProps(NO_MISS, u.deriveSection(NO_MISS, null)), { state: 'no_miss', n_moves: 0, band: 'championship' })
-      && eq(u.viewedProps(UNAVAILABLE, u.deriveSection(UNAVAILABLE, null)), { state: 'unavailable', n_moves: 0, band: 'none' }),
+  assert(eq(u.viewedProps(READY, m), { state: 'ready', n_moves: 2, band: 'jets', n_listed: 3, any_pass: true }),
+    'K1. maxpf_moves_viewed {state, n_moves (passing, v1 meaning), band, n_listed, any_pass} for §5.1');
+  assert(eq(u.viewedProps(NO_MISS, u.deriveSection(NO_MISS, null)), { state: 'no_miss', n_moves: 0, band: 'championship', n_listed: 0, any_pass: false })
+      && eq(u.viewedProps(UNAVAILABLE, u.deriveSection(UNAVAILABLE, null)), { state: 'unavailable', n_moves: 0, band: 'none', n_listed: 0, any_pass: false }),
     'K2. n_moves is 0 unless ready; band is "none" with no baseline');
   const live = READY.roster_player_ids.filter((id) => id !== '8150');
   assert(u.viewedProps(READY, u.deriveSection(READY, live)).n_moves === 1, 'K3. n_moves counts rows after the roster drop');
@@ -386,7 +394,8 @@ const R3 = READY.rows[2];
     'K6. the four event names');
   const comp = read('src/components/MaxPfMovesSection.tsx');
   const tracks = comp.match(/\btrack\(/g) || [];
-  assert(tracks.length === 3 && /track\(MAXPF_EVENTS\.viewed, viewedProps\(block, model\), SCREEN\)/.test(comp)
+  assert(tracks.length === 4 && /if \(opening\) track\(MAXPF_EVENTS\.expanded, combinedExpandedProps\(entry\), SCREEN\)/.test(comp)
+      && /track\(MAXPF_EVENTS\.viewed, viewedProps\(block, model\), SCREEN\)/.test(comp)
       && /if \(opening\) track\(MAXPF_EVENTS\.expanded, expandedProps\(row\), SCREEN\)/.test(comp)
       && /track\(MAXPF_EVENTS\.answered, answeredProps\(rule, questionSource\), SCREEN\)/.test(comp),
     'K7. the component emits viewed (on body mount), expanded (on open only), answered (after the POST); pinned rides the hand-off');
@@ -469,6 +478,95 @@ const R3 = READY.rows[2];
     'N1. not_priced hides the baseline value and every row value');
   const comp = read('src/components/MaxPfMovesSection.tsx');
   assert(/rowLine2\(row, priced\)/.test(comp) && /priced=\{model\.priced\}/.test(comp), 'N2. the row renders rowLine2 with the model\'s priced flag');
+}
+
+// ═══ O. v1.1 (D-261): every row listed, the none-alone sentence, combined lines ═
+{
+  const M = '−';
+  const fail = (r) => Object.assign(clone(r), { passes_threshold: false });
+  const NOPASS = withBlock(READY, { state: 'no_moves', rows: READY.rows.map(fail), combined: READY.combined.map(fail) });
+  const COMB = READY.combined;
+  const C2 = COMB[0];
+  const C3 = COMB[1];
+  // O1. all rows listed in both list states
+  const np = u.deriveSection(NOPASS, null);
+  assert(eq(np.listed.map((r) => r.rank), [1, 2, 3]) && eq(u.deriveSection(READY, null).listed.map((r) => r.rank), [1, 2, 3])
+      && np.baseline !== null && np.head === 'Max PF change over the remaining 5 weeks' && np.foot === C['C-FOOT'],
+    'O1. every row is listed, rank order, in ready AND no_moves (with head and foot)');
+  const eight = withBlock(NOPASS, { rows: Array.from({ length: 8 }, (_, i) => Object.assign(fail(R1), { rank: 8 - i, player_id: `q${i}` })) });
+  const v = u.visibleRows(u.deriveSection(eight, null).listed, false);
+  assert(v.rows.length === 5 && v.showAllButton && eq(v.rows.map((r) => r.rank), [1, 2, 3, 4, 5]),
+    'O1b. 8 non-passing rows ⇒ 5 shown, largest drop first, then Show all');
+  // O2. the sentence exactly when nothing listed passes
+  assert(np.noneAloneLine === 'None of these changes your projected pick on its own.' && np.noMovesLine === null,
+    'O2a. nothing passes ⇒ C-NONE-ALONE above the list (not C-NO-MOVES)');
+  assert(u.deriveSection(READY, null).noneAloneLine === null, 'O2b. some rows pass ⇒ no sentence');
+  const combOnly = withBlock(NOPASS, { combined: [clone(C2)] });
+  assert(u.deriveSection(combOnly, null).noneAloneLine === null, 'O2c. only a combined entry passes ⇒ no sentence');
+  const oneRow = withBlock(NOPASS, { rows: [clone(R3), Object.assign(clone(R1), { passes_threshold: true })], combined: [] });
+  assert(u.deriveSection(oneRow, null).noneAloneLine === null, 'O2d. one passing row among failing ones ⇒ no sentence, no badge');
+  assert(u.deriveSection(withBlock(NOPASS, { rows: [], combined: [] }), null).noneAloneLine === null
+      && u.deriveSection(NO_MISS, null).noneAloneLine === null && u.deriveSection(UNAVAILABLE, null).noneAloneLine === null,
+    'O2e. no sentence without a list (zero rows, other states)');
+  // O3. combined lines: strings and formatting
+  assert(u.combinedLine1(C2) === `Top 2 together: R. Sato and D. Okafor  ${M}55`
+      && u.combinedLine1(C3) === `Top 3 together: R. Sato, D. Okafor and B. Halvorsen  ${M}59`,
+    'O3a. C-COMB-1 names joined "A and B" / "A, B and C", change with U+2212', u.combinedLine1(C3));
+  assert(u.combinedLine2(C2, true) === 'Pick if you miss 3.7 → 3.1 · Value +282' && u.combinedLine2(C2, false) === 'Pick if you miss 3.7 → 3.1',
+    'O3b. C-COMB-2 = C-ROW-2 rules: value only when priced', u.combinedLine2(C2, true));
+  assert(eq(u.combinedDetail(C2), { top3: 'Top-3 chance 46% → 70%', playoff: 'Playoff chance 3% → 1%' }),
+    'O3c. an opened combined line shows top-3 and playoff chance only', show(u.combinedDetail(C2)));
+  const odd = Object.assign(clone(C2), { maxpf_change: 0, pick_if_miss: { now: 3.6912, after: null }, pick_value: { now: 1, after: 1, change: 0.3 } });
+  assert(u.combinedLine1(odd).endsWith('  0') && u.combinedLine2(odd, true) === 'Pick if you miss 3.7 → — · Value 0',
+    'O3d. §11 on combined: 0 as "0", null after as "—", a zero value change as "0"', u.combinedLine2(odd, true));
+  const unpriced = withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { pick_value: null, pick_value_status: 'not_priced' }) });
+  assert(!/Value/.test(u.combinedLine2(C2, u.deriveSection(unpriced, null).priced)), 'O3e. not_priced hides the combined value');
+  assert(u.combinedLine1(Object.assign(clone(C2), { maxpf_change: 4 })).endsWith('  +4'), 'O3f. a positive combined change is "+n"');
+  // O4. roster-change dropping
+  const live = READY.roster_player_ids.filter((id) => id !== '11233');
+  const rc = u.deriveSection(READY, live);
+  assert(eq(rc.combined.map((c) => c.size), [2]) && eq(rc.listed.map((r) => r.rank), [1, 2]),
+    'O4a. a member off the roster drops that combined entry (size 3), keeps the other');
+  assert(u.deriveSection(READY, READY.roster_player_ids.filter((id) => id !== '6130')).combined.length === 0,
+    'O4b. a player in both entries leaving drops both');
+  assert(eq(u.deriveSection(READY, [...READY.roster_player_ids].reverse()).combined.map((c) => c.size), [2, 3]),
+    'O4c. an unchanged roster keeps both, smallest first');
+  // O5. no Find trades on combined
+  const comp = read('src/components/MaxPfMovesSection.tsx');
+  const combBody = (/function CombinedLine\([\s\S]*?\n\}\n/.exec(comp) || [''])[0];
+  assert(combBody.length > 0 && !/Button|handOff|onFindTrades|find\./.test(combBody) && eq(Object.keys(u.combinedDetail(C2)), ['top3', 'playoff'])
+      && !/combined/.test((/export function handOffToFinder[\s\S]*?\n\}/.exec(utilSrc) || [''])[0]),
+    'O5. a combined line has no Find trades button, no hand-off, no week detail');
+  assert(/\{entry\.keep \? <Badge label=\{C\['C-KEEP'\]\} \/> : null\}/.test(combBody) && C2.keep === true,
+    'O5b. a combined entry with a Keep member shows the Keep tag');
+  // O6. old-shape block (no combined key) renders as before
+  const old = clone(READY);
+  delete old.combined;
+  const om = u.deriveSection(old, null);
+  const nm = u.deriveSection(withBlock(READY, { combined: [] }), null);
+  assert(eq(om.combined, []) && eq(om, nm) && om.baseline === u.deriveSection(READY, null).baseline,
+    'O6. a block without `combined` (pre-v1.1 server) renders exactly as one with none');
+  // O7. events
+  assert(eq(u.combinedExpandedProps(C3), { position: 'combined', rank: 'combined_3' }), 'O7a. combined expand props');
+  assert(eq(u.viewedProps(NOPASS, np), { state: 'no_moves', n_moves: 0, band: 'jets', n_listed: 3, any_pass: false })
+      && u.viewedProps(combOnly, u.deriveSection(combOnly, null)).any_pass === true,
+    'O7b. viewed carries n_listed and any_pass (combined counts)');
+  // O8. gates and placement
+  const listOpenBlock = (/\{listOpen \? <>[\s\S]*?<\/> : null\}/.exec(comp) || [''])[0];
+  assert(/model\.combined\.map\(\(entry\) => <CombinedLine/.test(listOpenBlock)
+      && listOpenBlock.indexOf('model.noneAloneLine') > 0
+      && listOpenBlock.indexOf('model.noneAloneLine') < listOpenBlock.indexOf('rows.map(')
+      && listOpenBlock.indexOf('showAllButton ?') < listOpenBlock.indexOf('model.combined.map'),
+    'O8a. the sentence sits above the rows, combined lines under the rows and Show all, all inside the gated list');
+  const owned = withBlock(NOPASS, { pick_owner: { owns_own_pick: false, owner_roster_id: 9, owner_name: 'Saltmarsh Owls' } });
+  const collapsed = withBlock(NOPASS, { saved_outlook: 'contender', baseline: Object.assign(clone(READY.baseline), { playoff_probability: 0.6 }) });
+  assert(u.deriveSection(owned, null).ownerGate && !u.deriveSection(collapsed, null).defaultOpen
+      && u.deriveSection(collapsed, null).collapsedLine !== null, 'O8b. owner and collapsed gates apply to a no_moves list');
+  assert(eq(u.deriveSection(NO_MISS, null).combined, []) && eq(u.deriveSection(NOT_MAXPF, null).combined, [])
+      && u.listedCombined(withBlock(READY, { state: 'no_miss' }), null).length === 0,
+    'O8c. no combined lines outside ready / no_moves');
+  assert(/testID=\{`standings\.maxpf\.combined\.\$\{entry\.size\}`\}/.test(comp) && /testID="standings\.maxpf\.none-alone"/.test(comp)
+      && /rowHead/.test(combBody), 'O8d. testIDs and the 44pt row construction');
 }
 
 console.log(failures ? `\n${failures} max-pf-moves check(s) FAILED, ${passes} passed.` : `\nAll max-pf-moves checks passed (${passes}).`);

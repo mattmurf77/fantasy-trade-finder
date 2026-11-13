@@ -2115,11 +2115,17 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #     ≥ 0); band ∈ jets | rebuilder | contender | championship | none
     #     (the server's `baseline.playoff_band`; not home_tile_tapped's
     #     per-position band).
+    #   v1.1 (D-261, 2026-11-13), additive: n_listed = rows listed whether
+    #     or not they pass (int ≥ 0; n_moves keeps its v1 meaning, passing
+    #     rows listed, 0 unless ready); any_pass = a listed row or combined
+    #     entry passes the threshold (bool). Builds ≤ 191 send neither.
     #   maxpf_move_expanded.position = the row's position string; rank 1..8.
+    #     v1.1: a combined line ("Top 2 together") sends rank 'combined_2' |
+    #     'combined_3' and position 'combined'.
     #   draft_order_rule_answered.answer ∈ maxpf_lowest_first |
     #     reverse_standings | lottery_or_other | not_sure; source ∈
     #     first_ask | change.
-    "maxpf_moves_viewed":          frozenset({"state", "n_moves", "band"}),
+    "maxpf_moves_viewed":          frozenset({"state", "n_moves", "band", "n_listed", "any_pass"}),
     "maxpf_move_expanded":         frozenset({"position", "rank"}),
     "draft_order_rule_answered":   frozenset({"answer", "source"}),
     # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
