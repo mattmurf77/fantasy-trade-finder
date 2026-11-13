@@ -665,11 +665,14 @@ backtest share one definition.
 
 ### 13.1 Location and shape
 
-`result_json["max_pf_moves"]`, written only for `kind == "baseline"` runs while the flag is on:
+`result_json["max_pf_moves"]`, written only for `kind == "baseline"` runs while the flag is on,
+by `maxpf_moves.compute` (pure; its docstring states the inputs and outputs, so a validation
+agent can call it on historical inputs):
 
 ```
-{ "version": 1, "computed": true | false, "reason": null | "time_budget" | "failed" | "not_eligible",
-  "settings": {simulations_per_candidate, candidates, min_drop_points, min_pick_change, min_top3_change},
+{ "version": 1, "computed": true | false, "reason": null | "not_eligible",
+  "settings": {simulations_per_candidate, candidates, min_drop_points, min_pick_change,
+               min_top3_change, time_budget_seconds},
   "settings_hash": sha256 of settings,
   "viewer_roster_id", "roster_player_ids", "trade_deadline": int | null,
   "baseline": {weeks_remaining, first_week, last_week, weeks_excluded_played,
@@ -678,18 +681,23 @@ backtest share one definition.
   "rows": [ {rank, player_id, name, short_name, position, maxpf_change, maxpf_change_exact,
              lineup_change, lineup_change_exact, weeks_affected, replacements, replacements_more, weeks,
              playoff_probability, pick_if_miss, top3_probability, label, label_slot,
-             after_pick_probabilities: number[], passes_threshold } ],
+             after_pick_probabilities: number[], after_playoff_probability: number,
+             passes_threshold } ],
   "free_agent_pool": { "<week>": [ {player_id, name, positions, points} ] },
   "elapsed_ms": int }
 ```
 
 `after_pick_probabilities` (the viewer's full non-playoff slot odds after the move, same
-length as `pick_probabilities`) is what read-time pricing needs. `free_agent_pool` makes the
+length as `pick_probabilities`) and `after_playoff_probability` are what read-time pricing
+needs. A failed or timed-out step saves **no block at all** (§13.5); `computed: false` with
+`reason: "not_eligible"` means the team was not in the run. `free_agent_pool` makes the
 re-solve reproducible for the backtest.
 
 **Excluded candidates.** Players on reserve (not in either pool under `ir_maxpf: exclude`,
 `provider.py:404-406`), and any player with no usable projection (`None`) in a week that is
-not a verified bye (unknown is not zero, `season_points.py:39-55`).
+not a verified bye (unknown is not zero, `season_points.py:39-55`). A week the provider says he
+will not play (`availability: 0`) is a known zero, not unknown: that week's change is 0 and he
+stays a candidate.
 
 ### 13.2 The re-solve (per player *p*, per week *w*)
 
@@ -725,13 +733,18 @@ with `pick_projection.slot_ranks`, strength tie-break from "after" expected win-
 
 - `sidecar["free_agents"][str(week)]`: for each slot type in the league's `slots`, the top
   `K` eligible free agents from the week's already-built `free_agents` list
-  (`provider.py:357-373`) by `(points desc, player_id)`, `K = 1 + max(open slots of the
-  viewer's lineup and max PF lineups that week)`. Removing one player shrinks a maximum
+  (`provider.py:357-373`) by `(points desc, player_id)`, `K = SIDECAR_EXTRA_SLOTS (1) + the
+  most open slots of any team's lineup or max PF lineup that week` (every team, so the re-solve
+  is exact for any roster, which the backtest needs). Removing one player shrinks a maximum
   assignment by at most one slot, so this always contains the free agents
   `core.free_agent_fill` would pick (`core.py:213-217`). No extra fetch: the list is already
   in memory.
-- `sidecar["trade_deadline"]`: `int(settings.get("trade_deadline") or 0) or None` from the
-  league object capture already holds (`provider.py:232`).
+- `sidecar["trade_deadline"]`: the league's `settings.trade_deadline` when it is an integer in
+  1..98, else None (0, 99, absent or non-integer mean no deadline), from the league object
+  capture already holds (`provider.py:232`). The service copies it into the block
+  (`trade_deadline`); the read compares it with the run's `completed_weeks` (§4.1 row 3).
+- `sidecar["names"]`: `{player_id: full name}` for every rostered player, from the player
+  metadata capture already fetched (the snapshot's inputs carry no names).
 
 The sidecar is never put in the snapshot, so `semantic_facts`, `input_hash`
 (`store.py:172-181`), `snapshot_hash` (`simulation.py:334`) and every simulated number are
@@ -739,9 +752,10 @@ unchanged.
 
 ### 13.5 Never fail the forecast
 
-The moves step runs between `simulate` and `store.finish` (`service.py:109-112`) and is
-wrapped so that any exception, including `Unavailable`, becomes `{"computed": false, "reason":
-"failed"}`; a deadline hit becomes `"time_budget"`. It stops at the earlier of
+The moves step (`service._attach_moves`) runs between `simulate` and `store.finish` and is
+wrapped so that any exception, including `Unavailable` and a deadline hit, returns the forecast
+result **without** a block (a warning naming `failed` or `time_budget` is logged, never the
+exception text); the read then serves `unavailable` / `not_computed`. It stops at the earlier of
 `time_budget_seconds` (setting) and 480 s after the job started (the job's own cancel line is
 540 s, `service.py:83`). Its `simulate` calls get a `cancelled` callback that checks that
 deadline and the job's lease (`_checkpoint`), so it still yields to foreground requests. When
