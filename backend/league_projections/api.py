@@ -201,7 +201,9 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         _, current_league = identity(sess)
         if league_id != current_league:
             return jsonify(error="not_found"), 404
-        if request.content_length and request.content_length > 1024:
+        # 8192, the same cap as the scenario POST: never below the test-profile
+        # fence's body scan limit (server._TP_BODY_SCAN_LIMIT).
+        if request.content_length and request.content_length > 8192:
             return jsonify(error="payload_too_large"), 413
         data = request.get_json(silent=True)
         if not isinstance(data, dict) or set(data) != {"rule"} or data["rule"] not in (*db.DRAFT_ORDER_RULES, "not_sure"):

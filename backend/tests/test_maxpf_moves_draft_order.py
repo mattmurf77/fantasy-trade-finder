@@ -102,7 +102,7 @@ def test_bad_bodies_are_400_and_large_is_413(client, body):
     response = post(http, "123", body)
     assert response.status_code == 400 and response.json == {"error": "invalid_draft_order_rule"}
     assert http.post("/api/leagues/123/draft-order-rule", data="").status_code == 400
-    big = http.post("/api/leagues/123/draft-order-rule", data='{"rule": "' + "x" * 2000 + '"}',
+    big = http.post("/api/leagues/123/draft-order-rule", data='{"rule": "' + "x" * 9000 + '"}',
                     content_type="application/json")
     assert big.status_code == 413
     assert db.get_league_draft_order_rule("123")["rule"] is None

@@ -253,6 +253,9 @@ ROUTES = {
     ("GET", "/api/leagues/<league_id>/projection-runs/latest"): FREE,
     ("GET", "/api/projection-runs/<run_id>"): FREE,
     ("POST", "/api/projection-runs/<run_id>/cancel"): FREE,
+    # Max PF moves (D-258): the once-per-league draft-order answer. Free in v1
+    # like the forecast read it changes (operator decision 9).
+    ("POST", "/api/leagues/<league_id>/draft-order-rule"): FREE,
     ("GET", "/api/projection-runs/<run_id>/teams"): FREE,
     ("GET", "/api/projection-runs/<run_id>/draft"): FREE,
     ("GET", "/api/projection-runs/<run_id>/teams/<int:roster_id>/weeks"): FREE,
