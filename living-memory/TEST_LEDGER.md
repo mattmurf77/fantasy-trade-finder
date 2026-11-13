@@ -5,6 +5,7 @@
 - **Production (read-only checks):** deploy live at 04:22 UTC on 2026-11-13; no errors or tracebacks in the logs after it; `GET /api/feature-flags` reports `league.max_pf_moves` false.
 - **TestFlight:** EAS production build 1.22.0 (191) from the clean checkout of `90d8837c` (EAS `428eaffc`, submission `92cb9a85`), auto-submit scheduled. No caveat line under the list (operator: "Build without it").
 - **Not verified:** anything on a device; the two new `leagues` columns on the production database beyond a clean boot log; whether the submission reached TestFlight. With the flag off the section does not render, so the app-evidence checklist cannot run until the flag is on.
+- **Flag flip (D-259), same PR:** `league.max_pf_moves` true in `config/features.json` and the three fixtures. Main session re-ran the Max PF, flag and league-projection test files on the flipped tree (count in the PR); the full suite is CI on the PR. Not verified until Tuesday's forecast: a real saved block, the job's added time in production, and the list on a device.
 - FTF_SKIP_SIM_GATE=1 on push (D-056).
 
 ## 2026-11-12 — Max PF moves leave-one-out backtest (research, flag stays off), branch `research/max-pf-moves-backtest`

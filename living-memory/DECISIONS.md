@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-259 — Max PF moves is turned on, without a caveat line
+
+**Date:** 2026-11-12 · **Who:** the operator, after reading the leave-one-out backtest: asked whether to add a caveat line before the build, "Build without it"; then "Flip the flag on too".
+**Context:** D-258 shipped Max PF moves dark, with the backtest as the gate (operator decision 11). The backtest (`docs/plans/league-projections/max-pf-trade-away/backtest/README.md`, 9 leagues, weeks 1 to 9 of 2026) found the list picks the right players (0.6% of listed players had no real drop over 5+ weeks; none the wrong sign) and that the shown drop is about a third too small, because in hindsight bench players start some weeks. It recommended a caveat line and no correction factor.
+**Decision:** `league.max_pf_moves` is true in `config/features.json` and the three flag fixtures. No caveat line and no correction factor in v1; the list's existing "Largest possible change" line stands.
+**Consequences:**
+- The weekly forecast job now computes the block for every Sleeper baseline run, so the list first appears after each league's next weekly forecast (Tuesday 09:30 Eastern). Until then the section reads "Max PF moves are worked out with the weekly forecast. They appear after the next update."
+- The section needs TestFlight 1.22.0 (191) or later.
+- The shown max PF drop understates the real one by about a third. If the operator later wants it stated or corrected, re-run the backtest on frozen pregame snapshots first (the cached projections were each week's final ones).
+- Kill: set the flag false and `POST /api/feature-flags/reload`. The forecast is unaffected either way.
+- Not validated: the pick-odds side (needs the final 2026 draft order); the app-evidence TestFlight checklist, which can only run now that the flag is on.
+
 ## D-258 — Max PF moves: computed weekly with the forecast, served composed, and the draft-order answer is one per league
 
 **Date:** 2026-11-12 · **Who:** the operator ("Build v1 of the max pf trade feature", accepting the eleven recommendations of `docs/plans/league-projections/max-pf-trade-away/exploration.md` §14); storage, served-shape and failure rules by the backend builder, settled by the coordinator. Ships dark behind `league.max_pf_moves`.
