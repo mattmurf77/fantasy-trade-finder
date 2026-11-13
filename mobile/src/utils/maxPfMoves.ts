@@ -73,9 +73,11 @@ export function formatValue(n: number): string {
   const r = halfAwayFromZero(n);
   return `${r < 0 ? MINUS : ''}${thousands(r)}`;
 }
-/** Pick value change: whole number, leading + or −, thousands separator. */
+/** Pick value change: whole number, leading + or −, thousands separator;
+ *  exactly 0 (after rounding) is `0` (coordinator ruling 2026-11-12). */
 export function formatValueChange(n: number): string {
   const r = halfAwayFromZero(n);
+  if (r === 0) return '0';
   return `${r < 0 ? MINUS : '+'}${thousands(r)}`;
 }
 const pair = (now: string, after: string) => `${now}${ARROW}${after}`;
@@ -369,19 +371,38 @@ export function draftOrderRequest(leagueId: string, rule: DraftOrderAnswer) {
 }
 export const answerLabel = (a: DraftOrderAnswer) => C[`C-Q-OPTS.${a}` as const];
 
-// ── The Find trades hand-off (contract §12) ─────────────────────────────
+// ── The Find trades hand-off (contract §12 + coordinator ruling 2026-11-12) ─
+/** The params for `navigation.popTo('Main', …)`: Trades tab → TradesHome,
+ *  carrying the existing `canvasPrefill` route param (the MatchesScreen
+ *  bridge TradesScreen consumes once, keyed on `canvasPrefillSeq`), so on the
+ *  inline-canvas landing the player sits on the give side. `pop: true` makes
+ *  the nested navigate return to the existing TradesHome instead of pushing
+ *  a second one above a pushed deck (G-056). No auto-run. */
+export function finderNavParams(row: MaxPfMoveRow, seq: number) {
+  return {
+    screen: 'Trades',
+    params: {
+      screen: 'TradesHome',
+      params: { canvasPrefill: { give: [row.player_id], receive: [] as string[] }, canvasPrefillSeq: seq },
+      pop: true,
+    },
+  };
+}
 export interface HandOffDeps {
   setSide: (side: 'give' | 'receive', players: { id: string; name: string; position: string }[]) => void;
   track: (event: string, props: Record<string, unknown>, screen: string) => void;
-  navigate: () => void;
+  navigate: (params: ReturnType<typeof finderNavParams>) => void;
+  now: () => number;
 }
-/** Pins the row's player on the give side, clears receive, logs, opens the
- *  deck. No hand-off object, no auto-run. A Keep row does nothing. */
+/** Pins the row's player on the give side (the player-mode board and the
+ *  model search read it), clears receive, logs, then opens Find a Trade with
+ *  the same player prefilled on the canvas. No hand-off object, no auto-run.
+ *  A Keep row does nothing. */
 export function handOffToFinder(row: MaxPfMoveRow, deps: HandOffDeps): boolean {
   if (row.keep) return false;
   deps.setSide('give', [{ id: row.player_id, name: row.name, position: row.position }]);
   deps.setSide('receive', []);
   deps.track(MAXPF_EVENTS.pinned, { ...PINNED_PROPS }, SCREEN);
-  deps.navigate();
+  deps.navigate(finderNavParams(row, deps.now()));
   return true;
 }

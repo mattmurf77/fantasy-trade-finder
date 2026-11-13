@@ -71,46 +71,88 @@ when `questionAutoShown` (`:76-77`). `answer` (`:80-96`): `setDraftOrderRule` �
 **Events.** `maxpf_moves_viewed` on body mount, guarded by the card-owned ref
 (`MaxPfMovesSection.tsx:51-56`, `LeagueProjectionDetail.tsx:44`); `maxpf_move_expanded` on open
 only (`:108-112`); `draft_order_rule_answered` after the POST (`:87`); `finder_target_pinned` in
-`handOffToFinder` (`maxPfMoves.ts:380-387`). Standings' own single emitter is untouched.
+`handOffToFinder` (`maxPfMoves.ts:401-408`). Standings' own single emitter is untouched.
 
-**Hand-off.** `MaxPfMovesSection.tsx:98-106` → `handOffToFinder`: `setSide('give', [player])`,
-`setSide('receive', [])`, `finder_target_pinned {side:'give', source:'maxpf_moves'}`, then
-`navigation.popTo('Main', {screen:'Trades', params:{screen:'TradesHome'}})`. See §3 for what the
-deck then does with the pin.
+**Hand-off.** `MaxPfMovesSection.tsx:98-108` → `handOffToFinder` (`maxPfMoves.ts:401-408`):
+`setSide('give', [player])`, `setSide('receive', [])`, `finder_target_pinned {side:'give',
+source:'maxpf_moves'}`, then `navigation.popTo('Main', finderNavParams(row, Date.now()))`
+(`maxPfMoves.ts:381-390`), i.e. Main → Trades → TradesHome with
+`{canvasPrefill: {give: [player_id], receive: []}, canvasPrefillSeq: <now>}` and `pop: true`.
+A Keep row does none of it. No `setHandoff`, no auto-run. §3 traces what TradesScreen does with it.
 
-## 3. The TradesScreen give pin (contract §12): it does NOT hold
+## 3. The hand-off on TradesHome (contract §12, coordinator ruling 2026-11-12)
 
-Contract §12 asks the app builder to confirm that TradesScreen shows a give pin set from outside
-the screen and that its next Find a Trade sends it. **On the current flag set it does neither.**
-I did not patch TradesScreen (brief: stop and report).
+**First pass (pin only): it did not hold on today's flags.** With `trades.finder_hub` on,
+TradesHome opens guided (`initialParams {mode:'guided'}`, `navigation/TabNav.tsx:460-464`); with
+`calc.inline_home` on that is the canvas host (`canvasHost = 'flag'`, `TradesScreen.tsx:7578-7587`).
+The `pinnedGive` board renders only in player mode (`:8903`, `:9206`), and the canvas's Find a
+Trade (`handleInlineFindATrade`, `:4102-4142` → `forkCanvasSearch`, `utils/canvasSearch.ts:50-60`)
+takes the canvas's own sides, never the store (`canvasSelection`, `:4133`). So the pin alone was
+neither shown nor sent.
 
-- `TradesHome` is registered with `initialParams {mode: 'guided'}` when `trades.finder_hub` is on
-  (`navigation/TabNav.tsx:460-464`; `config/features.json`: `trades.finder_hub` true).
-- With `calc.inline_home` on (true in `config/features.json`), guided TradesHome is the canvas host:
-  `canvasHost = 'flag'` (`TradesScreen.tsx:7578-7587`).
-- The pin board that renders `pinnedGive` is inside `finderMode === 'player'` branches only
-  (`TradesScreen.tsx:8903`, `:9206`). `TradingWithStrip` (`:8536-8543`) shows league and partner,
-  not pins (its "Players" pill is an unbuilt seam, `components/TradingWithStrip.tsx:15-28`). So the
-  pin is **not shown** on the landing.
-- Find a Trade on that landing is the canvas action row → `handleInlineFindATrade`
-  (`TradesScreen.tsx:4102-4142`) → `forkCanvasSearch(opts)` (`utils/canvasSearch.ts:50-60`), which
-  takes the canvas's own give/receive and never reads `useFinderTargets`; the pushed deck carries
-  `canvasSelection: {giveIds: fork.giveIds, ...}` (`TradesScreen.tsx:4133`). Both page-level
-  `trades.find-btn` bars step aside for the canvas (screens/CLAUDE.md, merged-view trim T-2). So
-  the pin is **not sent**.
-- Pins are read by `modelRequest` (`TradesScreen.tsx:2329-2337`) and by the consumed `FinderHandoff`
-  path (`:3806-3810`). League rankings' Offer works because it also calls `setHandoff` (auto-run),
-  which contract §12 rules out for v1.
+**Ruling: keep the pin and event, and also pass the existing `canvasPrefill` route param.** No
+TradesScreen change. Verified by reading:
 
-What the user would see today: Find trades lands on the canvas with an empty give side; the pin
-sits invisibly in the store and is ignored. Options for the operator (none built):
-(a) hand off through the existing `canvasPrefill` route param MatchesScreen uses
-(`TradesScreen.tsx:1362-1368`: `{give: [player_id], receive: []}` loads the canvas; Find a Trade
-then runs the fair sweep anchored on him) — no TradesScreen change, but a different search than a
-pinned model search; (b) `setHandoff` with `autoRun` (needs a new R1 `source`, contract §12);
-(c) make the canvas seed from store pins (a TradesScreen change). The hand-off as built follows the
-contract to the letter so it is one function to change (`maxPfMoves.ts:380-387` plus the
-`navigate` dep at `MaxPfMovesSection.tsx:105`). **Do not light the flag until this is decided.**
+**(i) Shape and existing user.** `CanvasPrefill` is `{opponentId?: string; give: string[];
+receive: string[]; seeded?: boolean}`: id lists, not asset objects
+(`components/TradeBuildCanvas.tsx:60-70`). MatchesScreen already sends it to TradesHome as
+`{canvasPrefill: {opponentId, give, receive}, canvasPrefillSeq: Date.now()}`
+(`screens/MatchesScreen.tsx:673-684`); TradesScreen's own pushed deck pops back with the same pair
+(`popToLanding`, `TradesScreen.tsx:4277-4284`). Ours sends `{give: [player_id], receive: []}`,
+no `opponentId`.
+
+**(ii) Applied when TradesHome is already mounted, and only once.** The consumer is an effect
+keyed on `route.params.canvasPrefillSeq` (`TradesScreen.tsx:1362-1368`): it runs
+`loadCanvasPrefill(p)` and then `setParams({canvasPrefill: undefined, canvasPrefillSeq: undefined})`.
+A mounted screen gets the new params from the nested navigate: core turns the Trades route's
+`{screen, params, pop}` into `navigate({name:'TradesHome', params, pop})`
+(`node_modules/@react-navigation/core/src/useNavigationBuilder.tsx:680-705`, core 7.17.2), and the
+stack reuses the current route or, with `pop`, the existing TradesHome below a pushed deck
+(`routers/src/StackRouter.tsx:372-390`, 410-425, routers 7.5.3), with params = `initialParams` +
+ours (`routers/src/createParamsFromAction.tsx:13-22`), so `mode:'guided'` survives. A fresh seq
+changes the dependency, so the effect fires on an already-mounted screen; the clear sets it to
+`undefined`, so a later focus re-applies nothing. A cold Trades stack takes the same params
+through `getRehydratedState` (StackRouter `:202-236`, also merging `initialParams`) and the effect
+runs on mount. **Without `pop: true`** a pushed TradeDeck on top would get a second TradesHome
+pushed over it (G-056), so the params carry `pop: true`. **`canvasPrefillSeq` is required:** the
+effect is keyed on it alone, so `canvasPrefill` without a new seq would be ignored.
+
+**(iii) Replace, not merge.** `loadCanvasPrefill` (`TradesScreen.tsx:4297-4322`) sets
+`canvasPrefill` and bumps `canvasPrefillSeq`; `TradeBuildCanvas` adopts it on the seq change and
+bumps `canvasKey` (`TradeBuildCanvas.tsx:169-179`), remounting `InLeagueCalculator`
+(`key=…canvasKey…`, `:212`) whose sides are initialised from the prefill alone
+(`InLeagueCalculator.tsx:394-395`). Whatever was on the canvas is **replaced**: give = the
+player, receive = empty. The partner: with no `opponentId` in our prefill the remount uses the
+page's scoped opponent (`effectiveOpponentId = activePrefill?.opponentId ?? opponentUserId`,
+`TradeBuildCanvas.tsx:193-195`), so a partner chosen only in the canvas's Team dropdown (not the
+page scope) resets to the page scope or none. The page then scrolls to the canvas. Nothing runs
+until the user taps Find a Trade (the effect only loads; no `setHandoff`, no `autoRun`).
+
+**(iv) `calc.inline_home` off: FALSE in part.** With the flag off the prefill is ignored
+(`if (!inlineHomeOn || !p) return`, `TradesScreen.tsx:1364`), so the pin alone must carry it:
+- *Shown:* not on the guided landing. With `trades.edit_full_sheet` on, `consolidateOn` is true
+  (`:1272`), and the consolidated layout renders the pin board only for `finderMode === 'player'`
+  (`:8692` fork, board at `:9206`). Guided mode shows the pin only inside the full Trade DNA sheet
+  (`components/TradeDnaSheet.tsx:987-1010`), opened from "Outlook & filters"
+  (`trades.outlook-fallback`, `:8454-8464`).
+- *Sent:* only if no model search has run on that TradesHome mount since its last reset. The
+  page's Find a Trade (`:9136-9143`, rendered only while `deck.length === 0`, `:9134`) calls
+  `handleFindTrades` (`:1524`) → `dispatchGenerate({repeat: true})` (`:1560`), and `modelRequest`
+  replays `lastModelRequestRef.current` when one exists (`:2337-2344`), else reads the store pins
+  (`modelSelectionParams`, `:2351-2354`). A store change from outside does not reset that
+  (`resetDeckForNewTargets`, `:3630`, is called only by the on-screen pin handlers and the hand-off
+  choke point). So after an earlier search in the session the old request repeats and the new pin
+  is ignored; with a deck on screen there is no Find a Trade button at all.
+- *Smallest fix (not applied, TradesScreen):* an effect keyed on the joined `pinnedGive` /
+  `pinnedReceive` ids that, on a change not made by the screen's own handlers, calls
+  `resetDeckForNewTargets()` (`:3630`; it clears `lastModelRequestRef` and the deck). About 8
+  lines. For visibility, the hand-off could additionally pass `mode: 'player'` when
+  `calc.inline_home` is off, which shows the board (`:9206`); that is a Standings-side change but
+  it switches the user's finder mode, so it is the operator's call.
+
+On today's flags (`calc.inline_home` true) (i)–(iii) hold, so the hand-off works: the user lands
+on Find a Trade with the player on the give side, and their next tap runs the canvas search from
+him. (iv) only bites if `calc.inline_home` is turned off.
 
 ## 4. Tests and sabotage
 
@@ -118,7 +160,7 @@ Run from `mobile/` on this branch:
 
 | Check | Result |
 |---|---|
-| `node tests/check-max-pf-moves.js` | 112 assertions pass (groups A–N) |
+| `node tests/check-max-pf-moves.js` | 115 assertions pass (groups A–N) |
 | all `tests/check-*.js` (CI's loop) | 185 / 185 suites pass (184 before + the new one) |
 | `npx tsc --noEmit` | clean |
 | `bash scripts/testid-lint.sh` | OK |
@@ -128,7 +170,7 @@ against them and their variants, and compares the copy module with the §10 tabl
 directions (45 rows; the one worked example, `An empty spot starts instead (1 week).`, is checked
 as an output instead).
 
-**Sabotage: 41 of 41 caught across all 14 groups (A–N).** Each break was applied to the source,
+**Sabotage: 48 of 48 caught across all 14 groups (A–N).** Each break was applied to the source,
 the suite run (non-zero exit with the named assertion failing), then restored; file checksums
 were identical before and after, and the suite was green afterwards. Breaks included: a copy edit
 (A1), "tank" in a comment (A3), an inline literal (A6), every-reason → generic (B3), wrong state
@@ -137,8 +179,9 @@ inverted (D1) and ignored in the body (D4), roster drop disabled (E2), null rost
 C-NO-MOVES under a roster drop (E4), threshold ignored (F1), 6 before Show all (F3), Keep row
 gets a button (G1) or a hand-off (G3), `<1%` cut (H4), hyphen for U+2212 (H1), no `+` (H6),
 singular week (H15), no-label sentence (H10), final week (H22), flag ignored (I2), flag forced in
-Standings (I4), own-card check removed (I5), receive not cleared (J1), `navigate` instead of
-`popTo` (J2), `n_moves` from all rows (K1), a name in `maxpf_move_expanded` (K4), expanded on close
+Standings (I4), own-card check removed (I5), receive not cleared (J1), event dropped (J1),
+receive prefilled (J1), empty give in the prefill (J1b), no `canvasPrefillSeq` (J1b), no `pop` (J1b),
+`navigate` instead of `popTo` (J2), a Keep row navigating with a prefill (G3), `+0` for zero (H6b), `n_moves` from all rows (K1), a name in `maxpf_move_expanded` (K4), expanded on close
 (K7), viewed every opening (K8), wrong POST path (L1), question with a stored answer (L3), no
 refetch after the POST (L8), wrong device key (L5), a `fetch` on open (M1), 40pt row (M5), hex
 colour (M7), untruncated name (M6), value shown when not priced (N1).
@@ -184,9 +227,14 @@ forecast saved after the backend lands. Open Home → Standings, tap your own ro
    tag; opening it shows "You marked <name> Keep, so Find trades is off for this player." and no
    button.
 8. **Find trades hand-off.** Open a non-Keep row: Top-3 chance, Playoff chance, Projected pick,
-   "<name> starts instead …", the week list, and **Find trades for <name>**. Tap it: the app goes to
-   the Trades tab. **Expected failure on today's flags (§3):** the player is not shown on the give
-   side and Find a Trade does not use him. Record what you see; this item is the open decision.
+   "<name> starts instead …", the week list, and **Find trades for <name>**. First put a different
+   player on the Find a Trade canvas. Then tap Find trades: the app switches to the Trades tab and
+   lands on Find a Trade with **that player alone on the give side** and an empty receive side
+   (the earlier canvas is replaced); the page scrolls to the canvas. **Nothing runs** until you tap
+   Find a Trade, which then searches from him. Repeat from a state where a results deck is open on
+   the Trades tab: you land on the builder (the deck is popped), not on a second copy of it. Go back
+   to Standings and return to the Trades tab: the canvas is not re-filled. On a Keep row there is
+   no button.
 9. **Non-Sleeper league.** Switch to an ESPN or MFL league: Standings shows its unavailable card and
    nothing about Max PF moves.
 10. **Flag off.** Turn `league.max_pf_moves` off (reload flags): your card shows the three old
@@ -197,11 +245,14 @@ forecast saved after the backend lands. Open Home → Standings, tap your own ro
 
 ## 6. Contract questions
 
-1. **§12 hand-off does not work on the shipped flag set** (§3 above). Blocking for flag-on.
+1. **§12 hand-off.** Resolved by the coordinator's ruling: pin + event as specified, plus the
+   existing `canvasPrefill` param (§3). Open: with `calc.inline_home` off the pin is not shown on the
+   guided landing and is not sent after an earlier search (§3 (iv)); smallest fix is in TradesScreen.
 2. **§12 navigation.** The contract's `navigation.navigate('Trades', {screen: 'TradesHome'})` is
    unhandled from Standings, a root-stack push over `Main` (React Navigation 7; the same reason
    `LeagueSummaryScreen.tsx:601-609` uses `popTo('Main', …)` on its root push). Built as
-   `popTo('Main', {screen: 'Trades', params: {screen: 'TradesHome'}})`.
+   `popTo('Main', {screen: 'Trades', params: {screen: 'TradesHome', params: {canvasPrefill,
+   canvasPrefillSeq}, pop: true}})`. Accepted by the coordinator.
 3. **§7.2 client location.** The contract puts `setDraftOrderRule` in `leagueProjections.ts`, but
    two existing guards pin that module read-only (`check-league-projections.js:36`,
    `check-standings-table.js` B6d). Put in a new `api/draftOrderRule.ts` instead; the forecast
@@ -212,7 +263,8 @@ forecast saved after the backend lands. Open Home → Standings, tap your own ro
    will).
 5. **Unknown `state`.** §3.1 makes `reason` an open set and an unknown `version` render nothing,
    but says nothing about an unknown `state`. Built: render nothing.
-6. **Value change of 0.** §11 says "leading + or −"; 0 renders `+0`.
+6. **Value change of 0.** Ruled: exactly 0 (after rounding) renders `0`, not `+0`; a max PF change
+   of 0 renders `0` too.
 7. **Replacement names.** §10 C-REPL uses `{name}`; built with the full `name` (rows use
    `short_name`). C-WEEK's `{names}` is joined "a, b and c".
 8. **C-RULES "under the baseline".** Shown only where a baseline shows (ready / no_moves, body

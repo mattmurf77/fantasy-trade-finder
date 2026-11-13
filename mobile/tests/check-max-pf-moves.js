@@ -224,8 +224,8 @@ const R3 = READY.rows[2];
   const d1 = u.rowDetail(R1);
   assert(d1.button === 'Find trades for R. Sato' && d1.keepNote === null, 'G2. a non-Keep row has the button');
   const calls = [];
-  const did = u.handOffToFinder(R2, { setSide: () => calls.push('s'), track: () => calls.push('t'), navigate: () => calls.push('n') });
-  assert(did === false && calls.length === 0, 'G3. the hand-off refuses a Keep row (no pin, no event, no navigation)');
+  const did = u.handOffToFinder(R2, { setSide: () => calls.push('s'), track: () => calls.push('t'), navigate: () => calls.push('n'), now: () => calls.push('c') });
+  assert(did === false && calls.length === 0, 'G3. the hand-off refuses a Keep row (no pin, no event, no prefill, no navigation)');
   const comp = read('src/components/MaxPfMovesSection.tsx');
   assert(/\{row\.keep \? <Badge label=\{C\['C-KEEP'\]\} \/> : null\}/.test(comp)
       && /\{d\.button \? <Button/.test(comp) && /\{d\.keepNote \?/.test(comp),
@@ -249,6 +249,8 @@ const R3 = READY.rows[2];
     'H5. baseline value: whole number with thousands separator');
   assert(u.formatValueChange(169.2) === '+169' && u.formatValueChange(-12.6) === `${M}13` && u.formatValueChange(1234.5) === '+1,235',
     'H6. value change: leading + or −, thousands separator');
+  assert(u.formatValueChange(0) === '0' && u.formatValueChange(0.4) === '0' && u.formatValueChange(-0.4) === '0'
+      && u.formatPoints(-0.4) === '0', 'H6b. a change of exactly 0 (after rounding) is "0", never "+0" or "−0"');
   assert(u.ARROW === ' → ', 'H7. arrows are " → " (U+2192 with spaces)');
   const base = u.baselineLine(READY);
   assert(base === 'Your 2027 1st today: 1.02 projected. If you miss the playoffs, pick 3.7 on average. 46% chance of a top-3 pick. Value 2,480.',
@@ -331,19 +333,30 @@ const R3 = READY.rows[2];
   const did = u.handOffToFinder(R1, {
     setSide: (side, players) => calls.push(['setSide', side, players]),
     track: (e, p, s) => calls.push(['track', e, p, s]),
-    navigate: () => calls.push(['navigate']),
+    navigate: (params) => calls.push(['navigate', params]),
+    now: () => 1731430000000,
   });
+  const NAV = { screen: 'Trades', params: { screen: 'TradesHome',
+    params: { canvasPrefill: { give: ['8150'], receive: [] }, canvasPrefillSeq: 1731430000000 }, pop: true } };
   assert(did === true && eq(calls, [
     ['setSide', 'give', [{ id: '8150', name: 'Rhett Sato', position: 'RB' }]],
     ['setSide', 'receive', []],
     ['track', 'finder_target_pinned', { side: 'give', source: 'maxpf_moves' }, 'Standings'],
-    ['navigate'],
-  ]), 'J1. give := [player], receive := [], finder_target_pinned {side, source}, then navigate', show(calls));
+    ['navigate', NAV],
+  ]), 'J1. give := [player], receive := [], finder_target_pinned {side, source}, then navigate with the canvas prefill', show(calls));
+  const p = calls[3] && calls[3][1] && calls[3][1].params;
+  assert(p && p.screen === 'TradesHome' && p.pop === true && eq(p.params.canvasPrefill, { give: ['8150'], receive: [] })
+      && !('opponentId' in p.params.canvasPrefill) && typeof p.params.canvasPrefillSeq === 'number',
+    'J1b. canvasPrefill = {give: [player id], receive: []} (ids, no partner), a fresh canvasPrefillSeq, pop back to TradesHome');
   const comp = read('src/components/MaxPfMovesSection.tsx');
   assert(/setSide: \(side, players\) => useFinderTargets\.getState\(\)\.setSide\(side, players\)/.test(comp)
-      && /navigation\.popTo\('Main', \{ screen: 'Trades', params: \{ screen: 'TradesHome' \} \}\)/.test(comp),
-    'J2. the component wires the store and pops to Main → Trades → TradesHome (Standings is a root push)');
+      && /navigate: \(params\) => navigation\.popTo\('Main', params\),\s*now: Date\.now,/.test(comp),
+    'J2. the component wires the store and pops to Main with the util-built params (Standings is a root push)');
   assert(!/setHandoff|autoRun|beginTradeSearch/.test(comp + utilSrc), 'J3. no hand-off object, no auto-run, no R1 search start');
+  const trades = read('src/screens/TradesScreen.tsx');
+  assert(/const p = route\?\.params\?\.canvasPrefill as CanvasPrefill \| undefined;\s*if \(!inlineHomeOn \|\| !p\) return;\s*loadCanvasPrefill\(p\);\s*navigation\?\.setParams\?\.\(\{ canvasPrefill: undefined, canvasPrefillSeq: undefined \}\);[\s\S]{0,120}\}, \[route\?\.params\?\.canvasPrefillSeq\]\);/.test(trades)
+      && /export interface CanvasPrefill \{\s*opponentId\?: string;\s*give: string\[\];\s*receive: string\[\];/.test(read('src/components/TradeBuildCanvas.tsx')),
+    'J4. the receiving side is unchanged: TradesScreen consumes canvasPrefill once per canvasPrefillSeq and clears it; CanvasPrefill takes id lists');
 }
 
 // ═══ K. Analytics (§9) ═══════════════════════════════════════════════════

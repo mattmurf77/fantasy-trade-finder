@@ -101,8 +101,10 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
       track,
       // Standings is a ROOT-stack push over 'Main', so a bare
       // navigate('Trades') is unhandled in React Navigation 7: pop back to
-      // Main's Trades tab (the League rankings legacy-push pattern).
-      navigate: () => navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome' } }),
+      // Main's Trades tab (the League rankings legacy-push pattern), with the
+      // canvas prefill from utils/maxPfMoves.finderNavParams.
+      navigate: (params) => navigation.popTo('Main', params),
+      now: Date.now,
     });
 
   const toggleRow = (row: MaxPfMoveRow) => {
