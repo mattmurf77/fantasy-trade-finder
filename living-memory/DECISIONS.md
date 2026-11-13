@@ -1,5 +1,20 @@
 # Decisions — Fantasy Trade Finder
 
+## D-261 — Max PF moves lists every row and adds "top 2 / top 3 together" lines
+
+**Date:** 2026-11-13 · **Who:** the operator ("My recommendation is to always show the top moves with their numbers, add a line for the top two or three combined, and keep the 'none of these changes your pick on its own' sentence when that is true. Yes. I'm aligned"); built by a builder subagent on `feat/max-pf-moves-show-all`.
+**Context:** v1 listed only rows passing the threshold. On a live 12-team league 6 of 12 teams, the operator's included, saw only "No single player moves your projected pick by a visible amount."; his top row was a 62-point drop leaving pick-if-you-miss 5.90 → 5.88, because his max PF sits about 84 points above the next likely non-playoff team.
+**Decision:**
+- The app lists every saved row in `ready` and `no_moves` (5, then Show all), largest drop first, with no pass marker; "None of these changes your projected pick on its own." shows when nothing listed passes. The old sentence stays for a block with no rows.
+- The weekly job adds `combined`: rows 1–2 and 1–3 removed together, an exact re-solve (not the sum of single drops; replacements interact) and one paired 5,000-run re-run each, sharing the rows' "before" run. Rows first; a failed or timed-out combined step keeps the rows. Members are the listed rows, so a size above the row count is skipped.
+- Additive only: `version` stays 1, every v1 key and the `state` rule (rows alone) are unchanged, so build 191 behaves as before. No `any_row_passes` field (derivable).
+- `combined_sizes` joins the settings so the hash moves; `_moves_missing` treats a stale hash as missing, so `retry_missing_moves` refreshes old blocks.
+- Combined lines have no Find trades hand-off and no week detail.
+**Consequences:**
+- About +1.2 s per baseline on the 14-week fixture (9.5 → 10.6 s), +1.5 KB per block.
+- Every pre-v1.1 block reads as stale to `retry_missing_moves`; one operator call refreshes them, otherwise the weekly slot does.
+- The combined hand-off is a NEXT.md follow-up.
+
 ## D-260 — Operator re-run for forecasts saved without Max PF moves
 
 **Date:** 2026-11-13 · **Who:** the operator ("Rerun the weekly forecast so the max PF moves show"); option shape by the coordinator, built by a backend subagent.

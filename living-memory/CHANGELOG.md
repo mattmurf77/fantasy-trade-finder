@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-13 — Max PF moves v1.1: every row listed, top-2 / top-3 lines (D-261)
+
+- App lists every saved row (passing or not) in `ready` and `no_moves`; "None of these changes your projected pick on its own." when nothing passes. Combined "Top 2 / Top 3 together" lines, no hand-off.
+- Weekly job saves `combined` (exact joint re-solve + two paired 5,000-run re-runs); `combined_sizes` moves the settings hash so `retry_missing_moves` refreshes old blocks. `version` stays 1; build 191 unchanged. Branch `feat/max-pf-moves-show-all`, not merged. Scope: `docs/plans/league-projections/max-pf-trade-away/scope-v1-1.md`.
+
 ## 2026-11-13 — Operator re-run for forecasts without Max PF moves (D-260)
 
 - `POST /api/cron/league-projections {"retry_missing_moves": true}` makes due every current-model baseline success saved without a computed moves block, so the list shows before Tuesday's slot. One call; the 15-minute ticks drain the rest. Reports `retried_missing_moves`.
