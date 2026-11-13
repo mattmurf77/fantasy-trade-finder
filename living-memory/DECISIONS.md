@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-260 — Operator re-run for forecasts saved without Max PF moves
+
+**Date:** 2026-11-13 · **Who:** the operator ("Rerun the weekly forecast so the max PF moves show"); option shape by the coordinator, built by a backend subagent.
+**Context:** D-259 turned `league.max_pf_moves` on, but the block is only computed by a fresh weekly baseline, so every forecast saved earlier shows none until its Tuesday slot. Nothing could re-run a baseline that already succeeded this week, and production database edits are not available.
+**Decision:**
+- `POST /api/cron/league-projections` accepts `{"retry_missing_moves": true}` (weekly mode only, `batch._retry_missing_moves_baselines`): with the flag on, a target whose latest success is a current-model baseline whose `result_json` has no computed `max_pf_moves` block, that is not leased and has no attempt queued or running, is made due now; `retried_missing_moves` counts them. Flag off: nothing marked, `retried_missing_moves_skipped: "max_pf_moves_disabled"`.
+- Detection parses `result_json` of the candidates in Python rather than a SQL `LIKE`: the block's presence is not enough (`computed:false` must count) and the candidate set is one row per target. A `computed:false` block with reason `not_eligible` is settled (the team is not in the run; re-running repeats it) and is not marked, so repeated calls converge.
+- No change to the worker was needed: a dispatched baseline is created without `snapshot_json`, so `_run` captures fresh with the moves step on; the request-hash dedupe only matches queued/running runs; a same-input prior result is reused and `_attach_moves` adds the block because the prior has none.
+- No scope block: an operator-only option on an existing secret-authenticated cron route, not user-visible behaviour, data collection, schema or a public API surface. Bounds unchanged (batch limit, leases, account locks, foreground-busy).
+**Consequences:**
+- One operator call; the realtime ticks drain the rest. Runbook: "After turning Max PF moves on".
+- Scheduled ticks are unchanged and never read the moves flag (pinned).
+
 ## D-259 — Max PF moves is turned on, without a caveat line
 
 **Date:** 2026-11-12 · **Who:** the operator, after reading the leave-one-out backtest: asked whether to add a caveat line before the build, "Build without it"; then "Flip the flag on too".
