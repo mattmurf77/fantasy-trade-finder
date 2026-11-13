@@ -29133,6 +29133,9 @@ def set_league_preferences():
     Body: {
         "league_id":             "...",
         "team_outlook":          "championship|contender|rebuilder|jets|not_sure",
+                                 (optional when a positional list is sent:
+                                  omitted or null => the stored outlook is
+                                  left unchanged, and stays unsaved if none)
         "acquire_positions":     ["WR", "TE"],   (optional)
         "trade_away_positions":  ["QB"],          (optional)
         "avoid_positions":       ["QB", "TE"]     (optional, #360)
@@ -29169,7 +29172,15 @@ def set_league_preferences():
     avoid_positions      = body.get("avoid_positions")      # #360; None|list
 
     valid = {"championship", "contender", "rebuilder", "jets", "not_sure"}
-    if not outlook or outlook not in valid:
+    # A POSITIONS-ONLY save (no `team_outlook`, or null) leaves the stored
+    # outlook exactly as it is — unsaved stays unsaved. Team Review's Chase /
+    # Shop save used to backfill the roster read here, which turned an
+    # inferred outlook into a declared one the user never chose. A body with
+    # neither an outlook nor any positional list is still a 400, as is any
+    # outlook string outside `valid`.
+    positions_only = outlook is None and any(
+        v is not None for v in (acquire_positions, trade_away_positions, avoid_positions))
+    if not positions_only and (not outlook or outlook not in valid):
         return jsonify({"error": f"team_outlook must be one of {sorted(valid)}"}), 400
 
     # Validate positional arrays if supplied
@@ -29208,6 +29219,10 @@ def set_league_preferences():
             _invalidate_trade_jobs(user_id=user_id, league_id=league_id)
         except Exception as inv_err:
             log.warning("league/preferences: trade-cache invalidation failed: %s", inv_err)
+        if positions_only:
+            # Echo the STORED outlook (null when none is saved), not the omit.
+            outlook = (load_league_preference(user_id=user_id, league_id=league_id)
+                       or {}).get("team_outlook")
         return jsonify({
             "ok":                    True,
             "team_outlook":          outlook,
@@ -40335,6 +40350,22 @@ def _first_round_ledgers(league_id: str) -> dict[str, dict]:
     return out
 
 
+def _first_round_pick_count(owned) -> int:
+    """Team Review's "N firsts": owned picks whose numeric `round` is 1.
+
+    Counted on the round `_power_picks_by_owner` carries, never on the label:
+    slotted and projected-slot labels ("2026 1.08", "2027 1.02 · projected")
+    carry no "1st", so a label match counted those firsts as zero.
+    """
+    count = 0
+    for p in owned or ():
+        try:
+            count += int(p.get("round") or 0) == 1
+        except (TypeError, ValueError):
+            continue
+    return count
+
+
 # #14/#21 rank chips — per-league consensus-rank cache so a fan of home
 # league cards costs one power-rankings computation per league per minute,
 # not one per card render. In-process only (fine across Render restarts —
@@ -40355,12 +40386,14 @@ def league_team_review_route():
 
     404 while `trades.team_review` is off, checked before any session work.
 
-    The odds band on the `standing` beat is composed HERE rather than in
+    The `outlook.odds` band is composed HERE rather than in
     `backend/team_review.py`: that module is a pure composer over existing
     service outputs, and reaching into the outlook pipeline from inside it
     would entangle two feature flags. Here the outlook read is its own
     try/except, so a dark `outlook.odds`, a non-Sleeper league or a simulator
-    hiccup costs the band and never the review.
+    hiccup costs the band and never the review. The band feeds the window
+    inference only; the `standing` beat's playoff line is the saved weekly
+    forecast (`standing.playoff_chance`), read the same way.
     """
     if not is_enabled("trades.team_review"):
         return jsonify({"error": "not_found"}), 404
@@ -40439,8 +40472,7 @@ def league_team_review_route():
             v = sum(float(p.get("value") or 0.0) for p in owned)
             pick_share[uid] = v
             total_pick_value += v
-            first_rounds[uid] = sum(
-                1 for p in owned if "1st" in str(p.get("label") or ""))
+            first_rounds[uid] = _first_round_pick_count(owned)
         if total_pick_value > 0:
             pick_share = {k: v / total_pick_value for k, v in pick_share.items()}
         # #365 — round-1 pick provenance per member, read ONCE for the league
@@ -40562,9 +40594,9 @@ def league_team_review_route():
         # simulator fails: the band is enrichment, the review is the feature.
         #
         # #371 HOISTED IT ABOVE `build_team_review` — same computation, same
-        # guards, same try/except, and it is still assigned onto
-        # `payload["standing"]["outlook"]` below. It moved because the band may
-        # now DRIVE the window, and the window is built inside the composer.
+        # guards, same try/except. It moved because the band may now DRIVE the
+        # window, and the window is built inside the composer. It is no longer
+        # shipped on the standing beat (see `standing.playoff_chance` below).
         outlook_band = None
         # #372 — EVERY member's band, not just the caller's. The composite
         # scores playoff likelihood as a term, and the `partners` beat pits
@@ -40778,8 +40810,26 @@ def league_team_review_route():
         payload["league_id"] = league_id
         payload["platform"] = platform
         payload["basis"] = basis
-        if outlook_band is not None:
-            payload["standing"]["outlook"] = outlook_band
+        # The standing beat's playoff line is the SAVED weekly forecast, the
+        # same one Home, Standings and the window beat read, so one review
+        # cannot contradict itself. `outlook_band` (the `outlook.odds`
+        # simulator) still feeds the window inference above but is no longer
+        # shipped as `standing.outlook`: a build that renders that band (up to
+        # 1.22.0 (188)) shows no playoff line instead of the contradiction.
+        # Absent, never null-filled, when the forecast is off, not Sleeper, or
+        # has no usable saved result.
+        if is_enabled("league.projections") and platform == "sleeper":
+            try:
+                from .league_projections import recommendation as _projection_outlook
+                chance = _projection_outlook.load_chance(str(sess["user_id"]), str(league_id))
+                if chance is not None:
+                    payload["standing"]["playoff_chance"] = chance
+            except Exception as pc_err:
+                log.warning("team-review: saved playoff chance unavailable: %s", pc_err)
+        # The rules each outlook switches on, named as the rule catalog names
+        # them, shown beside the outlook choices.
+        from .rule_catalog import outlook_rule_names
+        payload["window"]["outlook_rules"] = outlook_rule_names()
 
         return jsonify(payload)
     except Exception as e:

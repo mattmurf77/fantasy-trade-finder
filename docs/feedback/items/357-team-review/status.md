@@ -1,10 +1,10 @@
 # Status — Team Review (#357 / #358 / #359)
 
-**Status:** `planned` (Team Review) + **`shipped-pending-merge`** (the `outlook.odds` flip). Doc set complete; Team Review build not started. Operator override 2026-08-19 lit `outlook.odds` and ratified the PPG cut.
-**Date:** 2026-08-19
+**Status:** `shipped` — Team Review is built and live behind `trades.team_review` (on in `config/features.json`), revised by #364-#374, #423-#424 and the 2026-11-12 current-data fixes ([`2026-11-12-current-data-fixes.md`](2026-11-12-current-data-fixes.md), branch `fix/team-review-current-data`). The 2026-08-19 lines below are the original planning record and read as history: the build did start, and the standing beat no longer shows the `outlook.odds` band (it shows the saved weekly forecast's playoff chance).
+**Date:** 2026-08-19 (planning); corrected 2026-11-12
 **Covered feedback IDs:** #357, #358, #359 (canonical folder = lowest id, 357)
-**Branch:** `claude/team-review-analysis-plan-1f91e3` (worktree `jolly-leakey-d20295`) — docs only, no code
-**Flag:** `trades.team_review` — **not yet added to `config/features.json`**; it is specced, not built
+**Branch:** planning on `claude/team-review-analysis-plan-1f91e3` (worktree `jolly-leakey-d20295`), docs only; the build shipped on later branches
+**Flag:** `trades.team_review` — in `config/features.json`, `true`
 
 ---
 
@@ -16,7 +16,7 @@ exists, explains it plainly, and offers one action — and four of the six actio
 write `league_preferences`, the fields the trade engine already reads. The exit
 is a deck reshaped by what the user just agreed to.
 
-Beat `standing` carries a playoff **band chip** — `outlook.odds` was lit by operator override on 2026-08-19 ([D-094](../../../../living-memory/DECISIONS.md), superseding D-093). Adds **no new modeling**. Championship odds and bare percentages stay refused on evidence.
+Beat `standing` carried a playoff **band chip** (replaced 2026-11-12 by the saved weekly forecast's playoff chance; see the addendum) — `outlook.odds` was lit by operator override on 2026-08-19 ([D-094](../../../../living-memory/DECISIONS.md), superseding D-093). Adds **no new modeling**. Championship odds and bare percentages stay refused on evidence.
 
 ## Doc set
 
@@ -27,6 +27,7 @@ Beat `standing` carries a playoff **band chip** — `outlook.odds` was lit by op
 | [`lld-delta.md`](lld-delta.md) | Full API contract, composer spec, mobile wiring, degradation matrix |
 | [`prd.md`](prd.md) | R-1…R-27, copy rules, guardrails, test plan incl. the manual TestFlight checklist |
 | [`reconciliation-log.md`](reconciliation-log.md) | Adversarial review: 7 objections, 2 blocking (both fixed) |
+| [`2026-11-12-current-data-fixes.md`](2026-11-12-current-data-fixes.md) | Scope addendum: eight fixes against the current engine (firsts by round, the saved forecast on the standing beat, shared outlook names, refetch after a save, no silent outlook write, the plan beat's player rules, window copy, the "Preferences changed" return) |
 | Design lab | [`mockups/team-review-2026-08-19/`](../../../../mockups/team-review-2026-08-19/index.html) |
 
 ## Rulings made this session

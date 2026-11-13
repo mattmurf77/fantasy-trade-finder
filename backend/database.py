@@ -13274,12 +13274,16 @@ def record_match_disposition(
 # ---------------------------------------------------------------------------
 
 _VALID_OUTLOOKS = frozenset({"championship", "contender", "rebuilder", "jets", "not_sure"})
+# `league_preferences.team_outlook` is NOT NULL; a row created by a
+# positions-only save stores this to mean "no outlook declared". The loaders
+# return it as None, the same as a missing row.
+UNSAVED_OUTLOOK = ""
 
 
 def upsert_league_preference(
     user_id: str,
     league_id: str,
-    team_outlook: str,
+    team_outlook: str | None,
     acquire_positions: list[str] | None = None,
     trade_away_positions: list[str] | None = None,
     avoid_positions: list[str] | None = None,
@@ -13290,6 +13294,10 @@ def upsert_league_preference(
 
     team_outlook must be one of:
         championship | contender | rebuilder | jets | not_sure
+    or None: a positions-only save that leaves the stored outlook unchanged.
+    With no row yet, the new row stores `UNSAVED_OUTLOOK` (the NOT NULL
+    column's "nothing declared"), which both loaders read back as None — so
+    the engine keeps using its inferred outlook, exactly as with no row.
 
     acquire_positions / trade_away_positions / avoid_positions: lists of
         position strings e.g. ["WR", "TE"] or ["QB"].  Pass None to leave the
@@ -13297,7 +13305,7 @@ def upsert_league_preference(
         omits avoid_positions (e.g. the web client) preserves whatever is
         stored — this is what makes a web save non-destructive.
     """
-    if team_outlook not in _VALID_OUTLOOKS:
+    if team_outlook is not None and team_outlook not in _VALID_OUTLOOKS:
         raise ValueError(f"team_outlook must be one of {sorted(_VALID_OUTLOOKS)}")
 
     now = _now()
@@ -13312,7 +13320,9 @@ def upsert_league_preference(
         ).fetchone()
 
         # Build the values dict; only include positional fields when supplied
-        vals: dict = {"team_outlook": team_outlook, "updated_at": now}
+        vals: dict = {"updated_at": now}
+        if team_outlook is not None:
+            vals["team_outlook"] = team_outlook
         if acquire_positions is not None:
             vals["acquire_positions"]    = json.dumps(acquire_positions)
         if trade_away_positions is not None:
@@ -13338,10 +13348,11 @@ def upsert_league_preference(
                 acquire_positions    = vals.get("acquire_positions",    "[]"),
                 trade_away_positions = vals.get("trade_away_positions", "[]"),
                 avoid_positions      = vals.get("avoid_positions",      "[]"),
+                team_outlook         = vals.get("team_outlook", UNSAVED_OUTLOOK),
                 updated_at           = now,
                 **{k: v for k, v in vals.items()
                    if k not in ("acquire_positions", "trade_away_positions",
-                                "avoid_positions", "updated_at")},
+                                "avoid_positions", "team_outlook", "updated_at")},
             ))
 
 
@@ -13380,7 +13391,7 @@ def load_league_preference(user_id: str, league_id: str) -> dict | None:
             return []
 
     return {
-        "team_outlook":          row.team_outlook,
+        "team_outlook":          row.team_outlook or None,
         "acquire_positions":     _parse_positions(getattr(row, "acquire_positions",    None)),
         "trade_away_positions":  _parse_positions(getattr(row, "trade_away_positions", None)),
         # #360 — getattr default is required, not defensive noise: a row read
@@ -13422,7 +13433,7 @@ def load_league_preferences_bulk(user_ids: list, league_id: str) -> dict:
         ).fetchall()
     for row in rows:
         out[row.user_id] = {
-            "team_outlook":          row.team_outlook,
+            "team_outlook":          row.team_outlook or None,
             "acquire_positions":     _parse_positions(
                 getattr(row, "acquire_positions", None)),
             "trade_away_positions":  _parse_positions(

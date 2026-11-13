@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Team Review catches up with the engine (D-255)
+
+- **Fixed:** the firsts count on the Partners step; the playoff figure on the first step now comes from the saved forecast, as on Home; outlook names match the rest of the app and Tanking's hard rules are named; later steps refresh after you confirm an outlook; saving Chase or Shop no longer saves an outlook you did not choose; the Plan step shows Keep and Move and links to Roster setup; Find a Trade offers a fresh deck after a save.
+- **Reaches installed builds on deploy:** the firsts count, and the contradicting playoff band disappears.
+- **Needs the next app build:** everything else.
+
 ## 2026-11-12 — Standings is one sortable table (D-254)
 
 - **What changed:** no Current / Projected tabs. One row per team with a Record | Points pill: Record shows W-L, projected W-L and playoff odds; Points shows PF, Max PF and projected Max PF. Every heading sorts.

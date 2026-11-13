@@ -174,6 +174,7 @@ import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWi
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
+  saveLeagueOutlook,
   getNewPartners,
   getLeagueCoverage,
   copyTiersFromFormat,
@@ -268,6 +269,7 @@ import {
   consumeGuidedRegenSource,
   isRegenPosition,
 } from '../state/onboardingBus';
+import { consumeTeamReviewSave, prefsChangedStripVisible } from '../state/teamReviewSaveBus';
 import {
   useGuide,
   requestGuideStep,
@@ -1331,10 +1333,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // search is already in flight (that search will land under whatever
     // prefs are current by the time it started).
     if (
-      consolidateOn &&
       prefsChangedSinceGenerateRef.current &&
-      deck.length > 0 &&
-      job?.status !== 'running'
+      prefsChangedStripVisible(consolidateOn, deck.length, job?.status)
     ) {
       setShowPrefsChangedStrip(true);
     }
@@ -1667,21 +1667,15 @@ export default function TradesScreen({ navigation, route }: any) {
       prefsQuery.data?.inferred_outlook ?? null,
     );
 
-  // One-tap confirm: persist the inferred outlook with empty position
-  // arrays, then refetch prefs so the banner clears and the control card
-  // shows the saved value.
+  // One-tap confirm: persist the inferred outlook ONLY, then refetch prefs
+  // so the banner clears and the control card shows the saved value.
+  // #681 (operator 2026-11-12, reversing Q-033's 2026-08-19 ruling): it
+  // sends no position list, so saved Chasing / Shopping / Avoiding survive.
+  // It used to send three empty arrays, which wiped positions saved without
+  // an outlook (Team Review's Chase / Shop can do that now).
   const confirmOutlookMutation = useMutation({
     mutationFn: (outlook: NonNullable<Outlook>) =>
-      saveLeaguePreferences(leagueId!, {
-        team_outlook: outlook,
-        acquire_positions: [],
-        trade_away_positions: [],
-        // #360 — this one-tap confirm deliberately writes EMPTY position
-        // arrays (it is confirming an inferred outlook, not a positional
-        // edit), so Avoiding is cleared here exactly as Chasing and
-        // Shopping already are. Consistent with the two siblings above.
-        avoid_positions: [],
-      }),
+      saveLeagueOutlook(leagueId!, outlook),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
       setToast({ msg: 'Outlook saved', tone: 'success' });
@@ -6264,6 +6258,20 @@ export default function TradesScreen({ navigation, route }: any) {
       params: { guidedEntry: 'n8', ...(position ? { position } : {}) },
     });
   }
+
+  // A preference save in Team Review (pushed over this screen) is a Trade DNA
+  // save made elsewhere: on return, mark the deck stale and show the same
+  // "Preferences changed" strip under the same rule as handleEditSheetClose.
+  // Never regenerates; nothing was posted when nothing was saved.
+  useFocusEffect(
+    useCallback(() => {
+      if (!consumeTeamReviewSave(leagueId)) return;
+      prefsChangedSinceGenerateRef.current = true;
+      if (prefsChangedStripVisible(consolidateOn, deck.length, job?.status)) {
+        setShowPrefsChangedStrip(true);
+      }
+    }, [leagueId, consolidateOn, deck.length, job?.status]),
+  );
 
   // Consume the QuickSet→Trades handoff on focus: snapshot the old deck,
   // force a fresh job (server cache key doesn't see board changes), and

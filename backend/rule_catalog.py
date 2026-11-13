@@ -376,3 +376,21 @@ def as_rows() -> list[dict]:
     return [{"key": r.key, "name": r.name, "description": r.description, "stage": r.stage,
              "kind": r.kind, "protects": r.protects, "setting": r.setting, "source": r.source,
              "counted": r.counted, "live": r.live, "question": r.question} for r in RULES]
+
+
+# The `setting` a rule keyed to a team's outlook carries, by stored outlook value. The names are
+# the shared display names (`OUTLOOK_DISPLAY_NAME` in the mobile app).
+OUTLOOK_SETTING = {"championship": "Team outlook: All-in", "contender": "Team outlook: Contending",
+                   "rebuilder": "Team outlook: Rebuilding", "jets": "Team outlook: Tanking"}
+
+
+def outlook_rule_names() -> dict[str, list[str]]:
+    """The names of the live rules each outlook switches on, in catalog order, keyed by stored
+    outlook value. An outlook with no rule of its own is absent. Team Review shows these next to
+    the outlook choices, so the wording is the catalog's and never restated."""
+    out: dict[str, list[str]] = {}
+    for outlook, setting in OUTLOOK_SETTING.items():
+        names = [r.name for r in RULES if r.live and r.setting == setting]
+        if names:
+            out[outlook] = names
+    return out

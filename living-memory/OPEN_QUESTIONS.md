@@ -164,7 +164,9 @@ loses data while it is off and lighting it later is deploy-free.
 add it to `LAUNCHED_FLAG_DEFAULTS` ([D-166](DECISIONS.md)).
 **Status:** RESOLVED.
 
-### Q-033 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-08-19: NO, keep inherited behavior**
+### Q-033 — Should the one-tap outlook confirm stop clearing the position lists? — **RESOLVED 2026-11-12: YES, stop clearing** (reverses the 2026-08-19 "keep inherited behavior" ruling below)
+**RESOLUTION (operator, 2026-11-12), verbatim: "#681. Yes. Stop clearing".** The banner's one-tap Confirm now saves the outlook only (`saveLeagueOutlook`), so Chasing, Shopping and Avoiding survive it. What changed the answer: [D-255](DECISIONS.md) made positions without a saved outlook reachable (Team Review's Chase / Shop), so the wipe described below was no longer hypothetical. See [D-256](DECISIONS.md).
+**Earlier ruling (2026-08-19), kept as history:**
 **Raised:** 2026-08-19 (feedback #360 build)
 `confirmOutlookMutation` (`mobile/src/screens/TradesScreen.tsx:1047-1058`) writes empty `acquire_positions`, `trade_away_positions` **and now `avoid_positions`** when the user taps **Confirm** on the inferred-outlook banner. So a user who set Avoiding but never declared an outlook loses that set on one tap.
 **This is inherited, not introduced** — the two sibling lists have always been cleared by that call, and #360 was built as specced rather than "improved" in passing (surgical-changes rule). It is raised because Avoiding reads as a stronger promise than the other two ("never send me this"), so losing it silently is a worse failure than losing a Chasing hint.

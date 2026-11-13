@@ -34,7 +34,8 @@
 //        files scanned, App.tsx, app.config.js and index.ts among them, each
 //        with its strings visited; Info.plist's CFBundleDisplayName value
 //        scanned; and the scan itself visits each ribbon's PROJECTED /
-//        'Projected' string.
+//        'Projected' string (Team Review's ribbon is gone: there the control
+//        is the standing beat's "Playoff chance" card).
 //
 // HONEST LABEL (G-035): this proves the source holds no such string, not what
 // renders. Out of its reach: strings assembled at runtime ('BE' + 'TA',
@@ -248,11 +249,25 @@ function ribbonStrings(rel, testID) {
   );
 }
 {
-  const r = ribbonStrings('src/screens/TeamReviewScreen.tsx');
+  // Team Review's Playoff outlook ribbon is gone (its standing beat now shows
+  // the saved forecast's playoff chance, 2026-11-12), so the control moved to
+  // that card: the scan must visit its kicker.
+  const rel = 'src/screens/TeamReviewScreen.tsx';
+  const visited = seen.get(rel) || [];
+  const sf = visited.length ? visited[0].node.getSourceFile() : null;
+  const cards = [];
+  const find = (n) => {
+    if (ts.isJsxElement(n)
+        && attrText(n.openingElement, 'testID') === '"team-review.standing.playoff-chance"') cards.push(n);
+    ts.forEachChild(n, find);
+  };
+  if (sf) find(sf);
+  const texts = cards.length === 1
+    ? visited.filter((x) => within(x.node, cards[0])).map((x) => x.text.trim()) : [];
   assert(
-    r.count === 1 && r.texts.includes('PROJECTED'),
-    'p3 TeamReviewScreen: the scan visits PROJECTED inside the Playoff outlook ribbon element',
-    `ribbon elements found: ${r.count}; strings inside: ${JSON.stringify(r.texts)}`,
+    cards.length === 1 && texts.includes('Playoff chance'),
+    'p3 TeamReviewScreen: the scan visits "Playoff chance" inside the team-review.standing.playoff-chance card',
+    `cards found: ${cards.length}; strings inside: ${JSON.stringify(texts)}`,
   );
 }
 {
