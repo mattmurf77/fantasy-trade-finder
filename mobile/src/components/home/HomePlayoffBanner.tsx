@@ -7,6 +7,7 @@ import { getLeagueProjectionBatch, type ProjectionOutlook } from '../../api/leag
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import { homePlayoffBanner } from '../../utils/homePlayoffBanner';
+import { playoffOddsText } from '../../utils/playoffOdds';
 import { outlookDisplayName } from '../OutlookBiasReceipt';
 import { RowAction } from './StatusRow';
 
@@ -40,7 +41,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
   const [open, setOpen] = useState(false);
   if (!available) return null;
   const view = homePlayoffBanner(query.data, rosterId, query.isError);
-  const percent = view.probability != null ? `${(view.probability * 100).toFixed(1)}%` : null;
+  const percent = view.probability != null ? playoffOddsText(view.probability, view.proof, 0.1) : null;
   const savedOn = view.capturedAt ? new Date(view.capturedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null;
   const status = query.isLoading ? 'Loading forecast…' : view.status;
   // The server classified the unrounded probability; this only names its pick.
@@ -83,7 +84,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
     {recommendation && consider ? <View testID="home.playoff.recommendation" style={[styles.row, styles.divider]}>
       <Text style={styles.consider}>{`Consider ${consider}`}</Text>
       <Pressable testID="home.playoff.review-outlook" accessibilityRole="button" hitSlop={LINK_SLOP}
-        accessibilityLabel={`${Math.round(recommendation.probability * 100)}% playoff chance. Consider ${consider}. Review outlook.`}
+        accessibilityLabel={`${playoffOddsText(recommendation.probability, view.proof, 1)} playoff chance. Consider ${consider}. Review outlook.`}
         onPress={() => onReviewOutlook(recommendation.outlook)}>
         <Text style={styles.action}>Review outlook</Text>
       </Pressable>

@@ -12,6 +12,7 @@
 - [5. Manual TestFlight checklist](#5-manual-testflight-checklist)
 - [6. Contract questions](#6-contract-questions)
 - [7. Not verified](#7-not-verified)
+- [8. v1.1: every row listed, combined lines (2026-11-13, D-261)](#8-v11-every-row-listed-combined-lines-2026-11-13-d-261)
 
 ## 1. What was built
 
@@ -293,3 +294,84 @@ forecast saved after the backend lands. Open Home → Standings, tap your own ro
 - That the backend registers `maxpf_moves_viewed`, `maxpf_move_expanded`,
   `draft_order_rule_answered` and the `maxpf_moves` source value (contract §9) is the backend
   builder's; `track()` drops nothing client-side, but an unregistered event is rejected server-side.
+
+## 8. v1.1: every row listed, combined lines (2026-11-13, D-261)
+
+Scope: [scope-v1-1.md](scope-v1-1.md). Contract: the v1.1 note at the top of
+[contract.md](contract.md). Branch `feat/max-pf-moves-show-all`.
+
+### 8.1 Code-walk delta
+
+- **Listing.** `utils/maxPfMoves.ts:146` `listedRows` now returns every row in `ready` and
+  `no_moves` (`isListState`), rank order, minus players off the live roster; it no longer filters
+  on `passes_threshold`. `visibleRows` (unchanged) still shows 5 then Show all.
+- **Combined.** `utils/maxPfMoves.ts:156` `listedCombined` reads `block.combined ?? []` (an older
+  server sends none), list states only, drops an entry when any member left the roster, smallest
+  first. `deriveSection` (`:377`) computes it only when a row is listed.
+- **Sentences.** `deriveSection` `:397`: C-NONE-ALONE when rows are listed and no listed row or
+  combined entry passes; `:400`: C-NO-MOVES only for a list state with zero rows (C-ROSTER alone
+  when the roster drop emptied the list, as before).
+- **Combined line strings.** `:253` `combinedLine1` = C-COMB-1 with `listText(short_names)` plus
+  the §11 change; `:258` `combinedLine2` = C-ROW-2's rules; `:264` `combinedDetail` = top-3 and
+  playoff chance only.
+- **Component.** `components/MaxPfMovesSection.tsx:150` renders C-NONE-ALONE above the head and
+  rows; `:158` maps `model.combined` to `CombinedLine` after the Show all link and before the
+  footer, inside the `listOpen` block, so the owner and collapsed gates apply unchanged.
+  `CombinedLine` (`:209`) is the row construction (44pt head, mono number, Keep badge) without
+  week lines, replacement text or a Find trades button; its open state is separate from rows'
+  (`toggleCombined`, `:118`, fires `maxpf_move_expanded {position: 'combined', rank:
+  'combined_N'}`).
+- **Events.** `viewedProps` (`:408`) keeps `n_moves` = passing rows listed (0 unless `ready`, the
+  v1 meaning) and adds `n_listed` and `any_pass` (`backend/analytics_taxonomy.py` registers both).
+- **Server.** `backend/league_projections/maxpf_moves.py:442` computes `combined` after the rows
+  (`_combined`, `:453`; `resolve_together`, `:260`) inside a `try` that drops only `combined`;
+  `compose` (`:569`) serves it with `pick_value` and `keep`; `state` (`:578`) is still decided by
+  rows alone. `batch.py:127` flags a stale `settings_hash`; `service.py:74` recomputes a reused
+  prior on a hash mismatch (unchanged, now pinned by `test_old_hash_block_is_rerun_end_to_end`).
+
+**Build 191 against the new server.** Build 191's `listedRows` (`origin/main`
+`mobile/src/utils/maxPfMoves.ts:144-151`) returns `[]` unless `state === 'ready'` and keeps only
+`passes_threshold === true` rows; `sectionMounts` requires `version === 1` and a known state. The
+server keeps `version: 1`, the v1 `state` rule and every v1 key (golden test), so build 191 shows
+exactly what it showed before: passing rows for `ready`, C-NO-MOVES alone for `no_moves`. It never
+reads `combined`.
+
+### 8.2 TestFlight checklist additions
+
+New build only, after the v1.1 server is live and the operator has run `retry_missing_moves`
+or a weekly slot has passed.
+
+8. **No passing rows.** On a team whose list used to read only "No single player moves your
+   projected pick by a visible amount." (the operator's league: his own team): the section shows
+   the baseline, then "None of these changes your projected pick on its own.", then "Max PF change
+   over the remaining N weeks" and up to 5 rows, largest drop first (e.g. a −62 row with "Pick if
+   you miss 5.9 → 5.9"), "Show all" when there are more than 5, then the combined lines, the
+   footer and the order line. The old "No single player…" sentence does not appear.
+9. **Combined lines.** Under the rows: "Top 2 together: A. Name and B. Name" with a whole-number
+   change on the right (long minus sign), and "Pick if you miss X → Y · Value ±N" (no Value part
+   in an unpriced league); then "Top 3 together: A, B and C". Tap one: only "Top-3 chance a% →
+   b%" and "Playoff chance a% → b%" appear; no week list, no "Find trades" button. A Keep player
+   in the pair shows the Keep tag on the combined line. The top-2 drop is at least the larger of
+   its two rows' drops.
+10. **Mixed.** On a team where some rows pass: all rows show with no marker telling passing from
+    not; no "None of these…" sentence.
+11. **Roster change.** Trade or drop the rank-1 player, reopen Standings before the next weekly
+    forecast: "Your roster changed after this forecast…" shows, his row and both combined lines
+    are gone, the others stay.
+12. **Build 191 against the new server.** On a phone still on 1.22.0 (191), the same team as
+    item 8 still shows only "No single player moves your projected pick by a visible amount."; a
+    team with passing rows still shows only those rows; nothing new appears and nothing breaks.
+
+### 8.3 Tests and sabotage
+
+`mobile/tests/check-max-pf-moves.js`: 144 checks (119 before); group O is new, and A1, E2, E4,
+F1, F5, F6, K1, K2, K7 were updated for the listing rule. 15 named sabotages of the utils,
+component and copy each turned the suite red and were restored with checksums unchanged
+(TEST_LEDGER 2026-11-13). Backend: `backend/tests/test_maxpf_moves_combined.py` plus updates in
+the settings, rerun and analytics files.
+
+### 8.4 Not verified
+
+Nothing ran on a device (D-056). The production re-run and the real job time on production
+hardware are not measured. The combined numbers on a real league (the operator's 84-point gap)
+are unknown until the first v1.1 forecast.

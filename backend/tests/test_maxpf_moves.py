@@ -47,7 +47,7 @@ from backend.league_projections.scoring import BEST_AVAILABLE, CONTRACT as SPARS
 from backend.tests.test_season_points import CAPTURED_AT, LEAGUE_ID, capture_cfg, sleeper_world
 
 OPTIONS = {"simulations_per_candidate": 5000, "candidates": 8, "min_drop_points": 5,
-           "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60}
+           "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60, "combined_sizes": [2, 3]}
 
 
 def model_cfg(iterations=20000):

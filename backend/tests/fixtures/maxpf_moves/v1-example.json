@@ -1,0 +1,384 @@
+{
+ "max_pf_moves": {
+  "version": 1,
+  "state": "ready",
+  "reason": null,
+  "viewer_roster_id": 7,
+  "captured_at": "2026-11-10T14:30:05+00:00",
+  "draft_season": 2027,
+  "draft_round": 1,
+  "draft_order": {
+   "rule": null,
+   "set_at": null
+  },
+  "saved_outlook": "rebuilder",
+  "pick_owner": {
+   "owns_own_pick": true,
+   "owner_roster_id": 7,
+   "owner_name": "Harbor Herons"
+  },
+  "baseline": {
+   "weeks_remaining": 5,
+   "first_week": 10,
+   "last_week": 14,
+   "weeks_excluded_played": 0,
+   "playoff_probability": 0.0271,
+   "playoff_band": "jets",
+   "pick_if_miss": 3.6912,
+   "top3_probability": 0.4583,
+   "label": "1.02",
+   "label_slot": 2,
+   "pick_value": 2480.4,
+   "pick_value_status": "priced"
+  },
+  "roster_player_ids": [
+   "10021",
+   "10477",
+   "11233",
+   "4034",
+   "5022",
+   "6130",
+   "7611",
+   "8150",
+   "9488"
+  ],
+  "candidates_total": 11,
+  "rows": [
+   {
+    "rank": 1,
+    "player_id": "8150",
+    "name": "Rhett Sato",
+    "short_name": "R. Sato",
+    "position": "RB",
+    "maxpf_change": -31,
+    "maxpf_change_exact": "-31.00",
+    "lineup_change": -31,
+    "lineup_change_exact": "-31.00",
+    "weeks_affected": 5,
+    "replacements": [
+     {
+      "player_id": "9488",
+      "name": "Cal Mercer",
+      "short_name": "C. Mercer",
+      "free_agent": false,
+      "weeks": 4
+     },
+     {
+      "player_id": "10477",
+      "name": "Ezra Quill",
+      "short_name": "E. Quill",
+      "free_agent": false,
+      "weeks": 1
+     }
+    ],
+    "replacements_more": 0,
+    "weeks": [
+     {
+      "week": 10,
+      "status": "changed",
+      "maxpf_change": -5.0,
+      "lineup_change": -5.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 11,
+      "status": "changed",
+      "maxpf_change": -5.0,
+      "lineup_change": -5.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 12,
+      "status": "changed",
+      "maxpf_change": -11.0,
+      "lineup_change": -11.0,
+      "replaced_by": [
+       {
+        "player_id": "10477",
+        "name": "Ezra Quill",
+        "short_name": "E. Quill",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 13,
+      "status": "changed",
+      "maxpf_change": -5.0,
+      "lineup_change": -5.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 14,
+      "status": "changed",
+      "maxpf_change": -5.0,
+      "lineup_change": -5.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     }
+    ],
+    "playoff_probability": {
+     "now": 0.0271,
+     "after": 0.0122
+    },
+    "pick_if_miss": {
+     "now": 3.6912,
+     "after": 3.3604
+    },
+    "top3_probability": {
+     "now": 0.4583,
+     "after": 0.6177
+    },
+    "label": {
+     "now": "1.02",
+     "after": "1.02"
+    },
+    "label_slot": {
+     "now": 2,
+     "after": 2
+    },
+    "pick_value": {
+     "now": 2480.4,
+     "after": 2649.6,
+     "change": 169.2
+    },
+    "keep": false,
+    "passes_threshold": true
+   },
+   {
+    "rank": 2,
+    "player_id": "6130",
+    "name": "Dale Okafor",
+    "short_name": "D. Okafor",
+    "position": "WR",
+    "maxpf_change": -28,
+    "maxpf_change_exact": "-28.00",
+    "lineup_change": -28,
+    "lineup_change_exact": "-28.00",
+    "weeks_affected": 4,
+    "replacements": [
+     {
+      "player_id": "9488",
+      "name": "Cal Mercer",
+      "short_name": "C. Mercer",
+      "free_agent": false,
+      "weeks": 4
+     }
+    ],
+    "replacements_more": 0,
+    "weeks": [
+     {
+      "week": 10,
+      "status": "changed",
+      "maxpf_change": -7.0,
+      "lineup_change": -7.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 11,
+      "status": "changed",
+      "maxpf_change": -7.0,
+      "lineup_change": -7.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 12,
+      "status": "bye",
+      "maxpf_change": 0.0,
+      "lineup_change": 0.0,
+      "replaced_by": []
+     },
+     {
+      "week": 13,
+      "status": "changed",
+      "maxpf_change": -7.0,
+      "lineup_change": -7.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     },
+     {
+      "week": 14,
+      "status": "changed",
+      "maxpf_change": -7.0,
+      "lineup_change": -7.0,
+      "replaced_by": [
+       {
+        "player_id": "9488",
+        "name": "Cal Mercer",
+        "short_name": "C. Mercer",
+        "free_agent": false
+       }
+      ]
+     }
+    ],
+    "playoff_probability": {
+     "now": 0.0271,
+     "after": 0.0131
+    },
+    "pick_if_miss": {
+     "now": 3.6912,
+     "after": 3.3887
+    },
+    "top3_probability": {
+     "now": 0.4583,
+     "after": 0.6094
+    },
+    "label": {
+     "now": "1.02",
+     "after": "1.02"
+    },
+    "label_slot": {
+     "now": 2,
+     "after": 2
+    },
+    "pick_value": {
+     "now": 2480.4,
+     "after": 2633.1,
+     "change": 152.7
+    },
+    "keep": true,
+    "passes_threshold": true
+   },
+   {
+    "rank": 3,
+    "player_id": "11233",
+    "name": "Bo Halvorsen",
+    "short_name": "B. Halvorsen",
+    "position": "TE",
+    "maxpf_change": -4,
+    "maxpf_change_exact": "-4.20",
+    "lineup_change": -4,
+    "lineup_change_exact": "-4.20",
+    "weeks_affected": 1,
+    "replacements": [
+     {
+      "player_id": "20391",
+      "name": "Ike Brennan",
+      "short_name": "I. Brennan",
+      "free_agent": true,
+      "weeks": 1
+     }
+    ],
+    "replacements_more": 0,
+    "weeks": [
+     {
+      "week": 10,
+      "status": "no_change",
+      "maxpf_change": 0.0,
+      "lineup_change": 0.0,
+      "replaced_by": []
+     },
+     {
+      "week": 11,
+      "status": "changed",
+      "maxpf_change": -4.2,
+      "lineup_change": -4.2,
+      "replaced_by": [
+       {
+        "player_id": "20391",
+        "name": "Ike Brennan",
+        "short_name": "I. Brennan",
+        "free_agent": true
+       }
+      ]
+     },
+     {
+      "week": 12,
+      "status": "no_change",
+      "maxpf_change": 0.0,
+      "lineup_change": 0.0,
+      "replaced_by": []
+     },
+     {
+      "week": 13,
+      "status": "no_change",
+      "maxpf_change": 0.0,
+      "lineup_change": 0.0,
+      "replaced_by": []
+     },
+     {
+      "week": 14,
+      "status": "no_change",
+      "maxpf_change": 0.0,
+      "lineup_change": 0.0,
+      "replaced_by": []
+     }
+    ],
+    "playoff_probability": {
+     "now": 0.0271,
+     "after": 0.0262
+    },
+    "pick_if_miss": {
+     "now": 3.6912,
+     "after": 3.6581
+    },
+    "top3_probability": {
+     "now": 0.4583,
+     "after": 0.4712
+    },
+    "label": {
+     "now": "1.02",
+     "after": "1.02"
+    },
+    "label_slot": {
+     "now": 2,
+     "after": 2
+    },
+    "pick_value": {
+     "now": 2480.4,
+     "after": 2493.0,
+     "change": 12.6
+    },
+    "keep": false,
+    "passes_threshold": false
+   }
+  ]
+ }
+}

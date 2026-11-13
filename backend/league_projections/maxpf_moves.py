@@ -21,7 +21,12 @@ SETTINGS_KEYS = {
     "min_pick_change": ((int, float), 0, 32),
     "min_top3_change": ((int, float), 0, 1),
     "time_budget_seconds": ((int, float), 1, 400),
+    # v1.1 (D-261): the "top N together" entries, e.g. [2, 3]. Validated
+    # apart below (a list, not a number); part of the settings hash, so a
+    # change re-runs saved blocks through `retry_missing_moves`.
+    "combined_sizes": (list, None, None),
 }
+COMBINED_SIZES = (2, 3)
 
 
 def parse_settings(raw):
@@ -32,6 +37,13 @@ def parse_settings(raw):
     out = {}
     for key, (kind, low, high) in SETTINGS_KEYS.items():
         value = raw[key]
+        if key == "combined_sizes":
+            # Distinct sizes from COMBINED_SIZES, ascending; [] turns the step off.
+            if (not isinstance(value, list) or any(type(v) is not int or v not in COMBINED_SIZES for v in value)
+                    or value != sorted(set(value))):
+                raise ValueError("invalid_max_pf_moves_configuration")
+            out[key] = list(value)
+            continue
         if isinstance(value, bool) or not isinstance(value, kind) or not low <= value <= high:
             raise ValueError("invalid_max_pf_moves_configuration")
         out[key] = value
@@ -120,12 +132,12 @@ class _Context:
         ids = set(roster.get("players", [])) | set(roster.get("taxi", [])) | set(roster.get("reserve", []))
         return bool(ids & self.completed.get(week, set()))
 
-    def lineups(self, roster_id, week, detail, remove=None):
+    def lineups(self, roster_id, week, detail, remove=()):
         """(lineup lane, max PF lane) exactly as `provider.capture` builds them
-        (`provider.py` lineup and Max PF blocks), with `remove` taken off the roster."""
+        (`provider.py` lineup and Max PF blocks), with the ids in `remove` taken off the roster."""
         roster = self.rosters[roster_id]
         reserve, taxi = set(roster.get("reserve", [])), set(roster.get("taxi", []))
-        ids = sorted((set(roster.get("players", [])) | taxi | reserve) - {remove})
+        ids = sorted((set(roster.get("players", [])) | taxi | reserve) - set(remove))
         week_points = self.points.get(week, {})
         pool, max_pool, bye = [], [], []
         for pid in ids:
@@ -224,7 +236,7 @@ def resolve(snapshot, cfg, free_agent_pool, roster_id, *, names=None):
                 per_week.append({"week": w, "status": "played", "dA": Decimal(0), "dM": Decimal(0), "replaced_by": []})
                 continue
             detail, actual, maximum = base[w]
-            actual2, maximum2 = ctx.lineups(roster_id, w, detail, remove=pid)
+            actual2, maximum2 = ctx.lineups(roster_id, w, detail, remove={pid})
             d_a = decimal(actual["points"]) - decimal(actual2["points"])
             d_m = decimal(maximum["points"]) - decimal(maximum2["points"])
             before = {str(r["player"]["player_id"]) for r in maximum["lineup"] if r["player"]}
@@ -242,7 +254,25 @@ def resolve(snapshot, cfg, free_agent_pool, roster_id, *, names=None):
             total_m += d_m
         candidates[pid] = {"weeks": per_week, "dA": total_a, "dM": total_m}
     return {"weeks": [int(w["week"]) for w in weeks], "excluded_played": excluded, "candidates": candidates,
-            "unknown": unknown, "context": ctx}
+            "unknown": unknown, "context": ctx, "base": base}
+
+
+def resolve_together(solved, roster_id, player_ids):
+    """The exact weekly re-solve with every id in `player_ids` removed AT ONCE
+    (v1.1 combined entries, D-261). Not the sum of the single drops: the
+    replacements interact (two removed running backs can both have needed the
+    same bench back). `solved` is `resolve`'s answer for the same team.
+    Returns {"changes": {week: (dA, dM)}, "dA", "dM"}; played weeks are 0."""
+    ctx, roster_id = solved["context"], int(roster_id)
+    changes, total_a, total_m = {}, Decimal(0), Decimal(0)
+    for w, (detail, actual, maximum) in solved["base"].items():
+        actual2, maximum2 = ctx.lineups(roster_id, w, detail, remove=set(player_ids))
+        d_a = decimal(actual["points"]) - decimal(actual2["points"])
+        d_m = decimal(maximum["points"]) - decimal(maximum2["points"])
+        changes[w] = (d_a, d_m)
+        total_a += d_a
+        total_m += d_m
+    return {"changes": changes, "dA": total_a, "dM": total_m}
 
 
 def _lowered(snapshot, roster_id, changes):
@@ -404,7 +434,47 @@ def compute(snapshot, result, free_agent_pool, options, *, names=None, trade_dea
                 "after_playoff_probability": mine["playoff_probability"],
                 "passes_threshold": bool(passes)})
     block.update(computed=True, reason=None, rows=rows)
+    # v1.1 combined entries (D-261): rows first, combined second. Sizes come
+    # from the listed rows (top N by max PF drop), so every member is a row the
+    # app can name; a size larger than the row count is skipped. Any failure
+    # here, a cancellation or a hit time budget included, leaves the rows as
+    # computed and the block without `combined` (contract §13.5).
+    sizes = [n for n in options.get("combined_sizes", ()) if n <= len(rows)]
+    if sizes:
+        try:
+            block["combined"] = [_combined(snapshot, result, solved, team, roster_id, rows[:n], before, small,
+                                           options, block["baseline"]["label"], label_slot, round_, cancelled)
+                                 for n in sizes]
+        except Exception:
+            block.pop("combined", None)
     return block
+
+
+def _combined(snapshot, result, solved, team, roster_id, members, before, small, options, label_now, slot_now,
+              round_, cancelled):
+    """One saved combined entry: the top `len(members)` rows removed together,
+    exact re-solve, then the same paired 5,000-run re-run as a row."""
+    together = resolve_together(solved, roster_id, [r["player_id"] for r in members])
+    after = simulation.simulate(_lowered(snapshot, roster_id, together["changes"]), small, cancelled=cancelled)
+    teams_after = _after_teams(result, before, after)
+    mine = teams_after[roster_id]
+    slot_after = _labels(teams_after, int(result["playoff_spots"])).get(str(roster_id))
+    top3_now, top3_after = sum(team["pick_probabilities"][:3]), sum(mine["pick_probabilities"][:3])
+    cep_now, cep_after = team["conditional_expected_pick"], mine["conditional_expected_pick"]
+    change = -together["dM"]
+    return {
+        "size": len(members), "player_ids": [r["player_id"] for r in members],
+        "names": [r["name"] for r in members], "short_names": [r["short_name"] for r in members],
+        "maxpf_change": _whole(change), "maxpf_change_exact": str(change.quantize(Decimal("0.01"))),
+        "lineup_change": _whole(-together["dA"]), "lineup_change_exact": str((-together["dA"]).quantize(Decimal("0.01"))),
+        "playoff_probability": {"now": team["playoff_probability"], "after": mine["playoff_probability"]},
+        "pick_if_miss": {"now": cep_now, "after": cep_after},
+        "top3_probability": {"now": top3_now, "after": top3_after},
+        "label": {"now": label_now, "after": pick_slots.slot_suffix(round_, slot_after) if slot_after else None},
+        "label_slot": {"now": slot_now, "after": slot_after},
+        "after_pick_probabilities": mine["pick_probabilities"],
+        "after_playoff_probability": mine["playoff_probability"],
+        "passes_threshold": bool(passes_threshold(change, cep_now, cep_after, top3_now, top3_after, options))}
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +484,9 @@ def compute(snapshot, result, free_agent_pool, options, *, names=None, trade_dea
 _ROW_KEYS = ("rank", "player_id", "name", "short_name", "position", "maxpf_change", "maxpf_change_exact",
              "lineup_change", "lineup_change_exact", "weeks_affected", "replacements", "replacements_more", "weeks",
              "playoff_probability", "pick_if_miss", "top3_probability", "label", "label_slot", "passes_threshold")
+_COMBINED_KEYS = ("size", "player_ids", "names", "short_names", "maxpf_change", "maxpf_change_exact", "lineup_change",
+                  "lineup_change_exact", "playoff_probability", "pick_if_miss", "top3_probability", "label", "label_slot",
+                  "passes_threshold")
 NOT_MAXPF = {"reverse_standings", "lottery_or_other"}
 
 
@@ -439,7 +512,8 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
     block = {"version": VERSION, "state": "unavailable", "reason": None, "viewer_roster_id": None, "captured_at": None,
              "draft_season": None, "draft_round": None,
              "draft_order": draft_order or {"rule": None, "set_at": None}, "saved_outlook": saved_outlook,
-             "pick_owner": None, "baseline": None, "roster_player_ids": [], "candidates_total": 0, "rows": []}
+             "pick_owner": None, "baseline": None, "roster_player_ids": [], "candidates_total": 0, "rows": [],
+             "combined": []}
     reason = recommendation.unusable_reason(view_state, saved, failure_reason=failure_reason)
     if reason:
         return {**block, "reason": reason}
@@ -472,6 +546,11 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
         "weeks_excluded_played": base["weeks_excluded_played"],
         "playoff_probability": team["playoff_probability"],
         "playoff_band": recommendation.classify(team["playoff_probability"], cuts) if cuts else None,
+        # D-262: proven from the rules, roster-independent, so they hold for
+        # every row's and combined entry's "after" too. Absent on a run saved
+        # before D-262: False, never proven.
+        "playoff_clinched": bool(team.get("playoff_clinched")),
+        "playoff_eliminated": bool(team.get("playoff_eliminated")),
         "pick_if_miss": team["conditional_expected_pick"], "top3_probability": base["top3_probability"],
         "label": base["label"], "label_slot": base["label_slot"],
         "pick_value": now_value, "pick_value_status": "priced" if now_value is not None else "not_priced"}
@@ -488,5 +567,18 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
                 value = {"now": now_value, "after": after, "change": round(after - now_value, 1)}
         row.update(pick_value=value, keep=row["player_id"] in keep)
         rows.append(row)
+    # v1.1 (D-261), additive: the "top N together" entries, priced and Keep-
+    # tagged the way rows are. They never decide `state` (v1's rule, which
+    # build 191 relies on, is unchanged) and carry no hand-off.
+    combined = []
+    for saved_entry in raw.get("combined") or []:
+        entry = {k: saved_entry[k] for k in _COMBINED_KEYS}
+        value = None
+        if now_value is not None:
+            after = price(_dist(saved_entry["after_pick_probabilities"], saved_entry["after_playoff_probability"], spots))
+            if after is not None:
+                value = {"now": now_value, "after": after, "change": round(after - now_value, 1)}
+        entry.update(pick_value=value, keep=any(pid in keep for pid in entry["player_ids"]))
+        combined.append(entry)
     state = "ready" if any(r["passes_threshold"] for r in rows) else "no_moves"
-    return {**block, "state": state, "rows": rows}
+    return {**block, "state": state, "rows": rows, "combined": combined}

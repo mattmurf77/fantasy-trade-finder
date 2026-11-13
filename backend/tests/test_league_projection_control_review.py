@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
 from backend import accounts,database as db
-from backend.league_projections import store,service,provider,batch,simulation
+from backend.league_projections import store,service,provider,batch,simulation,clinch
 from backend.tests.test_outlook_calibration_persistence import engine
 from backend.tests.test_league_projection_simulation import snapshot,config
 
@@ -83,7 +83,9 @@ def test_real_simulation_outputs_and_checkpoint_count_identical(engine,monkeypat
     monkeypatch.setattr(store,'control',read)
     service._run(lambda *a:pytest.fail('saved snapshot cannot fetch'))
     result=json.loads(store.get(queued['run_id'],'account','123')['result_json'])
-    assert result=={**expected,'reused_compatible_result':False,'verified_at':frozen['captured_at']}
+    # D-262: the worker also attaches the rules-based clinch proof; no probability changes.
+    assert result==clinch.attach({**expected,'reused_compatible_result':False,'verified_at':frozen['captured_at']},frozen)
+    assert [t['playoff_probability'] for t in result['teams']]==[t['playoff_probability'] for t in expected['teams']]
     #2 worker pre/post save + simulation iteration0/500 checks at1000 draws.
     assert len(calls)==4
     assert set(calls)=={(queued['run_id'],'account','123')}

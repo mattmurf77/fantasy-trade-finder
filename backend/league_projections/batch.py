@@ -113,11 +113,18 @@ def _retry_baselines(now, status):
 
 
 def _moves_missing(raw):
-    """No computed Max PF moves block in a saved result. A `computed: false`
+    """No current Max PF moves block in a saved result. A `computed: false`
     block counts as missing unless its reason is `not_eligible`: that is the
-    settled answer for a team not in the run, and re-running repeats it."""
+    settled answer for a team not in the run, and re-running repeats it. A
+    computed block made under other settings (its `settings_hash` is not the
+    current one, e.g. saved before v1.1's combined entries) is missing too."""
+    from . import maxpf_moves
     block = json.loads(raw or "{}").get("max_pf_moves")
-    return not isinstance(block, dict) or (not block.get("computed") and block.get("reason") != "not_eligible")
+    if not isinstance(block, dict):
+        return True
+    if not block.get("computed"):
+        return block.get("reason") != "not_eligible"
+    return block.get("settings_hash") != maxpf_moves.settings_hash(maxpf_moves.settings())
 
 
 def _retry_missing_moves_baselines(now):

@@ -80,7 +80,7 @@ def _view(probability=.6, *, state="current", model=VERSION, captured="2026-11-1
 def test_saved_chance_is_shown_whenever_home_shows_a_percentage(view, current):
     chance = recommendation.saved_chance(view, NOW)
     assert chance == {"playoff_probability": .6, "captured_at": "2026-11-10T15:00:00+00:00",
-                      "current": current}
+                      "current": current, "playoff_clinched": False, "playoff_eliminated": False}
 
 
 @pytest.mark.parametrize("view", [

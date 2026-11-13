@@ -30,7 +30,7 @@ import pytest
 from sqlalchemy import update
 
 from backend import database as db
-from backend.league_projections import batch, maxpf_moves, provider, service, simulation, store
+from backend.league_projections import batch, clinch, maxpf_moves, provider, service, simulation, store
 from backend.league_projections.scoring import BEST_AVAILABLE
 from backend.tests.test_outlook_calibration_persistence import engine  # noqa: F401  (fixture)
 from backend.tests.test_season_points import CAPTURED_AT, LEAGUE_ID, sleeper_world
@@ -90,10 +90,11 @@ def test_flag_off_saves_exactly_what_main_saves(world, monkeypatch):
     assert calls == [["viewer_user_id"]]  # capture called exactly as on main
     result = json.loads(off["result_json"])
     assert "max_pf_moves" not in result
-    # The pre-change worker's result: simulate on the same capture, plus the two keys _run adds.
+    # The pre-change worker's result: simulate on the same capture, plus the two keys _run adds,
+    # plus the D-262 clinch proof (`clinch.attach`, flag-independent: every run carries it).
     snapshot = json.loads(off["snapshot_json"])
-    main = {**simulation.simulate(snapshot, model_cfg()), "reused_compatible_result": False,
-            "verified_at": snapshot["captured_at"]}
+    main = clinch.attach({**simulation.simulate(snapshot, model_cfg()), "reused_compatible_result": False,
+                          "verified_at": snapshot["captured_at"]}, snapshot)
     assert off["result_json"] == store.dumps(main)
     assert snapshot == REAL_CAPTURE(LEAGUE_ID, "me", model_cfg(), lambda url: deepcopy(SOURCE[url]),
                                     captured_at=CAPTURED_AT, clock=lambda: CAPTURED_AT)
@@ -176,3 +177,23 @@ def test_prior_reuse_recomputes_only_on_a_settings_change(world, monkeypatch):
     flags["league.max_pf_moves"] = False
     fourth = json.loads(run_job()["result_json"])
     assert fourth["reused_compatible_result"] and "max_pf_moves" not in fourth
+
+
+def test_reused_prior_result_saved_before_d262_gets_the_clinch_keys(world):
+    """D-262: a prior result saved without the proof (an older run) gains
+    `playoff_clinched` / `playoff_eliminated` on reuse; no probability moves.
+    Sabotage: attach only on a fresh simulation (`if not prior`)."""
+    first = run_job(keep=True)
+    old = json.loads(first["result_json"])
+    stripped = {k: v for k, v in old.items() if k != "playoff_proof"}
+    stripped["teams"] = [{k: v for k, v in t.items() if k not in ("playoff_clinched", "playoff_eliminated")}
+                         for t in old["teams"]]
+    with db.engine.begin() as conn:
+        conn.execute(update(db.league_projection_runs_table).where(
+            db.league_projection_runs_table.c.run_id == first["run_id"]).values(result_json=store.dumps(stripped)))
+    second = json.loads(run_job()["result_json"])
+    assert second["reused_compatible_result"]
+    assert second["playoff_proof"] == old["playoff_proof"] and second["playoff_proof"]["status"] == "exact"
+    assert [(t["playoff_clinched"], t["playoff_eliminated"]) for t in second["teams"]] == \
+        [(t["playoff_clinched"], t["playoff_eliminated"]) for t in old["teams"]]
+    assert [t["playoff_probability"] for t in second["teams"]] == [t["playoff_probability"] for t in old["teams"]]

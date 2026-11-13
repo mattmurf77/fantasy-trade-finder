@@ -54,7 +54,8 @@ def runs(engine):
         return len(conn.execute(db.select(R)).all())
 
 
-COMPUTED = {"max_pf_moves": {"version": maxpf_moves.VERSION, "computed": True, "rows": []}}
+COMPUTED = {"max_pf_moves": {"version": maxpf_moves.VERSION, "computed": True, "rows": [],
+                             "settings_hash": maxpf_moves.settings_hash(maxpf_moves.settings())}}
 
 
 @pytest.mark.parametrize("result", [{}, {"max_pf_moves": None},

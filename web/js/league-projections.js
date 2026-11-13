@@ -4,6 +4,8 @@
   let epoch = 0, displayedContext = null;
   const el = (tag, text) => {const n = document.createElement(tag); if (text !== undefined) n.textContent = text; return n;};
   const pct = n => `${(n * 100).toFixed(1)}%`;
+  /* Playoff and miss-playoff odds go through the one rule (D-262, js/playoff-odds.js). */
+  const odds = window.FTFPlayoffOdds;
   const num = n => n == null ? 'Unavailable' : n.toFixed(1);
   const states = {no_run: 'Waiting for the first weekly forecast.', queued: 'Weekly update queued.',
     running: 'Weekly update in progress.', current: '', stale: 'Weekly update due.',
@@ -45,7 +47,7 @@
       const teams=[...result.teams].sort((a,b) => pickView ? a.maxpf_mean-b.maxpf_mean : sort.value==='name'
         ? a.name.localeCompare(b.name) : sort.value==='record'
           ? (b.current_record[0]+.5*b.current_record[2])-(a.current_record[0]+.5*a.current_record[2])
-          : b.playoff_probability-a.playoff_probability);
+          : b.playoff_probability-a.playoff_probability || odds.rank(b)-odds.rank(a));
       for (const team of teams) {
         const row=el('tr'), name=el('td'), detailRow=el('tr'), detail=el('td');
         detail.colSpan=3;detailRow.hidden=true;detailRow.append(detail);
@@ -56,7 +58,7 @@
         });
         expand.className='league-projection-team';expand.setAttribute('aria-expanded','false');
         name.append(expand);
-        row.append(name,el('td',pct(pickView?team.nonplayoff_probability:team.playoff_probability)),
+        row.append(name,el('td',pickView?odds.miss(team.nonplayoff_probability,team,0.1):odds.text(team.playoff_probability,team,0.1)),
           el('td',pickView?num(team.maxpf_mean):team.expected_record.map(num).join('–')));
         body.append(row,detailRow);
       }
@@ -125,7 +127,7 @@
     if (rec.status !== 'available' || !rec.differs || data.model_current === false || !label
       || !window.FTFReviewOutlook || typeof rec.playoff_probability !== 'number') return;
     const prompt = el('div'); prompt.className = 'league-projection-outlook';
-    prompt.append(el('p', `${Math.round(rec.playoff_probability * 100)}% playoff chance · Consider ${label}`));
+    prompt.append(el('p', `${odds.text(rec.playoff_probability, rec, 1)} playoff chance · Consider ${label}`));
     if (rec.suggestion) prompt.append(el('p', rec.suggestion));
     prompt.append(button('Review outlook', () => window.FTFReviewOutlook(rec.recommended_outlook)));
     host.append(prompt);

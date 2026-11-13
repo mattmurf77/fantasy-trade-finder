@@ -70,6 +70,7 @@ import {
 import type { SplitSide } from '../utils/positionSplit';
 import ProjectedPickTag from '../components/ProjectedPickTag';
 import { projectedPick, projectedPickA11y } from '../utils/projectedPick';
+import { playoffOddsText } from '../utils/playoffOdds';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -2881,14 +2882,12 @@ function playoffBand(frac: number): PlayoffBand {
 // without a client build; this constant is the local placeholder for that
 // decision, not the decision.
 const OUTLOOK_WEEK6_PERCENT_ENABLED = false;
-// Load-bearing: the granularity IS the honesty claim.
-const OUTLOOK_PERCENT_ROUNDING = 0.05;
+// Load-bearing: the granularity IS the honesty claim (5-point steps).
 function roundedPct(frac: number): string {
-  const p = Math.max(0, Math.min(1, frac ?? 0));
-  // Round in PERCENTAGE POINTS, not fractions: 0.75/0.05*0.05 is
-  // 0.7500000000000001 in float, which would print "75.00000000000001%".
-  const step = OUTLOOK_PERCENT_ROUNDING * 100;
-  return `${Math.round((p * 100) / step) * step}%`;
+  // Through the one playoff-odds rule (D-262) at 5-point steps: the same
+  // rounding (in percentage points, utils/playoffOdds), and with no clinch
+  // proof on the outlook.odds simulator 100% / 0% read ">95%" / "<5%".
+  return playoffOddsText(frac ?? 0, null, 5);
 }
 
 function record(wins: number, losses: number, ties: number): string {

@@ -22,6 +22,9 @@ export interface ProjectionTeam {
   maxpf_quantiles: Record<string, number>; nonplayoff_probability: number; pick_owner_roster_id: number;
   pick_probabilities: number[]; conditional_expected_pick: number | null; nonplayoff_samples: number;
   owner_expected_nonplayoff_picks: number; owner_probability_at_least_one: number; weeks: ProjectionWeek[];
+  /** D-262: proven from the rules, not the simulations. Absent (a run saved
+   *  before D-262) means not proven. Display through utils/playoffOdds. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 export interface ProjectionResult {
   league_name: string; completed_weeks: number; playoff_spots: number; playoff_byes: number; scoring: Record<string, number>;
@@ -39,6 +42,8 @@ export interface OutlookRecommendation {
   status: 'available' | 'unavailable'; reason: string | null; playoff_probability: number | null;
   recommended_outlook: ProjectionOutlook | null; current_outlook: string | null; differs: boolean;
   suggestion: string | null; explanation: string; captured_at: string | null;
+  /** D-262, on `available` only; absent means not proven. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 // ── Max PF moves (flag `league.max_pf_moves`; contract:
 // docs/plans/league-projections/max-pf-trade-away/contract.md §3). The app
@@ -54,6 +59,9 @@ export interface MaxPfBaseline {
   playoff_probability: number; playoff_band: ProjectionOutlook; pick_if_miss: number | null;
   top3_probability: number; label: string | null; label_slot: number | null;
   pick_value: number | null; pick_value_status: 'priced' | 'not_priced';
+  /** D-262: roster-independent, so they hold for every row's and combined
+   *  entry's playoff chance "after" too. Absent means not proven. */
+  playoff_clinched?: boolean; playoff_eliminated?: boolean;
 }
 export interface MaxPfReplacement {player_id: string | null; name: string | null; short_name: string | null; free_agent: boolean; weeks: number}
 export interface MaxPfMoveWeek {
@@ -71,6 +79,17 @@ export interface MaxPfMoveRow {
   pick_value: {now: number; after: number; change: number} | null;
   keep: boolean; passes_threshold: boolean;
 }
+/** v1.1 (D-261): the top 2 / top 3 rows removed together (contract §3.7).
+ *  No week detail and no Find trades hand-off. */
+export interface MaxPfCombined {
+  size: number; player_ids: string[]; names: string[]; short_names: string[];
+  maxpf_change: number; maxpf_change_exact: string; lineup_change: number; lineup_change_exact: string;
+  playoff_probability: NowAfter; pick_if_miss: {now: number | null; after: number | null};
+  top3_probability: NowAfter; label: {now: string | null; after: string | null};
+  label_slot: {now: number | null; after: number | null};
+  pick_value: {now: number; after: number; change: number} | null;
+  keep: boolean; passes_threshold: boolean;
+}
 export interface MaxPfMoves {
   version: number; state: MaxPfMovesState; reason: string | null;
   viewer_roster_id: number | null; captured_at: string | null;
@@ -78,6 +97,8 @@ export interface MaxPfMoves {
   saved_outlook: 'championship' | 'contender' | 'rebuilder' | 'jets' | 'not_sure' | null;
   pick_owner: PickOwner | null; baseline: MaxPfBaseline | null; roster_player_ids: string[];
   rows: MaxPfMoveRow[]; candidates_total: number;
+  /** v1.1, additive: absent on an older server, [] outside ready / no_moves. */
+  combined?: MaxPfCombined[];
 }
 export interface ProjectionRun {run_id: string; status: string; reason: string | null; result: ProjectionResult | null}
 export interface ProjectionView {

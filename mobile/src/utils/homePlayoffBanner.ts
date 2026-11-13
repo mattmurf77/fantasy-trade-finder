@@ -48,7 +48,11 @@ export function homePlayoffBanner(
   // The server's sentence explains the suggestion, or why there is none. It
   // is withheld when it would explain a suggestion this client is not showing.
   const explanation = rec?.explanation && (available || rec.status === 'unavailable') ? rec.explanation : null;
-  return { probability: hasEstimate ? probability : null, capturedAt: hasEstimate ? result!.captured_at : null,
+  // D-262: the rules-based proof travels with the probability; absent = not proven.
+  const proof = hasEstimate && team
+    ? { playoff_clinched: team.playoff_clinched === true, playoff_eliminated: team.playoff_eliminated === true }
+    : null;
+  return { probability: hasEstimate ? probability : null, proof, capturedAt: hasEstimate ? result!.captured_at : null,
     current, status, incomplete: hasEstimate && result!.coverage?.estimate_status === 'incomplete',
     recommendation, explanation };
 }

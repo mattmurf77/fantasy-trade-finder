@@ -48,7 +48,16 @@ check('honest budget, evidence and supported-state surfaces', () => {
 const ts = require('typescript');
 const utility = {exports: {}};
 const scoringWarning = 'Rare special-teams/fumble bonuses are not projected.';
-vm.runInNewContext(ts.transpileModule(read('mobile/src/utils/winNow.ts'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText, {exports: utility.exports, Date});
+const playoffOdds = {exports: {}};
+vm.runInNewContext(ts.transpileModule(read('mobile/src/utils/playoffOdds.ts'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText, {exports: playoffOdds.exports});
+vm.runInNewContext(ts.transpileModule(read('mobile/src/utils/winNow.ts'), {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020}}).outputText, {exports: utility.exports, Date,
+  require: name => { assert.equal(name, './playoffOdds'); return playoffOdds.exports; }});
+check('win-now playoff chance: no clinch proof here, so 100% / 0% read ">99.9%" / "<0.1%" (D-262)', () => {
+  assert.equal(utility.exports.playoffChance(1), '>99.9%');
+  assert.equal(utility.exports.playoffChance(0), '<0.1%');
+  assert.equal(utility.exports.playoffChance(0.4567), '45.7%');
+  assert.equal(utility.exports.playoffChance(null), '—');
+});
 check('mobile receipt shows only server-supplied scoring warning', () => {
   const receipt = utility.exports.sourceReceipt;
   assert.ok(receipt({scoring_warning: scoringWarning}).endsWith(`\n${scoringWarning}`));
@@ -103,6 +112,7 @@ const window = {FTF_FLAG: key => !!flags[key], FTFWinNowContext: {
   apiFetch: (url, options) => new Promise(resolve => requests.push({url, options, resolve})),
 }};
 const sandbox = {window, document: {getElementById: id => staticNodes[id] || all().find(n => n.id === id), createElement: tag => new Element(tag), addEventListener: () => {}}, AbortController, Date, setTimeout: (fn, ms) => { const id = ++timerId; timers.set(id, {fn, ms}); return id; }, clearTimeout: id => timers.delete(id)};
+vm.runInNewContext(read('web/js/playoff-odds.js'), {window});  // index.html loads it before win-now.js (D-262)
 vm.runInNewContext(web, sandbox);
 const flush = async () => { for (let n = 0; n < 8; n++) await Promise.resolve(); };
 const reply = async (request, data, ok = true) => { request.resolve({ok, status: ok ? 200 : 503, json: async () => data}); await flush(); };

@@ -5,7 +5,7 @@ import threading
 import time
 
 from ..feature_flags import is_enabled
-from . import provider, store, batch
+from . import provider, store, batch, clinch
 from .core import Unavailable, VERSION
 from .simulation import simulate
 
@@ -85,6 +85,9 @@ def _attach_moves(result, prior, snapshot, sidecar, started, job_cancelled, fore
                                     names=sidecar.get("names"), trade_deadline=sidecar.get("trade_deadline"),
                                     cancelled=cancelled)
         block["elapsed_ms"] = int((time.monotonic() - clock) * 1000)
+        if block.get("computed") and options.get("combined_sizes") and "combined" not in block:
+            # compute saved the rows and dropped only the combined step (D-261).
+            log.warning("max_pf_moves combined not computed: %s", "time_budget" if timed_out else "failed")
     except Exception:
         # No exception text: it can carry provider payloads (same rule as _run).
         log.warning("max_pf_moves not computed: %s", "time_budget" if timed_out else "failed")
@@ -153,6 +156,9 @@ def _run(fetch_json, foreground_busy=None):
             result = prior or simulate(snapshot, inputs["config"],
                                        cancelled=lambda: _checkpoint(cancelled, foreground_busy))
             result = {**result, "reused_compatible_result": bool(prior), "verified_at": snapshot["captured_at"]}
+            # Clinched / eliminated from the rules (D-262), on every run and on
+            # a reused prior result too. Never raises; changes no probability.
+            result = clinch.attach(result, snapshot)
             if moves:
                 result = _attach_moves(result, prior, snapshot, sidecar, started, cancelled, foreground_busy)
             elif "max_pf_moves" in result:

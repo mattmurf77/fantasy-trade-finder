@@ -4,15 +4,17 @@ import { useNavigation } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, Icon, Text } from './chalkline';
 import { ink, chalk, ice, space, type } from '../theme/chalkline';
-import type { MaxPfMoves, MaxPfMoveRow } from '../api/leagueProjections';
+import type { MaxPfMoves, MaxPfMoveRow, MaxPfCombined } from '../api/leagueProjections';
 import { setDraftOrderRule } from '../api/draftOrderRule';
 import { track } from '../api/events';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { readMaxPfPrompts, markRulesNoteShown, markDraftOrderAsked } from '../state/maxPfMovesPrompts';
 import { MAXPF_COPY as C } from '../utils/maxPfMovesCopy';
+import type { PlayoffProof } from '../utils/playoffOdds';
 import {
   rowLine1, rowLine1Parts, rowLine2, rowDetail, visibleRows, viewedProps, expandedProps, answeredProps,
   answerLabel, handOffToFinder, questionAutoShown, MAXPF_EVENTS, DRAFT_ORDER_ANSWERS, SCREEN,
+  combinedLine1, combinedLine1Parts, combinedLine2, combinedDetail, combinedExpandedProps,
   type SectionModel, type DraftOrderAnswer,
 } from '../utils/maxPfMoves';
 
@@ -43,6 +45,7 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
   const [revealed, setRevealed] = useState(false);       // Show anyway / Show moves
   const [showAll, setShowAll] = useState(false);
   const [openRank, setOpenRank] = useState<number | null>(null);
+  const [openSize, setOpenSize] = useState<number | null>(null);    // combined line (v1.1)
   const [prompts, setPrompts] = useState<{ rulesNote: boolean; asked: boolean } | null>(null);
   const [question, setQuestion] = useState<'first_ask' | 'change' | null>(null);
   const [posting, setPosting] = useState<DraftOrderAnswer | null>(null);
@@ -113,6 +116,12 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
     if (opening) track(MAXPF_EVENTS.expanded, expandedProps(row), SCREEN);
   };
 
+  const toggleCombined = (entry: MaxPfCombined) => {
+    const opening = openSize !== entry.size;
+    setOpenSize(opening ? entry.size : null);
+    if (opening) track(MAXPF_EVENTS.expanded, combinedExpandedProps(entry), SCREEN);
+  };
+
   const { rows, showAllButton } = visibleRows(model.listed, showAll);
 
   return <View style={styles.body} testID="standings.maxpf.body">
@@ -139,13 +148,16 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
       {showRulesNote ? <Text variant="bodySm" testID="standings.maxpf.rules">{C['C-RULES']}</Text> : null}
       {model.rosterLine ? <Text variant="bodySm" style={styles.strong} testID="standings.maxpf.roster-changed">{model.rosterLine}</Text> : null}
       {model.noMovesLine ? <Text variant="bodySm" testID="standings.maxpf.no-moves">{model.noMovesLine}</Text> : null}
+      {model.noneAloneLine ? <Text variant="bodySm" testID="standings.maxpf.none-alone">{model.noneAloneLine}</Text> : null}
       {model.head ? <Text variant="label" style={styles.head}>{model.head}</Text> : null}
-      {rows.map((row) => <MoveRow key={row.player_id} row={row} priced={model.priced}
+      {rows.map((row) => <MoveRow key={row.player_id} row={row} priced={model.priced} proof={block.baseline}
         open={openRank === row.rank} onToggle={() => toggleRow(row)} onFindTrades={() => onFindTrades(row)} />)}
       {showAllButton ? <Pressable accessibilityRole="button" testID="standings.maxpf.show-all"
         onPress={() => setShowAll(true)} style={styles.link}>
         <Text variant="bodySm" style={styles.linkText}>{C['C-SHOWALL']}</Text>
       </Pressable> : null}
+      {model.combined.map((entry) => <CombinedLine key={entry.size} entry={entry} priced={model.priced} proof={block.baseline}
+        open={openSize === entry.size} onToggle={() => toggleCombined(entry)} />)}
       {model.foot ? <Text variant="bodySm">{model.foot}</Text> : null}
     </> : null}
 
@@ -159,12 +171,12 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
   </View>;
 }
 
-function MoveRow({ row, priced, open, onToggle, onFindTrades }: {
-  row: MaxPfMoveRow; priced: boolean; open: boolean; onToggle: () => void; onFindTrades: () => void;
+function MoveRow({ row, priced, proof, open, onToggle, onFindTrades }: {
+  row: MaxPfMoveRow; priced: boolean; proof: PlayoffProof | null | undefined; open: boolean; onToggle: () => void; onFindTrades: () => void;
 }) {
   const p = rowLine1Parts(row);
   const line2 = rowLine2(row, priced);
-  const d = open ? rowDetail(row) : null;
+  const d = open ? rowDetail(row, proof) : null;
   return <View style={styles.row}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.row.${row.rank}`}
       accessibilityLabel={`${rowLine1(row)}${row.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}
@@ -189,6 +201,35 @@ function MoveRow({ row, priced, open, onToggle, onFindTrades }: {
       {d.button ? <Button label={d.button} variant="secondary" onPress={onFindTrades}
         testID={`standings.maxpf.find.${row.rank}`} /> : null}
       {d.keepNote ? <Text variant="bodySm" testID={`standings.maxpf.keep-note.${row.rank}`}>{d.keepNote}</Text> : null}
+    </View> : null}
+  </View>;
+}
+
+// v1.1 (D-261): "Top 2 together" in the row's construction. Opens to top-3
+// and playoff chance only: no week detail and no Find trades (contract §12).
+function CombinedLine({ entry, priced, proof, open, onToggle }: {
+  entry: MaxPfCombined; priced: boolean; proof: PlayoffProof | null | undefined; open: boolean; onToggle: () => void;
+}) {
+  const p = combinedLine1Parts(entry);
+  const line2 = combinedLine2(entry, priced);
+  const d = open ? combinedDetail(entry, proof) : null;
+  return <View style={styles.row}>
+    <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.combined.${entry.size}`}
+      accessibilityLabel={`${combinedLine1(entry)}${entry.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}
+      onPress={onToggle} style={styles.rowHead}>
+      <View style={styles.rowText}>
+        <View style={styles.line1}>
+          <Text variant="bodySm" style={[styles.strong, styles.name]} numberOfLines={2}>{p.label}</Text>
+          {entry.keep ? <Badge label={C['C-KEEP']} /> : null}
+          <Text scale="dense" style={styles.num}>{p.change}</Text>
+        </View>
+        <Text variant="bodySm">{line2}</Text>
+      </View>
+      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
+    </Pressable>
+    {d ? <View style={styles.rowDetail} testID={`standings.maxpf.combined-detail.${entry.size}`}>
+      <Text variant="bodySm">{d.top3}</Text>
+      <Text variant="bodySm">{d.playoff}</Text>
     </View> : null}
   </View>;
 }

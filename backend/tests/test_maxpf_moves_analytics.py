@@ -12,6 +12,7 @@ test_analytics_taxonomy_home_hub.py.
 - test_finder_target_pinned_keeps_its_shape_and_documents_the_new_source.
 - test_events_land_with_every_prop: POST /api/events accepts all four with
   their props intact.
+- test_build_191_shape_and_a_combined_line_land (v1.1, D-261).
 - test_flags_endpoint_serves_the_flag: GET /api/feature-flags (the app's
   flag source, mobile/src/api/flags.ts) carries `league.max_pf_moves`, false
   by default and true when turned on. Sabotage: drop the key from FLAG_KEYS.
@@ -32,7 +33,7 @@ import backend.server as server
 from backend.database import metadata, user_events_table
 
 _PROPS = {
-    "maxpf_moves_viewed": {"state": "ready", "n_moves": 3, "band": "jets"},
+    "maxpf_moves_viewed": {"state": "ready", "n_moves": 3, "band": "jets", "n_listed": 8, "any_pass": True},
     "maxpf_move_expanded": {"position": "RB", "rank": 1},
     "draft_order_rule_answered": {"answer": "reverse_standings", "source": "first_ask"},
     "finder_target_pinned": {"side": "give", "source": "maxpf_moves"},
@@ -97,6 +98,26 @@ def test_events_land_with_every_prop(harness):
     for name, props in _PROPS.items():
         landed = {k: v for k, v in json.loads(by_type[name]["props"]).items() if k not in {"seq", "ts_suspect"}}
         assert landed == props, name
+
+
+def test_build_191_shape_and_a_combined_line_land(harness):
+    """v1.1 (D-261): the registration is a superset, so a build-191 viewed event
+    (no n_listed / any_pass) lands as sent, and a combined line's expand event
+    carries rank 'combined_2'."""
+    client, engine = harness
+    sent = {"maxpf_moves_viewed": {"state": "no_moves", "n_moves": 0, "band": "contender"},
+            "maxpf_move_expanded": {"position": "combined", "rank": "combined_2"}}
+    events = [{"event_id": f"evtmq-{i:04d}", "event_type": name, "client_ts": "2026-11-13T12:00:00Z",
+               "screen": "Standings", "props": props, "session_id": "sess-mq-0001", "seq": i + 1}
+              for i, (name, props) in enumerate(sent.items())]
+    body = client.post("/api/events", headers={"Content-Type": "application/json", "X-Device-Id": DEVICE},
+                       data=json.dumps({"events": events})).get_json()
+    assert body["accepted"] == 2 and body["dropped"] == 0
+    with engine.begin() as conn:
+        rows = conn.execute(select(user_events_table).order_by(user_events_table.c.id)).fetchall()
+    for r in rows:
+        landed = {k: v for k, v in json.loads(r._mapping["props"]).items() if k not in {"seq", "ts_suspect"}}
+        assert landed == sent[r._mapping["event_type"]]
 
 
 def test_flags_endpoint_serves_the_flag():

@@ -21,6 +21,7 @@ import {
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
 import { OUTLOOK_DISPLAY_NAME } from '../components/OutlookBiasReceipt';
+import { playoffOddsText, type PlayoffProof } from '../utils/playoffOdds';
 import { clearTeamReviewSave, noteTeamReviewSave } from '../state/teamReviewSaveBus';
 import {
   getTeamReview, type BeatId, type OutlookOption, type TeamReviewResponse,
@@ -106,11 +107,11 @@ function outlookRuleLines(
  *  the way Home's playoff tile words it (one decimal; "last saved" when the
  *  forecast is not current). */
 function playoffChanceLine(
-  chance: { playoff_probability: number; captured_at: string; current: boolean },
+  chance: { playoff_probability: number; captured_at: string; current: boolean } & PlayoffProof,
   savedOn: string,
 ): { percent: string; note: string } {
   return {
-    percent: `${(chance.playoff_probability * 100).toFixed(1)}%`,
+    percent: playoffOddsText(chance.playoff_probability, chance, 0.1),
     note: chance.current ? `From the forecast saved ${savedOn}.` : `Last saved ${savedOn}.`,
   };
 }
@@ -577,7 +578,7 @@ function Window({
           <View testID="team-review.window.projection">
             <ChalkText style={styles.read}>
               {typeof pr.playoff_probability === 'number'
-                ? `${(pr.playoff_probability * 100).toFixed(1)}% playoff chance · ` : ''}
+                ? `${playoffOddsText(pr.playoff_probability, pr, 0.1)} playoff chance · ` : ''}
               {`Consider ${OUTLOOK_LABEL[recommended]}`}
             </ChalkText>
             {pr.suggestion ? (
@@ -740,7 +741,7 @@ function Window({
           {po.provenance === 'observed' ? (
             <ChalkText
               style={styles.fine}
-              accessibilityLabel={po.playoff_pct === null ? undefined : `Playoff odds ${pct(po.playoff_pct)}, against an even ${pct(po.center)}`}
+              accessibilityLabel={po.playoff_pct === null ? undefined : `Playoff odds ${playoffOddsText(po.playoff_pct, null, 1)}, against an even ${pct(po.center)}`}
             >
               {'Against an even shot, that counts '}
               {po.index > 0 ? 'toward your window'

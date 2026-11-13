@@ -57,6 +57,9 @@ export interface TeamReviewStanding {
     playoff_probability: number;
     captured_at: string;
     current: boolean;
+    /** D-262; absent means not proven. */
+    playoff_clinched?: boolean;
+    playoff_eliminated?: boolean;
   };
 }
 

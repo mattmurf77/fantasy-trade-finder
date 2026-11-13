@@ -1,5 +1,8 @@
 # Feature Scope — Max PF moves (v1)
 
+> **v1.1 (2026-11-13, D-261):** every row listed, combined top-2 / top-3 lines, the "none of these
+> changes your pick on its own" sentence. Addendum: [scope-v1-1.md](scope-v1-1.md).
+
 **Date:** 2026-11-12
 **Entry point:** direct ask. Operator, 2026-11-12: "Build v1 of the max pf trade feature",
 accepting [exploration.md](exploration.md) §14's eleven recommendations as written.

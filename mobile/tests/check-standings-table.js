@@ -45,23 +45,27 @@ const assert = (cond, name, why) => {
 };
 const read = (rel) => fs.readFileSync(path.join(MOBILE, rel), 'utf8');
 const exists = (rel) => fs.existsSync(path.join(MOBILE, rel));
-const load = (rel) => {
+const load = (rel, deps = {}) => {
   const src = read(rel);
   const js = ts.transpileModule(src, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
   }).outputText;
   const m = { exports: {} };
-  new Function('module', 'exports', 'require', js)(m, m.exports, () => {
-    throw new Error(`${rel} must not require anything at runtime`);
+  new Function('module', 'exports', 'require', js)(m, m.exports, (name) => {
+    if (name in deps) return deps[name];
+    throw new Error(`${rel} must not require ${name} at runtime`);
   });
   return { src, mod: m.exports };
 };
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ═══ A. The pure table ══════════════════════════════════════════════════
-const { src: utilSrc, mod: u } = load('src/utils/standingsTable.ts');
+// Its one runtime import is the zero-import playoff-odds rule (D-262).
+const { mod: odds } = load('src/utils/playoffOdds.ts');
+const { src: utilSrc, mod: u } = load('src/utils/standingsTable.ts', { './playoffOdds': odds });
 const { mod: s } = load('src/utils/standings.ts');
-assert(!/^\s*import\s+(?!type\b)/m.test(utilSrc), 'A0. standingsTable.ts has zero runtime imports');
+assert(!/^\s*import\s+(?!type\b)(?![^;]*from '\.\/playoffOdds')/m.test(utilSrc),
+  'A0. standingsTable.ts imports only types and the zero-import playoff-odds rule');
 
 // A1 — standings.ts reads Sleeper's Max PF (ppts) and nothing else for it.
 assert(s.maxPointsFor({ ppts: 1721, ppts_decimal: 44 }) === 1721.44, 'A1a. Max PF = ppts + ppts_decimal / 100');
@@ -154,11 +158,29 @@ assert(u.COLUMN_LABEL.projMaxPf === 'Proj.\nMax PF' && u.COLUMN_LABEL.projWl ===
     u.COLUMN_LABEL.playoffs === 'Playoffs', 'A4e. headings; Proj. Max PF breaks after "Proj."');
 
 // A5 — number formats.
-const ODDS = [[0, '<1%'], [0.001, '<1%'], [0.00499, '<1%'], [0.005, '1%'], [0.0149, '1%'], [0.4, '40%'],
-  [0.958, '96%'], [0.995, '99%'], [0.99949, '99%'], [0.9995, '100%'], [1, '100%']];
-const badOdds = ODDS.filter(([p, want]) => u.oddsText(p) !== want);
-assert(badOdds.length === 0, 'A5a. playoff odds: whole percent, under 0.5% "<1%", 99.95% and up "100%", else 1–99',
-  badOdds.map(([p, w]) => `${p} → ${u.oddsText(p)} (want ${w})`).join('; '));
+// D-262: 100% only with a proven clinch, 0% only with a proven elimination.
+const CL = { playoff_clinched: true }, EL = { playoff_eliminated: true };
+const ODDS = [[0, null, '<1%'], [0.001, null, '<1%'], [0.00499, null, '<1%'], [0.005, null, '1%'], [0.0149, null, '1%'],
+  [0.4, null, '40%'], [0.958, null, '96%'], [0.9949, null, '99%'], [0.995, null, '>99%'], [0.9995, null, '>99%'],
+  [1, null, '>99%'], [1, {}, '>99%'], [1, CL, '100%'], [0, EL, '0%'], [0.004, EL, '0%'], [0.4, CL, '40%']];
+const badOdds = ODDS.filter(([p, proof, want]) => u.oddsText(p, proof) !== want);
+assert(badOdds.length === 0, 'A5a. playoff odds: whole percent; "100%" / "0%" only when proven, else ">99%" / "<1%"',
+  badOdds.map(([p, pr, w]) => `${p} ${JSON.stringify(pr)} → ${u.oddsText(p, pr)} (want ${w})`).join('; '));
+{
+  // Sort: equal probability, the proven clinch ranks above the unproven ">99%",
+  // the proven elimination below the unproven "<1%".
+  const mk = (rid, place, p, proof) => ({ rosterId: rid, name: `T${rid}`, isYou: false, place, wins: 0, losses: 0, ties: 0,
+    winPct: 0, pointsFor: 0, maxPf: null, forecast: { roster_id: rid, modal_record: [0, 0, 0], expected_record: [0, 0, 0],
+      playoff_probability: p, bye_probability: 0, maxpf_mean: 0, current_maxpf: 0, ...proof } });
+  const rs = [mk(1, 1, 1, {}), mk(2, 2, 1, CL), mk(3, 3, 0, EL), mk(4, 4, 0, {})];
+  const ord = (dir) => u.sortRows(rs, { column: 'playoffs', dir }).map((r) => r.rosterId).join(',');
+  assert(ord('desc') === '2,1,4,3' && ord('asc') === '3,4,1,2',
+    'A5f. playoffs sort: proven 100% above unproven >99%; proven 0% below unproven <1%', `${ord('desc')} / ${ord('asc')}`);
+  assert(u.cellText(rs[0], 'playoffs') === '>99%' && u.cellText(rs[1], 'playoffs') === '100%'
+      && u.cellText(rs[2], 'playoffs') === '0%' && u.cellText(rs[3], 'playoffs') === '<1%'
+      && u.openTeamLines('points', rs[0], 0).leftOut.endsWith('Playoff odds >99%'),
+    'A5g. the cell and the open team line pass the team\'s proof');
+}
 const PTS = [[1498.2, '1,498'], [999.6, '1,000'], [12345.4, '12,345'], [0, '0'], [87.5, '88']];
 assert(PTS.every(([n, w]) => u.pointsText(n) === w), 'A5b. points: whole, thousands commas, no toLocaleString',
   PTS.map(([n]) => u.pointsText(n)).join(' '));

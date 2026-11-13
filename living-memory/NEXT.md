@@ -84,6 +84,8 @@ Built dark on `feat/max-pf-moves` (backend) and `feat/max-pf-moves-app` (app). N
 4. **If `calc.inline_home` is ever turned off:** the hand-off's prefill is ignored; add the ~8-line TradesScreen effect that calls `resetDeckForNewTargets()` when store pins change from outside (app-evidence.md §3). Not built.
 5. **Website version** of the section (the old non-playoff picks tab is web-only today). *Why:* W2 left it out of v1.
 6. **Reconcile `leagues.draft_order_rule`** (member-written) with the ESPN/MFL forecast design's operator-set rule when that design is built.
+7. **v1.1 (D-261), built on `feat/max-pf-moves-show-all`, not merged:** every row listed, the "None of these changes your projected pick on its own." sentence, "Top 2 / Top 3 together" lines. After merge and a new TestFlight build: one `retry_missing_moves` call (every block's settings hash moved), then `app-evidence.md` §8.2 items 8–12. This also answers item 1's "the shown drop is too small" question only partly: combined lines show what two or three players together do.
+8. **Hand-off for a combined line.** "Find trades for A and B" (two or three give pins). *Why:* v1.1 combined lines have no hand-off (contract §12).
 
 ## 2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD
 
