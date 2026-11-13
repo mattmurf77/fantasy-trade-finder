@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-262 — A playoff chance prints 100% / 0% only when clinched / eliminated is proven
+
+**Date:** 2026-11-13 · **Who:** the operator ("There should only be 100% probability if there's absolutely 0 possibility they miss the playoffs. Neither team has technically clinched a spot." Asked to stop showing 100% / 0% until clinched or eliminated: "Yes, fix display"); built by a builder subagent on `feat/playoff-odds-clinch-display`, stacked on D-261.
+**Context:** two 8-1 teams with five weeks left made the playoffs in all 250,000 simulated seasons and every surface printed "100%". The probability is right to four decimals; the label claimed a certainty.
+**Decision:**
+- The server proves it from the rules (`league_projections/clinch.py`): standing points 2W+T as the simulation ranks; clinched = losing out, fewer than `playoff_spots` rivals can finish level or above (level counts against: the tiebreak is future points); eliminated = winning out, at least `playoff_spots` rivals finish strictly above in every outcome. Exact per rival set by a max-flow over the remaining games (2 points a game, so in-game ties are exact); validated against brute force. Median leagues, divisions, partial schedules, unreconciled records and > 20,000 rival sets return "not proven". Never raises.
+- Computed in the weekly job on every run, a reused prior result included, and saved per team (`playoff_clinched`, `playoff_eliminated`) with `playoff_proof`. Chosen over read time: one call site, every reader already reads the saved teams. Absent keys = not proven.
+- One display rule, one helper per client (`utils/playoffOdds.ts`, `web/js/playoff-odds.js`, `clinch.odds_text`): what would print 100% prints ">99.9%" / ">99%" / ">95%" unless clinched; 0% prints "<0.1%" / "<1%" / "<5%" unless eliminated; nothing else changes. Sort: equal probability, proven 100% above unproven, proven 0% below.
+- No probability, simulation number, `score_sd`, `VERSION`, threshold or price changes.
+**Consequences:**
+- Until the next weekly run, saved results have no proof: a clinched team reads ">99.9%" too. Old app builds keep printing "100%" (accepted).
+- Surfaces with no proof of their own (Win Now, the `outlook.odds` percent chip, off) always take the unproven form.
+
 ## D-261 — Max PF moves lists every row and adds "top 2 / top 3 together" lines
 
 **Date:** 2026-11-13 · **Who:** the operator ("My recommendation is to always show the top moves with their numbers, add a line for the top two or three combined, and keep the 'none of these changes your pick on its own' sentence when that is true. Yes. I'm aligned"); built by a builder subagent on `feat/max-pf-moves-show-all`.

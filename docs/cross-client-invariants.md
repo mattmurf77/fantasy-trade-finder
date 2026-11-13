@@ -1564,6 +1564,21 @@ Both clients disclose modeled scoring omissions and preserve the requested Max P
 
 Shared between the server and the app ([contract](plans/league-projections/max-pf-trade-away/contract.md)): the `max_pf_moves.state` enum (`ready`, `no_moves`, `unavailable`, `no_miss`, `draft_order_not_maxpf`, `after_trade_deadline`, `season_over`; an unknown state renders nothing), the `reason` set (open: an unknown reason takes the generic line), the draft-order values (`maxpf_lowest_first`, `reverse_standings`, `lottery_or_other`, request-only `not_sure`), and the formatting rules of contract §11 (whole-point changes with `−`/`+` and plain `0`, one-decimal pick if you miss, whole percents with `<1%` / `>99%`). The section opens by default when the unrounded playoff chance is ≤ 0.45 (`recommendation.REBUILDING_MAX`) or the saved outlook is `rebuilder` or `jets`. The playoff band is server-classified and never re-derived. Labels are served, never composed. Every list says it is the **largest possible change** (it assumes nothing that would start comes back), and the copy never says "tank". **Listing rule (v1.1, 2026-11-13, D-261):** the app lists every saved row in `ready` and `no_moves`, largest max PF drop first (5, then Show all up to 8), passing or not, with no per-row pass marker; when no listed row and no listed combined entry passes it shows "None of these changes your projected pick on its own." above the list; "No single player moves your projected pick by a visible amount." is only for a block with zero rows. Combined lines ("Top 2 together: A and B", "Top 3 together: A, B and C") follow the row formatting rules, drop when any member left the roster, and never offer Find trades. The server keeps `version: 1` and decides `state` from rows alone, so builds ≤ 191 (passing rows in `ready` only) are unaffected.
 
+### Playoff odds: 100% and 0% need a proof (2026-11-13, D-262)
+
+Operator 2026-11-13: a playoff chance prints as 100% only when the team has mathematically clinched, and 0% only when it is mathematically eliminated. The server proves both from the rules and saves them on every forecast team (`playoff_clinched`, `playoff_eliminated`; absent = not proven). The rule, identical in `mobile/src/utils/playoffOdds.ts`, `web/js/playoff-odds.js` and `backend/league_projections/clinch.py` (`odds_text`):
+
+| The surface would print | Proof | Prints instead |
+|---|---|---|
+| 100.0% (one decimal) | not clinched | `>99.9%` |
+| 100% (whole percents) | not clinched | `>99%` |
+| 100% (5-point steps, outlook chip) | none exists | `>95%` |
+| 0.0% (one decimal) | not eliminated | `<0.1%` |
+| 0% (whole percents) | not eliminated | `<1%` |
+| 0% (5-point steps) | none exists | `<5%` |
+
+"Would print" means the surface's own rounding (one decimal: `toFixed(1)`; whole: round half up; 5-point: `round(p·100/5)·5`), so every other value prints exactly as before. A proven clinch prints the surface's own 100 (`100.0%` / `100%`). A miss-the-playoffs chance mirrors it: 0% needs a clinch, 100% an elimination. Surfaces without a proof (Win Now, the `outlook.odds` chip) always take the unproven form. Sort: by probability, then at an equal probability a proven clinch above an unproven `>99.9%` and a proven elimination below an unproven `<0.1%`. The Max PF moves baseline carries the viewer's proof, which also governs every row's and combined entry's "after" (the proof is roster-independent). Bye, pick, top-3 and title odds are not covered.
+
 ### Best-available weekly projections (engine v4)
 
 Both clients distinguish known scoring subtotals, unpriced player data, historical team fallback and authoritative completed lineup totals. Missing negative coefficients mean a subtotal is not necessarily a lower bound. An observed official total has no historical blend or score simulation even if individual points are missing. Known Max PF conditioning shows original target, achieved feasible bound and adjusted target; no unchanged-60/40 claim on a corrected branch. Stored weekly results and same-context last-success retention remain shared.

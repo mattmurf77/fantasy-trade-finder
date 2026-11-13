@@ -269,6 +269,8 @@ exploration §6.
       "weeks_excluded_played": 0,
       "playoff_probability": 0.0271,
       "playoff_band": "jets",
+      "playoff_clinched": false,
+      "playoff_eliminated": false,
       "pick_if_miss": 3.6912,
       "top3_probability": 0.4583,
       "label": "1.02",
@@ -457,7 +459,8 @@ With no saved run at all (`reason: "no_forecast"`): `viewer_roster_id`, `capture
   "draft_order": {"rule": null, "set_at": null}, "saved_outlook": "championship",
   "pick_owner": {"owns_own_pick": false, "owner_roster_id": 9, "owner_name": "Saltmarsh Owls"},
   "baseline": {"weeks_remaining": 5, "first_week": 10, "last_week": 14, "weeks_excluded_played": 0,
-    "playoff_probability": 0.9997, "playoff_band": "championship", "pick_if_miss": null,
+    "playoff_probability": 0.9997, "playoff_band": "championship",
+    "playoff_clinched": false, "playoff_eliminated": false, "pick_if_miss": null,
     "top3_probability": 0.0, "label": "1.12", "label_slot": 12, "pick_value": 1214.0, "pick_value_status": "priced"},
   "roster_player_ids": ["2210", "3391"], "candidates_total": 0, "rows": []}}
 ```

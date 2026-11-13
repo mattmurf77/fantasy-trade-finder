@@ -75,6 +75,10 @@ The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-cong
 
 **Universal score SD** — The single standard deviation (`config/league_projections.json` → `model.score_sd`, 25.0 fantasy points per team-week) applied to every team's unplayed weekly score in the saved projection. Provisional, not calibrated; see `docs/plans/league-projections/universal-sd/`.
 
+**Clinched (playoff spot)** — Proven from the rules, not the simulations (D-262, `backend/league_projections/clinch.py`): even if the team loses every remaining regular-season game, fewer than the league's playoff spots' worth of other teams can finish level with or above it in standing points (2 × wins + ties). A level finish counts against the team, since the tiebreak is future points. Saved per team as `playoff_clinched`; only a clinched team's playoff chance may print as 100%.
+
+**Eliminated (from the playoffs)** — The mirror (D-262): even winning every remaining game, at least the league's playoff spots' worth of other teams finish strictly above the team in every outcome. Saved as `playoff_eliminated`; only an eliminated team's playoff chance may print as 0%. Both are "not proven" (false) for leagues whose rules the proof does not model (league median, divisions, partial schedule).
+
 **Outlook suggestion** — The outlook the saved playoff chance points to (Tanking, Rebuilding, Contender, All-in), offered as "Consider …" with a Review outlook action when it differs from the saved outlook. It never changes the saved outlook by itself. Flag `league.projection_outlook`; bands in `docs/cross-client-invariants.md` § Playoff chance → suggested outlook.
 
 **Incomplete forecast** — A saved projection in which a starter who has already played has no recorded score (`coverage.estimate_status: "incomplete"`). The odds are shown with that label and no outlook suggestion is made. Since model v6 an empty starting slot is never what makes a forecast incomplete: it takes a **free-agent fill**, or scores zero.

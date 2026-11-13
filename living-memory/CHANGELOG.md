@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-13 — Playoff odds: 100% / 0% only when clinched / eliminated (D-262)
+
+- The weekly job saves a rules-based proof per team (`playoff_clinched`, `playoff_eliminated`, `playoff_proof`; `league_projections/clinch.py`, exact max-flow, brute-force checked; median/division/partial schedules "not proven").
+- One display rule on app, web and the server's outlook sentence: ">99.9%" / "<0.1%" (">99%" / "<1%" whole) unless proven. No probability changes. Stacked on D-261, not merged. Scope: `docs/plans/league-projections/clinch-display/scope.md`.
+
 ## 2026-11-13 — Max PF moves v1.1: every row listed, top-2 / top-3 lines (D-261)
 
 - App lists every saved row (passing or not) in `ready` and `no_moves`; "None of these changes your projected pick on its own." when nothing passes. Combined "Top 2 / Top 3 together" lines, no hand-off.
