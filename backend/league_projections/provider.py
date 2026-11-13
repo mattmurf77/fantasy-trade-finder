@@ -212,7 +212,18 @@ def _games(rows, ids):
     return sorted(sorted(pair) for pair in pairs.values())
 
 
-def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_at=None, clock=None, viewer_user_id=None):
+# Max PF moves: free agents kept per slot type beyond the week's open slots.
+SIDECAR_EXTRA_SLOTS = 1
+
+
+def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_at=None, clock=None, viewer_user_id=None,
+            sidecar=None):
+    """`sidecar` (Max PF moves, flag `league.max_pf_moves`): when a dict is
+    passed, capture also writes into it the free agents a one-player-removed
+    lineup could need, the league's trade deadline and player names. Nothing
+    it writes enters the snapshot, so the snapshot, its input hash and every
+    simulated number are the same with or without it. None (the default and
+    the flag-off path) collects nothing."""
     if not str(league_id).isdigit() or len(str(league_id)) > 30:
         raise ValueError("invalid_league_id")
     captured_at = captured_at or (clock or now)()
@@ -375,6 +386,7 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
         fa_recorded = set()
         week_projected = bool(free_agents)
         absent_teams = []
+        week_gaps = 0
         for team in teams:
             pool, bye, excluded, max_pool, unpriced = [], [], [], [], []
             partial_players = []
@@ -525,6 +537,8 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             # Max PF: a played player with no recorded score could fill these
             # slots for an unknown amount, so they are neither filled nor zero.
             maximum = optimize(slots, max_pool, empty_policy=cfg["empty_slots"], hindsight=True)
+            if sidecar is not None:
+                week_gaps = max(week_gaps, len(real["gaps"]), len(maximum["gaps"]))
             unscored = {i for i in maximum["gaps"] if any(p["maxpf_eligible"] and p["reason"] == "missing_completed_actual"
                         and SLOTS[slots[i]].intersection(p["positions"]) for p in unpriced)}
             if best:
@@ -611,6 +625,16 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
                                                     "idp_replacement_unavailable": replacement_unavailable,
                                                     "free_agent_fills": fa_actual, "zero_filled_slots": zero_actual,
                                                     "maxpf_free_agent_fills": fa_maxpf, "maxpf_zero_filled_slots": zero_maxpf}}
+        if sidecar is not None and best:
+            # Removing one player shrinks a maximum assignment by at most one
+            # slot, so the best (open slots + 1) eligible free agents per slot
+            # type contain every free agent core.free_agent_fill could pick.
+            keep_count, kept = week_gaps + SIDECAR_EXTRA_SLOTS, {}
+            ranked = sorted(free_agents, key=lambda p: (-decimal(p["points"]), str(p["player_id"])))
+            for slot in sorted(set(slots)):
+                for p in [p for p in ranked if SLOTS[slot].intersection(p["positions"])][:keep_count]:
+                    kept.setdefault(p["player_id"], {k: p[k] for k in ("player_id", "name", "positions", "points")})
+            sidecar.setdefault("free_agents", {})[str(w)] = sorted(kept.values(), key=lambda p: (-decimal(p["points"]), p["player_id"]))
         if absent_teams and not week_projected:
             # The feed has no usable projection for anyone this week (empty or
             # unpublished): free-agent fill needs a real feed, so the run stops
@@ -632,6 +656,12 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
     if any(not entry["input"].get("bye") and entry["input"].get("phase") != "completed" and entry["input"].get("kickoff_at") is not None and timestamp(entry["input"].get("kickoff_at")) <= timestamp(finished)
            for entry in normalized_inputs):
         raise Unavailable("game_started_during_capture", state="incomplete_projections")
+    if sidecar is not None:
+        deadline = settings.get("trade_deadline")
+        sidecar["trade_deadline"] = deadline if type(deadline) is int and 0 < deadline < 99 else None
+        sidecar["names"] = {pid: (metadata.get(pid) or {}).get("full_name") or pid
+                            for t in teams for key in ("players", "taxi", "reserve") for pid in t["roster"][key]}
+        sidecar.setdefault("free_agents", {})
     provenance_counts = defaultdict(Counter)
     for entry in normalized_inputs:
         for key, value in entry["input"].get("stat_provenance", {}).items():
