@@ -24,6 +24,14 @@
     "tanking_max": 0.15,
     "contender_max": 0.75
   },
+  "max_pf_moves": {
+    "simulations_per_candidate": 5000,
+    "candidates": 8,
+    "min_drop_points": 5,
+    "min_pick_change": 0.1,
+    "min_top3_change": 0.02,
+    "time_budget_seconds": 60
+  },
   "schedule": {
     "weekday": 1,
     "hour": 9,

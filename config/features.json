@@ -3,6 +3,8 @@
   "league.projections_provider_approved": false,
   "_comment_league_projection_outlook": "2026-11-11 operator spec (projected playoff teams update). Suggests, never sets, a team outlook from the saved playoff projection: 0-15% Tanking, over 15-45% Rebuilding, over 45-75% Contender, over 75% All-in, classified on the unrounded probability. Shown only when the saved forecast is current, complete and from the current model, and only when it differs from the saved outlook. Rides league.projections: with that off there is no forecast to read. OFF = no outlook_recommendation block, no Home prompt, Team Review window unchanged.",
   "league.projection_outlook": true,
+  "_comment_league_max_pf_moves": "2026-11-12 operator ask (v1, D-258). The user's own Standings card lists the players whose trade would lower max PF the most, with the projected pick before and after. Computed in the weekly forecast job (exact lineup re-solve + a 5,000-run paired re-simulation per candidate), saved with the run, served as max_pf_moves on GET /api/leagues/<id>/projection-runs/latest. Rides league.projections. Stays OFF until the leave-one-out backtest is written up. OFF = no block on any read, no extra job work, POST /api/leagues/<id>/draft-order-rule answers 404.",
+  "league.max_pf_moves": false,
   "trade.prepared_inventory": true,
   "_comment_prepared_inventory": "Persistent silent preparation capability. Actual preparation/adoption ships dark behind audited model_config prepared_trade_inventory_enabled=0. No model/offer limits change. See docs/plans/prepared-trade-inventory/plan.md.",
   "trade.first_page_store": true,
