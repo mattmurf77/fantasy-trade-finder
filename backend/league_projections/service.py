@@ -85,6 +85,9 @@ def _attach_moves(result, prior, snapshot, sidecar, started, job_cancelled, fore
                                     names=sidecar.get("names"), trade_deadline=sidecar.get("trade_deadline"),
                                     cancelled=cancelled)
         block["elapsed_ms"] = int((time.monotonic() - clock) * 1000)
+        if block.get("computed") and options.get("combined_sizes") and "combined" not in block:
+            # compute saved the rows and dropped only the combined step (D-261).
+            log.warning("max_pf_moves combined not computed: %s", "time_budget" if timed_out else "failed")
     except Exception:
         # No exception text: it can carry provider payloads (same rule as _run).
         log.warning("max_pf_moves not computed: %s", "time_budget" if timed_out else "failed")

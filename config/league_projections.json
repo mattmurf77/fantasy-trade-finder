@@ -30,7 +30,8 @@
     "min_drop_points": 5,
     "min_pick_change": 0.1,
     "min_top3_change": 0.02,
-    "time_budget_seconds": 60
+    "time_budget_seconds": 60,
+    "combined_sizes": [2, 3]
   },
   "schedule": {
     "weekday": 1,

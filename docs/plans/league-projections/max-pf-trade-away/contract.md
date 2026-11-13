@@ -1,4 +1,14 @@
-# Max PF moves: the build contract (v1)
+# Max PF moves: the build contract (v1, with the v1.1 additions)
+
+> **v1.1 change note (2026-11-13, D-261).** Operator decision: always show the top moves with
+> their numbers, add a line for the top two and three combined, and keep a "none of these
+> changes your pick on its own" sentence when that is true. Everything below is additive;
+> `version` stays 1 and every v1 key and the §4.1 state rules are unchanged, so installed builds
+> (191) keep working (§6.5, §8). Changed sections: §3.1 (`combined`), §3.7 (new), §4.1 (note),
+> §5.1 (example gains `combined`), §6.3, §6.5, §9, §10 (C-NONE-ALONE, C-COMB-1, C-COMB-2), §12
+> (combined entries have no hand-off), §13.1 (saved `combined`, `combined_sizes`, hash re-run).
+> Scope addendum: [scope-v1-1.md](scope-v1-1.md). The v1 §5.1 example is kept as a golden in
+> `backend/tests/fixtures/maxpf_moves/v1-example.json`.
 
 > The one contract the backend builder and the app builder both code against. Written
 > 2026-11-12 against `origin/main` `4a8cd70d` (D-257 merged). Design and reasons:
@@ -79,8 +89,9 @@ is read.
 | `pick_owner` | `PickOwner` (§3.3) | yes | S | Who holds the user's own next-year 1st. Null when there is no usable run |
 | `baseline` | `Baseline` (§3.4) | yes | S+R | The "today" line. Null unless `state` is `ready`, `no_moves`, or `no_miss` |
 | `roster_player_ids` | `string[]` | no | S | The user's Sleeper roster (`players`, which on Sleeper includes taxi and reserve) as captured. Sorted. Empty when there is no usable run. Used only for the roster-changed check (§6) |
-| `rows` | `MoveRow[]` (§3.5) | no | S+R | The re-simulated candidates, at most `candidates` (8), ordered by `rank`. Empty unless `state` is `ready` or `no_moves`. Includes rows that fail the threshold (`passes_threshold: false`); the app lists only passing rows |
+| `rows` | `MoveRow[]` (§3.5) | no | S+R | The re-simulated candidates, at most `candidates` (8), ordered by `rank`. Empty unless `state` is `ready` or `no_moves`. Includes rows that fail the threshold (`passes_threshold: false`); v1 apps list only passing rows, v1.1 apps list every row (§6.5) |
 | `candidates_total` | `number` | no | S | How many roster players had a non-zero max PF change (before the top-8 cut). 0 when not computed |
+| `combined` | `MaxPfCombined[]` (§3.7) | no | S+R | **v1.1.** The top 2 and top 3 rows removed together, smallest first. `[]` outside `ready`/`no_moves`, for a block saved before v1.1, when the combined step failed or timed out (§13.5), or when there are fewer rows than the size. Absent entirely on a pre-v1.1 server |
 
 ### 3.2 `DraftOrder`
 
@@ -172,6 +183,24 @@ is read.
 
 Computed at save time on the unrounded values (exploration §4.3).
 
+### 3.7 `MaxPfCombined` (v1.1)
+
+The top `size` rows (rank 1..`size`) removed **together**: one exact weekly re-solve with all of
+them off the roster in both lanes (not the sum of the single drops: the replacements interact,
+e.g. two backs who both needed the same bench back), then one paired 5,000-run re-run like a
+row's (§13.3, same "before" run). No week detail, no replacements, no Find trades (§12).
+
+| Field | Type | Null? | S/R | Meaning |
+|---|---|---|---|---|
+| `size` | `2 \| 3` | no | S | How many rows are removed together |
+| `player_ids` / `names` / `short_names` | `string[]` | no | S | The members in rank order (equal to rows 1..`size`) |
+| `maxpf_change` / `maxpf_change_exact` | `number` / `string` | no | S | As on a row, for the combined removal. Never smaller in magnitude than the largest member's drop |
+| `lineup_change` / `lineup_change_exact` | `number` / `string` | no | S | As on a row |
+| `playoff_probability`, `pick_if_miss`, `top3_probability`, `label`, `label_slot` | as on a row | | S | As on a row |
+| `pick_value` | as on a row | yes | R | As on a row, priced from the entry's saved after-distribution |
+| `keep` | `boolean` | no | R | Any member is a Keep player |
+| `passes_threshold` | `boolean` | no | S | §3.6 on the combined numbers. Never changes `state` |
+
 ## 4. States
 
 ### 4.1 Server states (`state`)
@@ -190,6 +219,10 @@ The server checks these in order; the first that applies wins.
 
 The pick-owner case is not a state: it applies on top of `ready` and `no_moves` through
 `pick_owner.owns_own_pick` (§6).
+
+**v1.1 note.** These rules are unchanged: `state` is decided by the rows alone (a passing
+combined entry with no passing row is still `no_moves`). `no_moves` has always served every
+re-run row; v1.1 apps list them (§6.5), build 191 shows only C-NO-MOVES for it.
 
 ### 4.2 `reason` values (only with `unavailable`)
 
@@ -350,6 +383,44 @@ exploration §6.
         "keep": false,
         "passes_threshold": false
       }
+    ],
+    "combined": [
+      {
+        "size": 2,
+        "player_ids": ["8150", "6130"],
+        "names": ["Rhett Sato", "Dale Okafor"],
+        "short_names": ["R. Sato", "D. Okafor"],
+        "maxpf_change": -55,
+        "maxpf_change_exact": "-55.00",
+        "lineup_change": -55,
+        "lineup_change_exact": "-55.00",
+        "playoff_probability": {"now": 0.0271, "after": 0.0064},
+        "pick_if_miss": {"now": 3.6912, "after": 3.1458},
+        "top3_probability": {"now": 0.4583, "after": 0.7012},
+        "label": {"now": "1.02", "after": "1.01"},
+        "label_slot": {"now": 2, "after": 1},
+        "pick_value": {"now": 2480.4, "after": 2761.9, "change": 281.5},
+        "keep": true,
+        "passes_threshold": true
+      },
+      {
+        "size": 3,
+        "player_ids": ["8150", "6130", "11233"],
+        "names": ["Rhett Sato", "Dale Okafor", "Bo Halvorsen"],
+        "short_names": ["R. Sato", "D. Okafor", "B. Halvorsen"],
+        "maxpf_change": -59,
+        "maxpf_change_exact": "-59.20",
+        "lineup_change": -59,
+        "lineup_change_exact": "-59.20",
+        "playoff_probability": {"now": 0.0271, "after": 0.0058},
+        "pick_if_miss": {"now": 3.6912, "after": 3.1203},
+        "top3_probability": {"now": 0.4583, "after": 0.7154},
+        "label": {"now": "1.02", "after": "1.01"},
+        "label_slot": {"now": 2, "after": 1},
+        "pick_value": {"now": 2480.4, "after": 2774.0, "change": 293.6},
+        "keep": true,
+        "passes_threshold": true
+      }
     ]
   }
 }
@@ -426,8 +497,8 @@ rosterChanged = live and saved are both available and live != saved
 ```
 
 When `rosterChanged`: show C-ROSTER above the list and drop every row whose `player_id` is not
-in `live`. Numbers on the remaining rows are shown unchanged. If no passing row survives,
-show C-ROSTER only. The live roster query already exists on the page
+in `live`, and every combined entry with **any** member not in `live` (v1.1). Numbers on the
+remaining rows are shown unchanged. If no row survives, show C-ROSTER only. The live roster query already exists on the page
 (`StandingsScreen.tsx:91-96`); when it has not loaded, skip the check (no notice).
 
 ### 6.4 Once-only prompts (device storage)
@@ -442,8 +513,16 @@ dependency).
 
 ### 6.5 Which rows are listed
 
-Only rows with `passes_threshold === true`, in `rank` order, after the roster-changed drop.
-The first 5 show; "Show all" reveals the rest (at most 8 total). `no_moves` lists nothing.
+**v1.1 (D-261):** every row, passing or not, in `rank` order (largest max PF drop first), after
+the roster-changed drop, in **both** `ready` and `no_moves`. The first 5 show; "Show all"
+reveals the rest (at most 8 total). Under the rows, one combined line per `combined` entry
+(after the §6.3 drop), smallest first, not expandable into week detail; tapping it shows
+C-OPEN-TOP3 and C-OPEN-PLAYOFF. When no listed row and no listed combined entry passes,
+C-NONE-ALONE shows above the list. When some pass and some do not, nothing marks the
+difference: the numbers speak. C-NO-MOVES is kept for a block with zero rows.
+
+v1 (build 191 and earlier) listed only passing rows and showed C-NO-MOVES alone for `no_moves`;
+it ignores `combined`. The server serves both shapes from one block.
 
 ### 6.6 Values to hide
 
@@ -545,8 +624,8 @@ CLAUDE.md rule. No player id or name in any property. Screen: `'Standings'`.
 
 | Event | Fires when | Properties (exact names → allowed values) | Class |
 |---|---|---|---|
-| `maxpf_moves_viewed` (new) | The section body becomes visible: on render when it starts open (§6.1), or on the tap that opens it. Once per opening of the user's own card | `state` → `ready` \| `no_moves` \| `unavailable` \| `no_miss` \| `draft_order_not_maxpf` \| `after_trade_deadline` \| `season_over` (the server `state` verbatim); `n_moves` → integer ≥ 0, rows listed after §6.3 and §6.5 (0 unless `ready`); `band` → `baseline.playoff_band` (`jets` \| `rebuilder` \| `contender` \| `championship`) or `none` when `baseline` is null | Impression: add to `NON_INTENT_EVENTS` |
-| `maxpf_move_expanded` (new) | A listed row is opened | `position` → the row's `position` string; `rank` → the row's `rank` (1..8) | Intent |
+| `maxpf_moves_viewed` (new) | The section body becomes visible: on render when it starts open (§6.1), or on the tap that opens it. Once per opening of the user's own card | `state` → `ready` \| `no_moves` \| `unavailable` \| `no_miss` \| `draft_order_not_maxpf` \| `after_trade_deadline` \| `season_over` (the server `state` verbatim); `n_moves` → integer ≥ 0, passing rows listed after §6.3 (0 unless `ready`; the v1 meaning); `band` → `baseline.playoff_band` (`jets` \| `rebuilder` \| `contender` \| `championship`) or `none` when `baseline` is null; v1.1: `n_listed` → every row listed after §6.3 and §6.5; `any_pass` → a listed row or combined entry passes | Impression: add to `NON_INTENT_EVENTS` |
+| `maxpf_move_expanded` (new) | A listed row is opened (v1.1: or a combined line) | `position` → the row's `position` string (`combined` for a combined line); `rank` → the row's `rank` (1..8), or `combined_2` \| `combined_3` | Intent |
 | `finder_target_pinned` (existing, `analytics_taxonomy.py:1809`) | "Find trades for [player]" is tapped | `side` → `give`; `source` → `maxpf_moves` (new value; add it to the row's comment) | Intent, already registered |
 | `draft_order_rule_answered` (new) | The draft-order POST returns 200 | `answer` → `maxpf_lowest_first` \| `reverse_standings` \| `lottery_or_other` \| `not_sure`; `source` → `first_ask` (the once-per-league question) \| `change` (opened from a "Change" link) | Intent |
 
@@ -585,7 +664,10 @@ English; never "tank", never anything about who to start or bench.
 | C-COLLAPSED | Collapsed (§6.1) | `Your team makes the playoffs in {playoff} of simulations. Moving these players lowers that.` + button `Show moves` |
 | C-OWNER | Pick owned elsewhere (§6.2) | `{owner_name} owns your {season} 1st, so lowering your max PF improves their pick.` + button `Show anyway` |
 | C-ROSTER | Roster changed (§6.3) | `Your roster changed after this forecast. The list updates with the next weekly forecast.` |
-| C-NO-MOVES | `no_moves` (or every row dropped by §6.3 → C-ROSTER only) | `No single player moves your projected pick by a visible amount.` |
+| C-NO-MOVES | A list state with zero rows (or every row dropped by §6.3 → C-ROSTER only). v1.1: no longer shown for a `no_moves` block that has rows | `No single player moves your projected pick by a visible amount.` |
+| C-NONE-ALONE | v1.1. Above the list when no listed row and no listed combined entry passes | `None of these changes your projected pick on its own.` |
+| C-COMB-1 | v1.1. Combined line, line 1 (`{n}` = `size`, `{names}` = `short_names` joined "A and B" / "A, B and C"; the `maxpf_change` on the right as on a row) | `Top {n} together: {names}` |
+| C-COMB-2 | v1.1. Combined line, line 2: C-ROW-2's words and rules (value only when priced) | `Pick if you miss {now} → {after}` |
 | C-NO-MISS | `no_miss` | `Your team is not projected to miss the playoffs.` |
 | C-NOT-MAXPF | `draft_order_not_maxpf` | `Your league doesn't set its draft order by max PF, so these moves wouldn't change your pick.` + link `Change answer` |
 | C-DEADLINE | `after_trade_deadline` | `Your league's trade deadline has passed.` |
@@ -648,6 +730,8 @@ navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome',
   C-KEEP-NOTE instead of the button. The app does not pin a Keep player. (The engine would
   accept it: a viewer's own give-side pin overrides Keep, `database.py:4023`; v1 does not offer
   that path.)
+- **Combined entries (v1.1) have no hand-off.** A combined line opens to top-3 and playoff chance
+  only; there is no "Find trades" for two or three players at once in v1.1 (follow-up in NEXT.md).
 - **Known limitation (follow-up, not built):** with `calc.inline_home` OFF (it is true in
   `config/features.json` today) TradesScreen ignores the prefill (`TradesScreen.tsx:1364`); the
   give pin is then not shown on the guided landing and is sent only if no model search has run
@@ -672,7 +756,7 @@ agent can call it on historical inputs):
 ```
 { "version": 1, "computed": true | false, "reason": null | "not_eligible",
   "settings": {simulations_per_candidate, candidates, min_drop_points, min_pick_change,
-               min_top3_change, time_budget_seconds},
+               min_top3_change, time_budget_seconds, combined_sizes},
   "settings_hash": sha256 of settings,
   "viewer_roster_id", "roster_player_ids", "trade_deadline": int | null,
   "baseline": {weeks_remaining, first_week, last_week, weeks_excluded_played,
@@ -683,9 +767,23 @@ agent can call it on historical inputs):
              playoff_probability, pick_if_miss, top3_probability, label, label_slot,
              after_pick_probabilities: number[], after_playoff_probability: number,
              passes_threshold } ],
+  "combined": [ {size, player_ids, names, short_names, maxpf_change, maxpf_change_exact,
+                 lineup_change, lineup_change_exact, playoff_probability, pick_if_miss,
+                 top3_probability, label, label_slot, after_pick_probabilities,
+                 after_playoff_probability, passes_threshold} ],          // v1.1, may be absent
   "free_agent_pool": { "<week>": [ {player_id, name, positions, points} ] },
   "elapsed_ms": int }
 ```
+
+**v1.1 (D-261).** `combined_sizes` (setting, `[2, 3]`; distinct, ascending, each 2 or 3; `[]`
+turns the step off) joins the settings, so the `settings_hash` of a block saved before v1.1
+differs from the current one. `combined` is computed after the rows, inside the same time
+budget, two more 5,000-run simulations (sharing the rows' "before" run); a size larger than the
+number of rows is skipped. If that step fails, is cancelled or hits the budget, the block is
+saved with its rows and **without** `combined` (a warning `max_pf_moves combined not computed`
+is logged). `batch._moves_missing` treats a computed block whose `settings_hash` is not the
+current one as missing, so the operator's `retry_missing_moves` dispatch re-runs pre-v1.1
+blocks; `_attach_moves` already recomputes a reused prior result on a hash mismatch.
 
 `after_pick_probabilities` (the viewer's full non-playoff slot odds after the move, same
 length as `pick_probabilities`) and `after_playoff_probability` are what read-time pricing
@@ -767,7 +865,7 @@ different `settings_hash`.
 | # | Exploration said | Contract does | Why / evidence |
 |---|---|---|---|
 | 1 | `band` = "the playoff band `home_tile_tapped` already carries" (§12) | `band` = `baseline.playoff_band`, the outlook classifier's band | `home_tile_tapped.band` is a per-POSITION seller/buyer/mid band, not a playoff band (`analytics_taxonomy.py:2084-2089`) |
-| 2 | "Show all for the rest of the 8" | Only passing rows are ever listed; Show all reveals passing rows 6..8 | A row below the threshold is, by §4.3's own reasoning, inside the noise |
+| 2 | "Show all for the rest of the 8" | v1: only passing rows were listed. **v1.1 (D-261): all rows are listed again**, 5 then Show all | v1 reasoned a row below the threshold is inside the noise; a live 12-team check showed 6 of 12 teams saw nothing at all, so the operator chose to show the numbers and say plainly when none moves the pick on its own |
 | 3 | Ranked label "not on main" (§2) | Uses `pick_projection.slot_ranks` | D-257 merged in `4a8cd70d` (`pick_projection.py:247-261`) |
 | 4 | Find trades "puts the player on the give side" with the League Offer hand-off | Pins only; no auto-run | §12: auto-run needs an opponent or a new R1 source |
 | 5 | Pick value formula cited at `pick_projection.py:203-211`, `pick_values.py:770-792` | Same formula | `factor` moved to `pick_projection.py:224-226`; `_projection_terms` is still `pick_values.py:770-791`; `priced_pool_value` starts `pick_values.py:812` |

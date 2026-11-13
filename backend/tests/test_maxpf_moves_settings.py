@@ -39,17 +39,21 @@ def test_flag_registered_code_default_off_shipped_on():
 
 def test_settings_from_config():
     assert maxpf_moves.settings() == {"simulations_per_candidate": 5000, "candidates": 8, "min_drop_points": 5,
-                                      "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60}
+                                      "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60,
+                                      "combined_sizes": [2, 3]}
 
 
 GOOD = {"simulations_per_candidate": 5000, "candidates": 8, "min_drop_points": 5,
-        "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60}
+        "min_pick_change": 0.1, "min_top3_change": 0.02, "time_budget_seconds": 60, "combined_sizes": [2, 3]}
 
 
 @pytest.mark.parametrize("change", [
     {"simulations_per_candidate": 0}, {"simulations_per_candidate": 5000.5}, {"candidates": 0},
     {"candidates": True}, {"min_drop_points": -1}, {"min_top3_change": 2}, {"time_budget_seconds": 0},
     {"min_pick_change": "0.1"}, {"extra": 1},
+    # v1.1 (D-261): distinct ascending sizes from (2, 3) only.
+    {"combined_sizes": [4]}, {"combined_sizes": [3, 2]}, {"combined_sizes": [2, 2]}, {"combined_sizes": [True]},
+    {"combined_sizes": 2}, {"combined_sizes": [2.0]},
 ])
 def test_settings_reject_missing_unknown_and_out_of_range(change):
     with pytest.raises(ValueError):
@@ -59,6 +63,10 @@ def test_settings_reject_missing_unknown_and_out_of_range(change):
     with pytest.raises(ValueError):
         maxpf_moves.parse_settings(None)
     assert maxpf_moves.parse_settings(dict(GOOD)) == GOOD
+    assert maxpf_moves.parse_settings({**GOOD, "combined_sizes": []})["combined_sizes"] == []
+    assert maxpf_moves.parse_settings({**GOOD, "combined_sizes": [3]})["combined_sizes"] == [3]
+    with pytest.raises(ValueError):
+        maxpf_moves.parse_settings({k: v for k, v in GOOD.items() if k != "combined_sizes"})
 
 
 def test_batch_settings_and_view_ignore_the_new_key(monkeypatch):
