@@ -1,5 +1,6 @@
 """One bounded worker; fetching is outside simulation, completion is atomic."""
 import json
+import logging
 import threading
 import time
 
@@ -8,8 +9,12 @@ from . import provider, store, batch
 from .core import Unavailable, VERSION
 from .simulation import simulate
 
+log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _worker = None
+# Max PF moves stops this long after the job started at the latest: well
+# inside the job's own 540 s cancel line and the lease's 600 s write window.
+MOVES_DEADLINE_SECONDS = 480
 
 
 def wake(fetch_json, *, foreground_busy=None):
@@ -56,6 +61,37 @@ def _checkpoint(cancelled, foreground_busy):
     return cancelled() if waited else False
 
 
+def _attach_moves(result, prior, snapshot, sidecar, started, job_cancelled, foreground_busy):
+    """Max PF moves (flag `league.max_pf_moves`, baseline runs only): add the
+    saved block to `result`. Never raises and never delays the forecast past
+    its budget: any failure or a hit time budget returns `result` without the
+    block, and the read then reports `unavailable` / `not_computed`."""
+    from . import maxpf_moves
+    timed_out = []
+    try:
+        options = maxpf_moves.settings()
+        saved = result.get("max_pf_moves")
+        if prior and saved and saved.get("computed") and saved.get("settings_hash") == maxpf_moves.settings_hash(options):
+            return result
+        clock = time.monotonic()
+        stop = min(clock + options["time_budget_seconds"], started + MOVES_DEADLINE_SECONDS)
+
+        def cancelled():
+            if time.monotonic() >= stop:
+                timed_out.append(True)
+                return True
+            return _checkpoint(job_cancelled, foreground_busy)
+        block = maxpf_moves.compute(snapshot, result, sidecar.get("free_agents") or {}, options,
+                                    names=sidecar.get("names"), trade_deadline=sidecar.get("trade_deadline"),
+                                    cancelled=cancelled)
+        block["elapsed_ms"] = int((time.monotonic() - clock) * 1000)
+    except Exception:
+        # No exception text: it can carry provider payloads (same rule as _run).
+        log.warning("max_pf_moves not computed: %s", "time_budget" if timed_out else "failed")
+        return {k: v for k, v in result.items() if k != "max_pf_moves"}
+    return {**result, "max_pf_moves": block}
+
+
 def _run(fetch_json, foreground_busy=None):
     while is_enabled("league.projections"):
         row = store.claim()
@@ -83,6 +119,11 @@ def _run(fetch_json, foreground_busy=None):
                         or current["expires_at"] <= store.utc_now() or time.monotonic() - started > 540
                         or not is_enabled("league.projections") or not is_enabled("league.projections_provider_approved") or not batch.settings()["policy_approved"])
             admit()
+            # Max PF moves rides only a fresh baseline capture with its flag on;
+            # off, capture and the result are exactly as before.
+            moves = (is_enabled("league.max_pf_moves") and inputs.get("kind") == "baseline"
+                     and not row.get("snapshot_json"))
+            sidecar = {} if moves else None
             if row.get("snapshot_json"):
                 snapshot = json.loads(row["snapshot_json"])
             else:
@@ -95,8 +136,11 @@ def _run(fetch_json, foreground_busy=None):
                     if cancelled():
                         raise Unavailable("cancelled", state="cancelled")
                     try:
+                        if moves:
+                            sidecar.clear()
                         snapshot = provider.capture(row["league_id"], inputs["league_user_id"], inputs["config"], fetch_json,
-                                                    viewer_user_id=_viewer_identity(row["user_id"]))
+                                                    viewer_user_id=_viewer_identity(row["user_id"]),
+                                                    **({"sidecar": sidecar} if moves else {}))
                         break
                     except Unavailable as exc:
                         if attempt or exc.reason != "inputs_changed_during_capture":
@@ -109,6 +153,11 @@ def _run(fetch_json, foreground_busy=None):
             result = prior or simulate(snapshot, inputs["config"],
                                        cancelled=lambda: _checkpoint(cancelled, foreground_busy))
             result = {**result, "reused_compatible_result": bool(prior), "verified_at": snapshot["captured_at"]}
+            if moves:
+                result = _attach_moves(result, prior, snapshot, sidecar, started, cancelled, foreground_busy)
+            elif "max_pf_moves" in result:
+                # A result reused from a run saved while the flag was on.
+                result = {k: v for k, v in result.items() if k != "max_pf_moves"}
             store.finish(row, result)
         except Unavailable as exc:
             store.fail(row, exc)

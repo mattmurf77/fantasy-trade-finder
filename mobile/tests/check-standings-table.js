@@ -299,7 +299,8 @@ assert(/\{ width: COL_WIDTH\[column\], justifyContent: 'flex-end' \}/.test(st) &
   assert(/setOpen\(null\);/.test(sel), 'B4f. switching view closes the open team');
   assert(/openTeamLines\(view, r, result\?\.playoff_byes \?\? 0\)/.test(st) &&
       /testID="standings\.open\.left-out">\{lines\.leftOut\}/.test(st) &&
-      /\{r\.forecast && result \? <ProjectionTeamDetail team=\{r\.forecast\} result=\{result\} \/> : null\}/.test(st),
+      // Max PF moves (2026-11-12) adds the `maxPf` inputs; check-max-pf-moves.js pins them.
+      /\{r\.forecast && result \? <ProjectionTeamDetail team=\{r\.forecast\} result=\{result\} maxPf=\{\{[^}]*\}\} \/> : null\}/.test(st),
     'B4g. the open team shows the util lines, then the moved forecast sub-sections');
   assert(/paddingHorizontal: space\.xs - 1,/.test(card) && /row: \{ paddingHorizontal: space\.xs,/.test(st),
     "B4h. card border + padding = the closed row's padding, so columns do not move");

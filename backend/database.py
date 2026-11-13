@@ -680,6 +680,15 @@ leagues_table = Table("leagues", metadata,
     # league payload session init already fetched; refreshed on every sync.
     # Descriptive only: the playoff forecast reads the live setting.
     Column("median_game", Integer),
+    # ── Max PF moves (D-258) — how the league orders next year's draft for
+    # non-playoff teams, as a league member answered it in the app:
+    # 'maxpf_lowest_first' | 'reverse_standings' | 'lottery_or_other'; NULL =
+    # never answered. Per league (a fact about the league, the same for every
+    # member); last answer wins; who answered is not stored. v1 reads it only
+    # to show or hide the Max PF moves list. Name and the first two values are
+    # the ones docs/plans/forecasts-espn-mfl/design.md §5.2 proposes.
+    Column("draft_order_rule", String),
+    Column("draft_order_rule_set_at", String),  # ISO UTC of the last write
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -4478,6 +4487,10 @@ def _migrate_db() -> None:
         # League median setting (docs/plans/league-projections/median-leagues-scope.md).
         # NULL on every existing row until that league's next sync; no backfill.
         ("leagues",            "median_game",           "INTEGER"),
+        # Max PF moves (D-258). NULL on every existing row = never answered,
+        # which is the correct backfill.
+        ("leagues",            "draft_order_rule",      "VARCHAR"),
+        ("leagues",            "draft_order_rule_set_at", "VARCHAR"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -13890,6 +13903,32 @@ def set_league_draft_status(league_id: str, status: str,
                     draft_status_confidence=confidence,
                     draft_status_checked_at=_now())
         )
+
+
+DRAFT_ORDER_RULES = ("maxpf_lowest_first", "reverse_standings", "lottery_or_other")
+
+
+def get_league_draft_order_rule(league_id: str) -> dict | None:
+    """`{"rule", "set_at"}` for a stored league (both None when never
+    answered), or None when the league has no row."""
+    with engine.connect() as conn:
+        row = conn.execute(select(leagues_table.c.draft_order_rule, leagues_table.c.draft_order_rule_set_at)
+                           .where(leagues_table.c.sleeper_league_id == str(league_id))).fetchone()
+    if row is None:
+        return None
+    rule = row.draft_order_rule if row.draft_order_rule in DRAFT_ORDER_RULES else None
+    return {"rule": rule, "set_at": row.draft_order_rule_set_at if rule else None}
+
+
+def set_league_draft_order_rule(league_id: str, rule: str) -> dict | None:
+    """Store a member's answer for the whole league (last answer wins).
+    Returns the stored state, or None when the league has no row."""
+    if rule not in DRAFT_ORDER_RULES:
+        raise ValueError("invalid_draft_order_rule")
+    with engine.begin() as conn:
+        updated = conn.execute(update(leagues_table).where(leagues_table.c.sleeper_league_id == str(league_id))
+                               .values(draft_order_rule=rule, draft_order_rule_set_at=_now())).rowcount
+    return get_league_draft_order_rule(league_id) if updated else None
 
 
 def get_league_draft_context(league_id: str) -> dict | None:

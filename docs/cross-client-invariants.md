@@ -1560,6 +1560,10 @@ Mobile Projected standings, League Summary and web League Summary read the same 
 
 Both clients disclose modeled scoring omissions and preserve the requested Max PF target in the joint model. Weekly text compares the target with the simulated average; advanced diagnostics distinguish latent parameters from realized variance/correlation and report rounding and Monte Carlo uncertainty. Decoder consistency and simulation invariants are separate from predictive accuracy.
 
+### Max PF moves (2026-11-12, D-258, flag `league.max_pf_moves`)
+
+Shared between the server and the app ([contract](plans/league-projections/max-pf-trade-away/contract.md)): the `max_pf_moves.state` enum (`ready`, `no_moves`, `unavailable`, `no_miss`, `draft_order_not_maxpf`, `after_trade_deadline`, `season_over`; an unknown state renders nothing), the `reason` set (open: an unknown reason takes the generic line), the draft-order values (`maxpf_lowest_first`, `reverse_standings`, `lottery_or_other`, request-only `not_sure`), and the formatting rules of contract §11 (whole-point changes with `−`/`+` and plain `0`, one-decimal pick if you miss, whole percents with `<1%` / `>99%`). The section opens by default when the unrounded playoff chance is ≤ 0.45 (`recommendation.REBUILDING_MAX`) or the saved outlook is `rebuilder` or `jets`. The playoff band is server-classified and never re-derived. Labels are served, never composed. Every list says it is the **largest possible change** (it assumes nothing that would start comes back), and the copy never says "tank".
+
 ### Best-available weekly projections (engine v4)
 
 Both clients distinguish known scoring subtotals, unpriced player data, historical team fallback and authoritative completed lineup totals. Missing negative coefficients mean a subtotal is not necessarily a lower bound. An observed official total has no historical blend or score simulation even if individual points are missing. Known Max PF conditioning shows original target, achieved feasible bound and adjusted target; no unchanged-60/40 claim on a corrected branch. Stored weekly results and same-context last-success retention remain shared.

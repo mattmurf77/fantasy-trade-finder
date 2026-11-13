@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-12 — Max PF moves v1 built, flag off (D-258)
+
+- **What:** the user's own Standings card gets "Max PF moves": the players whose trade lowers rest-of-season max PF most, who replaces them week by week, and the pick if you miss, top-3 chance, playoff chance, label and pick value before and after. Computed in the weekly forecast job; served on the forecast read. A once-per-league draft-order question hides the list for leagues not on max PF order.
+- **Dark:** `league.max_pf_moves` off everywhere; off = reads, saved runs and the job unchanged. On only after the leave-one-out backtest.
+- **Branches:** backend `feat/max-pf-moves`, app `feat/max-pf-moves-app`. Not merged. Plan folder: `docs/plans/league-projections/max-pf-trade-away/`.
+
 ## 2026-11-12 — Projected pick labels rank 1..N, each slot once (D-257)
 
 - **What changed:** a projected 2027 1st now shows its original team's rank in the league's projected order, so a 12-team league shows 1.01 to 1.12 with no repeats. Before, two teams could share 1.04 and all playoff locks showed 1.10. Ties go to the team with fewer expected wins, so the best team picks last.

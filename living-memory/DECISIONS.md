@@ -1,5 +1,20 @@
 # Decisions — Fantasy Trade Finder
 
+## D-258 — Max PF moves: computed weekly with the forecast, served composed, and the draft-order answer is one per league
+
+**Date:** 2026-11-12 · **Who:** the operator ("Build v1 of the max pf trade feature", accepting the eleven recommendations of `docs/plans/league-projections/max-pf-trade-away/exploration.md` §14); storage, served-shape and failure rules by the backend builder, settled by the coordinator. Ships dark behind `league.max_pf_moves`.
+**Context:** the user's own Standings card should list the players whose trade lowers max PF most, with the projected pick before and after. The saved forecast keeps no per-simulation data, so a pick change needs a re-simulation; the forecast's inputs are hash-deduplicated; leagues do not all order the draft by max PF.
+**Decision:**
+- Exact weekly lineup re-solve with the forecast's own solver (both lanes), then a paired 5,000-run re-simulation for the top 8, in the weekly job, baseline runs only; "after" = saved 250,000 figure + paired difference. Bounded (60 s, and 480 s after the job started); any failure or a budget hit saves the forecast without the block.
+- Capture's extra data (kept free agents, trade deadline, names) goes through an optional `sidecar`, never into the snapshot, so `input_hash`, dedupe, `snapshot_hash`, model version and every simulated number are unchanged.
+- The saved block is never served raw; the read composes `max_pf_moves` (state, read-time pick values, Keep, the draft-order answer, the saved outlook).
+- The draft-order answer is a league fact: `leagues.draft_order_rule` (+ `_set_at`), any verified member, last answer wins, "not sure" and the answerer not stored. It only hides or shows the list; it does not change D-240 pick pricing in v1.
+**Consequences:**
+- Flag off: reads, saved runs and the job are as before (pinned by tests).
+- A member's wrong answer hides the list league-wide until changed ("Change answer" is on the hidden state).
+- The ESPN/MFL forecast design's operator-set `draft_order_rule` must reconcile with member answers when built.
+- The flag stays off until the leave-one-out backtest is written up.
+
 ## D-257 — Projected pick labels are an exact 1..N rank; values do not move
 
 **Date:** 2026-11-12 · **Who:** the operator: "Pick labels: yes. Make them exact", answering "Should projected pick labels become a 1-to-12 ranking, so each slot appears once?". The operator was told that pick values stay as they are. The tie-break is the builder's call. Scope: [`../docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md`](../docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md).

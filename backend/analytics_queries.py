@@ -414,6 +414,11 @@ NON_INTENT_EVENTS = frozenset({
     #     `tab_selected` class: choosing what to look at, never a decision.
     "home_tile_tapped",
     "standings_segment_changed",
+    # Max PF moves (D-258): the section on the user's own Standings card
+    # became visible, an impression on a read-only page. Opening a row
+    # (maxpf_move_expanded) and answering the draft-order question
+    # (draft_order_rule_answered) are intent and stay out of this set.
+    "maxpf_moves_viewed",
     # ── Usage Trends, 2026-10-10 — added in the SAME commit as the emitters
     # (docs/business/analytics/2026-10-10-usage-trends-events.md). Reading the
     # cross-league availability sheet and switching metric / filter chips are

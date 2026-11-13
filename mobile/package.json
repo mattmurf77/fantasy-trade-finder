@@ -133,6 +133,7 @@
     "test:single-pin-actions": "node tests/check-single-pin-actions.js",
     "test:standing-offer-362": "node tests/check-standing-offer-362.js",
     "test:standings-order": "node tests/check-standings-order.js",
+    "test:max-pf-moves": "node tests/check-max-pf-moves.js",
     "test:standings-table": "node tests/check-standings-table.js",
     "test:swipe-failure-recovery": "node tests/check-swipe-failure-recovery.js",
     "test:swipe-guard-telemetry": "node tests/check-swipe-guard-telemetry.js",

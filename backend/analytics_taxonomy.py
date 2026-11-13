@@ -762,6 +762,19 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                               Current | Projected segment.
     "home_tile_tapped",
     "standings_segment_changed",
+    # ── Max PF moves (flag `league.max_pf_moves`, D-258, 2026-11-12) ──────
+    # docs/plans/league-projections/max-pf-trade-away/contract.md §9. All
+    # three are app-emitted from the user's own Standings card and are
+    # registered in the same change as the emitters (one squash-merge).
+    #   maxpf_moves_viewed        — the section body became visible (default
+    #                               open on render, or the tap that opens it).
+    #                               IMPRESSION: in NON_INTENT_EVENTS.
+    #   maxpf_move_expanded       — a listed row was opened. INTENT.
+    #   draft_order_rule_answered — the once-per-league draft-order question
+    #                               was answered (POST returned 200). INTENT.
+    # The hand-off rides the existing `finder_target_pinned` (side: give,
+    # source: maxpf_moves).
+    "maxpf_moves_viewed", "maxpf_move_expanded", "draft_order_rule_answered",
     # ── Usage Trends, 2026-10-10 (docs/plans/usage-trends/scope.md §1) ──────
     # Addendum: docs/business/analytics/2026-10-10-usage-trends-events.md.
     # Registered in the SAME commit as the emitters
@@ -1805,7 +1818,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                               "offer_count", "tied_package_count"}),
     "overhaul_fallback_requested": frozenset({"overhaul_id", "package_id", "tier", "offer_count"}),
     # `side` ∈ give | receive — the targeting board half the pin landed on
-    # (the same vocabulary as player_menu_opened.side).
+    # (the same vocabulary as player_menu_opened.side). `source` ∈
+    # deck_summary | board | maxpf_moves (2026-11-12: "Find trades for
+    # [player]" on the user's own Standings card, side always give).
     "finder_target_pinned":    frozenset({"side", "source"}),
     # `position` is a CORE POSITION (QB|RB|WR|TE) — the QuickSet walk being
     # started, NOT a device platform (the NULL-`platform` incident).
@@ -2093,6 +2108,20 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # retired segment, whose Projected tap ran the outlook simulation).
     # Neither new value runs anything: the table reads the saved forecast.
     "standings_segment_changed":   frozenset({"segment"}),
+    # Max PF moves (contract §9). No player id or name in any prop.
+    #   maxpf_moves_viewed.state ∈ ready | no_moves | unavailable | no_miss |
+    #     draft_order_not_maxpf | after_trade_deadline | season_over (the
+    #     server's `max_pf_moves.state` verbatim); n_moves = rows listed (int
+    #     ≥ 0); band ∈ jets | rebuilder | contender | championship | none
+    #     (the server's `baseline.playoff_band`; not home_tile_tapped's
+    #     per-position band).
+    #   maxpf_move_expanded.position = the row's position string; rank 1..8.
+    #   draft_order_rule_answered.answer ∈ maxpf_lowest_first |
+    #     reverse_standings | lottery_or_other | not_sure; source ∈
+    #     first_ask | change.
+    "maxpf_moves_viewed":          frozenset({"state", "n_moves", "band"}),
+    "maxpf_move_expanded":         frozenset({"position", "rank"}),
+    "draft_order_rule_answered":   frozenset({"answer", "source"}),
     # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
     # Both props are version INTS (major*10000 + minor*100 + patch, see
     # docs/cross-client-invariants.md): `min_version` is the served

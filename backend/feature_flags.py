@@ -51,6 +51,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # web standings). Off = no `outlook_recommendation` block and no prompt;
     # the projection surfaces and every saved outlook are untouched.
     "league.projection_outlook",
+    # Max PF moves (docs/plans/league-projections/max-pf-trade-away/contract.md):
+    # on the user's own Standings card, which players lower max PF the most
+    # and what that does to the projected pick. Computed in the weekly
+    # forecast job, served as `max_pf_moves` on the forecast read. Requires
+    # league.projections. Off = no block, no extra job work, the draft-order
+    # route 404s; every read and saved run is byte-identical.
+    "league.max_pf_moves",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.

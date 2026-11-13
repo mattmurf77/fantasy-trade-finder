@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups](#2026-11-12--max-pf-moves-d-258-backtest-gate-then-the-follow-ups)
 - [2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD](#2026-11-11--projection-model-v5-testflight-build-and-checklist-first-v5-forecasts-then-calibrate-the-sd)
 - [2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4](#2026-11-10--offer-learnings-and-fast-deck-are-on-device-checklists-first-production-reads-then-revision-4)
 - [2026-11-10 — Roster-first setup (#637, flag on): TestFlight build + checklist, MOD-M1 call](#2026-11-10--roster-first-setup-637-flag-on-testflight-build--checklist-mod-m1-call)
@@ -72,6 +73,17 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups
+
+Built dark on `feat/max-pf-moves` (backend) and `feat/max-pf-moves-app` (app). Not queued above the seven active items; none of these is a launch blocker.
+
+1. **Backtest before the flag goes on.** Run the leave-one-out backtest (exploration §11) with `league_projections.maxpf_moves.resolve` / `compute`, write it up, and decide whether the bench-depth bias needs a caveat line. *Why:* operator decision 11; `league.max_pf_moves` stays off until then. Then the TestFlight checklist in `app-evidence.md` §5.
+2. **D-240 pricing for leagues not on max PF order.** When a league answers `reverse_standings` or `lottery_or_other`, `_league_pick_projection` should return None (price generic). *Why:* today those picks are still priced from the max PF forecast (contract §7.3).
+3. **Auto-run from "Find trades".** A new R1 `find_trades_tapped.source` (`maxpf_moves`) and opponent-less auto-run in TradesScreen. *Why:* v1 only prefills the canvas.
+4. **If `calc.inline_home` is ever turned off:** the hand-off's prefill is ignored; add the ~8-line TradesScreen effect that calls `resetDeckForNewTargets()` when store pins change from outside (app-evidence.md §3). Not built.
+5. **Website version** of the section (the old non-playoff picks tab is web-only today). *Why:* W2 left it out of v1.
+6. **Reconcile `leagues.draft_order_rule`** (member-written) with the ESPN/MFL forecast design's operator-set rule when that design is built.
 
 ## 2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD
 
