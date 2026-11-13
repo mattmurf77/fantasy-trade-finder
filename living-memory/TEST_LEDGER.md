@@ -1,3 +1,22 @@
+## 2026-11-12 — Max PF moves v1 (D-258), branches `feat/max-pf-moves` (backend) and `feat/max-pf-moves-app` (app)
+
+- **Backend, new (64 tests, Python 3.12, synthetic fixtures only):** `test_maxpf_moves_settings.py` 12, `test_maxpf_moves_capture.py` 7, `test_maxpf_moves.py` 18, `test_maxpf_moves_job.py` 6, `test_maxpf_moves_draft_order.py` 10, `test_maxpf_moves_read.py` 6, `test_maxpf_moves_analytics.py` 5. They pin:
+  - flag off: the saved `result_json`, `snapshot_json` and `input_hash` byte-identical to the pre-change worker path, capture called exactly as on main, no moves work (`test_flag_off_saves_exactly_what_main_saves`); the read byte-identical with or without a saved block (`test_flag_off_read_is_unchanged_with_or_without_a_saved_block`); scratch run: `/latest`, `/projection-runs/<id>`, `/teams` byte-identical to `origin/main`'s own `api.py`;
+  - the side channel never changes the snapshot (`==`, digest, input hash);
+  - parity: nobody removed reproduces every saved team-week, both lanes, both scoring contracts, 168/168, free-agent-filled weeks included; the kept free-agent pool equals an unbounded pool for every candidate of every team;
+  - exploration §6's worked example (−31 / −28); taxi, only-TE free agent, reserve, unprojected, provider-out and superflex cases;
+  - paired re-run: unchanged roster gives exactly the saved figures (also through `compute`); same input, same output; 5,000 vs 100,000 runs within 0.05 slot (pick if you miss) and 0.03 (top-3, playoff) on a 5-week cut (about 18 s, runs in CI; the suite has no markers);
+  - failure isolation: an exception and a time-budget hit each leave a complete forecast with no block;
+  - every state in precedence order, every unavailable reason, engine-price equality, the contract §5.1 example vs the composer;
+  - route authz (flag off, other league, unverified, non-Sleeper, no row), bad bodies, migration on an existing SQLite DB;
+  - event registration and classification; `/api/feature-flags` serves `league.max_pf_moves`.
+- **Sabotages, red then restored, checksums unchanged (28):** B1 drop the flag from a fixture, accept 0 sims; B3 pool into the snapshot, accept deadline 99 / "11"; B2 skip the max-lane free-agent fill, `SIDECAR_EXTRA_SLOTS = 0`, taxi in the lineup pool, a different seed for "after", no clamp, `>` at the threshold, status always `changed`; B4 moves always on, wrapper re-raises, budget ignored, no strip of a reused block when off, always recompute; B5 no league check, no flag check, a migration row dropped, route and helper value checks both removed; B6 no strip in `public()`, draft order not read, deadline after draft order, "after" priced with "now", Keep always false; B7 `band` dropped, intent misclassified, flag dropped from `FLAG_KEYS`. Four first attempts stayed green and were fixed or recorded (a test helper overriding the constant under test; a wrong lineup-lane anchor; a clamp unreachable on the fixture, now a unit test; the route's value check alone, backed by the helper's).
+- **Cost of the weekly step (laptop):** about 6.5 s and 37 KB for the 12-team, 14-week fixture with 8 candidates.
+- **Full backend suite, run 1 (`935b1b34` code, 22:43):** 15,535 passed, 42 skipped, **2 failed**, both the new route meeting repo guards: `test_paywall_gate_allowlist::test_every_rule_is_classified` (route unclassified) and `test_test_profile_review::test_the_body_scan_limit_is_at_most_every_route_cap` (1 KB cap below the fence's scan limit). Fixed in `8f5cb3f1` (FREE; 8 KB).
+- **Full backend suite, run 2 (`29a8e6cc`, after the fix, 22:00):** 15,537 passed, 42 skipped, 0 failed.
+- **App (`feat/max-pf-moves-app` 18bfb448, app builder):** `mobile/tests/check-max-pf-moves.js` 115 assertions (groups A–N), 48 of 48 sabotages caught; all 185 `check-*.js` suites, `tsc --noEmit` and testid-lint clean. Evidence: `docs/plans/league-projections/max-pf-trade-away/app-evidence.md` (§4 tests, §5 the 11-step TestFlight checklist).
+- **Evidence posture:** D-056, `FTF_SKIP_SIM_GATE=1` on push; no simulator, no Maestro. Not verified: Postgres for the two new columns (same `_migrate_db` path as `median_game`), production run times, a device. The TestFlight checklist runs after the backtest, before the flag goes on.
+
 ## 2026-11-12 — Projected pick labels as a 1..N rank (D-257), branch `feat/projected-pick-rank`
 
 - **New:** `backend/tests/test_pick_slot_rank.py`, 21 passed. It pins:

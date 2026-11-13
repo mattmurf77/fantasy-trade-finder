@@ -4,6 +4,10 @@
 > [contract.md](contract.md). Scope: [scope.md](scope.md). Written 2026-11-12 against
 > `4a8cd70d`. The app builder works from the contract in parallel; the two halves meet only
 > at the JSON in contract §3 and the route in contract §7.2.
+>
+> **As built (2026-11-12):** see [build-backend.md](build-backend.md) for the commits, the test
+> files as named (`test_maxpf_moves*.py`) and the code-walk. B3 landed before B2; the route cap
+> is 8 KB, not 1 KB; a failed step saves no block rather than `computed: false`.
 
 - [Commits](#commits)
 - [Risks and how each is proved](#risks-and-how-each-is-proved)

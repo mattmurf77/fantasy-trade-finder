@@ -5,7 +5,8 @@
 accepting [exploration.md](exploration.md) §14's eleven recommendations as written.
 **Builder:** backend builder (this file, [contract.md](contract.md), [plan.md](plan.md)); an
 app builder codes the Standings section from the contract in parallel.
-**Operator sign-off on waivers:** pending — see §0.
+**Operator sign-off on waivers:** W1–W4 stand (coordinator, 2026-11-12, reported to the
+operator); Q1–Q5 settled with the recommendations below.
 
 The wire contract both builders follow is [contract.md](contract.md). Decision id **D-258** is
 reserved for this feature; its DECISIONS entry is written in the build, not now.
@@ -23,14 +24,14 @@ reserved for this feature; its DECISIONS entry is written in the build, not now.
 | W3 | Flag stays off at merge; the leave-one-out backtest is not part of this build | Operator decision 11: the backtest runs before the flag is turned on, by a separate validation agent. This build only makes the calculation callable for it (`maxpf_moves.compute`) |
 | W4 | No auto-run of the trade search from "Find trades" | Needs a new R1 `find_trades_tapped.source` value and opponent-less auto-run support in TradesScreen; v1 pins the give side and lands on the deck (contract §12). Follow-up |
 
-**Choices the operator has not yet seen (each with a recommendation)**
+**Choices settled 2026-11-12 (coordinator's defaults, reported to the operator)**
 
 | # | Question | Recommendation |
 |---|---|---|
 | Q1 | Who may answer the draft-order question for a league? | Any member, last answer wins, stored per league (contract §7.1). It only shows or hides this section in v1 |
 | Q2 | Should a "reverse standings" or "lottery or other" answer also stop projected-slot pick pricing (D-240) for that league? | Not in v1 (contract §7.3); follow-up item, because it changes trade values league-wide and every member's deck |
 | Q3 | The ESPN/MFL forecast design treats `leagues.draft_order_rule` as operator-set only and feeds it to the simulation. This build makes the same column member-written | Keep one column; when that design is built, it adds a source/lock column or reads only `maxpf_lowest_first`/`reverse_standings`. Flag in its scope |
-| Q4 | Trade deadline: Sleeper's `settings.trade_deadline` is a week number; the code cannot tell whether trades are allowed during that week | Hide the list once `completed_weeks ≥ trade_deadline` (the deadline week is under way or over), i.e. lean to hiding. Exploration §15 lists this as unknown |
+| Q4 | Trade deadline: Sleeper's `settings.trade_deadline` is a week number; the code cannot tell whether trades are allowed during that week | Hide the list once `completed_weeks ≥ trade_deadline` (the deadline week is under way or over), i.e. lean to hiding; 0, 99, absent or a non-integer mean no deadline. Exploration §15 lists this as unknown |
 | Q5 | "Show all" | Lists only rows that pass the threshold (contract §14 row 2) |
 
 ## 1. Analytics scope
@@ -73,67 +74,58 @@ reserved for this feature; its DECISIONS entry is written in the build, not now.
 
 ## 3. Evidence scope
 
-- [x] **Structural guard (app builder):** `mobile/tests/check-maxpf-moves.js` + `npm run
-      test:maxpf-moves` — pins: the section mounts only when `team.roster_id ===
-      result.viewer_roster_id`; it renders under "Draft pick odds"; every server `state` and
-      every `reason` in contract §4 has its copy-table string; the Find trades handler calls
-      `setSide('give', …)` and `setSide('receive', [])` and tracks `finder_target_pinned` with
-      `source: 'maxpf_moves'`; no "Find trades" button renders for a `keep` row; the word
-      "tank" appears nowhere in the section's source; no colours outside Chalkline tokens.
-- [x] **Unit tests (backend):** `backend/tests/test_maxpf_moves.py` (pure module),
-      `test_maxpf_moves_capture.py` (side channel), `test_maxpf_moves_job.py` (service hook,
-      budget, failure isolation), `test_maxpf_moves_routes.py` (read block, strip, draft-order
-      route); updates to the flag-mirror tests. Each with the sabotages listed in
-      [plan.md](plan.md).
-- [x] **Code-walk proof:** written at build end into `build-backend.md` (this folder),
-      file:line through capture → job → saved block → read → app; and by the app builder for
-      the Standings section and the hand-off.
+- [x] **Structural guard (app builder, `feat/max-pf-moves-app` 18bfb448):**
+      `mobile/tests/check-max-pf-moves.js` + `npm run test:max-pf-moves`, 115 assertions
+      (groups A–N): mount only on the own card and only with flag + block; placement under
+      "Draft pick odds"; every state and reason has its copy (the §10 table compared both ways,
+      the four §5 example payloads parsed from contract.md); the hand-off pins give, clears
+      receive, sends `canvasPrefill` + `canvasPrefillSeq` with `pop: true` via `popTo`, and fires
+      `finder_target_pinned {give, maxpf_moves}`; no button on a Keep row; no "tank"; tokens only.
+      48 of 48 sabotages caught. All 185 `check-*.js` suites, `tsc --noEmit` and testid-lint
+      clean. Detail: [app-evidence.md](app-evidence.md) §4 (on the app branch until merged).
+- [x] **Unit tests (backend):** `test_maxpf_moves_settings.py` (12),
+      `test_maxpf_moves_capture.py` (7), `test_maxpf_moves.py` (18),
+      `test_maxpf_moves_job.py` (6), `test_maxpf_moves_draft_order.py` (10),
+      `test_maxpf_moves_read.py` (6), `test_maxpf_moves_analytics.py` (5). Sabotages and the
+      full-suite run: `living-memory/TEST_LEDGER.md` 2026-11-12 Max PF moves.
+- [x] **Code-walk proof:** backend [build-backend.md](build-backend.md); app
+      [app-evidence.md](app-evidence.md) §2–§3.
 - [x] **Manual TestFlight checklist** (operator, flag on for a test account, after the
-      backtest):
-      1. Own team in a Sleeper league with a current forecast and playoff chance ≤ 45%: Standings
-         → open your team → "Max PF moves" is open under "Draft pick odds", with the baseline
-         line and up to 5 rows.
-      2. Open any other team's card: no "Max PF moves" section.
-      3. Open the top row: its replacement names for week N match Weekly projections → Week N
-         lineup when that player is mentally removed (the bench player who would start).
-      4. Baseline "pick … on average" equals Draft pick odds → "Expected pick if this team
-         misses" to one decimal.
-      5. Tap "Find trades for …": Trades opens with that player pinned on the give side and
-         nothing on the receive side; Find a Trade returns cards that send him.
-      6. A row tagged Keep shows no Find trades button.
-      7. Answer the draft-order question "Reverse standings": the list is replaced by the
-         not-max-PF line with "Change answer"; change it back to "Lowest max PF": the list
-         returns. Sign in as a second member of the same league: the answer is shared, the
-         question does not appear.
-      8. A league where your playoff chance is above 45%: the section is collapsed with the
-         playoff line; "Show moves" opens the list.
-      9. Trade away a listed player on Sleeper, reopen Standings: the roster-changed notice
-         shows and that player's row is gone.
-      10. An ESPN or MFL league: Standings shows its existing unavailable card and no section.
-      11. Turn the flag off: the section disappears; Standings otherwise unchanged.
+      backtest): [app-evidence.md](app-evidence.md) §5, eleven steps (own card, other cards,
+      collapsed, pick owned elsewhere, the draft-order question each way and shared across
+      members, roster changed, Keep, the hand-off onto the canvas, non-Sleeper, flag off, large
+      text). Add one backend check: the Weekly projections lineup for a week, with the top row's
+      player mentally removed, starts the replacement the row names for that week.
 - [ ] **WAIVED** — not waived; there is a user-visible surface.
-- `testID`s added (app builder): `standings.maxpf.section`, `standings.maxpf.row.<rank>`,
-  `standings.maxpf.find-trades`, `standings.maxpf.question`, `standings.maxpf.show-all`
-  (template ids go in `scripts/testid-lint-allow.txt`).
+- `testID`s: listed in app-evidence.md (app builder); testid-lint clean.
+
+### Risks (known, accepted for v1)
+
+| Risk | Handling |
+|---|---|
+| The bench-depth bias (exploration risk 2): projected max PF is the projected best lineup, real max PF is the hindsight best | The leave-one-out backtest runs before the flag is turned on (W3); `maxpf_moves.compute` and `resolve` are pure and documented for it |
+| With `calc.inline_home` OFF (true today) the hand-off's canvas prefill is ignored; the give pin is then not shown on the guided landing and is sent only if no model search has run since the last reset | Follow-up in NEXT.md; smallest fix is a TradesScreen effect calling `resetDeckForNewTargets()` on an outside pin change (about 8 lines). Not built |
+| A member's mistaken draft-order answer hides the list for the whole league | Visible "Change answer" on the hidden state; last answer wins |
+| A week's change can be positive when a free agent outprojects the removed player | Shown with `+`; a listed row's season total is always a drop (contract §3.5) |
+| The step's cost grows with weeks remaining | Measured about 6.5 s for 14 weeks on a laptop; hard stop at 60 s / 480 s, and the forecast is saved without the block on a stop |
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
-Every doc from exploration §12, "to update in build" until the build fills the row.
-
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | to update in build | `GET /api/leagues/<id>/projection-runs/latest` gains `max_pf_moves`; `public()` strip; new `POST /api/leagues/<id>/draft-order-rule` |
-| `docs/data-dictionary.md` | to update in build | `leagues.draft_order_rule`, `leagues.draft_order_rule_set_at`; `league_projection_runs.result_json.max_pf_moves` |
-| `docs/config-reference.md` | to update in build | Flag `league.max_pf_moves`; the six `max_pf_moves` settings |
-| `docs/cross-client-invariants.md` (shared constants/enums/colors) | to update in build | `state`/`reason` enums, `draft_order_rule` values, rounding rules (contract §11), the "largest possible change" wording rule, the 0.45 open rule |
-| `docs/glossary.md` (new domain term) | to update in build | Max PF, replacement, pick if you miss, Max PF moves, paired re-run |
-| `docs/plans/league-projections/implementation.md` | to update in build | The weekly job's extra step and the capture side channel |
-| `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | to update in build | "A raw saved sub-block of `result_json` is never served; reads compose it" convention; capture side channel |
-| `docs/architecture.md` | to update in build, or n/a with reason | Judged at build end: a new leaf module in an existing package and one extra step in an existing worker is likely not an architecture change |
-| `living-memory/HLD.md` | to update in build, or n/a with reason | Same judgement as architecture.md |
-| `mobile/src/components/CLAUDE.md`, `mobile/src/screens/CLAUDE.md` | to update in build (app builder) | The new section in `LeagueProjectionDetail`, Standings' new props |
-| ADR or `DECISIONS.md` entry (non-obvious choice made) | to update in build | D-258: per-league draft-order answer, saved-not-served raw block, side channel outside the snapshot hash |
-| `living-memory/CHANGELOG.md`, `TEST_LEDGER.md` | to update in build | Dated entry; suite + sabotage evidence |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | updated | "Scheduled league projection sidecar": the `max_pf_moves` block on `/latest`, the strip, `POST /api/leagues/{id}/draft-order-rule` |
+| `docs/data-dictionary.md` | updated | `leagues.draft_order_rule`, `draft_order_rule_set_at`; `league_projection_runs` → `result_json.max_pf_moves` |
+| `docs/config-reference.md` | updated | Flag `league.max_pf_moves` and the six `max_pf_moves` settings, before "Model v5" |
+| `docs/cross-client-invariants.md` (shared constants/enums/colors) | updated | "Max PF moves": state/reason/draft-order enums, formatting, the 0.45 open rule, the "largest possible change" and no-"tank" rules |
+| `docs/glossary.md` (new domain term) | updated | Max PF moves, replacement, pick if you miss, paired re-run (beside "Official Max PF") |
+| `docs/plans/league-projections/implementation.md` | updated | "Implemented": the weekly job's extra step and the capture side channel |
+| `docs/business/analytics/2026-11-12-max-pf-moves-events.md` | added | Tracking-plan addendum for the three events and the new `finder_target_pinned.source` |
+| `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | updated | "Specific patterns": saved sub-block composed on read; capture side channel |
+| `docs/architecture.md` | n/a | No new module wiring or data flow at the architecture's level: one leaf module inside the existing `league_projections` package and one bounded step in the existing worker; the read path is the existing route |
+| `living-memory/HLD.md` | n/a | Same reason as architecture.md |
+| `mobile/src/components/CLAUDE.md`, `mobile/src/screens/CLAUDE.md` | app builder | Owned by the app branch (`mobile/` is the app builder's) |
+| ADR or `DECISIONS.md` entry (non-obvious choice made) | updated | D-258 |
+| `living-memory/CHANGELOG.md`, `TEST_LEDGER.md`, `NEXT.md` | updated | 2026-11-12 Max PF moves entries; follow-ups in NEXT |
 
 ## 5. Ship gate declaration
 
