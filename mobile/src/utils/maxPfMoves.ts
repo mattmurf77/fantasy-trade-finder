@@ -46,15 +46,21 @@ export const ARROW = ' → ';
 const halfAwayFromZero = (n: number) => Math.sign(n) * Math.floor(Math.abs(n) + 0.5 + 1e-9);
 const thousands = (n: number) => String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-/** Whole points from the integer field; negatives with U+2212; 0 as `0`. */
+// Changes, not levels: a sign on every non-zero value (a week's max PF or a
+// row's lineup change can be POSITIVE when a free agent outprojects the
+// removed player, contract §3.5). Levels (pick if you miss, pick value,
+// probabilities) never go through these two.
+/** A row's change: whole points from the integer field; `−n` / `+n`; exactly 0 as `0`. */
 export function formatPoints(n: number): string {
   const r = halfAwayFromZero(n);
-  return r < 0 ? `${MINUS}${Math.abs(r)}` : String(r);
+  if (r === 0) return '0';
+  return r < 0 ? `${MINUS}${Math.abs(r)}` : `+${r}`;
 }
-/** A week's change: one decimal, U+2212. */
+/** A week's change: one decimal; `−` / `+`; exactly 0 (at one decimal) as `0`. */
 export function formatWeekChange(n: number): string {
   const s = Math.abs(n).toFixed(1);
-  return n < 0 && s !== '0.0' ? `${MINUS}${s}` : s;
+  if (s === '0.0') return '0';
+  return n < 0 ? `${MINUS}${s}` : `+${s}`;
 }
 /** Pick if you miss: one decimal; null → "—" (§6.6). */
 export function formatPick(n: number | null | undefined): string {

@@ -160,7 +160,7 @@ Run from `mobile/` on this branch:
 
 | Check | Result |
 |---|---|
-| `node tests/check-max-pf-moves.js` | 115 assertions pass (groups A–N) |
+| `node tests/check-max-pf-moves.js` | 119 assertions pass (groups A–N) |
 | all `tests/check-*.js` (CI's loop) | 185 / 185 suites pass (184 before + the new one) |
 | `npx tsc --noEmit` | clean |
 | `bash scripts/testid-lint.sh` | OK |
@@ -170,7 +170,7 @@ against them and their variants, and compares the copy module with the §10 tabl
 directions (45 rows; the one worked example, `An empty spot starts instead (1 week).`, is checked
 as an output instead).
 
-**Sabotage: 48 of 48 caught across all 14 groups (A–N).** Each break was applied to the source,
+**Sabotage: 54 of 54 caught across all 14 groups (A–N).** Each break was applied to the source,
 the suite run (non-zero exit with the named assertion failing), then restored; file checksums
 were identical before and after, and the suite was green afterwards. Breaks included: a copy edit
 (A1), "tank" in a comment (A3), an inline literal (A6), every-reason → generic (B3), wrong state
@@ -181,7 +181,9 @@ gets a button (G1) or a hand-off (G3), `<1%` cut (H4), hyphen for U+2212 (H1), n
 singular week (H15), no-label sentence (H10), final week (H22), flag ignored (I2), flag forced in
 Standings (I4), own-card check removed (I5), receive not cleared (J1), event dropped (J1),
 receive prefilled (J1), empty give in the prefill (J1b), no `canvasPrefillSeq` (J1b), no `pop` (J1b),
-`navigate` instead of `popTo` (J2), a Keep row navigating with a prefill (G3), `+0` for zero (H6b), `n_moves` from all rows (K1), a name in `maxpf_move_expanded` (K4), expanded on close
+`navigate` instead of `popTo` (J2), a Keep row navigating with a prefill (G3), `+0` for zero (H6b),
+no `+` on a positive week or row change (H2b, H2c, H2d), `0.0` for a zero week (H2b), a `+` on a
+level (H2e), `n_moves` from all rows (K1), a name in `maxpf_move_expanded` (K4), expanded on close
 (K7), viewed every opening (K8), wrong POST path (L1), question with a stored answer (L3), no
 refetch after the POST (L8), wrong device key (L5), a `fetch` on open (M1), 40pt row (M5), hex
 colour (M7), untruncated name (M6), value shown when not priced (N1).
@@ -264,7 +266,12 @@ forecast saved after the backend lands. Open Home → Standings, tap your own ro
 5. **Unknown `state`.** §3.1 makes `reason` an open set and an unknown `version` render nothing,
    but says nothing about an unknown `state`. Built: render nothing.
 6. **Value change of 0.** Ruled: exactly 0 (after rounding) renders `0`, not `+0`; a max PF change
-   of 0 renders `0` too.
+   of 0 renders `0` too. **Positive changes (contract §3.5/§11, 2026-11-12):** a week's max PF change
+   and a row's lineup change can be positive; `formatWeekChange` / `formatPoints` now render `+3.2`
+   / `+3`, `−` for negatives and `0` for exactly zero (a week that rounds to 0.0 at one decimal is
+   `0`). Only changes go through them (row line 1, the week list); levels (pick if you miss, pick
+   value, percentages) use other formatters and never gain a `+`. The app does not render
+   `lineup_change` anywhere today (contract §10 has no string for it); the formatter is ready.
 7. **Replacement names.** §10 C-REPL uses `{name}`; built with the full `name` (rows use
    `short_name`). C-WEEK's `{names}` is joined "a, b and c".
 8. **C-RULES "under the baseline".** Shown only where a baseline shows (ready / no_moves, body

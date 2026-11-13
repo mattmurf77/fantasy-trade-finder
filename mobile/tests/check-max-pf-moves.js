@@ -237,8 +237,18 @@ const R3 = READY.rows[2];
   const M = '−';
   assert(u.formatPoints(-31) === `${M}31` && u.formatPoints(0) === '0' && u.formatPoints(-4) === `${M}4`,
     'H1. row change: whole number, U+2212, 0 as 0');
-  assert(u.formatWeekChange(-7) === `${M}7.0` && u.formatWeekChange(-4.2) === `${M}4.2` && u.formatWeekChange(0) === '0.0',
+  assert(u.formatWeekChange(-7) === `${M}7.0` && u.formatWeekChange(-4.2) === `${M}4.2`,
     'H2. week change: one decimal, U+2212');
+  assert(u.formatWeekChange(3.2) === '+3.2' && u.formatWeekChange(0.04) === '0' && u.formatWeekChange(0) === '0'
+      && u.formatWeekChange(-0.04) === '0', 'H2b. a positive week change is "+3.2"; exactly 0 (one decimal) is "0"');
+  assert(u.formatPoints(3) === '+3' && u.formatPoints(12.6) === '+13' && u.formatPoints(0) === '0',
+    'H2c. a positive row change (e.g. lineup_change) is "+n"; 0 is "0"');
+  const posWeek = u.weekLines(Object.assign(clone(R1), { weeks: [{ week: 12, status: 'changed', maxpf_change: 3.2, lineup_change: 3.2,
+    replaced_by: [{ player_id: '20391', name: 'Ike Brennan', short_name: 'I. Brennan', free_agent: true }] }] }));
+  assert(eq(posWeek, ['Week 12: +3.2, Ike Brennan (free agent) instead']), 'H2d. C-WEEK reads "Week 12: +3.2, Name instead" for a positive week', show(posWeek));
+  assert(u.baselineLine(READY).indexOf('+') === -1 && u.rowLine2(R1, false).indexOf('+') === -1
+      && u.formatPick(3.7) === '3.7' && u.formatValue(2480) === '2,480',
+    'H2e. levels (pick if you miss, baseline value, percentages) never gain a "+"');
   assert(u.formatPick(3.6912) === '3.7' && u.formatPick(3.3604) === '3.4' && u.formatPick(null) === '—',
     'H3. pick if you miss: one decimal; null ⇒ —');
   const pct = [[0.4583, '46%'], [0.6177, '62%'], [0.0271, '3%'], [0.0122, '1%'], [0.004, '<1%'], [0.005, '1%'],
