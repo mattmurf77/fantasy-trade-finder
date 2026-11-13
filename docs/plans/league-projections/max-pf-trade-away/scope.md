@@ -75,13 +75,13 @@ reserved for this feature; its DECISIONS entry is written in the build, not now.
 ## 3. Evidence scope
 
 - [x] **Structural guard (app builder, `feat/max-pf-moves-app` 18bfb448):**
-      `mobile/tests/check-max-pf-moves.js` + `npm run test:max-pf-moves`, 115 assertions
+      `mobile/tests/check-max-pf-moves.js` + `npm run test:max-pf-moves`, 119 assertions
       (groups A–N): mount only on the own card and only with flag + block; placement under
       "Draft pick odds"; every state and reason has its copy (the §10 table compared both ways,
       the four §5 example payloads parsed from contract.md); the hand-off pins give, clears
       receive, sends `canvasPrefill` + `canvasPrefillSeq` with `pop: true` via `popTo`, and fires
       `finder_target_pinned {give, maxpf_moves}`; no button on a Keep row; no "tank"; tokens only.
-      48 of 48 sabotages caught. All 185 `check-*.js` suites, `tsc --noEmit` and testid-lint
+      54 of 54 sabotages caught. All 185 `check-*.js` suites, `tsc --noEmit` and testid-lint
       clean. Detail: [app-evidence.md](app-evidence.md) §4 (on the app branch until merged).
 - [x] **Unit tests (backend):** `test_maxpf_moves_settings.py` (12),
       `test_maxpf_moves_capture.py` (7), `test_maxpf_moves.py` (18),

@@ -14,8 +14,17 @@
 - **Cost of the weekly step (laptop):** about 6.5 s and 37 KB for the 12-team, 14-week fixture with 8 candidates.
 - **Full backend suite, run 1 (`935b1b34` code, 22:43):** 15,535 passed, 42 skipped, **2 failed**, both the new route meeting repo guards: `test_paywall_gate_allowlist::test_every_rule_is_classified` (route unclassified) and `test_test_profile_review::test_the_body_scan_limit_is_at_most_every_route_cap` (1 KB cap below the fence's scan limit). Fixed in `8f5cb3f1` (FREE; 8 KB).
 - **Full backend suite, run 2 (`29a8e6cc`, after the fix, 22:00):** 15,537 passed, 42 skipped, 0 failed.
-- **App (`feat/max-pf-moves-app` 18bfb448, app builder):** `mobile/tests/check-max-pf-moves.js` 115 assertions (groups A–N), 48 of 48 sabotages caught; all 185 `check-*.js` suites, `tsc --noEmit` and testid-lint clean. Evidence: `docs/plans/league-projections/max-pf-trade-away/app-evidence.md` (§4 tests, §5 the 11-step TestFlight checklist).
+- **App (`feat/max-pf-moves-app` a1af32e1, app builder):** `mobile/tests/check-max-pf-moves.js` 119 assertions (groups A–N), 54 of 54 sabotages caught; all 185 `check-*.js` suites, `tsc --noEmit` and testid-lint clean. Evidence: `docs/plans/league-projections/max-pf-trade-away/app-evidence.md` (§4 tests, §5 the 11-step TestFlight checklist).
 - **Evidence posture:** D-056, `FTF_SKIP_SIM_GATE=1` on push; no simulator, no Maestro. Not verified: Postgres for the two new columns (same `_migrate_db` path as `median_game`), production run times, a device. The TestFlight checklist runs after the backtest, before the flag goes on.
+
+## 2026-11-12 — Release: Standings table, League rankings tile, Team Review fixes, ranked pick labels on `main` at `4a8cd70d`; TestFlight 1.22.0 (189) and (190)
+
+- **CI on the merged heads:** #677 `247c41e7`, #678 `004d50da`, #680 `b0727aaf`, #679 `fc57b05f`, #681 `26d752a2` and #682 `01184485` each green on all four checks before its merge. #682 was stacked on #681.
+- **App, main session, clean checkout of `c68090d4`:** `tsc --noEmit` clean; `check-team-review.js` 38 of 38. The full `check-*.js` set and testid-lint ran green in CI on the same head.
+- **Production (read-only checks):** #681 deploy live at 00:50 UTC on 2026-11-13; the #682 deploy was started by the merge at 01:13 UTC.
+- **TestFlight:** build 1.22.0 (189) from `ac877b73` (EAS `9d1a4d8f`), auto-submit scheduled. Build 1.22.0 (190) from the clean checkout of `c68090d4` (EAS `91741bb7`, submission `11b3c5c3`), auto-submit scheduled. #682 is server-side only and needs no build.
+- **Not verified:** anything on a device, for 189 or 190: the single Standings table (column widths, the Record | Points pill, the open card), the League rankings playoff tile, the Team Review fixes and the outlook-only Confirm (manual checklist step 11 in `docs/feedback/items/357-team-review/2026-11-12-current-data-fixes.md`), and the ranked pick labels on a live league (checklist in `docs/plans/pick-value-projected-slot/pick-slot-rank/scope.md`). Whether either submission reached TestFlight could not be read.
+- FTF_SKIP_SIM_GATE=1 on push (D-056).
 
 ## 2026-11-12 — Projected pick labels as a 1..N rank (D-257), branch `feat/projected-pick-rank`
 
