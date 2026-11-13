@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-13 — Operator re-run for forecasts without Max PF moves (D-260)
+
+- `POST /api/cron/league-projections {"retry_missing_moves": true}` makes due every current-model baseline success saved without a computed moves block, so the list shows before Tuesday's slot. One call; the 15-minute ticks drain the rest. Reports `retried_missing_moves`.
+- No worker change: a re-dispatched baseline captures fresh and adds the block to the reused forecast. Branch `feat/forecast-retry-missing-moves`, not merged.
+
 ## 2026-11-12 — Max PF moves turned on (D-259)
 
 - `league.max_pf_moves` true in `config/features.json` and the three flag fixtures, on the operator's word after the backtest. No caveat line.
