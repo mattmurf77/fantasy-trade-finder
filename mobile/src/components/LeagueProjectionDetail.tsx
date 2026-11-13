@@ -1,9 +1,13 @@
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 import {View, Pressable, StyleSheet} from 'react-native';
 import {Button, Icon, Text} from './chalkline';
 import {ink, chalk, space} from '../theme/chalkline';
 import type {ProjectionResult, ProjectionTeam, ProjectionWeek} from '../api/leagueProjections';
+import type {MaxPfMoves} from '../api/leagueProjections';
 import {lineupRowText} from '../utils/projectionCoverage';
+import {MAXPF_COPY} from '../utils/maxPfMovesCopy';
+import {sectionMounts, isOwnCard, deriveSection} from '../utils/maxPfMoves';
+import {MaxPfMovesBody} from './MaxPfMovesSection';
 
 // The saved forecast's per-team detail, mounted inside the Standings table's
 // open team (screens/StandingsScreen). Moved from the retired
@@ -13,8 +17,8 @@ import {lineupRowText} from '../utils/projectionCoverage';
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const number = (n: number | null) => n == null ? 'Unavailable' : n.toFixed(1);
 
-function Disclosure({label, children, testID}: {label: string; children: React.ReactNode; testID?: string}) {
-  const [open, setOpen] = useState(false);
+function Disclosure({label, children, testID, initialOpen = false}: {label: string; children: React.ReactNode; testID?: string; initialOpen?: boolean}) {
+  const [open, setOpen] = useState(initialOpen);
   return <View style={styles.disclosure}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={testID}
       onPress={() => setOpen(value => !value)} style={styles.toggle}>
@@ -25,9 +29,23 @@ function Disclosure({label, children, testID}: {label: string; children: React.R
   </View>;
 }
 
-/** Final record odds, Weekly projections and Draft pick odds for one team. */
-export function ProjectionTeamDetail({team, result}: {team: ProjectionTeam; result: ProjectionResult}) {
+/** Max PF moves inputs for the viewer's own card (contract §2); the screen
+ *  owns the forecast and roster queries and the flag read. */
+export interface MaxPfMovesProps {
+  block: MaxPfMoves | null | undefined; flagOn: boolean; isSleeper: boolean;
+  liveRosterIds: string[] | null; leagueId: string | null; userId: string | null;
+}
+
+/** Final record odds, Weekly projections, Draft pick odds and, on the
+ *  viewer's own card only, Max PF moves for one team. */
+export function ProjectionTeamDetail({team, result, maxPf}: {team: ProjectionTeam; result: ProjectionResult; maxPf?: MaxPfMovesProps}) {
   const names = new Map(result.teams.map(t => [t.roster_id, t.name]));
+  // Fires maxpf_moves_viewed once per opening of this card (it unmounts on close).
+  const maxPfViewed = useRef(false);
+  const moves = maxPf?.block && maxPf.leagueId && sectionMounts({
+    block: maxPf.block, flagOn: maxPf.flagOn, isSleeper: maxPf.isSleeper,
+    ownCard: isOwnCard(team.roster_id, result.viewer_roster_id, maxPf.block),
+  }) ? {block: maxPf.block, leagueId: maxPf.leagueId, model: deriveSection(maxPf.block, maxPf.liveRosterIds)} : null;
   return <View style={styles.sections} testID="standings.open.detail">
     <Disclosure label="Final record odds">
       {team.final_record_distribution.map(r => <Text key={r.record.join('–')} variant="bodySm">{r.record.join('–')}: {pct(r.probability)}</Text>)}
@@ -50,6 +68,9 @@ export function ProjectionTeamDetail({team, result}: {team: ProjectionTeam; resu
         <Text variant="bodySm">Missed-playoff simulations: {team.nonplayoff_samples}. This franchise is projected to own {number(team.owner_expected_nonplayoff_picks)} non-playoff picks, with a {pct(team.owner_probability_at_least_one)} chance of at least one.</Text>
       </Disclosure>
     </Disclosure>
+    {moves ? <Disclosure label={MAXPF_COPY['C-TITLE']} testID="standings.maxpf.toggle" initialOpen={moves.model.initialOpen}>
+      <MaxPfMovesBody block={moves.block} model={moves.model} leagueId={moves.leagueId} userId={maxPf?.userId ?? null} viewedRef={maxPfViewed} />
+    </Disclosure> : null}
   </View>;
 }
 

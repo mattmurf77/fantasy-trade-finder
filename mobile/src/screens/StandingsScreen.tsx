@@ -77,6 +77,7 @@ export default function StandingsScreen() {
     useSession((s) => s.leagues.find((l) => l.league_id === leagueId)?.platform) ?? 'sleeper';
   const isSleeper = platform === 'sleeper';
   const batchProjections = useFlag('league.projections');
+  const maxPfMovesOn = useFlag('league.max_pf_moves');
 
   // View and per-view sort live as long as the screen is mounted, so a
   // league switch in the header keeps them.
@@ -115,6 +116,13 @@ export default function StandingsScreen() {
     const myRosterId = userId ? findMyRoster(rosters, userId)?.roster_id ?? null : null;
     return currentStandings(rosters, usersQuery.data ?? [], myRosterId);
   }, [rostersQuery.data, usersQuery.data, userId]);
+
+  // Max PF moves' roster-changed check (contract §6.3): the viewer's live
+  // Sleeper roster from the query above; null until it loads (no check).
+  const liveRosterIds = useMemo(() => {
+    const rosters = rostersQuery.data;
+    return rosters && userId ? findMyRoster(rosters, userId)?.players ?? null : null;
+  }, [rostersQuery.data, userId]);
 
   const data = forecastEnabled ? forecastQuery.data : undefined;
   const result = data?.run?.result ?? null;
@@ -260,7 +268,9 @@ export default function StandingsScreen() {
                       {lines.average ? (
                         <Text variant="bodySm" testID="standings.open.average">{lines.average}</Text>
                       ) : null}
-                      {r.forecast && result ? <ProjectionTeamDetail team={r.forecast} result={result} /> : null}
+                      {r.forecast && result ? <ProjectionTeamDetail team={r.forecast} result={result} maxPf={{
+                        block: data?.max_pf_moves, flagOn: maxPfMovesOn, isSleeper, liveRosterIds, leagueId, userId,
+                      }} /> : null}
                     </View>
                   ) : null}
                 </View>

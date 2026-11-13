@@ -40,6 +40,45 @@ export interface OutlookRecommendation {
   recommended_outlook: ProjectionOutlook | null; current_outlook: string | null; differs: boolean;
   suggestion: string | null; explanation: string; captured_at: string | null;
 }
+// ── Max PF moves (flag `league.max_pf_moves`; contract:
+// docs/plans/league-projections/max-pf-trade-away/contract.md §3). The app
+// reads every number here and never re-computes one (utils/maxPfMoves.ts).
+export type MaxPfMovesState =
+  | 'unavailable' | 'season_over' | 'after_trade_deadline' | 'draft_order_not_maxpf'
+  | 'no_miss' | 'no_moves' | 'ready';
+export type DraftOrderRule = 'maxpf_lowest_first' | 'reverse_standings' | 'lottery_or_other';
+export interface DraftOrder {rule: DraftOrderRule | null; set_at: string | null}
+export interface PickOwner {owns_own_pick: boolean; owner_roster_id: number; owner_name: string}
+export interface MaxPfBaseline {
+  weeks_remaining: number; first_week: number; last_week: number; weeks_excluded_played: number;
+  playoff_probability: number; playoff_band: ProjectionOutlook; pick_if_miss: number | null;
+  top3_probability: number; label: string | null; label_slot: number | null;
+  pick_value: number | null; pick_value_status: 'priced' | 'not_priced';
+}
+export interface MaxPfReplacement {player_id: string | null; name: string | null; short_name: string | null; free_agent: boolean; weeks: number}
+export interface MaxPfMoveWeek {
+  week: number; status: 'changed' | 'no_change' | 'bye' | 'played' | 'not_projected';
+  maxpf_change: number; lineup_change: number; replaced_by: Omit<MaxPfReplacement, 'weeks'>[];
+}
+export interface NowAfter {now: number; after: number}
+export interface MaxPfMoveRow {
+  rank: number; player_id: string; name: string; short_name: string; position: string;
+  maxpf_change: number; maxpf_change_exact: string; lineup_change: number; lineup_change_exact: string;
+  weeks_affected: number; replacements: MaxPfReplacement[]; replacements_more: number; weeks: MaxPfMoveWeek[];
+  playoff_probability: NowAfter; pick_if_miss: {now: number | null; after: number | null};
+  top3_probability: NowAfter; label: {now: string | null; after: string | null};
+  label_slot: {now: number | null; after: number | null};
+  pick_value: {now: number; after: number; change: number} | null;
+  keep: boolean; passes_threshold: boolean;
+}
+export interface MaxPfMoves {
+  version: number; state: MaxPfMovesState; reason: string | null;
+  viewer_roster_id: number | null; captured_at: string | null;
+  draft_season: number | null; draft_round: number | null; draft_order: DraftOrder;
+  saved_outlook: 'championship' | 'contender' | 'rebuilder' | 'jets' | 'not_sure' | null;
+  pick_owner: PickOwner | null; baseline: MaxPfBaseline | null; roster_player_ids: string[];
+  rows: MaxPfMoveRow[]; candidates_total: number;
+}
 export interface ProjectionRun {run_id: string; status: string; reason: string | null; result: ProjectionResult | null}
 export interface ProjectionView {
   state: string; reason: string | null; run: ProjectionRun | null; attempt: ProjectionRun | null;
@@ -50,6 +89,8 @@ export interface ProjectionView {
   model_current?: boolean;
   /** Absent while flag `league.projection_outlook` is off. */
   outlook_recommendation?: OutlookRecommendation;
+  /** Absent while flag `league.max_pf_moves` is off (or on an older server). */
+  max_pf_moves?: MaxPfMoves;
 }
 export const getLeagueProjectionBatch = (leagueId: string) =>
   api.get<ProjectionView>(`/api/leagues/${encodeURIComponent(leagueId)}/projection-runs/latest`);
