@@ -555,7 +555,7 @@ English; never "tank", never anything about who to start or bench.
 |---|---|---|
 | C-TITLE | Disclosure label | `Max PF moves` |
 | C-BASE | Baseline line, `ready`/`no_moves` | `Your {season} 1st today: {label} projected. If you miss the playoffs, pick {pick_if_miss} on average. {top3} chance of a top-3 pick.` then, when priced, ` Value {value}.` When `label` is null the first sentence is `Your {season} 1st:` and the rest is unchanged. |
-| C-HEAD | Above the rows | `Max PF change over the last {n} weeks` (n = `weeks_remaining`; n = 1 → `over the last week`) |
+| C-HEAD | Above the rows | `Max PF change over the remaining {n} weeks` (n = `weeks_remaining`; n = 1 → `over the final week`) |
 | C-ROW-1 | Row, line 1 | `{short_name}  {position}  {maxpf_change}` |
 | C-ROW-2 | Row, line 2 | `Pick if you miss {now} → {after}` then, when priced, ` · Value {change}` |
 | C-KEEP | Tag on a `keep` row | `Keep` |
