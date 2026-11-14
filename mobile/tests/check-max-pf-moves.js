@@ -256,10 +256,11 @@ const R3 = READY.rows[2];
     replaced_by: [{ player_id: '20391', name: 'Ike Brennan', short_name: 'I. Brennan', free_agent: true }] }] }));
   assert(eq(posWeek, ['Week 12: +3.2, Ike Brennan (free agent) instead']), 'H2d. C-WEEK reads "Week 12: +3.2, Name instead" for a positive week', show(posWeek));
   assert(u.baselineLine(READY).indexOf('+') === -1 && u.rowLine2(R1, false).indexOf('+') === -1
-      && u.formatPick(3.7) === '3.7' && u.formatValue(2480) === '2,480',
-    'H2e. levels (pick if you miss, baseline value, percentages) never gain a "+"');
-  assert(u.formatPick(3.6912) === '3.7' && u.formatPick(3.3604) === '3.4' && u.formatPick(null) === '—',
-    'H3. pick if you miss: one decimal; null ⇒ —');
+      && u.formatValue(2480) === '2,480',
+    'H2e. levels (most likely pick, baseline value, percentages) never gain a "+"');
+  // H3 (D-263): the decimal average pick position is gone from this surface.
+  assert(u.formatPick === undefined && !/pick_if_miss/.test(utilSrc) && !/pick_if_miss/.test(read('src/components/MaxPfMovesSection.tsx')),
+    'H3. no decimal pick formatter, and neither the util nor the component reads pick_if_miss (D-263)');
   const pct = [[0.4583, '46%'], [0.6177, '62%'], [0.0271, '3%'], [0.0122, '1%'], [0.004, '<1%'], [0.005, '1%'],
     [0.285, '29%'], [0.125, '13%'], [0.995, '>99%'], [0.9949, '99%'], [0, '0%'], [1, '100%'], [0.9997, '>99%']];
   const badPct = pct.filter(([p, s]) => u.formatPct(p) !== s).map(([p, s]) => `${p}→${u.formatPct(p)} (want ${s})`);
@@ -272,18 +273,30 @@ const R3 = READY.rows[2];
       && u.formatPoints(-0.4) === '0', 'H6b. a change of exactly 0 (after rounding) is "0", never "+0" or "−0"');
   assert(u.ARROW === ' → ', 'H7. arrows are " → " (U+2192 with spaces)');
   const base = u.baselineLine(READY);
-  assert(base === 'Your 2027 1st today: 1.02 projected. If you miss the playoffs, pick 3.7 on average. 46% chance of a top-3 pick. Value 2,480.',
+  assert(base === 'Your 2027 1st today: 1.02 projected. If you miss the playoffs, most likely pick 1.03 (24%). 46% chance of a top-3 pick. Value 2,480.',
     'H8. C-BASE for §5.1, priced', base);
   const unpriced = withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { pick_value: null, pick_value_status: 'not_priced' }) });
-  assert(u.baselineLine(unpriced) === 'Your 2027 1st today: 1.02 projected. If you miss the playoffs, pick 3.7 on average. 46% chance of a top-3 pick.'
+  assert(u.baselineLine(unpriced) === 'Your 2027 1st today: 1.02 projected. If you miss the playoffs, most likely pick 1.03 (24%). 46% chance of a top-3 pick.'
       && !u.deriveSection(unpriced, null).priced, 'H9. not_priced hides the baseline value');
   const nolabel = withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { label: null }) });
-  assert(u.baselineLine(nolabel) === 'Your 2027 1st: If you miss the playoffs, pick 3.7 on average. 46% chance of a top-3 pick. Value 2,480.',
+  assert(u.baselineLine(nolabel) === 'Your 2027 1st: If you miss the playoffs, most likely pick 1.03 (24%). 46% chance of a top-3 pick. Value 2,480.',
     'H10. label null ⇒ "Your {season} 1st:" and the rest unchanged', u.baselineLine(nolabel));
-  assert(u.rowLine1(R1) === `R. Sato  RB  ${M}31` && u.rowLine2(R1, true) === 'Pick if you miss 3.7 → 3.4 · Value +169'
-      && u.rowLine2(R1, false) === 'Pick if you miss 3.7 → 3.4', 'H11. C-ROW-1 / C-ROW-2 (value only when priced)');
-  const noAfter = Object.assign(clone(R1), { pick_if_miss: { now: 3.6912, after: null }, pick_value: null });
-  assert(u.rowLine2(noAfter, true) === 'Pick if you miss 3.7 → —', 'H12. after null ⇒ — ; a null row value is hidden');
+  const noMl = withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { most_likely_pick: undefined }) });
+  assert(u.baselineLine(noMl) === 'Your 2027 1st today: 1.02 projected. 46% chance of a top-3 pick. Value 2,480.'
+      && u.baselineLine(Object.assign(clone(noMl), { baseline: Object.assign(clone(noMl.baseline), { label: null }) }))
+        === 'Your 2027 1st: 46% chance of a top-3 pick. Value 2,480.',
+    'H10b. no most_likely_pick on the baseline ⇒ the "If you miss" sentence is left out (D-263)', u.baselineLine(noMl));
+  assert(u.rowLine1(R1) === `R. Sato  RB  ${M}31` && u.rowLine2(R1, true) === 'Most likely pick 1.03 (24%) → 1.02 (29%) · Value +169'
+      && u.rowLine2(R1, false) === 'Most likely pick 1.03 (24%) → 1.02 (29%)', 'H11. C-ROW-1 / C-ROW-2 (value only when priced)',
+    u.rowLine2(R1, true));
+  assert(u.rowLine2(R3, false) === 'Most likely pick 1.03 (24%) → 1.03 (25%)',
+    'H11b. both sides shown even when the labels are identical (D-263)', u.rowLine2(R3, false));
+  const tiny = Object.assign(clone(R1), { most_likely_pick: { now: { slot: 1, label: '1.01', probability: 0.004 },
+    after: { slot: 1, label: '1.01', probability: 0.9951 } } });
+  assert(u.rowLine2(tiny, false) === 'Most likely pick 1.01 (<1%) → 1.01 (>99%)', 'H11c. the chance uses the top-3 percent rules (<1%, >99%)');
+  const noMlRow = Object.assign(clone(R1), { most_likely_pick: undefined });
+  assert(u.rowLine2(noMlRow, true) === 'Value +169' && u.rowLine2(Object.assign(clone(noMlRow), { pick_value: null }), true) === '',
+    'H12. no most_likely_pick ⇒ that part is left out (value alone, or nothing); never the decimal', u.rowLine2(noMlRow, true));
   const d1 = u.rowDetail(R1);
   assert(d1.top3 === 'Top-3 chance 46% → 62%' && d1.playoff === 'Playoff chance 3% → 1%'
       && d1.label === 'Projected pick 1.02, unchanged', 'H13. opened row: top-3, playoff, unchanged label');
@@ -514,13 +527,14 @@ const R3 = READY.rows[2];
   assert(u.combinedLine1(C2) === `Top 2 together: R. Sato and D. Okafor  ${M}55`
       && u.combinedLine1(C3) === `Top 3 together: R. Sato, D. Okafor and B. Halvorsen  ${M}59`,
     'O3a. C-COMB-1 names joined "A and B" / "A, B and C", change with U+2212', u.combinedLine1(C3));
-  assert(u.combinedLine2(C2, true) === 'Pick if you miss 3.7 → 3.1 · Value +282' && u.combinedLine2(C2, false) === 'Pick if you miss 3.7 → 3.1',
+  assert(u.combinedLine2(C2, true) === 'Most likely pick 1.03 (24%) → 1.01 (34%) · Value +282'
+      && u.combinedLine2(C2, false) === 'Most likely pick 1.03 (24%) → 1.01 (34%)',
     'O3b. C-COMB-2 = C-ROW-2 rules: value only when priced', u.combinedLine2(C2, true));
   assert(eq(u.combinedDetail(C2), { top3: 'Top-3 chance 46% → 70%', playoff: 'Playoff chance 3% → 1%' }),
     'O3c. an opened combined line shows top-3 and playoff chance only', show(u.combinedDetail(C2)));
-  const odd = Object.assign(clone(C2), { maxpf_change: 0, pick_if_miss: { now: 3.6912, after: null }, pick_value: { now: 1, after: 1, change: 0.3 } });
-  assert(u.combinedLine1(odd).endsWith('  0') && u.combinedLine2(odd, true) === 'Pick if you miss 3.7 → — · Value 0',
-    'O3d. §11 on combined: 0 as "0", null after as "—", a zero value change as "0"', u.combinedLine2(odd, true));
+  const odd = Object.assign(clone(C2), { maxpf_change: 0, most_likely_pick: undefined, pick_value: { now: 1, after: 1, change: 0.3 } });
+  assert(u.combinedLine1(odd).endsWith('  0') && u.combinedLine2(odd, true) === 'Value 0',
+    'O3d. §11 on combined: 0 as "0", no most_likely_pick ⇒ value alone, a zero value change as "0"', u.combinedLine2(odd, true));
   const unpriced = withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { pick_value: null, pick_value_status: 'not_priced' }) });
   assert(!/Value/.test(u.combinedLine2(C2, u.deriveSection(unpriced, null).priced)), 'O3e. not_priced hides the combined value');
   assert(u.combinedLine1(Object.assign(clone(C2), { maxpf_change: 4 })).endsWith('  +4'), 'O3f. a positive combined change is "+n"');
@@ -589,6 +603,36 @@ const R3 = READY.rows[2];
     'P2. opened rows and combined lines use the same proof for now and after',
     `${u.rowDetail(r, { playoff_clinched: true }).playoff} | ${u.combinedDetail(e, null).playoff}`);
   assert(u.formatPct(1) === '100%' && u.formatPct(0) === '0%', 'P3. top-3 chance keeps formatPct (pick odds are out of scope)');
+}
+
+// ═══ Q. Most likely pick replaces the decimal average (D-263) ═════════════
+{
+  const OLD = /Pick if you miss|on average/;
+  const DECIMAL = /(^|[^\d.])\d+\.\d(?!\d)/; // "3.7"-style; pick labels like "1.03" have two digits
+  const blocks = [READY, withBlock(READY, { state: 'no_moves' }),
+    withBlock(READY, { baseline: Object.assign(clone(READY.baseline), { label: null, most_likely_pick: undefined }),
+      rows: READY.rows.map((r) => Object.assign(clone(r), { most_likely_pick: undefined })),
+      combined: READY.combined.map((e) => Object.assign(clone(e), { most_likely_pick: undefined })) })];
+  const lines = [];
+  const pickLines = []; // the lines that carried the average (week lines legitimately show "−7.0" points)
+  for (const b of blocks) {
+    const m = u.deriveSection(b, null);
+    pickLines.push(m.baseline, u.baselineLine(b));
+    for (const r of b.rows) {
+      pickLines.push(u.rowLine2(r, true), u.rowLine2(r, false));
+      lines.push(u.rowLine1(r), ...Object.values(u.rowDetail(r, b.baseline)).flat());
+    }
+    for (const e of b.combined) {
+      pickLines.push(u.combinedLine2(e, true), u.combinedLine2(e, false));
+      lines.push(u.combinedLine1(e), ...Object.values(u.combinedDetail(e, b.baseline)));
+    }
+  }
+  const text = lines.concat(pickLines).filter((l) => typeof l === 'string');
+  const bad = text.filter((l) => OLD.test(l)).concat(pickLines.filter((l) => typeof l === 'string' && DECIMAL.test(l)));
+  assert(text.length > 40 && bad.length === 0, 'Q1. no rendered line has "Pick if you miss", "on average" or a one-decimal pick', bad.join(' | '));
+  assert(Object.values(C).every((s) => !OLD.test(s) && !/\{pick_if_miss\}/.test(s)), 'Q2. no copy string keeps the old wording or fill');
+  assert(text.filter((l) => /Most likely pick|most likely pick/.test(l)).length >= 2 * READY.rows.length,
+    'Q3. the most likely pick is what shows instead');
 }
 
 console.log(failures ? `\n${failures} max-pf-moves check(s) FAILED, ${passes} passed.` : `\nAll max-pf-moves checks passed (${passes}).`);

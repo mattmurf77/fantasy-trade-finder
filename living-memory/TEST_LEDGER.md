@@ -1,3 +1,16 @@
+## 2026-11-14 — Max PF moves: most likely pick instead of the average (D-263), branch `feat/maxpf-most-likely-pick`
+
+- **Backend (Python 3.12, local venv, no network):** new `test_maxpf_moves_most_likely.py` 7 (basis = the simulation's own `conditional_pick_probabilities` argmax; renormalising; ties to the earlier slot incl. float noise; missing data omits only that item; rows and combined entries; saved run unchanged and nothing saved; settings keys and hash pinned). Updated two key-set tests in `test_maxpf_moves_combined.py`. Related files `test_maxpf_*.py` + `test_league_projection_*.py`: **739 passed, 0 failed** (2m31s). Full suite: CI.
+- **Backend sabotages, red then restored (6):** no renormalisation; ties to the later slot; "after" from the baseline distribution; fall back to "now" when "after" is missing; compose writes into the saved row; a new settings key.
+- **App:** `tsc --noEmit` clean; testid-lint clean; `check-max-pf-moves.js` 153 of 153 (H3, H8-H12, O3b/O3d updated, new group Q: no rendered line has "Pick if you miss", "on average" or a one-decimal pick); `check-home-playoff-banner`, `check-playoff-odds-display`, `check-standings-table`, `check-team-review`, `check-win-now` green.
+- **App sabotages, red then restored (5):** old C-ROW-2 wording (A1/A2/H11/O3b/Q1-Q3); baseline keeps the sentence without the value (H10b); baseline falls back to the decimal (H3); value part keeps its leading " · " (H12/O3d); after label hidden when equal (H11b/H11c).
+- **Not verified:** anything on a device (D-056; checklist in `docs/plans/league-projections/max-pf-trade-away/scope-most-likely-pick.md`). FTF_SKIP_SIM_GATE=1 on push.
+
+## 2026-11-14 — Release: playoff-odds proof + Max PF v1.1 on `main` at `11f774fb`; TestFlight 1.22.0 (192)
+
+- **TestFlight:** EAS production build 1.22.0 (192) from `11f774fb` (the #687 merge commit), submitted to TestFlight (EAS submission `afd6e1bc`).
+- **Not verified:** anything on a device; whether the build finished processing in TestFlight. Device checks: `docs/plans/league-projections/clinch-display/testflight-checklist.md` and the v1.1 items in `docs/plans/league-projections/max-pf-trade-away/app-evidence.md`.
+
 ## 2026-11-13 — Playoff odds 100% / 0% need a proof (D-262), branch `feat/playoff-odds-clinch-display`
 
 - **Backend (Python 3.12.16, local venv, no network):** new `test_playoff_clinch.py` 37 (hand-built clinched / tie-only not clinched / eliminated / tie-alive; in-game ties; the operator's 12-team, 6-spot, two 8-1 teams five weeks out: not clinched; brute force over every win/loss/tie outcome on 541 random 4- and 6-team states, all equal; conservative returns; season over incl. an exact tie; `attach`; `odds_text` boundaries at both precisions; the outlook sentence and `saved_chance`), plus `test_maxpf_moves_job.py::test_reused_prior_result_saved_before_d262_gets_the_clinch_keys`. Deliberately updated pins: flag-off byte identity (`test_maxpf_moves_job`, `test_league_projection_control_review`: the worker's result now also carries the proof; probabilities asserted equal), v1 golden keys (exactly two baseline keys added), `saved_chance`, contract §5.1 / §5.4. Full suite on the code commits (`e7975e5a` tree): **15,625 passed, 42 skipped, 0 failed in 24m01s** (D-261 tip was 15,587; +38 new).

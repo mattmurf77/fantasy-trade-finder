@@ -7,7 +7,7 @@
 // the zero-import playoff-odds rule (D-262); tests/check-max-pf-moves.js
 // transpiles all three and executes them.
 import type {
-  MaxPfMoves, MaxPfMoveRow, MaxPfMovesState, MaxPfReplacement, DraftOrderRule, MaxPfCombined,
+  MaxPfMoves, MaxPfMoveRow, MaxPfMovesState, MaxPfReplacement, DraftOrderRule, MaxPfCombined, MaxPfPickChance,
 } from '../api/leagueProjections';
 import { MAXPF_COPY as C } from './maxPfMovesCopy';
 import { playoffOddsText, type PlayoffProof } from './playoffOdds';
@@ -50,8 +50,8 @@ const thousands = (n: number) => String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d
 
 // Changes, not levels: a sign on every non-zero value (a week's max PF or a
 // row's lineup change can be POSITIVE when a free agent outprojects the
-// removed player, contract §3.5). Levels (pick if you miss, pick value,
-// probabilities) never go through these two.
+// removed player, contract §3.5). Levels (pick value, probabilities) never
+// go through these two.
 /** A row's change: whole points from the integer field; `−n` / `+n`; exactly 0 as `0`. */
 export function formatPoints(n: number): string {
   const r = halfAwayFromZero(n);
@@ -63,10 +63,6 @@ export function formatWeekChange(n: number): string {
   const s = Math.abs(n).toFixed(1);
   if (s === '0.0') return '0';
   return n < 0 ? `${MINUS}${s}` : `+${s}`;
-}
-/** Pick if you miss: one decimal; null → "—" (§6.6). */
-export function formatPick(n: number | null | undefined): string {
-  return n == null ? '—' : n.toFixed(1);
 }
 /** Whole percent, round half up; `<1%`, `>99%`; 0% and 100% exact. */
 export function formatPct(p: number): string {
@@ -214,11 +210,19 @@ export function baselineLine(block: MaxPfMoves): string | null {
   if (!b || !isListState(block.state)) return null;
   const full = C['C-BASE'];
   const season = block.draft_season ?? '';
-  const template = b.label == null
+  let template = b.label == null
     ? C['C-BASE.nolabel'] + full.slice(full.indexOf(' If you miss'))
     : full;
+  // D-263: no most likely pick ⇒ the "If you miss" sentence is left out
+  // (never the decimal average).
+  const ml = b.most_likely_pick;
+  if (!ml) {
+    const start = template.indexOf(' If you miss');
+    template = template.slice(0, start) + template.slice(template.indexOf('.', template.indexOf('{ml_pct}')) + 1);
+  }
   let line = fill(template, {
-    season, label: b.label ?? '', pick_if_miss: formatPick(b.pick_if_miss), top3: formatPct(b.top3_probability),
+    season, label: b.label ?? '', ml_label: ml?.label ?? '', ml_pct: ml ? formatPct(ml.probability) : '',
+    top3: formatPct(b.top3_probability),
   });
   if (priced(block) && b.pick_value != null) line += fill(C['C-BASE.value'], { value: formatValue(b.pick_value) });
   return line;
@@ -244,10 +248,23 @@ export function rowLine1(row: MaxPfMoveRow): string {
   const p = rowLine1Parts(row);
   return fill(C['C-ROW-1'], { short_name: p.name, position: p.position, maxpf_change: p.change });
 }
-export function rowLine2(row: MaxPfMoveRow, isPriced: boolean): string {
-  let line = fill(C['C-ROW-2'], { now: formatPick(row.pick_if_miss.now), after: formatPick(row.pick_if_miss.after) });
-  if (isPriced && row.pick_value) line += fill(C['C-ROW-2.value'], { change: formatValueChange(row.pick_value.change) });
+/** C-ROW-2 (D-263): the most likely pick if you miss and its chance, now →
+ *  after, then the value change when priced. With no `most_likely_pick` that
+ *  part is left out (never the decimal average); '' when nothing is left. */
+function pickLine(ml: { now: MaxPfPickChance; after: MaxPfPickChance } | undefined,
+  value: { change: number } | null, isPriced: boolean): string {
+  let line = ml ? fill(C['C-ROW-2'], {
+    now_label: ml.now.label, now_pct: formatPct(ml.now.probability),
+    after_label: ml.after.label, after_pct: formatPct(ml.after.probability),
+  }) : '';
+  if (isPriced && value) {
+    const part = fill(C['C-ROW-2.value'], { change: formatValueChange(value.change) });
+    line += line ? part : part.replace(/^ · /, '');
+  }
   return line;
+}
+export function rowLine2(row: MaxPfMoveRow, isPriced: boolean): string {
+  return pickLine(row.most_likely_pick, row.pick_value, isPriced);
 }
 // ── Combined lines (v1.1, contract §10 C-COMB-*; no week detail, no hand-off) ─
 export function combinedLine1Parts(entry: MaxPfCombined) {
@@ -262,9 +279,7 @@ export function combinedLine1(entry: MaxPfCombined): string {
 }
 /** Same words and rules as a row's line 2 (C-ROW-2). */
 export function combinedLine2(entry: MaxPfCombined, isPriced: boolean): string {
-  let line = fill(C['C-ROW-2'], { now: formatPick(entry.pick_if_miss.now), after: formatPick(entry.pick_if_miss.after) });
-  if (isPriced && entry.pick_value) line += fill(C['C-ROW-2.value'], { change: formatValueChange(entry.pick_value.change) });
-  return line;
+  return pickLine(entry.most_likely_pick, entry.pick_value, isPriced);
 }
 /** The opened combined line: top-3 chance and playoff chance only. */
 export function combinedDetail(entry: MaxPfCombined, proof: PlayoffProof | null | undefined) {

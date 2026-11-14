@@ -494,6 +494,38 @@ def _dist(picks, playoff, spots):
     return list(picks) + [playoff / spots] * spots
 
 
+_TIE = 1e-12  # float noise from a renormalisation never splits a tie
+
+
+def most_likely_pick(picks, round_):
+    """D-263, read time: the single most likely pick GIVEN A MISS, the basis of
+    `pick_if_miss`. `picks` is a saved non-playoff slot distribution
+    (`pick_probabilities` or a row's `after_pick_probabilities`: one entry per
+    non-playoff slot, slot 1 first, summing to the miss chance), so it is
+    renormalised to sum to 1. Ties go to the earlier pick. Returns
+    {"slot", "label", "probability"}, or None when there is no usable
+    distribution (absent, empty, or no miss mass)."""
+    if not isinstance(picks, (list, tuple)) or not picks:
+        return None
+    total = sum(picks)
+    if not total > 0:
+        return None
+    best = 0
+    for k, p in enumerate(picks):
+        if p > picks[best] + _TIE:
+            best = k
+    return {"slot": best + 1, "label": pick_slots.slot_suffix(round_, best + 1), "probability": picks[best] / total}
+
+
+def _most_likely_pair(now, after_picks, pick_if_miss, round_):
+    """{"now", "after"} for a row or combined entry, or None when either side
+    is missing (an older block, or a side with no conditional pick)."""
+    if now is None or pick_if_miss.get("after") is None:
+        return None
+    after = most_likely_pick(after_picks, round_)
+    return {"now": dict(now), "after": after} if after else None
+
+
 def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_outlook=None,
             untouchables=(), cuts=None, price=None):
     """The `max_pf_moves` block served on the forecast read (contract §3, §4.1).
@@ -556,6 +588,13 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
         "pick_value": now_value, "pick_value_status": "priced" if now_value is not None else "not_priced"}
     if team["conditional_expected_pick"] is None:
         return {**block, "state": "no_miss"}
+    # D-263, additive: the most likely pick (and its chance) if you miss, in
+    # place of the decimal average on screen. Derived here from the saved
+    # distributions; nothing saved changes. Omitted where the data is missing.
+    round_ = block["draft_round"]
+    ml_now = most_likely_pick(team.get("pick_probabilities"), round_)
+    if ml_now:
+        block["baseline"]["most_likely_pick"] = ml_now
     keep = set(map(str, untouchables or ()))
     rows = []
     for saved_row in raw.get("rows", []):
@@ -566,6 +605,9 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
             if after is not None:
                 value = {"now": now_value, "after": after, "change": round(after - now_value, 1)}
         row.update(pick_value=value, keep=row["player_id"] in keep)
+        pair = _most_likely_pair(ml_now, saved_row.get("after_pick_probabilities"), row["pick_if_miss"], round_)
+        if pair:
+            row["most_likely_pick"] = pair
         rows.append(row)
     # v1.1 (D-261), additive: the "top N together" entries, priced and Keep-
     # tagged the way rows are. They never decide `state` (v1's rule, which
@@ -579,6 +621,9 @@ def compose(view_state, saved, *, failure_reason=None, draft_order=None, saved_o
             if after is not None:
                 value = {"now": now_value, "after": after, "change": round(after - now_value, 1)}
         entry.update(pick_value=value, keep=any(pid in keep for pid in entry["player_ids"]))
+        pair = _most_likely_pair(ml_now, saved_entry.get("after_pick_probabilities"), entry["pick_if_miss"], round_)
+        if pair:
+            entry["most_likely_pick"] = pair
         combined.append(entry)
     state = "ready" if any(r["passes_threshold"] for r in rows) else "no_moves"
     return {**block, "state": state, "rows": rows, "combined": combined}

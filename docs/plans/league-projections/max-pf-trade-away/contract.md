@@ -1,5 +1,13 @@
 # Max PF moves: the build contract (v1, with the v1.1 additions)
 
+> **Most-likely-pick note (2026-11-14, D-263).** The screen no longer shows the decimal average
+> pick if you miss ("3.7", which read as the pick label "1.07"). The read adds
+> `most_likely_pick` (§3.4, §3.5, §3.7): the single most likely pick slot given a miss, its D-257
+> style label and its chance, derived in `maxpf_moves.compose` from distributions the saved run
+> already holds. Additive: `version` stays 1, `pick_if_miss` is still served (builds 191/192 read
+> it), nothing saved, no setting and no `settings_hash` change. Copy: C-BASE, C-ROW-2, C-COMB-2
+> (§10), §6.6, §11. Scope note: [scope-most-likely-pick.md](scope-most-likely-pick.md).
+
 > **v1.1 change note (2026-11-13, D-261).** Operator decision: always show the top moves with
 > their numbers, add a line for the top two and three combined, and keep a "none of these
 > changes your pick on its own" sentence when that is true. Everything below is additive;
@@ -118,6 +126,7 @@ is read.
 | `playoff_probability` | `number` | no | S | `result.teams[viewer].playoff_probability` |
 | `playoff_band` | `'jets' \| 'rebuilder' \| 'contender' \| 'championship'` | no | R | `recommendation.classify(playoff_probability, thresholds)` (`recommendation.py:60-70`). Analytics only; the app never re-derives it |
 | `pick_if_miss` | `number` | yes | S | `conditional_expected_pick` (`simulation.py:303`). Null when fewer than `min_pick_samples` simulations miss; then `state` is `no_miss` |
+| `most_likely_pick` | `PickChance` | absent | R | **D-263.** The most likely pick if you miss: argmax over `result.teams[viewer].pick_probabilities` (one entry per non-playoff slot, slot 1 first, summing to the miss chance, `simulation.py:301`) renormalised to sum to 1, so it is conditional on missing the playoffs, the basis of `pick_if_miss`. Ties go to the earlier pick (lower slot). Absent when `pick_if_miss` is null (`no_miss`) or the distribution has no miss mass |
 | `top3_probability` | `number` | no | S | Chance the user's own pick lands in slots 1 to 3 of the non-playoff order: `sum(pick_probabilities[0:3])` (unconditional, `simulation.py:301`). If the league has fewer than 3 non-playoff picks, the sum over all of them |
 | `label` | `string` | yes | S | The D-257 ranked label for the user's own pick in this run, formatted by `pick_slots.slot_suffix` (`pick_slots.py:240-244`), e.g. `"1.02"`. From `pick_projection.slot_ranks` (`pick_projection.py:247-261`) over this run's slot distributions |
 | `label_slot` | `number` | yes | S | The integer behind `label` (1..N) |
@@ -143,6 +152,7 @@ is read.
 | `weeks` | `MoveWeek[]` | no | S | One per simulated week, ascending |
 | `playoff_probability` | `NowAfter` | no | S | `now` = baseline; `after` = baseline + paired difference, clamped to 0..1 |
 | `pick_if_miss` | `NowAfterNullable` | no | S | `after` null when either 5,000-run gives no conditional pick (fewer than `min_pick_samples` misses) |
+| `most_likely_pick` | `{now: PickChance, after: PickChance}` | absent | R | **D-263.** `now` = the baseline's `most_likely_pick`; `after` = the same rule over the row's saved `after_pick_probabilities` (§13.1; non-playoff slots only, already scaled to `1 − after_playoff_probability`, renormalised here). Absent when the saved row has no `after_pick_probabilities` (an older block), `pick_if_miss.after` is null, or the baseline has none |
 | `top3_probability` | `NowAfter` | no | S | Clamped to 0..1 |
 | `label` | `{now: string \| null, after: string \| null}` | no | S | D-257 label before and after; `after` ranks every team's "after" expected slot (§13.3) |
 | `label_slot` | `{now: number \| null, after: number \| null}` | no | S | The integers |
@@ -151,6 +161,9 @@ is read.
 | `passes_threshold` | `boolean` | no | S | §3.6 |
 
 `NowAfter` = `{now: number, after: number}`. `NowAfterNullable` = `{now: number | null, after: number | null}`.
+`PickChance` (D-263) = `{slot: number, label: string, probability: number}`: `slot` 1-based among
+the non-playoff picks, `label` from `pick_slots.slot_suffix(draft_round, slot)` (e.g. `"1.03"`, the
+same formatter as `label`), `probability` 0..1 unrounded, conditional on missing the playoffs.
 
 `Replacement`:
 
@@ -198,6 +211,7 @@ row's (§13.3, same "before" run). No week detail, no replacements, no Find trad
 | `lineup_change` / `lineup_change_exact` | `number` / `string` | no | S | As on a row |
 | `playoff_probability`, `pick_if_miss`, `top3_probability`, `label`, `label_slot` | as on a row | | S | As on a row |
 | `pick_value` | as on a row | yes | R | As on a row, priced from the entry's saved after-distribution |
+| `most_likely_pick` | as on a row | absent | R | **D-263.** As on a row, from the entry's saved `after_pick_probabilities`; absent under the row's rules |
 | `keep` | `boolean` | no | R | Any member is a Keep player |
 | `passes_threshold` | `boolean` | no | S | §3.6 on the combined numbers. Never changes `state` |
 
@@ -272,6 +286,7 @@ exploration §6.
       "playoff_clinched": false,
       "playoff_eliminated": false,
       "pick_if_miss": 3.6912,
+      "most_likely_pick": {"slot": 3, "label": "1.03", "probability": 0.2412},
       "top3_probability": 0.4583,
       "label": "1.02",
       "label_slot": 2,
@@ -311,6 +326,8 @@ exploration §6.
         ],
         "playoff_probability": {"now": 0.0271, "after": 0.0122},
         "pick_if_miss": {"now": 3.6912, "after": 3.3604},
+        "most_likely_pick": {"now": {"slot": 3, "label": "1.03", "probability": 0.2412},
+                             "after": {"slot": 2, "label": "1.02", "probability": 0.2913}},
         "top3_probability": {"now": 0.4583, "after": 0.6177},
         "label": {"now": "1.02", "after": "1.02"},
         "label_slot": {"now": 2, "after": 2},
@@ -346,6 +363,8 @@ exploration §6.
         ],
         "playoff_probability": {"now": 0.0271, "after": 0.0131},
         "pick_if_miss": {"now": 3.6912, "after": 3.3887},
+        "most_likely_pick": {"now": {"slot": 3, "label": "1.03", "probability": 0.2412},
+                             "after": {"slot": 2, "label": "1.02", "probability": 0.2841}},
         "top3_probability": {"now": 0.4583, "after": 0.6094},
         "label": {"now": "1.02", "after": "1.02"},
         "label_slot": {"now": 2, "after": 2},
@@ -378,6 +397,8 @@ exploration §6.
         ],
         "playoff_probability": {"now": 0.0271, "after": 0.0262},
         "pick_if_miss": {"now": 3.6912, "after": 3.6581},
+        "most_likely_pick": {"now": {"slot": 3, "label": "1.03", "probability": 0.2412},
+                             "after": {"slot": 3, "label": "1.03", "probability": 0.2455}},
         "top3_probability": {"now": 0.4583, "after": 0.4712},
         "label": {"now": "1.02", "after": "1.02"},
         "label_slot": {"now": 2, "after": 2},
@@ -398,6 +419,8 @@ exploration §6.
         "lineup_change_exact": "-55.00",
         "playoff_probability": {"now": 0.0271, "after": 0.0064},
         "pick_if_miss": {"now": 3.6912, "after": 3.1458},
+        "most_likely_pick": {"now": {"slot": 3, "label": "1.03", "probability": 0.2412},
+                             "after": {"slot": 1, "label": "1.01", "probability": 0.3402}},
         "top3_probability": {"now": 0.4583, "after": 0.7012},
         "label": {"now": "1.02", "after": "1.01"},
         "label_slot": {"now": 2, "after": 1},
@@ -416,6 +439,8 @@ exploration §6.
         "lineup_change_exact": "-59.20",
         "playoff_probability": {"now": 0.0271, "after": 0.0058},
         "pick_if_miss": {"now": 3.6912, "after": 3.1203},
+        "most_likely_pick": {"now": {"slot": 3, "label": "1.03", "probability": 0.2412},
+                             "after": {"slot": 1, "label": "1.01", "probability": 0.3477}},
         "top3_probability": {"now": 0.4583, "after": 0.7154},
         "label": {"now": "1.02", "after": "1.01"},
         "label_slot": {"now": 2, "after": 1},
@@ -530,7 +555,10 @@ it ignores `combined`. The server serves both shapes from one block.
 ### 6.6 Values to hide
 
 When `baseline.pick_value_status === 'not_priced'`, hide the baseline value sentence part and
-the value figure on every row. When `row.pick_if_miss.after === null`, show "—" for that pair.
+the value figure on every row. D-263: when a row or combined entry has no `most_likely_pick`, leave
+out the "Most likely pick …" part of line 2 (line 2 is then the value part alone, or nothing); when
+the baseline has none, leave out the "If you miss the playoffs, …" sentence. Never fall back to
+the decimal `pick_if_miss`, which the app no longer shows anywhere.
 
 ## 7. Draft-order answer: storage and route
 
@@ -640,10 +668,10 @@ English; never "tank", never anything about who to start or bench.
 | Id | Where | String |
 |---|---|---|
 | C-TITLE | Disclosure label | `Max PF moves` |
-| C-BASE | Baseline line, `ready`/`no_moves` | `Your {season} 1st today: {label} projected. If you miss the playoffs, pick {pick_if_miss} on average. {top3} chance of a top-3 pick.` then, when priced, ` Value {value}.` When `label` is null the first sentence is `Your {season} 1st:` and the rest is unchanged. |
+| C-BASE | Baseline line, `ready`/`no_moves` | `Your {season} 1st today: {label} projected. If you miss the playoffs, most likely pick {ml_label} ({ml_pct}). {top3} chance of a top-3 pick.` then, when priced, ` Value {value}.` When `label` is null the first sentence is `Your {season} 1st:` and the rest is unchanged. D-263: the two fills come from the baseline's most_likely_pick (§3.4); without it the "If you miss" sentence is left out |
 | C-HEAD | Above the rows | `Max PF change over the remaining {n} weeks` (n = `weeks_remaining`; n = 1 → `over the final week`) |
 | C-ROW-1 | Row, line 1 | `{short_name}  {position}  {maxpf_change}` |
-| C-ROW-2 | Row, line 2 | `Pick if you miss {now} → {after}` then, when priced, ` · Value {change}` |
+| C-ROW-2 | Row, line 2 (D-263: from `most_likely_pick`; both sides shown even when the labels match; without it only the value part shows, with no leading ` · `) | `Most likely pick {now_label} ({now_pct}) → {after_label} ({after_pct})` then, when priced, ` · Value {change}` |
 | C-KEEP | Tag on a `keep` row | `Keep` |
 | C-OPEN-TOP3 | Opened row | `Top-3 chance {now} → {after}` |
 | C-OPEN-PLAYOFF | Opened row | `Playoff chance {now} → {after}` |
@@ -670,7 +698,7 @@ English; never "tank", never anything about who to start or bench.
 | C-NO-MOVES | A list state with zero rows (or every row dropped by §6.3 → C-ROSTER only). v1.1: no longer shown for a `no_moves` block that has rows | `No single player moves your projected pick by a visible amount.` |
 | C-NONE-ALONE | v1.1. Above the list when no listed row and no listed combined entry passes | `None of these changes your projected pick on its own.` |
 | C-COMB-1 | v1.1. Combined line, line 1 (`{n}` = `size`, `{names}` = `short_names` joined "A and B" / "A, B and C"; the `maxpf_change` on the right as on a row) | `Top {n} together: {names}` |
-| C-COMB-2 | v1.1. Combined line, line 2: C-ROW-2's words and rules (value only when priced) | `Pick if you miss {now} → {after}` |
+| C-COMB-2 | v1.1. Combined line, line 2: C-ROW-2's words and rules (value only when priced; D-263 most likely pick) | `Most likely pick {now_label} ({now_pct}) → {after_label} ({after_pct})` |
 | C-NO-MISS | `no_miss` | `Your team is not projected to miss the playoffs.` |
 | C-NOT-MAXPF | `draft_order_not_maxpf` | `Your league doesn't set its draft order by max PF, so these moves wouldn't change your pick.` + link `Change answer` |
 | C-DEADLINE | `after_trade_deadline` | `Your league's trade deadline has passed.` |
@@ -694,7 +722,7 @@ English; never "tank", never anything about who to start or bench.
 |---|---|---|
 | Max PF / lineup change, row | Whole number from the integer field; negatives with U+2212 `−`, positives with `+`; exactly 0 as `0` | `−31` |
 | Week change | One decimal; `−` / `+` as above; exactly 0 as `0` | `−7.0` |
-| Pick if you miss | One decimal | `3.7 → 3.4` |
+| Most likely pick (D-263) | Label verbatim from the server, chance as a probability (below) in brackets | `1.03 (24%) → 1.02 (29%)` |
 | Probabilities | Whole percent, round half up; `<1%` when 0 < p < 0.005; `>99%` when 0.995 ≤ p < 1; `0%` and `100%` exact | `46% → 62%`, `3% → 1%` |
 | Pick value (baseline) | Whole number, thousands separator | `2,480` |
 | Pick value change | Whole number, leading `+` or `−`, thousands separator; a change that rounds to exactly 0 renders `0`, never `+0` | `+169` |

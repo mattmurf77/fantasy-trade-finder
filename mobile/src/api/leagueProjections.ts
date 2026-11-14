@@ -57,6 +57,9 @@ export interface PickOwner {owns_own_pick: boolean; owner_roster_id: number; own
 export interface MaxPfBaseline {
   weeks_remaining: number; first_week: number; last_week: number; weeks_excluded_played: number;
   playoff_probability: number; playoff_band: ProjectionOutlook; pick_if_miss: number | null;
+  /** D-263: the most likely pick if you miss (what the app shows; `pick_if_miss`
+   *  is the average, kept for older builds). Absent when not derivable. */
+  most_likely_pick?: MaxPfPickChance;
   top3_probability: number; label: string | null; label_slot: number | null;
   pick_value: number | null; pick_value_status: 'priced' | 'not_priced';
   /** D-262: roster-independent, so they hold for every row's and combined
@@ -69,11 +72,15 @@ export interface MaxPfMoveWeek {
   maxpf_change: number; lineup_change: number; replaced_by: Omit<MaxPfReplacement, 'weeks'>[];
 }
 export interface NowAfter {now: number; after: number}
+/** D-263: one pick slot and its chance GIVEN A MISS (same basis as `pick_if_miss`). */
+export interface MaxPfPickChance {slot: number; label: string; probability: number}
 export interface MaxPfMoveRow {
   rank: number; player_id: string; name: string; short_name: string; position: string;
   maxpf_change: number; maxpf_change_exact: string; lineup_change: number; lineup_change_exact: string;
   weeks_affected: number; replacements: MaxPfReplacement[]; replacements_more: number; weeks: MaxPfMoveWeek[];
   playoff_probability: NowAfter; pick_if_miss: {now: number | null; after: number | null};
+  /** D-263; absent on an older saved block or when "after" has no conditional pick. */
+  most_likely_pick?: {now: MaxPfPickChance; after: MaxPfPickChance};
   top3_probability: NowAfter; label: {now: string | null; after: string | null};
   label_slot: {now: number | null; after: number | null};
   pick_value: {now: number; after: number; change: number} | null;
@@ -85,6 +92,8 @@ export interface MaxPfCombined {
   size: number; player_ids: string[]; names: string[]; short_names: string[];
   maxpf_change: number; maxpf_change_exact: string; lineup_change: number; lineup_change_exact: string;
   playoff_probability: NowAfter; pick_if_miss: {now: number | null; after: number | null};
+  /** D-263; absent on an older saved block or when "after" has no conditional pick. */
+  most_likely_pick?: {now: MaxPfPickChance; after: MaxPfPickChance};
   top3_probability: NowAfter; label: {now: string | null; after: string | null};
   label_slot: {now: number | null; after: number | null};
   pick_value: {now: number; after: number; change: number} | null;

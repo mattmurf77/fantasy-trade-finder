@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-14 — Max PF moves: most likely pick and its chance instead of the average (D-263)
+
+- The forecast read adds `most_likely_pick` (baseline, rows, combined) from the saved distributions, given a miss; no re-run, nothing saved, no hash change; `pick_if_miss` still served.
+- App: "If you miss the playoffs, most likely pick 1.03 (24%)." and "Most likely pick 1.03 (24%) → 1.02 (29%) · Value +169"; no decimal average left. Branch `feat/maxpf-most-likely-pick`, not merged. Scope: `docs/plans/league-projections/max-pf-trade-away/scope-most-likely-pick.md`. Also: recovery ledger for the clinch-display / release-192 sweep (not run) and the build 192 ledger entry.
+
 ## 2026-11-13 — Playoff odds: 100% / 0% only when clinched / eliminated (D-262)
 
 - The weekly job saves a rules-based proof per team (`playoff_clinched`, `playoff_eliminated`, `playoff_proof`; `league_projections/clinch.py`, exact max-flow, brute-force checked; median/division/partial schedules "not proven").

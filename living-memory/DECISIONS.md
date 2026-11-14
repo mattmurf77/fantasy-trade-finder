@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-263 — Max PF moves shows the most likely pick and its chance, not the average pick position
+
+**Date:** 2026-11-14 · **Who:** the operator approved replacing the decimal average with the most likely pick and its chance; built by a backend + app subagent.
+**Context:** rows read "Pick if you miss 1.9 → 1.4" and the baseline "pick 3.7 on average". Those are average positions (1.92 → 1.39), but they read as pick labels 1.09 → 1.04 and contradicted the rest of the screen (the team was already top-3).
+**Decision:**
+- The read (`maxpf_moves.compose`) adds `most_likely_pick`: `{slot, label, probability}` on the baseline, `{now, after}` on every row and combined entry. Basis: given a miss, the same as `pick_if_miss` (the saved non-playoff slot distributions renormalised to 1); ties to the earlier pick; label via `pick_slots.slot_suffix`.
+- Derived at read time from data every saved block already holds: no forecast re-run, nothing saved, no `settings_hash`, threshold, sort or `VERSION` change. Absent where the data is missing; the app then leaves that part out, never shows the decimal.
+- Copy: C-BASE "most likely pick 1.03 (24%)", C-ROW-2 / C-COMB-2 "Most likely pick 1.03 (24%) → 1.02 (29%)", both sides even when the labels match. Percent rules as top-3 chance.
+**Consequences:**
+- `pick_if_miss` stays on the wire (builds 191/192 show it; the threshold still uses it). A label-shaped number on this surface is now always a label.
+- The most likely slot can move less than the average (e.g. 1.03 → 1.03 with a higher chance), so both chances are shown.
+
 ## D-262 — A playoff chance prints 100% / 0% only when clinched / eliminated is proven
 
 **Date:** 2026-11-13 · **Who:** the operator ("There should only be 100% probability if there's absolutely 0 possibility they miss the playoffs. Neither team has technically clinched a spot." Asked to stop showing 100% / 0% until clinched or eliminated: "Yes, fix display"); built by a builder subagent on `feat/playoff-odds-clinch-display`, stacked on D-261.
