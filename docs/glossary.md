@@ -753,7 +753,8 @@ of existing market prices, not projected points or championship probability.
 - **Official Max PF:** provider aggregate hindsight-best eligible lineup points; distinct from actual PF and optimizing expected future points.
 - **Max PF moves (D-258):** the section on the user's own Standings card listing the roster players whose trade would lower the team's rest-of-season max PF most, with the projected pick before and after ([contract](plans/league-projections/max-pf-trade-away/contract.md)). Flag `league.max_pf_moves`.
 - **Replacement (Max PF moves):** the player or players who enter the best max PF lineup in a given week once a player is removed, from the forecast's own lineup solver; can differ week to week, and can be a free agent from the forecast's fill rule.
-- **Pick if you miss:** the average draft slot in the simulations where the team misses the playoffs (`conditional_expected_pick`).
+- **Pick if you miss:** the average draft slot in the simulations where the team misses the playoffs (`conditional_expected_pick`). Still served as `pick_if_miss`, no longer shown in the app since D-263 (a decimal like 3.7 read as the pick label 1.07).
+- **Most likely pick (Max PF moves, D-263):** the single draft slot the team's pick most often lands in among the simulations where it misses the playoffs, with that chance, e.g. "1.03 (24%)"; ties go to the earlier pick. Served as `most_likely_pick`, derived when the forecast is read.
 - **Paired re-run:** two simulations with identical random draws, with and without a change, read as a difference so the noise cancels; "after" = the saved 250,000-run figure plus that difference.
 - **Conditional expected non-playoff pick:** average pick position only across simulated worlds in which the original team misses playoffs; null below the configured sample threshold.
 - **Weekly as-of projection:** immutable forecast from a scheduled capture, not a live score update or a guarantee of calibration.
