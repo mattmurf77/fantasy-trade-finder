@@ -8,13 +8,13 @@
 
 export const MAXPF_COPY = {
   'C-TITLE': 'Max PF moves',
-  'C-BASE': 'Your {season} 1st today: {label} projected. If you miss the playoffs, pick {pick_if_miss} on average. {top3} chance of a top-3 pick.',
+  'C-BASE': 'Your {season} 1st today: {label} projected. If you miss the playoffs, most likely pick {ml_label} ({ml_pct}). {top3} chance of a top-3 pick.',
   'C-BASE.value': ' Value {value}.',
   'C-BASE.nolabel': 'Your {season} 1st:',
   'C-HEAD': 'Max PF change over the remaining {n} weeks',
   'C-HEAD.final': 'over the final week',
   'C-ROW-1': '{short_name}  {position}  {maxpf_change}',
-  'C-ROW-2': 'Pick if you miss {now} → {after}',
+  'C-ROW-2': 'Most likely pick {now_label} ({now_pct}) → {after_label} ({after_pct})',
   'C-ROW-2.value': ' · Value {change}',
   'C-KEEP': 'Keep',
   'C-OPEN-TOP3': 'Top-3 chance {now} → {after}',

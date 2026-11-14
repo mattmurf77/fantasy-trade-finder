@@ -206,7 +206,7 @@ def test_read_serves_combined_with_values_and_keep():
     out = compose(saved, untouchables=[keep], price=lambda dist: round(1000 * dist[0] + 500, 1))
     assert out["state"] == "ready" and [e["size"] for e in out["combined"]] == [2, 3]
     for served, entry in zip(out["combined"], raw["combined"]):
-        assert set(served) == set(maxpf_moves._COMBINED_KEYS) | {"pick_value", "keep"}
+        assert set(served) == set(maxpf_moves._COMBINED_KEYS) | {"pick_value", "keep", "most_likely_pick"}  # D-263
         assert served["keep"] is True
         after = round(1000 * entry["after_pick_probabilities"][0] + 500, 1)
         assert served["pick_value"]["after"] == after and served["pick_value"]["change"] == round(after - served["pick_value"]["now"], 1)
@@ -251,10 +251,15 @@ def test_v1_keys_unchanged():
     assert set(out) - set(golden) == {"combined"}
     # D-262 adds exactly two keys to the baseline (additive; the v1 golden is
     # what build 191 was written against and stays frozen).
+    # D-263 adds `most_likely_pick` (additive, read time) to the baseline and
+    # to every row; nothing else.
     proof = {"playoff_clinched", "playoff_eliminated"}
-    assert set(out["baseline"]) - set(golden["baseline"]) == proof
+    added = proof | {"most_likely_pick"}
+    assert set(out["baseline"]) - set(golden["baseline"]) == added
+    assert all(set(r) - set(golden["rows"][0]) == {"most_likely_pick"} for r in out["rows"])
     v1 = {k: v for k, v in out.items() if k != "combined"}
-    v1["baseline"] = {k: v for k, v in out["baseline"].items() if k not in proof}
+    v1["baseline"] = {k: v for k, v in out["baseline"].items() if k not in added}
+    v1["rows"] = [{k: v for k, v in r.items() if k != "most_likely_pick"} for r in out["rows"]]
     _merge_nullable(_types(golden), _types(v1))
 
 

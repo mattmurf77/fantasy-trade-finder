@@ -179,7 +179,7 @@ function MoveRow({ row, priced, proof, open, onToggle, onFindTrades }: {
   const d = open ? rowDetail(row, proof) : null;
   return <View style={styles.row}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.row.${row.rank}`}
-      accessibilityLabel={`${rowLine1(row)}${row.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}
+      accessibilityLabel={`${rowLine1(row)}${row.keep ? `, ${C['C-KEEP']}` : ''}${line2 ? `. ${line2}` : ''}`}
       onPress={onToggle} style={styles.rowHead}>
       <View style={styles.rowText}>
         <View style={styles.line1}>
@@ -188,7 +188,7 @@ function MoveRow({ row, priced, proof, open, onToggle, onFindTrades }: {
           {row.keep ? <Badge label={C['C-KEEP']} /> : null}
           <Text scale="dense" style={styles.num}>{p.change}</Text>
         </View>
-        <Text variant="bodySm">{line2}</Text>
+        {line2 ? <Text variant="bodySm">{line2}</Text> : null}
       </View>
       <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
     </Pressable>
@@ -215,7 +215,7 @@ function CombinedLine({ entry, priced, proof, open, onToggle }: {
   const d = open ? combinedDetail(entry, proof) : null;
   return <View style={styles.row}>
     <Pressable accessibilityRole="button" aria-expanded={open} testID={`standings.maxpf.combined.${entry.size}`}
-      accessibilityLabel={`${combinedLine1(entry)}${entry.keep ? `, ${C['C-KEEP']}` : ''}. ${line2}`}
+      accessibilityLabel={`${combinedLine1(entry)}${entry.keep ? `, ${C['C-KEEP']}` : ''}${line2 ? `. ${line2}` : ''}`}
       onPress={onToggle} style={styles.rowHead}>
       <View style={styles.rowText}>
         <View style={styles.line1}>
@@ -223,7 +223,7 @@ function CombinedLine({ entry, priced, proof, open, onToggle }: {
           {entry.keep ? <Badge label={C['C-KEEP']} /> : null}
           <Text scale="dense" style={styles.num}>{p.change}</Text>
         </View>
-        <Text variant="bodySm">{line2}</Text>
+        {line2 ? <Text variant="bodySm">{line2}</Text> : null}
       </View>
       <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={chalk.base} />
     </Pressable>
