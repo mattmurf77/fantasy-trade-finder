@@ -10,7 +10,7 @@ from flask import Response, jsonify, request
 
 from ..feature_flags import is_enabled
 from .. import database as db
-from . import batch, maxpf_moves, recommendation, store
+from . import batch, maxpf_moves, playoff_targets, recommendation, store
 from .core import Unavailable, VERSION
 from .simulation import config
 
@@ -52,8 +52,9 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
         # the forecast read composes its own `max_pf_moves` (contract §2).
         # `parsed`: the row's result already decoded by the caller (one decode).
         result = parsed if parsed is not None else (json.loads(row["result_json"]) if row.get("result_json") else None)
-        if isinstance(result, dict) and "max_pf_moves" in result:
-            result = {k: v for k, v in result.items() if k != "max_pf_moves"}
+        # The same holds for the raw saved playoff targets block.
+        if isinstance(result, dict) and ("max_pf_moves" in result or "playoff_targets" in result):
+            result = {k: v for k, v in result.items() if k not in ("max_pf_moves", "playoff_targets")}
         return {"run_id": row["run_id"], "status": row["status"], "created_at": row["created_at"],
                 "updated_at": row["updated_at"], "input_hash": row.get("input_hash"),
                 "reason": row.get("reason"), "details": json.loads(row.get("details_json") or "{}"),
@@ -114,6 +115,29 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
                                     untouchables=keep, cuts=recommendation.thresholds(batch.settings()),
                                     price=(pricer(sess, league_id, saved) if saved else None))
         return block
+
+    def targets_block(uid, league_id, result, saved):
+        """The composed `playoff_targets` block (flag `league.playoff_targets`).
+        Never raises: an unreadable saved run is `unavailable` / `read_failed`."""
+        try:
+            preferences = db.load_league_preference(user_id=uid, league_id=league_id) or {}
+            if result["state"] == "unsupported_policy":
+                saved = None
+            # The eligibility rule is applied again here, with the outlooks
+            # the selling teams' managers have saved NOW (one bulk read).
+            raw = (saved or {}).get("playoff_targets")
+            sellers = raw.get("sellers") if isinstance(raw, dict) and isinstance(raw.get("sellers"), dict) else {}
+            ids = sorted({uid_ for s in sellers.values() for uid_ in s.get("owner_ids") or []})
+            rows = db.load_league_preferences_bulk(ids, league_id) if ids else {}
+            live = {rid: next((rows[u]["team_outlook"] for u in s.get("owner_ids") or []
+                               if (rows.get(u) or {}).get("team_outlook")), None)
+                    for rid, s in sellers.items()}
+            return playoff_targets.compose(result["state"], saved, failure_reason=result["reason"],
+                                           saved_outlook=preferences.get("team_outlook"), live_outlooks=live,
+                                           cuts=recommendation.thresholds(batch.settings()))
+        except Exception as exc:
+            log.warning("playoff_targets read failed: %s", type(exc).__name__)
+            return {**playoff_targets.compose("no_run", None), "reason": "read_failed"}
 
     def load(sess, run_id, *, with_snapshot=False):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
@@ -188,6 +212,8 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
                 failure_reason=result["reason"])
         if is_enabled("league.max_pf_moves"):
             result["max_pf_moves"] = moves_block(sess, uid, league_id, result, raw_saved)
+        if is_enabled("league.playoff_targets"):
+            result["playoff_targets"] = targets_block(uid, league_id, result, raw_saved)
         return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/leagues/<league_id>/draft-order-rule", methods=["POST"])

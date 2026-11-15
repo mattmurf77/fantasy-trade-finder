@@ -132,12 +132,13 @@ class _Context:
         ids = set(roster.get("players", [])) | set(roster.get("taxi", [])) | set(roster.get("reserve", []))
         return bool(ids & self.completed.get(week, set()))
 
-    def lineups(self, roster_id, week, detail, remove=()):
+    def lineups(self, roster_id, week, detail, remove=(), add=()):
         """(lineup lane, max PF lane) exactly as `provider.capture` builds them
-        (`provider.py` lineup and Max PF blocks), with the ids in `remove` taken off the roster."""
+        (`provider.py` lineup and Max PF blocks), with the ids in `remove` taken off the roster.
+        `add` (playoff targets): ids from other rosters joined as active players."""
         roster = self.rosters[roster_id]
         reserve, taxi = set(roster.get("reserve", [])), set(roster.get("taxi", []))
-        ids = sorted((set(roster.get("players", [])) | taxi | reserve) - set(remove))
+        ids = sorted(((set(roster.get("players", [])) | taxi | reserve) - set(remove)) | set(add))
         week_points = self.points.get(week, {})
         pool, max_pool, bye = [], [], []
         for pid in ids:

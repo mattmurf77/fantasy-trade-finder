@@ -109,6 +109,39 @@ export interface MaxPfMoves {
   /** v1.1, additive: absent on an older server, [] outside ready / no_moves. */
   combined?: MaxPfCombined[];
 }
+// ── Playoff targets (flag `league.playoff_targets`; contract:
+// docs/plans/league-projections/playoff-targets/contract.md §3). The mirror
+// of Max PF moves: players on selling teams who would raise the viewer's
+// playoff chance. The app reads every number here and never re-computes one
+// (utils/playoffTargets.ts).
+export type PlayoffTargetsState =
+  | 'unavailable' | 'season_over' | 'after_trade_deadline' | 'clinched' | 'eliminated'
+  | 'near_certain' | 'no_sellers' | 'no_targets' | 'ready';
+export interface PlayoffTargetsBaseline {
+  weeks_remaining: number; first_week: number; last_week: number; weeks_excluded_played: number;
+  playoff_probability: number; playoff_band: ProjectionOutlook | null;
+  playoff_clinched: boolean; playoff_eliminated: boolean;
+}
+/** Who leaves the viewer's starting lineup; `player_id: null` is a slot nobody held. */
+export interface PlayoffTargetReplaced {player_id: string | null; name: string | null; short_name: string | null; free_agent: boolean; weeks: number}
+/** The team the player is on. Never carries an outlook (contract §2). */
+export interface PlayoffTargetSeller {
+  roster_id: number; name: string; playoff_probability: number;
+  playoff_clinched: boolean; playoff_eliminated: boolean;
+}
+export interface PlayoffTargetRow {
+  rank: number; player_id: string; name: string; short_name: string; position: string;
+  lineup_gain: number; lineup_gain_exact: string; weeks_affected: number;
+  replaces: PlayoffTargetReplaced[]; replaces_more: number;
+  playoff_probability: NowAfter; passes_threshold: boolean; seller: PlayoffTargetSeller;
+}
+export interface PlayoffTargets {
+  version: number; state: PlayoffTargetsState; reason: string | null;
+  viewer_roster_id: number | null; captured_at: string | null;
+  saved_outlook: 'championship' | 'contender' | 'rebuilder' | 'jets' | 'not_sure' | null;
+  baseline: PlayoffTargetsBaseline | null; eligible_teams: number; sellers_changed: boolean;
+  candidates_total: number; rows: PlayoffTargetRow[];
+}
 export interface ProjectionRun {run_id: string; status: string; reason: string | null; result: ProjectionResult | null}
 export interface ProjectionView {
   state: string; reason: string | null; run: ProjectionRun | null; attempt: ProjectionRun | null;
@@ -121,6 +154,8 @@ export interface ProjectionView {
   outlook_recommendation?: OutlookRecommendation;
   /** Absent while flag `league.max_pf_moves` is off (or on an older server). */
   max_pf_moves?: MaxPfMoves;
+  /** Absent while flag `league.playoff_targets` is off (or on an older server). */
+  playoff_targets?: PlayoffTargets;
 }
 export const getLeagueProjectionBatch = (leagueId: string) =>
   api.get<ProjectionView>(`/api/leagues/${encodeURIComponent(leagueId)}/projection-runs/latest`);
