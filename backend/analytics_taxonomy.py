@@ -1416,6 +1416,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # prop is worse than a missing one. Adding it later is a one-line
     # taxonomy change plus one client line — do that only with the
     # identity proven.
+    # `via`: bar | row (the two in-screen taps) | home_tile (D-269: the
+    # drill-in a Home position tile's body opens; it is the user's own team,
+    # which is still not sent as a prop).
     "league_team_opened":      frozenset({"via", "rank", "basis", "subset",
                                           "filter_count"}),
     "league_home_action_tapped": frozenset({"action"}),
@@ -1556,6 +1559,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #     taxonomy migration. Pinned both ways by check-analytics-297-302.js.
     #   tab_retap     — #302's re-tap of the already-active League tab
     #   refocus       — opened a DIFFERENT team without leaving the panel
+    #   home_back     — D-269's header "Home" control, shown only during an
+    #     arrival from a Home position tile; closes that drill-in and
+    #     returns to the Home tab
     # A `league_team_opened` with no `league_team_closed` before the next
     # screen_left is the sixth case — abandoned by navigating away. It is
     # measured by ABSENCE on purpose: an unmount-cleanup emitter would
@@ -2105,15 +2111,21 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   buy | sell | position_ranking               — a position tile's controls
     #                                                 (position_ranking = the
     #                                                 no-split fallback button)
+    #   position_roster                             — the tile's BODY (flag
+    #     nav.home_position_roster, D-269): League rankings at that position
+    #     with the user's own team drilled in
     #   find_trade | rank | matches | trends | usage_rates | free_agents — task tiles
     #   (usage_rates: the Usage Trends tile, only while usage_trends.enabled)
     #   link_league | retry                          — empty/error states
     # `position` (QB|RB|WR|TE) and `band` (seller|buyer|mid — the USER's
-    # band at that position) ride ONLY on buy / sell / position_ranking.
+    # band at that position) ride ONLY on buy / sell / position_ranking /
+    # position_roster. `split` (shown | no_split | no_median — the tile's
+    # state, utils/positionSplit) rides ONLY on position_roster, so a body
+    # tap on a "No clear split" tile is not read as Mid-pack.
     # `band` with `tile` is what makes the suggested-side emphasis readable:
     # a Seller tapping Sell took the suggestion. No league id, no team, no
     # player, no device platform (a user_events COLUMN, never a prop).
-    "home_tile_tapped":            frozenset({"tile", "position", "band"}),
+    "home_tile_tapped":            frozenset({"tile", "position", "band", "split"}),
     # `segment` — the view the tap SELECTED: record | points from the single
     # standings table (2026-11-12, docs/plans/home-engagement/
     # scope-standings-table.md); current | projected on older builds (the

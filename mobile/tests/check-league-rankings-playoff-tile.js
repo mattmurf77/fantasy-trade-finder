@@ -90,7 +90,8 @@ assert(hub.includes("navigation.navigate('Trades', { screen: 'TradesHome', param
   'T3c Home\'s Review outlook opens the same selector with the same params');
 assert(hub.includes("const onProjections = () => {\n    track('home_tile_tapped', { tile: 'standings' }, 'Home');\n    navigation.navigate('Standings');"), 'T3d Home\'s View opens the same page');
 // T4 — existing event, existing props and tile values; no new name.
-assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band"\}\)/.test(taxonomy)
+// (D-269 added `split`, which rides only on the tile body's position_roster.)
+assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band", "split"\}\)/.test(taxonomy)
   && /#   outlook \| standings \| overall_rank/.test(taxonomy),
   'T4c home_tile_tapped already carries `tile` with outlook / standings');
 assert.equal(count(ls, "track('home_tile_tapped'"), 2, 'T4d exactly the two tile taps emit on League Rankings');
