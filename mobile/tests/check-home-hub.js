@@ -240,12 +240,15 @@ const handler = (name) => {
 //     two: the Team outlook row and the playoff tile's "Review outlook",
 //     which open the same selector; `standings` has two: the Standings row
 //     and the playoff tile's percentage / "View", which open the same page),
-//     closed vocabulary, position/band only on buy/sell/position_ranking.
+//     closed vocabulary, position/band only on buy/sell/position_ranking/
+//     position_roster, and `split` (the tile's state) only on position_roster
+//     (D-269, the tile body tap).
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
-    'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry'];
+    'position_roster', 'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry'];
   const WITH_POS = new Set(['buy', 'sell', 'position_ranking']);
+  const WITH_SPLIT = new Set(['position_roster']);
   const re = /track\('home_tile_tapped', \{ ([^}]*) \}, 'Home'\);/g;
   const calls = [];
   for (const f of homeSrc) {
@@ -265,11 +268,15 @@ const handler = (name) => {
     `not exactly once: ${missing.join(', ') || '—'}; outside the vocabulary: ${extra.join(', ') || '—'}`);
   const badProps = calls.filter((c, i) => {
     const keys = c.props.split(',').map((p) => p.trim().split(':')[0]);
+    if (WITH_SPLIT.has(tiles[i])) {
+      return keys.join(',') !== 'tile,position,band,split' ||
+        !/position: s\.position, band: bandProp\(s\), split: s\.state$/.test(c.props);
+    }
     return WITH_POS.has(tiles[i])
       ? keys.join(',') !== 'tile,position,band' || !/position: s\.position, band: bandProp\(s\)$/.test(c.props)
       : keys.join(',') !== 'tile';
   });
-  assert(badProps.length === 0, '6c. position + band ride on buy / sell / position_ranking only',
+  assert(badProps.length === 0, '6c. position + band ride on buy / sell / position_ranking / position_roster only; split on position_roster only',
     badProps.map((c) => `{ ${c.props} }`).join('; '));
   const navBefore = calls.filter((c) => {
     const start = c.code.lastIndexOf('=> {', c.index);

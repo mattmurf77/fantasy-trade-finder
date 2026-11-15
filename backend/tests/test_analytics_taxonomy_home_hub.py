@@ -24,7 +24,8 @@ from backend.database import metadata, user_events_table
 
 
 _PROPS: dict[str, dict] = {
-    "home_tile_tapped": {"tile": "sell", "position": "RB", "band": "seller"},
+    "home_tile_tapped": {"tile": "position_roster", "position": "RB", "band": "seller",
+                         "split": "shown"},
     "standings_segment_changed": {"segment": "projected"},
 }
 
