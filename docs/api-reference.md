@@ -126,6 +126,20 @@ for subsequent requests. Trade jobs retain the user, league and format selected
 at kickoff even if that token is subsequently reinitialized. Response fields,
 pre-generation eligibility, cache TTLs and polling contracts are unchanged.
 
+**League surfaces use the league's own format (D-268, flag
+`league.format_from_league`).** While the flag is on, a request to a route under
+`/api/league/`, `/api/leagues/`, `/api/trades`, `/api/overhauls`, `/api/win-now/`
+or `/api/projection-runs/` resolves its format from the league's stored
+`leagues.default_scoring` (NULL ⇒ `1qb_ppr`) — the route's `<league_id>`, else
+`?league_id=`, else the session's league — and ignores both `X-Scoring-Format`
+and the session's `active_format`. Every `scoring_format` such a route returns
+(e.g. `/api/league/power-rankings`) is therefore the league's. A league with no
+`leagues` row keeps the rule above. Ranking routes (Tiers, Trios, rankings,
+progress, trends, …) are unchanged. `POST /api/session/init` carries the
+previous `active_format` over only when re-initializing the same league; a
+different league starts on its stored format. Flag off: exactly the rule above.
+Spec: [docs/plans/league-format-source/spec.md](plans/league-format-source/spec.md).
+
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/api/session/init` | Initialize an existing verified session. Optional `invite_id` (referral loop L7, [invite attribution](#apisessioninit--invite-attribution-referral-loop-l7)). Optional `trade_fairness_threshold` (0.5–1.0; omitted/invalid → 0.5) starts background trade preparation with the native search preference. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. Concurrent inits for one token are single-flighted: identical requests share one result; different leagues run one after the other. **First-init attribution:** auth creates the users row before init. Only a fresh auth INSERT has positive durable `first_init_pending=1`; legacy NULL/consumed 0 never count as new from absent history. One live-user transaction conditionally claims it and commits referral credit/notification, an empty inviter fill and signup together. A failure rolls back eligibility and those effects for a later retry. Other daemon league/peer-push work remains best-effort; no wire field or flag changes. |

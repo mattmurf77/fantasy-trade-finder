@@ -277,5 +277,6 @@
   "trade.partner_activity": false,
   "trade.fairness_window_v2": false,
   "trade.sleeper_offer_import": true,
-  "trade.season_signal": true
+  "trade.season_signal": true,
+  "league.format_from_league": true
 }

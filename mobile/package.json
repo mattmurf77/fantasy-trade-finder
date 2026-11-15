@@ -27,6 +27,7 @@
     "test:revised-offer-card": "node tests/check-revised-offer-card.js",
     "test:calc-merged-layout": "node tests/check-calc-merged-layout.js",
     "test:calc-partner-labels": "node tests/check-calc-partner-labels.js",
+    "test:calc-league-format": "node tests/check-calc-league-format.js",
     "test:calc-pick-tiers": "node tests/check-calc-pick-tiers.js",
     "test:calc-send-placement": "node tests/check-calc-send-placement.js",
     "test:calc-tour": "node tests/check-calc-tour.js",

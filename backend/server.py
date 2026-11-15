@@ -2864,12 +2864,68 @@ def _require_session() -> dict:
 
     from .database import SCORING_FORMATS as DB_SCORING_FORMATS
     header_fmt = request.headers.get("X-Scoring-Format", "")
+    # D-268: a league surface reads the league's own format (None ⇒ not a
+    # league surface, flag off, or no stored league; the session's applies).
+    league_fmt = _league_request_format(sess)
     with _sessions_lock:
         effective_format = (header_fmt if header_fmt in DB_SCORING_FORMATS
                             else sess.get("active_format") or "1qb_ppr")
+        if league_fmt is not None:
+            effective_format = league_fmt
         view = _RequestSession(sess, effective_format)
+        if league_fmt is not None:
+            # Raw `sess.get("active_format")` readers on a league surface
+            # (e.g. /api/league/picks) see the league's format too. View only:
+            # the shared session's active_format is never changed by a read.
+            view.data["active_format"] = league_fmt
     g._request_session = (token, view)
     return view
+
+
+# D-268 (docs/plans/league-format-source/spec.md): the request paths that
+# answer "about this league". Under flag league.format_from_league their
+# scoring format is the league's stored format, never the session's SF/1QB
+# toggle or the X-Scoring-Format header. Everything else (Tiers, Trios,
+# rankings, progress, trends, ...) keeps the session/header format.
+_LEAGUE_FORMAT_PATH_PREFIXES = (
+    "/api/league/",
+    "/api/leagues/",
+    "/api/trades",
+    "/api/overhauls",
+    "/api/win-now/",
+    "/api/projection-runs/",
+)
+
+
+def _league_format(league_id) -> str | None:
+    """THE league-format resolver (D-268): the league's stored
+    `leagues.default_scoring` (NULL reads as 1qb_ppr), or None when the
+    league has no `leagues` row or the read fails — the caller then keeps
+    the format it had. Never raises."""
+    if not league_id:
+        return None
+    try:
+        from .database import get_league_scoring_if_known
+        return get_league_scoring_if_known(str(league_id))
+    except Exception as exc:
+        log.warning("league format read failed for %s: %s", league_id, type(exc).__name__)
+        return None
+
+
+def _league_request_format(sess) -> str | None:
+    """The league's format for this request when it is a league surface and
+    flag league.format_from_league is on; None otherwise. The league is the
+    route's `<league_id>`, else `?league_id=`, else the session's league."""
+    if not is_enabled("league.format_from_league"):
+        return None
+    rule = getattr(request, "url_rule", None)
+    path = rule.rule if rule is not None else request.path
+    if not path.startswith(_LEAGUE_FORMAT_PATH_PREFIXES):
+        return None
+    league_id = ((request.view_args or {}).get("league_id")
+                 or request.args.get("league_id")
+                 or getattr(sess.get("league"), "league_id", None))
+    return _league_format(league_id)
 
 
 def _require_initialized_session() -> dict:
@@ -31098,12 +31154,23 @@ def session_init():
         _stored_scoring = get_league_scoring(league_id)
     except Exception:
         pass
+    # D-268: with league.format_from_league on, the carried-over format only
+    # survives a re-init of the SAME league (a toggle made there); a different
+    # league starts on its own format, never the previous league's.
+    _format_from_league = is_enabled("league.format_from_league")
+    _carry_ok = (not _format_from_league
+                 or getattr((existing_sess or {}).get("league"), "league_id", None) == league_id)
     if requested_format in DB_SCORING_FORMATS:
         active_format = requested_format
-    elif existing_sess and existing_sess.get("active_format") in DB_SCORING_FORMATS:
+    elif (_carry_ok and existing_sess
+          and existing_sess.get("active_format") in DB_SCORING_FORMATS):
         active_format = existing_sess["active_format"]
     else:
         active_format = _stored_scoring or DB_DEFAULT
+    # The format this league's own surfaces use (pre-built deck, owned-pick
+    # values): the same resolver league requests use. Flag off ⇒ active_format.
+    league_format = ((_league_format(league_id) if _format_from_league else None)
+                     or active_format)
 
     # ── Create or update session ─────────────────────────────────────────
     session_payload = {
@@ -31557,7 +31624,7 @@ def session_init():
                     # Reuse the rosters + league meta this daemon already
                     # fetched (None on either falls back to self-fetching).
                     _n_picks = _sync_sleeper_owned_picks(
-                        league_id, _uid_to_name, active_format,
+                        league_id, _uid_to_name, league_format,
                         rosters=_rh_roster_rows, meta=_league_meta())
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
@@ -31710,7 +31777,7 @@ def session_init():
     # for (user, league, format) already. The thread.start() returns
     # immediately — session_init's response is unaffected.
     try:
-        # `active_format`, `token`, and `members` are all in local scope at
+        # `league_format`, `token`, and `members` are all in local scope at
         # this point (set above). Don't re-read from the session dict —
         # we already have the right values.
         # Installed clients omit this field; match Find a Trade's wide-net
@@ -31730,10 +31797,10 @@ def session_init():
         pregen_outlook = ((pregen_prefs["prefs"] or {}).get("team_outlook")
                           or pregen_prefs["seeded_outlook"])
         pregen_signature = _trade_request_signature(pregen_prefs)
-        pregen_key = _trade_job_key(user_id, league_id, active_format)
+        pregen_key = _trade_job_key(user_id, league_id, league_format)
         presentation_capture = _capture_trade_presentation()
         # S0: read before the lock; the checks under it only compare.
-        pregen_fingerprints = _trade_current_fingerprints(league_id, active_format)
+        pregen_fingerprints = _trade_current_fingerprints(league_id, league_format)
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
@@ -31752,7 +31819,7 @@ def session_init():
                 sess_token         = token,
                 user_id            = user_id,
                 league_id          = league_id,
-                scoring_format     = active_format,
+                scoring_format     = league_format,
                 fairness_threshold = pregen_fairness,
                 pinned_give        = None,
                 opponents_total    = opp_total,

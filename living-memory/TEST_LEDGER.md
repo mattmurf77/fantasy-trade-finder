@@ -1,3 +1,10 @@
+## 2026-11-15 — League format source (D-268), branch `fix/league-format-source`
+
+- **Backend (Python 3.12, local venv, no network):** new `test_league_format_source.py` 34 (power rankings in a one-QB league under a superflex session and header → `1qb_ppr` label, one-QB pool, one-QB personal board; superflex league under a one-QB session stays `sf_tep`; no `leagues` row keeps the session format; request seam on 8 league routes; 7 ranking routes × both toggle directions; `/api/scoring/switch` flips rankings but not power rankings; trade generation builds on the one-QB board and never serves a cached `sf_tep` deck; session/init superflex → one-QB league does not carry `sf_tep`, pre-built deck on `1qb_ppr`; same-league re-init keeps the toggle but pre-builds on the league's format; flag-off paths). Full suite with the flag on (shipped value): **15,713 passed, 42 skipped, 0 failed in 30m10s**. 89 directly affected files + the new file with `FTF_FLAGS` forcing the flag off: **2,254 passed, 8 skipped, 0 failed**.
+- **Sabotages, red then restored (5):** resolver disabled (14 red); session/init carry-over restored (1 red); pre-built deck on the session format (1 red); view `active_format` not overridden (8 red); mobile calculator default back to the app-wide format (check red).
+- **App:** `check-calc-league-format.js` 5 (new); the related `check-*.js` that run without `node_modules` green; testid-lint OK. **`tsc --noEmit` not run** (no `node_modules` in the worktree; CI must run it).
+- **Not verified:** anything on a device (D-056; checklist in `docs/plans/league-format-source/spec.md` §3). FTF_SKIP_SIM_GATE=1 on push.
+
 ## 2026-11-15 — Home position tile opens your roster (D-269), branch `feat/position-tile-tap`
 
 - **App:** `tsc --noEmit` clean; testid-lint OK; new `check-position-tile-tap.js` 54 of 54; all 187 `check-*.js` green after updating `check-home-hub.js` 6b/6c (vocabulary + `split`) and `check-league-rankings-playoff-tile.js` T4c (taxonomy row). `npm ci` was run in the worktree's `mobile/` (node_modules was missing).

@@ -1378,6 +1378,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # bilateral revision 5, when selected, scores with it, and its cards carry
     # `season_block`. OFF (default) ⇒ no read, no line, no key anywhere.
     "trade.season_signal",
+    # docs/plans/league-format-source/spec.md (D-268). ON ⇒ every league
+    # surface (/api/league/*, /api/leagues/*, /api/trades*, /api/overhauls*,
+    # /api/win-now/*, /api/projection-runs/*) values the league on ITS stored
+    # format (leagues.default_scoring, NULL ⇒ 1qb_ppr), ignoring the session's
+    # SF/1QB toggle and X-Scoring-Format; session/init stops carrying the
+    # previous league's format into a different league. Ranking screens keep
+    # the toggle. OFF ⇒ the session's active format everywhere (pre-fix).
+    "league.format_from_league",
 )
 
 DEFAULT_FLAGS: dict[str, bool] = {key: False for key in FLAG_KEYS}
