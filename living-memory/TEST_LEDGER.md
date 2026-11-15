@@ -1,3 +1,11 @@
+## 2026-11-14 — Fairness window (D-266), branch `feat/fairness-window`
+
+- **Backend (Python 3.12, local venv, no network):** new `test_fairness_window.py` 39 (registration in code/config/three fixtures; every signature default is `FAIR_DEFAULT` 0.75; knob validation 0.55–0.75; flag off never reads model_config; `/api/feature-flags` key absent off, served on, bad knob → 0.75; `/api/trades/generate` resolution off/on/explicit/pinned; flag-off deck identical to an explicit-0.75 deck through the real worker; cache keys per threshold (page scope, prepared scope, `_trade_job_is_fresh`); replay tool on a synthetic fixture (exact/close ranks, 0.60/0.55 ≡ 0.65); decision rule (tie to tighter, nothing gains, slow winner refused)). Full suite **15,679 passed, 42 skipped, 0 failed in 25m59s**.
+- **Sabotages, red then restored (11):** generate default ignores flag; payload key never served; flag off reads knob; range check dropped; close share loosened; tie-break flipped; time rule dropped; signature default moved; mobile ignores served value; mobile range dropped; `flags.ts` never writes.
+- **App:** `tsc --noEmit` clean; `check-fairness-default.js` 31 (new 1b: served value, absent/invalid → 0.75, OFF fixed, constant fixed, success-path write); all 186 `check-*.js` green; testid-lint OK.
+- **Replay (research data, local, aggregates in `docs/plans/fairness-window/results.md`):** 600 trades / 458 lineages, all five candidates; no candidate passed; knob stays 0.75.
+- **Not verified:** anything on a device (D-056; checklist in `docs/plans/fairness-window/scope.md`, only relevant once the flag is on); the production-served deck (the replay is the r4 generator's order). FTF_SKIP_SIM_GATE=1 on push.
+
 ## 2026-11-14 — Max PF moves: most likely pick instead of the average (D-263), branch `feat/maxpf-most-likely-pick`
 
 - **Backend (Python 3.12, local venv, no network):** new `test_maxpf_moves_most_likely.py` 7 (basis = the simulation's own `conditional_pick_probabilities` argmax; renormalising; ties to the earlier slot incl. float noise; missing data omits only that item; rows and combined entries; saved run unchanged and nothing saved; settings keys and hash pinned). Updated two key-set tests in `test_maxpf_moves_combined.py`. Related files `test_maxpf_*.py` + `test_league_projection_*.py`: **739 passed, 0 failed** (2m31s). Full suite: CI.
