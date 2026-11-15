@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-15 — Improve pages, step 1: "Improve Playoff Chances" and "Improve Draft Pick", built dark (D-265)
+
+- Two root-stack pages (`ImprovePlayoffChances`, `ImproveDraftPick`; deep links `app/league/improve-playoffs`, `app/league/improve-pick`) with Standings' header and their own FeedbackFAB. Each reads Standings' forecast query (no new request) and renders the existing `PlayoffTargetsBody` / `MaxPfMovesBody` open on arrival (one new prop, `openOnArrival`), a playoff chance / projected pick summary, and links to Standings and to the other page when its list is `ready`.
+- Flag `league.direction_pages`, **off**: on, the two Standings sections become rows that open the pages; off, Standings is unchanged. App-only; no backend code reads it. Branch `feat/direction-pages`, not merged; needs D-264 merged for the playoff page.
+- Steps 2-3 (Home card, buttons, half sheet, events, experiment) not built. Judgement calls and checklist: `docs/plans/league-projections/direction-pages/evidence.md`.
+
 ## 2026-11-14 — Fairness window: one default "fair" threshold behind `trade.fairness_window_v2` (off), replay says keep 0.75 (D-266)
 
 - `backend/fairness_window.py` is the single source (0.75). Flag on ⇒ the `fairness_window_default` knob, served as `fairness_on_threshold` on `GET /api/feature-flags` and sent by the app's Balanced trades toggle. Flag off is byte-identical. The "balanced" copy bar stays 0.75.
