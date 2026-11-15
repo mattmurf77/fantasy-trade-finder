@@ -18,6 +18,11 @@
 - Flag `league.direction_pages`, **off**: on, the two Standings sections become rows that open the pages; off, Standings is unchanged. App-only; no backend code reads it. Branch `feat/direction-pages`, not merged; needs D-264 merged for the playoff page.
 - Steps 2-3 (Home card, buttons, half sheet, events, experiment) not built. Judgement calls and checklist: `docs/plans/league-projections/direction-pages/evidence.md`.
 
+## 2026-11-15 — League surfaces use the league's own format, not the SF/1QB toggle (D-268)
+
+- Bug: a one-QB league read "SF TEP" on League Summary and was valued on the superflex board (decks too), because league routes read the session's format (carry-over from the last league, Tiers/Trios toggle, `X-Scoring-Format`).
+- Fix behind `league.format_from_league` (shipped true, operator to confirm): `_require_session` resolves the league's stored `default_scoring` for `/api/league/`, `/api/leagues/`, `/api/trades*`, `/api/overhauls*`, `/api/win-now/`, `/api/projection-runs/`; `session_init` no longer carries a format across leagues. Ranking screens unchanged. App: calculator defaults to the league's format. Spec `docs/plans/league-format-source/spec.md`. Branch `fix/league-format-source`, not merged.
+
 ## 2026-11-14 — Fairness window: one default "fair" threshold behind `trade.fairness_window_v2` (off), replay says keep 0.75 (D-266)
 
 - `backend/fairness_window.py` is the single source (0.75). Flag on ⇒ the `fairness_window_default` knob, served as `fairness_on_threshold` on `GET /api/feature-flags` and sent by the app's Balanced trades toggle. Flag off is byte-identical. The "balanced" copy bar stays 0.75.

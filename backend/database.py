@@ -11457,6 +11457,25 @@ def get_league_scoring(league_id: str) -> str:
     return DEFAULT_SCORING
 
 
+def get_league_scoring_if_known(league_id: str) -> str | None:
+    """Like get_league_scoring, but None when the league has no `leagues` row.
+
+    A row with a NULL (or unknown) default_scoring reads as DEFAULT_SCORING,
+    exactly as get_league_scoring does. Only "no row at all" differs: there is
+    no stored league format to obey, so the caller keeps its own (D-268)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.default_scoring)
+            .where(leagues_table.c.sleeper_league_id == league_id)
+            .limit(1)
+        ).fetchone()
+    if row is None:
+        return None
+    if row.default_scoring in SCORING_FORMATS:
+        return row.default_scoring
+    return DEFAULT_SCORING
+
+
 def get_league_summary(league_id: str, user_id: str) -> dict:
     """
     Return a rollup for the League Summary page:

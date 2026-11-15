@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View
 import { useQuery } from '@tanstack/react-query';
 
 import { getLeagueRosters, myOwnerId } from '../api/sleeper';
-import { getLeagueCoverage, getLeaguePicks, getLeaguePreferences, getPowerRankings } from '../api/league';
+import { getLeagueCoverage, getLeagueFormatStats, getLeaguePicks, getLeaguePreferences, getPowerRankings } from '../api/league';
 import {
   evaluateTradeInLeague,
   evaluateTradesInLeague,
@@ -362,13 +362,24 @@ export default function InLeagueCalculator({
     return () => pairs.forEach(([id]) => unregisterGuideTarget(id));
   }, [merged]);
   // #166/#167 — the format defaults to the LEAGUE's detected scoring
-  // format (useSession.activeFormat, kept league-accurate by
-  // useLeagueFormatDefault in RootNav), not a hard-coded 1QB PPR. A chip
+  // format, not a hard-coded 1QB PPR. A chip
   // tap still overrides for this calculator session; the override is
   // local so it never stomps the app-wide format.
+  // D-268 — the league's own stored format wins over the app-wide format,
+  // which the Tiers/Trios SF/1QB toggle can hold on the other format. Same
+  // query (key + fn) useLeagueFormatDefault reads, so it is usually cached.
+  const leagueFormatQuery = useQuery({
+    queryKey: ['league-format', leagueId],
+    queryFn: () => getLeagueFormatStats(leagueId),
+    enabled: !!leagueId,
+    staleTime: 5 * 60_000,
+  });
+  const storedLeagueFormat = leagueFormatQuery.data?.default_scoring;
+  const leagueFormat: ScoringFormat | null =
+    storedLeagueFormat === '1qb_ppr' || storedLeagueFormat === 'sf_tep' ? storedLeagueFormat : null;
   const sessionFormat = useSession((s) => s.activeFormat);
   const [formatChoice, setFormatChoice] = useState<ScoringFormat | null>(null);
-  const format: ScoringFormat = formatChoice ?? sessionFormat ?? '1qb_ppr';
+  const format: ScoringFormat = formatChoice ?? leagueFormat ?? sessionFormat ?? '1qb_ppr';
   // #190 — "Edit in calculator" prefill from a suggested trade card.
   const [opponentId, setOpponentId] = useState<string | null>(initialOpponentId ?? null);
   // FB-407 — whether the partner was ever CHOSEN (a chip/sheet tap, or an

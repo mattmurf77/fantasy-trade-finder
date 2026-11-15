@@ -851,6 +851,17 @@ calls within one Flask request reuse the view. Mapping consumers must accept
 `collections.abc.Mapping`. The session lock is reentrant because existing callers
 can hold it while mutating a request view.
 
+League surfaces resolve the league's format (2026-11-15, D-268, flag
+`league.format_from_league`): `_require_session` asks `_league_request_format`
+for the request's format first. On a route under `_LEAGUE_FORMAT_PATH_PREFIXES`
+that is `_league_format(league_id)` — THE resolver, stored
+`leagues.default_scoring`, NULL ⇒ `1qb_ppr`, `None` without a row — and the view's
+`_effective_format`, `service`, `trade_svc` and `active_format` all follow it.
+New league-scoped routes go under those prefixes (or extend the tuple); never
+read `sess["active_format"]` on the shared session for a league answer.
+`session_init` keeps a carried-over format only for the same league and builds
+its pre-built deck / owned-pick values on `league_format`.
+
 Job kickoff passes its explicit format and captured ownership to a frozen
 `_TradeExecutionContext` before scheduling. Interactive and pregen callers pass
 already-resolved context instead of rereading a potentially reinitialized token.
