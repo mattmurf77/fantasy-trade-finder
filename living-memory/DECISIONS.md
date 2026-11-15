@@ -13,6 +13,21 @@
 - A new league-scoped route must live under one of the prefixes (or extend the tuple).
 - Open: a one-QB league with TE premium is still stored as `sf_tep` (two buckets) — follow-up in the spec.
 
+## D-269 — A Home position tile's body opens your own roster at that position; a header "Home" control returns for that arrival only
+
+**Date:** 2026-11-15 · **Who:** the operator asked for it (tile tap, the destination screenshot, then "Should still have a back button that goes back to the home page too"); built by a builder subagent on `feat/position-tile-tap`. Scope: `docs/plans/position-tile-tap/scope.md`.
+**Context:** the Home position tiles were deliberately not pressable (only Buy / Sell, so VoiceOver never meets a nested control). The operator wanted one tap from a tile to the user's own players at that position.
+**Decision:**
+- Flag `nav.home_position_roster` (code default false, shipped true). The tile's upper region is one pressable, a SIBLING of the actions row, never around Buy / Sell. Off ⇒ the tile tree is the original one.
+- A new intent kind `roster` in `state/leagueSummaryIntent`, not a reuse of `split`: no banner, no list landing. The consume only resets (Consensus, All, {position}) and queues the open; an effect declared after the filter auto-exit opens `myEntry` (the `is_you` row) through `openTeam(…, 'home_tile', …)` once the data is in, so `league_team_opened` stays the one enter event. No own team ⇒ the filtered list at the top.
+- Landing: no scroll when the roster fits; otherwise just enough that the roster ends on screen, never past the roster panel's top.
+- The "Home" control sits in the header RIGHT (the left is the drill-in's "All teams", #302; the title is the team name). It closes the drill-in (`league_team_closed` via `home_back`) and navigates to the Home tab. It shows only for the drill-in the arrival opened and clears on blur, "All teams", a filter change or another team.
+- Analytics: `home_tile_tapped` tile `position_roster` with `position`, `band` and a new `split` prop (the tile's state), so a no-split tap is not read as Mid-pack.
+**Consequences:**
+- Android hardware back and the iOS back swipe do not return to Home during the arrival: the swipe has no stack entry to pop, and Android back on this screen stays unregistered per #302's operator decision. Left for the operator.
+- The existing Buy / Sell arrival from Home still has no way back to Home; unchanged here.
+- Leaving League by the tab bar keeps the drill-in open (as any drill-in does) but drops the Home control.
+
 ## D-266 — The default "fair" threshold is one server value behind `trade.fairness_window_v2`; the "balanced" bar does not follow it
 
 **Date:** 2026-11-14 · **Who:** the operator approved the spec (`docs/plans/fairness-window/spec.md`); built by a builder subagent on `feat/fairness-window`.

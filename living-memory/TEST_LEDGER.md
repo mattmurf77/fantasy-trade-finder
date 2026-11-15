@@ -5,6 +5,14 @@
 - **App:** `check-calc-league-format.js` 5 (new); the related `check-*.js` that run without `node_modules` green; testid-lint OK. **`tsc --noEmit` not run** (no `node_modules` in the worktree; CI must run it).
 - **Not verified:** anything on a device (D-056; checklist in `docs/plans/league-format-source/spec.md` §3). FTF_SKIP_SIM_GATE=1 on push.
 
+## 2026-11-15 — Home position tile opens your roster (D-269), branch `feat/position-tile-tap`
+
+- **App:** `tsc --noEmit` clean; testid-lint OK; new `check-position-tile-tap.js` 54 of 54; all 187 `check-*.js` green after updating `check-home-hub.js` 6b/6c (vocabulary + `split`) and `check-league-rankings-playoff-tile.js` T4c (taxonomy row). `npm ci` was run in the worktree's `mobile/` (node_modules was missing).
+- **App sabotages, red then restored (11):** body pressable while loading (2d); label copy (2i/2j); flag ignored by the hub (3b); bare `setSelectedId` instead of `openTeam` (5b/5g); open before data (5b); banner on the roster arrival (4b); landing past the panel top (6a); Home control on any visit (7a); no blur clear (7d); no close event on Home (7e); `split` replaced by another prop (home-hub 6c).
+- **Backend (Python 3.12, local venv, no network):** new `test_home_position_roster_flag.py` 3; `test_analytics_taxonomy_home_hub.py` 6 (now a `position_roster` row with `split`, ingest round trip). Every backend test file that touches flags, fixtures or the taxonomy: 4077 passed, 27 skipped.
+- **Backend sabotages, red then restored (4):** config false; flag missing from a fixture; flag not registered; `split` dropped from the prop row.
+- **Not verified:** anything on a device (D-056; checklist in `docs/plans/position-tile-tap/scope.md` §3): the landing offset on real phones, the header right control's fit beside long team names, VoiceOver order. FTF_SKIP_SIM_GATE=1 on push.
+
 ## 2026-11-14 — Fairness window (D-266), branch `feat/fairness-window`
 
 - **Backend (Python 3.12, local venv, no network):** new `test_fairness_window.py` 39 (registration in code/config/three fixtures; every signature default is `FAIR_DEFAULT` 0.75; knob validation 0.55–0.75; flag off never reads model_config; `/api/feature-flags` key absent off, served on, bad knob → 0.75; `/api/trades/generate` resolution off/on/explicit/pinned; flag-off deck identical to an explicit-0.75 deck through the real worker; cache keys per threshold (page scope, prepared scope, `_trade_job_is_fresh`); replay tool on a synthetic fixture (exact/close ranks, 0.60/0.55 ≡ 0.65); decision rule (tie to tighter, nothing gains, slow winner refused)). Full suite **15,679 passed, 42 skipped, 0 failed in 25m59s**.
