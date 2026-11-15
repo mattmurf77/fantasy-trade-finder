@@ -235,6 +235,11 @@ class _Search:
         self.requested_floor = fairness_threshold
         self.valid_floor = _finite(fairness_threshold) and 0 <= fairness_threshold <= 1
         self.floor = max(float(fairness_threshold), self.config["market_floor_absolute"]) if self.valid_floor else 1.0
+        # docs/plans/fairness-formula/spec.md: None (flag off, or knobs at today's
+        # math) keeps every line below exactly today's.
+        from . import fairness_formula
+        self.formula = fairness_formula.active(self.config)
+        self._raw = {}
         self.seed = dict(seed_elo)
         self.market = {}
         with ts._cfg_override(self.config):
@@ -384,6 +389,30 @@ class _Search:
                     if team.get("native_bounds") else any(pos in ELIGIBILITY[s] for s in team["slots"])):
                 result[pos] += .15 * max(vals)
         return result
+
+    def _formula_terms(self, give, receive, gv, rv):
+        """The active fairness formula's sides, ratio and floor (fairness_formula.py).
+        `gv`/`rv` are today's package values (used as-is in package-math mode)."""
+        from . import fairness_formula as fx
+        knobs = self.formula
+        if knobs[fx.PACKAGE] == 1.0:
+            fg, fr = gv, rv
+        else:
+            def raw(pid):
+                if pid not in self._raw:
+                    self._raw[pid] = fx.raw_value(self.ts, self.seed[pid], self.players.get(pid))
+                return self._raw[pid]
+            sides = []
+            for ids in (give, receive):
+                values = [self.market[p] for p in ids]
+                raws = [raw(p) for p in ids] if knobs[fx.RAW] == 1.0 else None
+                sides.append(fx.side_value(knobs, values, raws))
+            fg, fr = sides
+        if not (fg > 0 and fr > 0):
+            return None
+        return {"knobs": dict(knobs), "give": fg, "receive": fr, "ratio": min(fg, fr) / max(fg, fr),
+                "floor": fx.floor(knobs, self.requested_floor, self.config["market_floor_absolute"]),
+                "package_ratio": min(gv, rv) / max(gv, rv)}
 
     def _package(self, give, receive, values):
         return self.ts.price_consensus_package(list(give), list(receive), value_of=values.__getitem__)
@@ -549,7 +578,14 @@ class _Search:
             "max_overpay_frac": self.config["max_overpay_frac"],
             "max_overpay_min_value": self.config["max_overpay_min_value"],
             "overpay_adjusted": self.config["overpay_adjusted"]}
-        if ratio < self.floor - _EPS:
+        if self.formula is not None:
+            formula = self._formula_terms(give, receive, gv, rv)
+            if formula is None:
+                return finish("invalid_market_value")
+            data["market"].update(ratio=formula["ratio"], formula=formula)
+            if formula["ratio"] < formula["floor"] - _EPS:
+                return finish("market_floor")
+        elif ratio < self.floor - _EPS:
             return finish("market_floor")
         if not self.ts.overpay_ok(give, receive, self.market.__getitem__):
             return finish("market_overpay")

@@ -188,8 +188,12 @@ class _Search(previous._Search):
             return None
         simpler = tuple(p for p in incoming if p != pid)
         priced = self._package(outgoing, simpler, self.market)
-        required = (priced is None or priced[0] < self.floor - owner._EPS
-                    or not self.ts.overpay_ok(outgoing, simpler, self.market.__getitem__))
+        if priced is not None and self.formula is not None:     # D-267: the active formula's bar
+            terms = self._formula_terms(outgoing, simpler, priced[1], priced[2])
+            below = terms is None or terms["ratio"] < terms["floor"] - owner._EPS
+        else:
+            below = priced is None or priced[0] < self.floor - owner._EPS
+        required = below or not self.ts.overpay_ok(outgoing, simpler, self.market.__getitem__)
         return "required_price_companion_to_independent_focal_thesis" if required else None
 
     def _window_evidence(self, team, pid):

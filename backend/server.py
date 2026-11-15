@@ -4688,7 +4688,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 30
+DECK_PIPELINE_VERSION = 31
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4853,6 +4853,7 @@ DECK_PIPELINE_PINS = {
     28: "f9dc5f829bcd9a92",  # Founders' review (docs/plans/founder-review/): _season_evidence attaches the founder's label overrides that reach this league (season_value.with_label_overrides: players projected here, scope `all` or the league's QB format) and recomputes the evidence digest over them, so the request hash moves with them; league_profile applies them to the future axis only; no override that reaches the league: the same evidence object, digest, hash, terms and order.
     29: "02e724a78ba569ee",  # Founders' review, use case 2: _run_trade_job takes a per-job rule_waterfall_probe (default None), called once after the rules-first rules are built and before the fit context and generation; only the founder's private diagnostic job passes one, and it always stops that job there; None (every real job): the same calls, terms, order and payload.
     30: "8b2ee05d3e179b04",  # Sell bonus (model_config season_sell_bonus_tanking 0.05 / season_sell_bonus_rebuilding 0.03; revision 5 only): _owner_selected_assignment pops both with the other season knobs when revision 5 is not selected, and keeps each in the request hash only while above 0, so a bonus-0 unit hashes as before; the rule lives in trade_gen_bilateral_season / trade_first_page (engine code hash); bonus 0 or revision 5 not selected: hash, terms and order unchanged. Shipped in the same bump as the viewer label fit (season_viewer_label_fit, default 1): a Rebuilding / Tanking viewer's re-scored team plan reads the season label table, never milder than the age rule.
+    31: "15f0d551ecbe6c98",  # Fairness formula (trade.fairness_formula_v2, default off; D-267): _owner_selected_assignment drops the four fairness_formula_* knobs from the request hash unless a formula is active (flag on and a knob off its default), so flag off or today's math hashes as before; the formula itself lives in trade_gen_owner / fairness_formula (engine code hash); flag off: hash, terms and order unchanged.
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4862,6 +4863,7 @@ DECK_PIPELINE_PINS = {
 _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "fairness_formula.py",        # D-267: the deck's admission formula (trade.fairness_formula_v2)
     "trade_first_page.py", "trade_fast_deck.py",  # ADR-030: rules-first construction (flag deck.rules_first)
     "deck_rules.py",              # ADR-030: the per-card deck rules applied before ranking
     "power_rankings.py",          # value_core's lineup slots and optimal starters
@@ -22864,6 +22866,12 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False, seas
         # Knob 0 is the premium-return rule every unit before it was built
         # under: it keeps their hashes. On (the default) it is a new unit.
         canonical["config"].pop(_owner_gen.UNTOUCHABLE_HARD_KEY, None)
+    from . import fairness_formula as _fairness_formula
+    if _fairness_formula.active(canonical["config"]) is None:
+        # Flag off or today's math: the knobs never join the hash, so units keep
+        # their hashes. An active formula is a new unit (D-267).
+        for key in _fairness_formula.KNOBS:
+            canonical["config"].pop(key, None)
     for key in ("user_roster", "pinned_give_players", "pinned_receive_players", "acquire_positions",
                 "trade_away_positions", "avoid_positions", "swap_positions"):
         if canonical.get(key) is not None:

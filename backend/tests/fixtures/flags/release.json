@@ -285,6 +285,7 @@
   "trade.fit_position_ranks": false,
   "trade.partner_activity": false,
   "trade.fairness_window_v2": false,
+  "trade.fairness_formula_v2": false,
   "trade.sleeper_offer_import": true,
   "trade.season_signal": true
 }

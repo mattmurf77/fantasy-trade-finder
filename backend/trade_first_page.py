@@ -355,6 +355,10 @@ class _Bounds:
     def __init__(self, search):
         from . import trade_gen_bilateral as bilateral
         self.search = search
+        if getattr(search, "formula", None) is not None:
+            # D-267: the bounds below are today's package math; the caller falls back
+            # to the generator's full solve.
+            raise Unsupported("fairness_formula")
         weights = bilateral._WEIGHTS
         self.w_pref = weights["preference_fulfillment"]
         self.w_market = weights["market_acceptability"]
