@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-15 — Fairness formula: selectable deck admission formula behind `trade.fairness_formula_v2` (off), replay says keep today's math (D-267)
+
+- `backend/fairness_formula.py` + four `fairness_formula_*` knobs (defaults = today's market package math). Flag off is byte-identical (golden decks from main for owner, r1, r2, r4); default knobs too. Request hash drops the knobs unless a formula is active; deck pipeline v31.
+- Replay `backend/eval/fairness_formula_replay.py` on 1,200 in-season trades: no arm passed; plain sum (C) built the same first 30 for every trade, Σv^0.7 arms shrank the deck and lowered matches (`docs/plans/fairness-formula/results.md`). Branch `feat/fairness-formula`, not merged.
+- Also: fairness-window scope records the operator's §1 waiver sign-off (2026-11-15).
+
 ## 2026-11-14 — Fairness window: one default "fair" threshold behind `trade.fairness_window_v2` (off), replay says keep 0.75 (D-266)
 
 - `backend/fairness_window.py` is the single source (0.75). Flag on ⇒ the `fairness_window_default` knob, served as `fairness_on_threshold` on `GET /api/feature-flags` and sent by the app's Balanced trades toggle. Flag off is byte-identical. The "balanced" copy bar stays 0.75.

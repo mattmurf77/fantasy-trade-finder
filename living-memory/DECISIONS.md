@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-267 — The deck's admission formula is selectable behind `trade.fairness_formula_v2`; the replay kept today's math
+
+**Date:** 2026-11-15 · **Who:** the operator approved the spec (`docs/plans/fairness-formula/spec.md`); built by a builder subagent on `feat/fairness-formula`.
+**Context:** research found a compressed sum (Σ value^0.7, no package discount) told real trades from made-up ones better than the app's package math. Whether it puts trades like the real ones on the first page had to be measured first.
+**Decision:**
+- `backend/fairness_formula.py` + four model_config knobs (`fairness_formula_package_math` 1, `_exponent` 1, `_raw` 0, `_threshold_power` 1 = today's math). Flag off never reads them. On, every owner deck generator admits on the active formula's ratio (floor = max(threshold^power, `market_floor_absolute` 0.65)) and the card's `fairness_score` is that ratio; shown side values, overpay ceiling, support scores, serving policy and verdicts stay on today's math.
+- The owner request hash drops the knobs unless a formula is active (deck pipeline v31), so flag-off units keep their hashes. The page-first search declines an active formula and the full solve runs.
+- **Result (1,200 trades, 729 lineages): no arm passed** (`docs/plans/fairness-formula/results.md`). Best: C (plain sum) +0.0 pts, the identical first 30 for every trade; A −0.3 [−1.2, +0.5]; B −1.4 [−2.6, −0.3]; D −0.2 [−1.1, +0.7].
+**Consequences:**
+- The r4 deck's order comes from support scores on today's package values, so the admission formula alone moves the back of the deck, not the first page. A formula that is to move the first page would also have to change ordering, which this change does not do.
+- If a formula is ever turned on, the serving policy (`trade_policy`) still prices on today's math; decide whether it follows first.
+
 ## D-266 — The default "fair" threshold is one server value behind `trade.fairness_window_v2`; the "balanced" bar does not follow it
 
 **Date:** 2026-11-14 · **Who:** the operator approved the spec (`docs/plans/fairness-window/spec.md`); built by a builder subagent on `feat/fairness-window`.
