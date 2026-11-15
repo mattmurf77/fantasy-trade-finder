@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-268 — A league's own stored format governs every league surface; the SF/1QB toggle is for ranking screens only
+
+**Date:** 2026-11-15 · **Who:** the operator reported a one-QB league labelled "SF TEP" on League Summary; the main session diagnosed it; built by a builder subagent on `fix/league-format-source`.
+**Context:** league surfaces read the session's active ranking format, which carries over from the previous league, follows the Tiers/Trios toggle and the app's `X-Scoring-Format` header. A one-QB league was labelled and valued (power rankings, trade decks) on the superflex board.
+**Decision:**
+- One resolver, `server._league_format` (stored `leagues.default_scoring`, NULL ⇒ `1qb_ppr`, no row ⇒ keep the session's), applied once per request in `_require_session` for routes under `/api/league/`, `/api/leagues/`, `/api/trades`, `/api/overhauls`, `/api/win-now/`, `/api/projection-runs/`. The request view's format, `service`, `trade_svc` and `active_format` follow it, so the ~20 league-scoped `_active_format(sess)` calls were not edited.
+- `session_init` keeps a carried-over format only for the same league; its pre-built deck and owned-pick sync use the league's format.
+- Ranking routes keep the toggle and header. The in-league calculator's body format (its own chip) is left; only the app's default for that chip now reads the league's format.
+- Behind `league.format_from_league`, shipped true as a bug fix (operator to confirm). Stored superflex deck rows for one-QB leagues are kept, never read for the league's key.
+**Consequences:**
+- A new league-scoped route must live under one of the prefixes (or extend the tuple).
+- Open: a one-QB league with TE premium is still stored as `sf_tep` (two buckets) — follow-up in the spec.
+
 ## D-266 — The default "fair" threshold is one server value behind `trade.fairness_window_v2`; the "balanced" bar does not follow it
 
 **Date:** 2026-11-14 · **Who:** the operator approved the spec (`docs/plans/fairness-window/spec.md`); built by a builder subagent on `feat/fairness-window`.
