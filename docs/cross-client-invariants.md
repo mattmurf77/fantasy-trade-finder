@@ -335,6 +335,8 @@ Recorded here so the absence is a decision on the record rather than an omission
 
 ## Consensus balance claim — the 0.75 bar (D-097, 2026-08-19)
 
+**The bar does not follow the deck window (D-266, 2026-11-14).** Flag `trade.fairness_window_v2` can lower the default threshold the app *generates* at (`fairness_on_threshold`, 0.55–0.75). `FAIRNESS_ON_THRESHOLD`, `NORMAL_LOW`, `CONSENSUS_BALANCED_MIN` and web `FAIRNESS_BALANCED_MIN` stay **0.75** with the flag in either state: a card admitted at 0.68 is shown, but it is not called balanced.
+
 **The app may not call a trade balanced below its own definition of balanced.** Until 2026-08-19 the consensus explainer asserted `…this is a balanced trade by consensus value.` gated on `basis === 'consensus'` **alone**, with no fairness check. The app's bar for balanced is **0.75**, but the mobile fairness default flipped OFF on 2026-08-17 so the live generation floor is **0.50** and cards ship down to 0.501. Measured read-only against prod `deck_impressions` on 2026-08-19: **805 of 7,293 served consensus cards (11.0%)** carried that sentence while below the bar (band `[0.501, 0.75)`; p10 0.7302, p50 0.8590, min 0.5010, and 7,293/7,293 carried a non-NULL `fairness_score`).
 
 **The claim is REMOVED, not replaced.** Below the bar the sub-line truncates to its true half and stops. Two character-identical strings on both clients, keyed on `fairness_score`:

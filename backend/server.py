@@ -268,6 +268,7 @@ from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import test_profile as _tp               # onboarding test profile (dev.test_profile)
+from . import fairness_window as _fairness_window  # default "fair" threshold (trade.fairness_window_v2)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
@@ -15160,7 +15161,7 @@ def _kickoff_trade_job(
     user_id: str,
     league_id: str,
     scoring_format: str,
-    fairness_threshold: float = 0.75,
+    fairness_threshold: float = _fairness_window.FAIR_DEFAULT,
     pinned_give: list | None = None,
     pinned_receive: list | None = None,
     pinned_give_mode: str = "any",
@@ -21967,8 +21968,11 @@ def generate_trades():
         selected_request = (tuple(body.get("pinned_give_players") or ()),
             tuple(body.get("pinned_receive_players") or ()), body.get("pinned_give_mode"),
             body.get("opponent_user_id"), body.get("trade_intent"))
-    # Default to 50% when pinned players are selected (wide net), 75% otherwise
-    default_fairness   = 0.50 if _any_pinned else 0.75
+    # Default to 50% when pinned players are selected (wide net), otherwise the
+    # default "fair" threshold (0.75; the configured window while
+    # trade.fairness_window_v2 is on — backend/fairness_window.py). Resolved
+    # once here, before any cache key is built from it.
+    default_fairness   = 0.50 if _any_pinned else _fairness_window.default_fair_threshold()
     fairness_threshold = float(body.get("fairness_threshold", default_fairness))
     fmt                = _active_format(sess)
     # Onboarding item 7 (F2): a Quick Set save changes the board but not the
@@ -36668,6 +36672,7 @@ def feature_flags_route():
         "configs":     configs,
         **_update_gate_fields(),
         **_pass_reason_cadence_fields(),
+        **_fairness_window.payload_fields(),
     })
 
 

@@ -1,6 +1,7 @@
 import { api, getDeviceId } from './client';
 import type { FlagMap } from '../shared/types';
 import { appStoreLiveOrUnset, minVersionOrOff } from '../utils/appVersion';
+import { setServedFairnessOnThreshold } from './tradePregen';
 
 // GET /api/feature-flags — fetched at boot and on the ≥30-min foreground
 // refetch (analytics-platform §4.6b). Mirrors the web's window.FTF_FLAGS
@@ -67,6 +68,7 @@ export async function loadFeatureFlags(
       app_min_version?: unknown;
       app_store_live?: unknown;
       pass_reason_cadence?: unknown;
+      fairness_on_threshold?: unknown;
     }>('/api/feature-flags', headers ? { headers } : undefined);
     const base = res?.flags || {};
     // Experiment overlays (FR-35): a running experiment variant may carry
@@ -98,6 +100,8 @@ export async function loadFeatureFlags(
     _appMinVersion = minVersionOrOff(res?.app_min_version);
     _appStoreLive = appStoreLiveOrUnset(res?.app_store_live);
     _passReasonCadence = res?.pass_reason_cadence;
+    // Flag trade.fairness_window_v2: absent (flag off) clears it back to 0.75.
+    setServedFairnessOnThreshold(res?.fairness_on_threshold);
     return merged;
   } catch (err) {
     if (opts.throwOnError) throw err;

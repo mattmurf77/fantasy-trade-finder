@@ -30,6 +30,7 @@ from itertools import combinations
 from typing import Optional
 
 from .feature_flags import FLAGS
+from .fairness_window import FAIR_DEFAULT
 from .pick_values import parse_generic_pick_id
 from .trade_narrative import build_narrative
 # trade.negmem — MODULE import, attribute calls only (T1, LLD §6.2). A value
@@ -4949,7 +4950,7 @@ class TradeService:
         league_id: str,
         seed_elo: dict[str, float],          # consensus elo for fairness checks
         max_per_opponent: int = 5,
-        fairness_threshold: float = 0.75,    # min package_value ratio (0.5–1.0)
+        fairness_threshold: float = FAIR_DEFAULT,    # min package_value ratio (0.5–1.0)
         acquire_positions: list[str] | None = None,    # positions user wants to receive
         trade_away_positions: list[str] | None = None, # positions user wants to give
         avoid_positions: list[str] | None = None,      # #360: never receive these
@@ -7886,7 +7887,7 @@ class TradeService:
         league_id: str,
         seed_elo: dict[str, float],
         max_cards: int,
-        fairness_threshold: float = 0.75,
+        fairness_threshold: float = FAIR_DEFAULT,
         acquire_positions: list[str] | None = None,
         trade_away_positions: list[str] | None = None,
         pinned_give_players: list[str] | None = None,
