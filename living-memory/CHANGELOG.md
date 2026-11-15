@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-14 — Playoff targets: the mirror of Max PF moves, built dark (D-264)
+
+- New section on the viewer's own Standings card, after Max PF moves: the players on selling teams who would raise the viewer's playoff chance most if acquired, as playoff chance now → after, with "Find trades for [player]" pinning the receive side. Flag `league.playoff_targets`, **off**; branch `feat/playoff-targets`, PR open, not merged.
+- Selling team = under 50% in the forecast run, or a saved Rebuilding / Tanking outlook; applied in the weekly job and again on every read. Computed as a second bounded step in the weekly job (`league_projections/playoff_targets.py`), saved in `result_json.playoff_targets`, composed on the forecast read. No schema or route change.
+- **Not signed off:** fifteen product choices and five waivers are listed for the operator in `docs/plans/league-projections/playoff-targets/scope.md` §0. Contract and evidence in the same folder.
+
 ## 2026-11-14 — Max PF moves: most likely pick and its chance instead of the average (D-263)
 
 - The forecast read adds `most_likely_pick` (baseline, rows, combined) from the saved distributions, given a miss; no re-run, nothing saved, no hash change; `pick_if_miss` still served.

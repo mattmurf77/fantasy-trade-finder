@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag](#2026-11-14--playoff-targets-d-264-operator-choices-merge-testflight-checklist-then-the-flag)
 - [2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups](#2026-11-12--max-pf-moves-d-258-backtest-gate-then-the-follow-ups)
 - [2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD](#2026-11-11--projection-model-v5-testflight-build-and-checklist-first-v5-forecasts-then-calibrate-the-sd)
 - [2026-11-10 — Offer learnings and fast deck are on: device checklists, first production reads, then revision 4](#2026-11-10--offer-learnings-and-fast-deck-are-on-device-checklists-first-production-reads-then-revision-4)
@@ -73,6 +74,21 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag
+
+Built dark on `feat/playoff-targets` (PR open, not merged). Flag `league.playoff_targets` is off. In order:
+
+1. **Operator answers the choices in [scope.md](../docs/plans/league-projections/playoff-targets/scope.md) §0** (P1–P15, W1–W5). *Why now:* nothing should merge before they are seen. The two most likely to change: P2 (a row for a team at or above 50% implies its manager saved Rebuilding or Tanking; today the row does not name the outlook) and P4 (the number assumes nothing is given up).
+2. **Review and merge the PR** with the flag off. Merging changes nothing a user sees.
+3. **TestFlight build, then the checklist** in [evidence.md](../docs/plans/league-projections/playoff-targets/evidence.md) §3 on a test account with the flag on. This is the only runtime evidence the app side gets (D-056).
+4. **Turn the flag on** (`config/features.json` + the three flag fixtures, or the reload route). Sections read "appear after the next update" until the next weekly forecast (Tuesday 09:30 ET).
+
+Follow-ups, not built:
+- An operator re-run for forecasts saved without the block (Max PF moves' `retry_missing_moves`, D-260, covers only its own block).
+- A backtest of the playoff-chance gain against real seasons (W3).
+- Read the weekly job's real time once the flag is on (`elapsed_ms` in the saved block); the fixture figure is from a laptop.
+- Auto-run of the trade search from the hand-off (W5), shared with Max PF moves' own follow-up.
 
 ## 2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups
 

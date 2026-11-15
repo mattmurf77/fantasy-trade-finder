@@ -123,7 +123,8 @@ The wire contract is [contract.md](contract.md). Decision id **D-264**.
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | updated | "Specific patterns": a rule that depends on live data is applied in the job and again on the read |
 | `docs/architecture.md` (module wiring / data flow changed) | n/a | One leaf module inside the existing `league_projections` package and one bounded step in the existing worker; the read path is the existing route |
 | `living-memory/HLD.md` | n/a | Same reason |
-| `mobile/src/components/CLAUDE.md`, `mobile/src/utils/CLAUDE.md`, `mobile/src/api/CLAUDE.md`, `mobile/src/screens/CLAUDE.md` | updated | The new component, util, copy module, type and the screen's props |
+| `mobile/src/components/CLAUDE.md`, `mobile/src/utils/CLAUDE.md`, `mobile/src/screens/CLAUDE.md` | updated | The new component, util and copy module, and the screen's props. `mobile/src/api/CLAUDE.md` has no row for `leagueProjections.ts`, where the new types live, so it is unchanged |
+| `docs/business/analytics/2026-11-14-playoff-targets-events.md` | added | Tracking-plan addendum for the two events and the new `finder_target_pinned.source` |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | updated | D-264 |
 | `living-memory/CHANGELOG.md`, `TEST_LEDGER.md`, `NEXT.md` | updated | 2026-11-14 entries; the operator's choices, the checklist and the flag flip in NEXT |
 
