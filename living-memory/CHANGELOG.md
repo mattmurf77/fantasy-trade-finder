@@ -12,6 +12,11 @@
 ---
 
 
+## 2026-11-14 — Fairness window: one default "fair" threshold behind `trade.fairness_window_v2` (off), replay says keep 0.75 (D-266)
+
+- `backend/fairness_window.py` is the single source (0.75). Flag on ⇒ the `fairness_window_default` knob, served as `fairness_on_threshold` on `GET /api/feature-flags` and sent by the app's Balanced trades toggle. Flag off is byte-identical. The "balanced" copy bar stays 0.75.
+- Offline replay tool `backend/eval/fairness_window_replay.py`. On 600 real in-season trades, no candidate passed the pre-registered rule, so the knob stays 0.75 (`docs/plans/fairness-window/results.md`). The 0.65 policy floor makes 0.60 / 0.55 equal to 0.65. Branch `feat/fairness-window`, not merged.
+
 ## 2026-11-14 — Max PF moves: most likely pick and its chance instead of the average (D-263)
 
 - The forecast read adds `most_likely_pick` (baseline, rows, combined) from the saved distributions, given a miss; no re-run, nothing saved, no hash change; `pick_if_miss` still served.

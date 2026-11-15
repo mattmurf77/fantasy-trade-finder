@@ -109,6 +109,35 @@ assert(
 );
 
 // ═══════════════════════════════════════════════════════════════════════
+// 1b. Flag trade.fairness_window_v2: the served "Balanced trades" threshold
+//     (docs/plans/fairness-window/spec.md). Absent ⇒ exactly the above.
+// ═══════════════════════════════════════════════════════════════════════
+
+{
+  const { setServedFairnessOnThreshold } = pregen;
+  setServedFairnessOnThreshold(0.65);
+  assert(fairnessThresholdFor(true) === 0.65, 'served 0.65 → ON sends 0.65');
+  assert(fairnessThresholdFor(false) === 0.5, 'a served value never moves OFF');
+  assert(FAIRNESS_ON_THRESHOLD === 0.75, 'the constant (the "balanced" definition) never moves');
+  setServedFairnessOnThreshold(undefined);
+  assert(fairnessThresholdFor(true) === 0.75, 'absent (flag off) → back to 0.75');
+  for (const bad of [0.5, 0.54, 0.76, 1, NaN, Infinity, '0.65', null, true]) {
+    setServedFairnessOnThreshold(0.6);
+    setServedFairnessOnThreshold(bad);
+    assert(fairnessThresholdFor(true) === 0.75, `invalid served value ${String(bad)} → 0.75`);
+  }
+  setServedFairnessOnThreshold(0.55);
+  assert(fairnessThresholdFor(true) === 0.55, 'the lowest allowed value 0.55 is honoured');
+  setServedFairnessOnThreshold(undefined);
+
+  const flagsSrc = fs.readFileSync(path.join(ROOT, 'src/api/flags.ts'), 'utf8');
+  const success = flagsSrc.indexOf('_passReasonCadence = res?.pass_reason_cadence;');
+  const write = flagsSrc.indexOf('setServedFairnessOnThreshold(res?.fairness_on_threshold);');
+  assert(success > 0 && write > success && write < flagsSrc.indexOf('return merged;'),
+    'api/flags.ts writes the served threshold on the success path only');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // 2. The pregen read site, end to end
 // ═══════════════════════════════════════════════════════════════════════
 
