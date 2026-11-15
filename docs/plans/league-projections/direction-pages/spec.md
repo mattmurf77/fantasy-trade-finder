@@ -1,7 +1,8 @@
 # Improve pages, the Home playoff card and its call to action: specification
 
-**Date:** 2026-11-14 · **Entry point:** direct operator ask · **Status:** draft for operator
-review. Nothing here is built. Written against `origin/main` `f0ab507b` and the unmerged
+**Date:** 2026-11-14 · **Entry point:** direct operator ask · **Status:** approved by the
+operator 2026-11-14 (D-265) with one change: the half sheet replaces the card's buttons.
+Nothing here is built. Written against `origin/main` `f0ab507b` and the unmerged
 branch `feat/playoff-targets` (D-264).
 
 The operator asked for three things:
@@ -12,9 +13,9 @@ The operator asked for three things:
    the two pages. Test a version that shows both buttons to teams in the middle, and a
    variation where "View" opens a half sheet with three options.
 
-Eight choices in this spec are the operator's. They are listed in [§11](#11-operator-decisions),
-each with a recommendation. The requirements below are written with the recommendations
-applied, so approving §11 as written approves the spec.
+Eight choices in this spec were the operator's. All eight are answered in
+[§11](#11-operator-decisions): seven as recommended and one changed (#5). The requirements
+below are written to those answers.
 
 - [1. Terms](#1-terms)
 - [2. What exists today](#2-what-exists-today)
@@ -110,7 +111,7 @@ copy. Installed builds without the pages keep the sections on Standings.
 | H-5 | When the league's stored draft-order answer is reverse standings or lottery, the projected pick is hidden. The forecast orders picks by max PF, so the figure would be wrong for that league |
 | H-6 | When the forecast is not current, the projected pick keeps its last saved value under the same "last saved" note as the percentage. With no saved forecast, the cell is hidden |
 | H-7 | "View ›", the info toggle and its explanation stay. The explanation gains one sentence: "Projected pick is where your own first-round pick lands if the season follows the forecast." |
-| H-8 | The button row sits under the figures and shows zero, one or two buttons ([§5](#5-part-3-the-call-to-action)). With none, the row is not rendered and the card is two lines shorter |
+| H-8 | The button row sits under the figures and shows zero, one or two buttons ([§5](#5-part-3-the-call-to-action)). With none, the row is not rendered and the card is two lines shorter. In the half-sheet version there is never a button row ([§5.6](#56-the-half-sheet)) |
 | H-9 | The "Consider [outlook] · Review outlook" row is unchanged and stays last |
 | H-10 | At large text sizes the two figures stack, and two buttons stack. Every control keeps a 44pt target |
 | H-11 | League Rankings shows the same card, because it mounts the same component. Events carry the host screen |
@@ -179,6 +180,7 @@ saved".
 | Single (base) | Any | The primary direction only |
 | Both for the middle | Band is `middle` and both directions are offered | Both, primary first |
 | Both for the middle | Any other | The primary direction only |
+| Half sheet | Any | None. The choices are in the sheet ([§5.6](#56-the-half-sheet)) |
 
 Labels: "Improve Playoff Chances" and "Improve Draft Pick". Each opens its page.
 
@@ -195,47 +197,50 @@ Worked examples, with both directions offered unless the row says otherwise:
 
 ### 5.6 The half sheet
 
-A variation that applies on top of either version above. The card and its buttons are
-unchanged; only "View ›" behaves differently.
+A third version, which replaces the buttons (operator, 2026-11-14). The card shows the two
+figures and "View ›" and nothing else; the choices live in the sheet.
 
 | Id | Requirement |
 |---|---|
-| S-1 | With the sheet on, "View ›" opens a half sheet instead of going to Standings. Tapping the percentage still opens Standings directly |
-| S-2 | The sheet lists three rows in this order: "View projected standings", "Improve Playoff Chances", "Improve Draft Pick" |
-| S-3 | "View projected standings" is always enabled and opens Standings |
-| S-4 | A direction that is offered ([§5.3](#53-when-a-direction-is-offered)) is enabled and opens its page |
-| S-5 | A direction that is not offered is shown disabled with one line saying why, from the server's reason ([§7.3](#73-reasons)). A direction whose feature flag is off is not listed |
-| S-6 | The sheet closes on a row tap, a tap outside it, a downward drag, or the system back gesture. Closing without choosing changes nothing |
-| S-7 | The sheet follows the existing sheet pattern (`AnchorSheet`): a modal over a scrim, safe-area padding, reduced-motion respected, focus moved into the sheet for VoiceOver, each row a 44pt target |
-| S-8 | The sheet reads no data of its own. It renders the block the card already holds |
+| S-1 | With the sheet on, the card has no button row, for any team in any band. `league.direction_both_middle` has no effect |
+| S-2 | "View ›" opens a half sheet instead of going to Standings. Tapping the percentage still opens Standings directly |
+| S-3 | The sheet lists three rows in this order: "View projected standings", "Improve Playoff Chances", "Improve Draft Pick". The order is the same for every team |
+| S-4 | "View projected standings" is always enabled and opens Standings |
+| S-5 | A direction that is offered ([§5.3](#53-when-a-direction-is-offered)) is enabled and opens its page |
+| S-6 | A direction that is not offered is shown disabled with one line saying why, from the server's reason ([§7.3](#73-reasons)). A direction whose feature flag is off is not listed |
+| S-7 | The sheet closes on a row tap, a tap outside it, a downward drag, or the system back gesture. Closing without choosing changes nothing |
+| S-8 | The sheet follows the existing sheet pattern (`AnchorSheet`): a modal over a scrim, safe-area padding, reduced-motion respected, focus moved into the sheet for VoiceOver, each row a 44pt target |
+| S-9 | The sheet reads no data of its own. It renders the block the card already holds |
+| S-10 | "View ›" opens the sheet whenever the card has a `team_direction` block, including when neither direction is offered. The sheet then holds "View projected standings" and the disabled rows |
 
 ## 6. The test
 
 ### 6.1 Cells
 
-Two switches give four cells:
+Three cells:
 
-| | "View" opens Standings | "View" opens the half sheet |
+| Cell | Buttons on the card | "View ›" |
 |---|---|---|
-| **Single button** | A1 (base) | A2 |
-| **Both for the middle** | B1 | B2 |
+| A (base) | One: the primary direction | Opens Standings |
+| B | Both for the middle, otherwise one | Opens Standings |
+| C | None | Opens the half sheet |
 
-A and B differ only for teams in the middle with both directions offered. Outside the middle
-the two are the same screen.
+A and B differ only for teams in the middle with both directions offered; outside the middle
+the two are the same screen. C differs from both for every team.
 
 ### 6.2 What is measured
 
 | Measure | Definition |
 |---|---|
 | Primary | Share of users shown the card in a week who tap "Find trades for [player]" on either page in that week (`finder_target_pinned`, source `maxpf_moves` or `playoff_targets`) |
-| Secondary | Button tap rate; page opens per user; for the middle band, which direction is chosen; trades generated |
+| Secondary | Button tap rate (A, B) and sheet row tap rate (C); page opens per user; for the middle band, which direction is chosen; trades generated |
 | Guard | Standings opens per user (the sheet adds a tap before Standings), plus the five standing guardrails every experiment carries |
 
 ### 6.3 How it runs
 
 Each switch is a flag. Before there are enough users, the operator turns each cell on for
 their own account and judges it by use. Once there are, the same two flags are delivered by
-one experiment through the existing engine: account as the unit, four variants, each variant
+one experiment through the existing engine: account as the unit, three variants, each variant
 carrying the two flag values. The app records the exposure itself the first time it reads a
 delivered flag.
 
@@ -244,7 +249,7 @@ Two facts limit the test and are stated here so they are not found later:
 - **Users.** The runbook's last count (2026-10-05) is under ten users, all on TestFlight.
   Only Sleeper leagues with a current forecast see the card, and only teams in the middle
   see a difference between A and B. No split of that population can show a real difference.
-  Until launch brings users, the test is the operator's own judgement of four screens.
+  Until launch brings users, the test is the operator's own judgement of three screens.
 - **The metric.** The engine's metric list (`backend/experiments.py:65`) has no
   click-through measure. Reading this test from the engine needs one added. Without it, the
   result is read from the events in [§9](#9-analytics) by query. The engine's design
@@ -304,8 +309,8 @@ An unknown reason uses "Not available right now."
 |---|---|---|---|
 | `league.direction_pages` | false | The Standings link rows and every entry point to the two pages | `league.projections` |
 | `league.direction_card` | false | The `team_direction` block, the projected pick on the card, and the button | `league.direction_pages` |
-| `league.direction_both_middle` | false | Version B: both buttons for the middle | `league.direction_card` |
-| `league.direction_view_sheet` | false | The half sheet on "View" | `league.direction_card` |
+| `league.direction_both_middle` | false | Cell B: both buttons for the middle. Ignored while the sheet flag is on | `league.direction_card` |
+| `league.direction_view_sheet` | false | Cell C: the half sheet on "View", and no buttons on the card | `league.direction_card` |
 
 Each is registered in `backend/feature_flags.py`, `config/features.json` with a comment line,
 `docs/config-reference.md`, and the three mirrored flag fixtures.
@@ -318,7 +323,7 @@ Turning off: each flag is a switch with no stored state behind it. Off returns t
 what it was. An experiment is stopped with one call.
 
 The playoff button cannot show until D-264 is merged and `league.playoff_targets` is on.
-Until then the card can ship with the draft-pick direction alone, and Version B has nothing
+Until then the card can ship with the draft-pick direction alone, and cell B has nothing
 to show.
 
 ## 9. Analytics
@@ -329,7 +334,7 @@ registered in `backend/analytics_taxonomy.py`, and impressions are added to
 
 | Event | Fires when | Properties | Class |
 |---|---|---|---|
-| `direction_card_shown` (new) | The card renders with a `team_direction` block, once per mount | `band` → `low` \| `middle` \| `high` \| `none`; `primary` → `playoffs` \| `draft_pick` \| `none`; `shown` → `playoffs` \| `draft_pick` \| `both` \| `none`; `sheet` → boolean; `pick_shown` → boolean | Impression |
+| `direction_card_shown` (new) | The card renders with a `team_direction` block, once per mount | `band` → `low` \| `middle` \| `high` \| `none`; `primary` → `playoffs` \| `draft_pick` \| `none`; `shown` → `playoffs` \| `draft_pick` \| `both` \| `none` (the buttons on the card; always `none` in cell C); `sheet` → boolean; `pick_shown` → boolean | Impression |
 | `home_tile_tapped` (existing) | A button on the card or a row in the sheet is tapped | `tile` gains `improve_playoffs`, `improve_pick`, `playoff_options` (the tap that opens the sheet); new property `via` → `card` \| `sheet`. `standings` keeps its meaning | Intent |
 | `direction_page_opened` (new) | A page gains focus | `page` → `playoffs` \| `draft_pick`; `source` → `card` \| `sheet` \| `standings` \| `other_page` \| `deep_link`; `state` → the feature block's server `state` | Intent |
 | `maxpf_moves_viewed`, `playoff_targets_viewed`, `maxpf_move_expanded`, `playoff_target_expanded`, `finder_target_pinned` (existing) | As today, with the page's route name as the screen | Unchanged | Unchanged |
@@ -347,9 +352,9 @@ choices that follow; it needs no event of its own.
 | Backend tests | The band at 0.35 and 0.65 exactly; the lean at 0.45 exactly and for each saved outlook; the fallback when the lean is not offered; every reason in §7.3; every unusable forecast state; the projected pick equals `max_pf_moves.baseline.label`; the pick is null for a non-max-PF draft order; flag off is byte-identical. Each rule has a named change that makes its test fail |
 | `mobile/tests/check-direction-card.js` | The card shows what the block says and decides nothing itself; zero, one and two buttons; the stacked layout; today's row when the flag is off or the block is absent; both hosts |
 | `mobile/tests/check-direction-pages.js` | Both routes registered; each page mounts the existing body component and no second list; the feedback button; deep links; league switch |
-| `mobile/tests/check-direction-sheet.js` | Row order; enabled, disabled and unlisted rows; every way of closing; the percentage still opens Standings |
+| `mobile/tests/check-direction-sheet.js` | No button row while the sheet is on; row order; enabled, disabled and unlisted rows; every way of closing; the percentage still opens Standings |
 | Code walk | File and line for each requirement that a test cannot pin |
-| TestFlight checklist | The four cells on a device, with large text and VoiceOver; a low, a middle and a high team; a pick owned by another team; a league switch. The only runtime evidence (D-056: no simulator) |
+| TestFlight checklist | The three cells on a device, with large text and VoiceOver; a low, a middle and a high team; a pick owned by another team; a league switch. The only runtime evidence (D-056: no simulator) |
 
 ### 10.2 Docs
 
@@ -370,19 +375,22 @@ choices that follow; it needs no event of its own.
 |---|---|---|
 | 1 | The two pages and the Standings link rows (app only) | D-264 merged for the playoff page; the draft-pick page can go first |
 | 2 | The `team_direction` block, the projected pick on the card, the single button | Step 1 |
-| 3 | Version B, the half sheet, the events, the experiment definition | Step 2 |
+| 3 | Cell B, the half sheet (cell C), the events, the experiment definition | Step 2 |
 
 Each step is its own pull request, ships with its flag off, and needs an app build.
 
 ## 11. Operator decisions
 
-| # | Question | Recommendation | Why |
+Answered by the operator on 2026-11-14 (D-265): "I agree with all recs but one. The sheet
+removes the buttons."
+
+| # | Question | Decision | Why |
 |---|---|---|---|
 | 1 | What is "the middle"? | 35% up to 65% | The cuts the first Home banner used. Centred on your 50% line for a selling team |
 | 2 | In the single version, which button does a middle team get? | The rule in §5.4: draft pick at 45% or lower, or with a saved outlook of Rebuilding or Tanking; otherwise playoffs | It is the rule that already opens one Standings section and closes the other. The alternative is your 50% line, which would disagree with the page for teams between 45% and 50% |
 | 3 | Does a saved outlook of Contender or All-in override a low playoff chance? | No | Matches the existing rule. The "Consider [outlook]" row already tells that user their outlook and their odds disagree |
 | 4 | Show a button when the page has no move that clears its threshold? | No | A button that says "Improve" should lead to something that does |
-| 5 | In the sheet variation, do the card's buttons stay? | Yes | Your wording was "a variation of all three versions". The alternative is the sheet replacing the buttons, which makes it a different test |
+| 5 | In the sheet variation, do the card's buttons stay? | **No. The sheet replaces the buttons** (the operator's change; the recommendation was to keep them) | The test is then three cells, not four: with no buttons on the card, single and both are the same screen |
 | 6 | Do the Standings sections become links to the pages, or stay in full? | Links | One home for each list. Two full copies doubles what can drift and splits the view counts |
 | 7 | Does League Rankings get the new card too? | Yes | It mounts the same component. Keeping it on the old row means a second component |
 | 8 | Button labels | "Improve Playoff Chances" and "Improve Draft Pick" | Your message had "Improve Draft pick" and "improve Draft pick"; one capitalisation is needed |
