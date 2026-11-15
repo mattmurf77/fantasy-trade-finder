@@ -12,10 +12,21 @@
 ---
 
 
+## 2026-11-15 — League surfaces use the league's own format, not the SF/1QB toggle (D-268)
+
+- Bug: a one-QB league read "SF TEP" on League Summary and was valued on the superflex board (decks too), because league routes read the session's format (carry-over from the last league, Tiers/Trios toggle, `X-Scoring-Format`).
+- Fix behind `league.format_from_league` (shipped true, operator to confirm): `_require_session` resolves the league's stored `default_scoring` for `/api/league/`, `/api/leagues/`, `/api/trades*`, `/api/overhauls*`, `/api/win-now/`, `/api/projection-runs/`; `session_init` no longer carries a format across leagues. Ranking screens unchanged. App: calculator defaults to the league's format. Spec `docs/plans/league-format-source/spec.md`. Branch `fix/league-format-source`, not merged.
+
 ## 2026-11-14 — Fairness window: one default "fair" threshold behind `trade.fairness_window_v2` (off), replay says keep 0.75 (D-266)
 
 - `backend/fairness_window.py` is the single source (0.75). Flag on ⇒ the `fairness_window_default` knob, served as `fairness_on_threshold` on `GET /api/feature-flags` and sent by the app's Balanced trades toggle. Flag off is byte-identical. The "balanced" copy bar stays 0.75.
 - Offline replay tool `backend/eval/fairness_window_replay.py`. On 600 real in-season trades, no candidate passed the pre-registered rule, so the knob stays 0.75 (`docs/plans/fairness-window/results.md`). The 0.65 policy floor makes 0.60 / 0.55 equal to 0.65. Branch `feat/fairness-window`, not merged.
+
+## 2026-11-14 — Playoff targets: the mirror of Max PF moves, built dark (D-264)
+
+- New section on the viewer's own Standings card, after Max PF moves: the players on selling teams who would raise the viewer's playoff chance most if acquired, as playoff chance now → after, with "Find trades for [player]" pinning the receive side. Flag `league.playoff_targets`, **off**; branch `feat/playoff-targets`, PR open, not merged.
+- Selling team = under 50% in the forecast run, or a saved Rebuilding / Tanking outlook; applied in the weekly job and again on every read. Computed as a second bounded step in the weekly job (`league_projections/playoff_targets.py`), saved in `result_json.playoff_targets`, composed on the forecast read. No schema or route change.
+- **Not signed off:** fifteen product choices and five waivers are listed for the operator in `docs/plans/league-projections/playoff-targets/scope.md` §0. Contract and evidence in the same folder.
 
 ## 2026-11-14 — Max PF moves: most likely pick and its chance instead of the average (D-263)
 

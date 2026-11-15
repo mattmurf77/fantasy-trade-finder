@@ -1,5 +1,33 @@
 # Decisions — Fantasy Trade Finder
 
+## D-268 — A league's own stored format governs every league surface; the SF/1QB toggle is for ranking screens only
+
+**Date:** 2026-11-15 · **Who:** the operator reported a one-QB league labelled "SF TEP" on League Summary; the main session diagnosed it; built by a builder subagent on `fix/league-format-source`.
+**Context:** league surfaces read the session's active ranking format, which carries over from the previous league, follows the Tiers/Trios toggle and the app's `X-Scoring-Format` header. A one-QB league was labelled and valued (power rankings, trade decks) on the superflex board.
+**Decision:**
+- One resolver, `server._league_format` (stored `leagues.default_scoring`, NULL ⇒ `1qb_ppr`, no row ⇒ keep the session's), applied once per request in `_require_session` for routes under `/api/league/`, `/api/leagues/`, `/api/trades`, `/api/overhauls`, `/api/win-now/`, `/api/projection-runs/`. The request view's format, `service`, `trade_svc` and `active_format` follow it, so the ~20 league-scoped `_active_format(sess)` calls were not edited.
+- `session_init` keeps a carried-over format only for the same league; its pre-built deck and owned-pick sync use the league's format.
+- Ranking routes keep the toggle and header. The in-league calculator's body format (its own chip) is left; only the app's default for that chip now reads the league's format.
+- Behind `league.format_from_league`, shipped true as a bug fix (operator to confirm). Stored superflex deck rows for one-QB leagues are kept, never read for the league's key.
+**Consequences:**
+- A new league-scoped route must live under one of the prefixes (or extend the tuple).
+- Open: a one-QB league with TE premium is still stored as `sf_tep` (two buckets) — follow-up in the spec.
+
+## D-269 — A Home position tile's body opens your own roster at that position; a header "Home" control returns for that arrival only
+
+**Date:** 2026-11-15 · **Who:** the operator asked for it (tile tap, the destination screenshot, then "Should still have a back button that goes back to the home page too"); built by a builder subagent on `feat/position-tile-tap`. Scope: `docs/plans/position-tile-tap/scope.md`.
+**Context:** the Home position tiles were deliberately not pressable (only Buy / Sell, so VoiceOver never meets a nested control). The operator wanted one tap from a tile to the user's own players at that position.
+**Decision:**
+- Flag `nav.home_position_roster` (code default false, shipped true). The tile's upper region is one pressable, a SIBLING of the actions row, never around Buy / Sell. Off ⇒ the tile tree is the original one.
+- A new intent kind `roster` in `state/leagueSummaryIntent`, not a reuse of `split`: no banner, no list landing. The consume only resets (Consensus, All, {position}) and queues the open; an effect declared after the filter auto-exit opens `myEntry` (the `is_you` row) through `openTeam(…, 'home_tile', …)` once the data is in, so `league_team_opened` stays the one enter event. No own team ⇒ the filtered list at the top.
+- Landing: no scroll when the roster fits; otherwise just enough that the roster ends on screen, never past the roster panel's top.
+- The "Home" control sits in the header RIGHT (the left is the drill-in's "All teams", #302; the title is the team name). It closes the drill-in (`league_team_closed` via `home_back`) and navigates to the Home tab. It shows only for the drill-in the arrival opened and clears on blur, "All teams", a filter change or another team.
+- Analytics: `home_tile_tapped` tile `position_roster` with `position`, `band` and a new `split` prop (the tile's state), so a no-split tap is not read as Mid-pack.
+**Consequences:**
+- Android hardware back and the iOS back swipe do not return to Home during the arrival: the swipe has no stack entry to pop, and Android back on this screen stays unregistered per #302's operator decision. Left for the operator.
+- The existing Buy / Sell arrival from Home still has no way back to Home; unchanged here.
+- Leaving League by the tab bar keeps the drill-in open (as any drill-in does) but drops the Home control.
+
 ## D-266 — The default "fair" threshold is one server value behind `trade.fairness_window_v2`; the "balanced" bar does not follow it
 
 **Date:** 2026-11-14 · **Who:** the operator approved the spec (`docs/plans/fairness-window/spec.md`); built by a builder subagent on `feat/fairness-window`.
@@ -29,6 +57,23 @@
 - Four flags, all default off: `league.direction_pages`, `league.direction_card`, `league.direction_both_middle`, `league.direction_view_sheet`. The last makes the third ignored.
 - The playoff direction cannot show until D-264 is merged and `league.playoff_targets` is on.
 - With under ten users the test cannot be read statistically before launch; until then it is the operator's judgement of three screens.
+
+## D-264 — Playoff targets: the mirror of Max PF moves, limited to selling teams by a rule applied in the job and again on the read
+
+**Date:** 2026-11-14 · **Who:** the operator ("Build the opposite of the Max PF moves features. The purpose is to identify the players to trade for that maximize playoff chances. This feature should only suggest players on teams that are rebuilding, tanking for team outlook or have a less than 50% chance of making the playoffs."); built by a builder subagent on `feat/playoff-targets`. The product choices below are the builder's defaults, **not yet signed off**: `docs/plans/league-projections/playoff-targets/scope.md` §0.
+**Context:** Max PF moves (D-258) tells a team that wants a better pick which of its own players to move. A team that wants to make the playoffs had no counterpart.
+**Decision:**
+- A section on the viewer's own Standings card lists the players who would raise the viewer's playoff chance most if acquired, as playoff chance now → after. Flag `league.playoff_targets`, **off**.
+- **Selling team** = playoff probability strictly below 0.5 in the forecast run, or a **saved** `rebuilder` / `jets` outlook. An inferred outlook never counts. One definition (`playoff_targets.is_seller`), applied in the weekly job to choose candidates and again on every read with the outlooks saved at that moment: a team that stops selling loses its rows at once; a team that starts selling gets rows with the next forecast, and the block says the set changed.
+- The number assumes the player joins the viewer's roster and leaves his own, with nothing given up and no starter going back. Stated in the footer; it is not a trade evaluation. Removing him from his own team was chosen over leaving him on both rosters, which counts him twice when the teams meet.
+- Two steps for the time budget: an exact lineup re-solve for every player on a selling team, then a paired 5,000-run re-simulation for the 8 largest lineup gains. Rows are ranked by playoff gain.
+- The block and the rows never carry a league-mate's saved outlook or which rule made the team eligible.
+- Reuses Max PF moves' lineup builder (one new `add` argument), snapshot shift and paired-run anchoring; Max PF moves' behaviour, saved block and contract are unchanged. No table, column or route added.
+**Consequences:**
+- A row for a team at or above 50% implies its manager saved Rebuilding or Tanking, which the app had not shown about a league-mate before. Operator's call (scope §0, P2).
+- About 8 s more per baseline job on the 12-team, 14-week fixture (Max PF moves' own step: about 9 s), in its own 60 s budget, after Max PF moves. Render is unmeasured.
+- Ordering step one by lineup points is a shortcut: a player outside the top 8 by points is never re-simulated.
+- After the flag is turned on, sections read "appear after the next update" until the next weekly forecast; there is no operator re-run for this block yet.
 
 ## D-263 — Max PF moves shows the most likely pick and its chance, not the average pick position
 

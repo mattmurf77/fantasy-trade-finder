@@ -3,6 +3,7 @@
   "league.projections_provider_approved": false,
   "league.projection_outlook": true,
   "league.max_pf_moves": true,
+  "league.playoff_targets": false,
   "trade.prepared_inventory": true,
   "trade.first_page_store": true,
   "trade.packed_evidence": true,
@@ -147,6 +148,7 @@
   "nav.trades_landing": true,
   "nav.home_tab": true,
   "nav.home_hub": true,
+  "nav.home_position_roster": true,
   "usage_trends.enabled": true,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,
@@ -276,5 +278,6 @@
   "trade.partner_activity": false,
   "trade.fairness_window_v2": false,
   "trade.sleeper_offer_import": true,
-  "trade.season_signal": true
+  "trade.season_signal": true,
+  "league.format_from_league": true
 }

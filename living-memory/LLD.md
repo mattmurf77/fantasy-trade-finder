@@ -218,6 +218,7 @@ Changes to any of these MUST update [`../docs/cross-client-invariants.md`](../do
 4. **Goal-driven execution** — define verifiable success criteria; loop until met.
 
 ### Specific patterns
+- **A rule that depends on data that can change after the weekly job is applied in the job and again on the read** (2026-11-14, D-264, Playoff targets' seller rule). The job uses it to choose what to compute and saves the per-item fact (`sellers[rid].eligible`) plus the keys the read needs to look the live data up again (`owner_ids`), never the live value itself; the read re-applies the one definition (`playoff_targets.is_seller`) with a single bulk read and can only DROP rows, and reports the drift (`sellers_changed`) instead of computing new ones. A reused prior result re-runs the step when the rule's outcome has changed, not only when its settings have.
 - **A display value derivable from data a saved result already holds is added when the result is read, never by re-saving** (2026-11-14, D-263, Max PF moves `most_likely_pick`). The served field is additive under the same `version`, absent (not null, not a fallback) when the saved item lacks the data, and the saved block, its settings and `settings_hash` stay untouched, so no re-run is needed and old blocks keep serving.
 - **An operator re-run of saved weekly forecasts is a `retry_*` option on `POST /api/cron/league-projections` that only marks targets due** (2026-11-13, D-260; also `retry_incomplete`, `retry_unsupported`). It sets `next_due_at` to now for unleased current-model targets matching its condition, and the normal dispatch does the rest under the same bounds; scheduled ticks never pass it. `retry_missing_moves` keys on the latest success's `result_json`, the others on the last attempt's status.
 - **A saved sub-block of a stored result is composed on read, never served raw; extra capture data rides beside the snapshot, not in it** (2026-11-12, D-258, Max PF moves). `league_projection_runs.result_json.max_pf_moves` is written by the weekly job and stripped from every served `result` in every flag state (`league_projections/api.py` `public()`); the forecast read builds `max_pf_moves` from it plus read-time values (`maxpf_moves.compose`). Data a feature needs from capture but that must not move `input_hash` / dedupe / `snapshot_hash` goes through `provider.capture(sidecar=…)`, a dict filled only when passed. A flag-gated extra step in the worker returns the result unchanged on any exception or budget hit (`service._attach_moves`). A served block that installed builds gate on a fixed `version` grows only by additive keys under that version, pinned against a golden of the old example (`backend/tests/fixtures/maxpf_moves/v1-example.json`, D-261); a saved block's settings live in its `settings_hash`, so a settings change is how old blocks get re-run.
@@ -850,6 +851,17 @@ calls within one Flask request reuse the view. Mapping consumers must accept
 `collections.abc.Mapping`. The session lock is reentrant because existing callers
 can hold it while mutating a request view.
 
+League surfaces resolve the league's format (2026-11-15, D-268, flag
+`league.format_from_league`): `_require_session` asks `_league_request_format`
+for the request's format first. On a route under `_LEAGUE_FORMAT_PATH_PREFIXES`
+that is `_league_format(league_id)` — THE resolver, stored
+`leagues.default_scoring`, NULL ⇒ `1qb_ppr`, `None` without a row — and the view's
+`_effective_format`, `service`, `trade_svc` and `active_format` all follow it.
+New league-scoped routes go under those prefixes (or extend the tuple); never
+read `sess["active_format"]` on the shared session for a league answer.
+`session_init` keeps a carried-over format only for the same league and builds
+its pre-built deck / owned-pick values on `league_format`.
+
 Job kickoff passes its explicit format and captured ownership to a frozen
 `_TradeExecutionContext` before scheduling. Interactive and pregen callers pass
 already-resolved context instead of rereading a potentially reinitialized token.
@@ -925,7 +937,7 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
 
 - **Cross-tab arrival goes through a one-shot intent store, not route params.**
   - **Why:** a tab-stack *root* such as League rankings (`LeagueSummaryScreen`, route `LeagueRankings`) stays mounted across tab switches and owns its own filter, basis and drill-in state. A param would be stale on the next focus, and a repeat tap would not re-fire.
-  - **The store:** `mobile/src/state/leagueSummaryIntent.ts` holds one pending `{kind: 'split' | 'all', leagueId, …, seq}`. The caller writes it, then navigates. The screen's tab-root registration consumes it on focus with `takeLeagueSummaryIntent(leagueId)`, which clears it always and discards it if it is for another league.
+  - **The store:** `mobile/src/state/leagueSummaryIntent.ts` holds one pending `{kind: 'split' | 'roster' | 'all', leagueId, …, seq}`. An arrival that must open something on the destination (`roster`, D-269: the user's own drill-in) still has the consume only reset state and queue the open; the open runs through the screen's existing open path once its data is in, so its analytics stay single-sourced. The caller writes it, then navigates. The screen's tab-root registration consumes it on focus with `takeLeagueSummaryIntent(leagueId)`, which clears it always and discards it if it is for another league.
   - **Lifecycle:** `seq` is a store-stamped nonce, so the same intent twice still re-fires. A league switch clears the store. It is never persisted, so an arrival cannot replay on a cold start.
   - **Precedent:** the #330 finder hand-off (`useFinderTargets`). Reuse an existing route param when the destination already consumes one: Team outlook → `editDna: true` on `TradesHome` needed no new store.
 - **Duplicating arithmetic requires an executable parity guard.** When a screen's inline logic is pinned by source-text guards and a second surface needs the same numbers, copy it into a zero-runtime-import util (`utils/positionSplit.ts`) instead of refactoring the pinned screen. Then add a guard that *extracts and runs* the screen's own expressions beside the util over randomised inputs and fails on any divergence (`tests/check-position-split-parity.js`, sabotage-proven against both copies). A comment saying "keep in sync" is not a guard.

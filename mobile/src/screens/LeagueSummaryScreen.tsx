@@ -450,6 +450,10 @@ export default function LeagueSummaryScreen() {
     | 'hardware_back'
     | 'tab_retap'
     | 'refocus'
+    // D-269 (flag `nav.home_position_roster`) — the header "Home" control
+    // shown only during an arrival from a Home position tile. It closes the
+    // drill-in it opened and returns to the Home tab.
+    | 'home_back'
     // #300 (flag `league.pos_candidates`) — the AUTOMATIC exit. Changing the
     // position filter while drilled in invalidates the drill-in's whole
     // premise ("Punt Gods are short at WR" says nothing about TE), so the
@@ -1216,6 +1220,13 @@ export default function LeagueSummaryScreen() {
         setPosFilter(new Set<FilterKey>([intent.position]));
         setArrival({ position: intent.position, side: intent.side });
         arrivalScrollRef.current = intent.side === 'sell' ? 'end' : 'list';
+      } else if (intent.kind === 'roster') {
+        // D-269: the split reset with no banner and no list landing; the
+        // own-team open below waits for the data, then lands on the roster.
+        setPosFilter(new Set<FilterKey>([intent.position]));
+        setArrival(null);
+        arrivalScrollRef.current = null;
+        setOwnArrival(intent.seq);
       } else {
         setPosFilter(new Set<FilterKey>());
         setArrival(null);
@@ -1264,6 +1275,73 @@ export default function LeagueSummaryScreen() {
     return () => cancelAnimationFrame(frame);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arrival]);
+
+  // ── Home position tile arrival (flag `nav.home_position_roster`, D-269;
+  //    docs/plans/position-tile-tap/scope.md) ───────────────────────────────
+  // The consume above did the reset (Consensus, All, {position}) and left the
+  // intent's seq here. Once the data is in, the user's OWN team (`myEntry`,
+  // the `is_you` row) opens through `openTeam` — the one open path, so
+  // `league_team_opened` fires with via 'home_tile'. Declared AFTER the
+  // filter-change auto-exit so, in the same commit, a previously open
+  // drill-in closes first ('filter_change') and this open is not ejected.
+  // No `is_you` row (the user's team is not ranked yet, or the read failed):
+  // the filtered list at the top, no drill-in.
+  const [ownArrival, setOwnArrival] = useState<number | null>(null);
+  // The team this arrival opened, while its "Home" header control shows.
+  const [homeBackId, setHomeBackId] = useState<string | null>(null);
+  // Armed by the open; lands the roster on screen until the user drags.
+  const ownLandRef = useRef(false);
+  const drillPanelYRef = useRef<number | null>(null);
+  const drillListRef = useRef<{ y: number; h: number } | null>(null);
+  const viewportHRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (ownArrival == null) return;
+    if (!query.isFetched && !query.isError) return;
+    setOwnArrival(null);
+    if (!myEntry) {
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
+      return;
+    }
+    const id = myEntry.tc.team.user_id;
+    ownLandRef.current = true;
+    openTeam(id, 'home_tile', ranked.indexOf(myEntry) + 1);
+    setHomeBackId(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownArrival, myEntry, ranked, query.isFetched, query.isError]);
+  // The Home control belongs to that one drill-in: "All teams", a filter
+  // change, opening another team or a tab re-tap all end it.
+  useEffect(() => {
+    if (homeBackId && selectedId !== homeBackId) {
+      setHomeBackId(null);
+      ownLandRef.current = false;
+    }
+  }, [homeBackId, selectedId]);
+  // Leaving the screen ends it too, so coming back to League on one's own
+  // never shows a stray Home control.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setHomeBackId(null);
+        setOwnArrival(null);
+        ownLandRef.current = false;
+      },
+      [],
+    ),
+  );
+  // Show the player rows without a scroll when the page allows it; when the
+  // chart pushes them below the fold, scroll just enough that the roster
+  // ends on screen, never past the panel's top (its All / position controls
+  // and the position header stay visible).
+  const applyOwnLanding = () => {
+    if (!ownLandRef.current || !selected) return;
+    const panelY = drillPanelYRef.current;
+    const list = drillListRef.current;
+    const viewH = viewportHRef.current;
+    if (panelY == null || list == null || viewH == null) return;
+    const rosterBottom = panelY + list.y + list.h;
+    const y = Math.max(0, Math.min(panelY, rosterBottom - viewH));
+    scrollRef.current?.scrollTo({ y, animated: false });
+  };
 
   // ── #300 — the row action: pin, then hand off to the finder ────────────
   // THE PIN STORE IS THE ONLY PRESELECTION CONTRACT THAT WORKS. Route params
@@ -1374,10 +1452,33 @@ export default function LeagueSummaryScreen() {
       selected.tc.team.username ||
       selected.tc.team.user_id
     : null;
+  // D-269 — during a Home position tile arrival the header also carries a
+  // "Home" control on the RIGHT (the left is this drill-in's own exit). One
+  // tap closes the drill-in it opened and returns to the Home tab as it was.
+  const showHomeBack = isTabRoot && homeBackId != null && selectedId === homeBackId;
+  const backToHome = React.useCallback(() => {
+    closeTeam('home_back');
+    navigation.navigate('Home');
+  }, [closeTeam, navigation]);
   useEffect(() => {
     if (!isTabRoot) return;
     if (focusedTeamName) {
       navigation.setOptions({
+        headerRight: showHomeBack
+          ? () => (
+              <Pressable
+                testID="league-summary.back-home"
+                onPress={backToHome}
+                hitSlop={space.md}
+                accessibilityRole="button"
+                accessibilityLabel="Back to Home"
+                style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
+              >
+                <Icon name="home" size={16} color={chalk.base} />
+                <Text style={styles.headerBackText}>Home</Text>
+              </Pressable>
+            )
+          : undefined,
         title: focusedTeamName,
         headerTitle: () => <StackHeaderTitle>{focusedTeamName}</StackHeaderTitle>,
         // Keeps testID `league-summary.roster-close` — same function as the
@@ -1404,9 +1505,10 @@ export default function LeagueSummaryScreen() {
         title: 'League rankings',
         headerTitle: () => <StackHeaderTitle>League rankings</StackHeaderTitle>,
         headerLeft: undefined,
+        headerRight: undefined,
       });
     }
-  }, [isTabRoot, navigation, focusedTeamName, closeTeam]);
+  }, [isTabRoot, navigation, focusedTeamName, closeTeam, showHomeBack, backToHome]);
 
   // #302 — Android hardware/gesture back is DELIBERATELY NOT REGISTERED YET.
   //
@@ -1582,7 +1684,7 @@ export default function LeagueSummaryScreen() {
   // the server's unfiltered team.rank. `is_self` is deliberately absent:
   // session-user ↔ PowerRankedTeam.user_id identity was never proven and a
   // guessed prop is worse than a missing one (hld.md S-33).
-  const openTeam = (id: string, via: 'bar' | 'row', rank: number) => {
+  const openTeam = (id: string, via: 'bar' | 'row' | 'home_tile', rank: number) => {
     // #299/#302 — jumping straight from one focused team to another (the
     // chart bars stay tappable while focused) ends the first focus without
     // touching any exit control. Terminate that interval before the new
@@ -1672,17 +1774,21 @@ export default function LeagueSummaryScreen() {
         // as the TradeCalculatorScreen precedent (#384 report 1); a no-op
         // with no tour up — the notifier walks an empty listener set.
         // Home hub — the same two callbacks land a pending arrival.
-        onLayout={() => {
+        onLayout={(e) => {
+          viewportHRef.current = e.nativeEvent.layout.height;
           notifyGuideTargetsMoved();
           applyArrivalScroll();
+          applyOwnLanding();
         }}
         onContentSizeChange={() => {
           notifyGuideTargetsMoved();
           applyArrivalScroll();
+          applyOwnLanding();
         }}
         // The user's own drag ends the arrival's hold on the offset.
         onScrollBeginDrag={() => {
           arrivalScrollRef.current = null;
+          ownLandRef.current = false;
         }}
         scrollEventThrottle={16}
         refreshControl={
@@ -2052,7 +2158,14 @@ export default function LeagueSummaryScreen() {
             2026-07-26 League Analyzer treatment so the grayscale chart stays
             visible above it). */}
         {selected ? (
-          <View style={styles.drillPanel}>
+          <View
+            style={styles.drillPanel}
+            // D-269 — the own-roster landing measures the panel and its list.
+            onLayout={(e) => {
+              drillPanelYRef.current = e.nativeEvent.layout.y;
+              applyOwnLanding();
+            }}
+          >
             <Text style={[type.data, styles.drillSub]}>
               {`#${selectedIdx + 1} of ${ranked.length}${
                 focusOther
@@ -2090,7 +2203,16 @@ export default function LeagueSummaryScreen() {
               style={styles.drillFilter}
               showPicks={showPicksKey}
             />
-            <View style={styles.drillList}>
+            <View
+              style={styles.drillList}
+              onLayout={(e) => {
+                drillListRef.current = {
+                  y: e.nativeEvent.layout.y,
+                  h: e.nativeEvent.layout.height,
+                };
+                applyOwnLanding();
+              }}
+            >
               {/* #300 — STACKED ROSTERS, never side-by-side columns
                   (operator decision 4). With the handoff dark, or on the
                   caller's own row, `drillRosters` is a single section

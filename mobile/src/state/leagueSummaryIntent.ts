@@ -18,6 +18,12 @@ import type { SplitPos, SplitSide } from '../utils/positionSplit';
 //     basis Consensus, subset All, filter {position}, closes any drill-in
 //     (scope W2), shows the pinned Buy/Sell banner, and scrolls: 'buy' to the
 //     TOP OF THE LIST (deepest first), 'sell' to the END (shortest last).
+//   * 'roster' — the BODY of a Home position tile (flag
+//     `nav.home_position_roster`, docs/plans/position-tile-tap/scope.md).
+//     The same reset as 'split' (Consensus, All, filter {position}), NO
+//     banner, then the user's OWN team opens in the drill-in so the first
+//     thing on screen is their players at that position. If the user's team
+//     is not in the rankings, the filtered list opens with no drill-in.
 //   * 'all' — Home's Overall rank row. Same reset with NO position filter,
 //     no banner, scrolled to the top: "5th of 12" is a consensus/All number,
 //     so the list it opens on must be that list.
@@ -29,10 +35,12 @@ import type { SplitPos, SplitSide } from '../utils/positionSplit';
 
 export type LeagueSummaryIntent =
   | { kind: 'split'; leagueId: string; position: SplitPos; side: SplitSide; seq: number }
+  | { kind: 'roster'; leagueId: string; position: SplitPos; seq: number }
   | { kind: 'all'; leagueId: string; seq: number };
 
 export type LeagueSummaryIntentInput =
   | { kind: 'split'; leagueId: string; position: SplitPos; side: SplitSide }
+  | { kind: 'roster'; leagueId: string; position: SplitPos }
   | { kind: 'all'; leagueId: string };
 
 interface LeagueSummaryIntentState {
@@ -67,6 +75,11 @@ export function requestLeagueSummarySplit(
   side: SplitSide,
 ): void {
   useLeagueSummaryIntent.getState().set({ kind: 'split', leagueId, position, side });
+}
+
+/** The body of a Home position tile: your own roster at that position. */
+export function requestLeagueSummaryRoster(leagueId: string, position: SplitPos): void {
+  useLeagueSummaryIntent.getState().set({ kind: 'roster', leagueId, position });
 }
 
 /** Home's Overall rank row. */
