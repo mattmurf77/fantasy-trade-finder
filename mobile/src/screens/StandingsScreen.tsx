@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigation } from '@react-navigation/native';
 
 import Text from '../components/chalkline/Text';
 import { Badge, Button, Icon } from '../components/chalkline';
@@ -79,6 +80,15 @@ export default function StandingsScreen() {
   const batchProjections = useFlag('league.projections');
   const maxPfMovesOn = useFlag('league.max_pf_moves');
   const playoffTargetsOn = useFlag('league.playoff_targets');
+  // Improve pages (direction-pages spec P-13): with the flag on, the two
+  // sections on the viewer's own card become rows that open the pages. Off:
+  // `pageLinks` is undefined and the card is exactly as before.
+  const directionPagesOn = useFlag('league.direction_pages');
+  const navigation = useNavigation<any>();
+  const pageLinks = directionPagesOn ? {
+    draftPick: () => navigation.navigate('ImproveDraftPick'),
+    playoffs: () => navigation.navigate('ImprovePlayoffChances'),
+  } : undefined;
 
   // View and per-view sort live as long as the screen is mounted, so a
   // league switch in the header keeps them.
@@ -274,7 +284,7 @@ export default function StandingsScreen() {
                       }} targets={{
                         block: data?.playoff_targets, flagOn: playoffTargetsOn, isSleeper,
                         liveRosters: rostersQuery.data ?? null,
-                      }} /> : null}
+                      }} pageLinks={pageLinks} /> : null}
                     </View>
                   ) : null}
                 </View>

@@ -125,6 +125,11 @@ const V2_SCREENS = {
   // Home hub (scope R5) — the standings table. Root stack, so the
   // link pushes over the tabs exactly as Home's Standings row does.
   Standings: 'app/league/standings',
+  // Improve pages (direction-pages spec P-11) — root stack, like Standings.
+  // Addressable regardless of `league.direction_pages` (the flag gates the
+  // entry points); a page with its feature off shows its unavailable card.
+  ImprovePlayoffChances: 'app/league/improve-playoffs',
+  ImproveDraftPick: 'app/league/improve-pick',
   // Usage Trends — addressable regardless of `usage_trends.enabled` (the
   // flag gates the entry points; a 404 renders the screen's unavailable state).
   UsageTrends: 'app/league/usage-trends',
