@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-15 — Home playoff card, the half sheet version first: two figures and "View" opens a sheet, built dark (D-270)
+
+- Operator: "get an agent building the half sheet version of the home page as the initial experience update". Server: the forecast read's `team_direction` block (spec §7, complete: band, primary, options with reasons, projected pick), composed on read behind `league.direction_card`; settings `team_direction.middle_min` / `middle_max`. Nothing saved; flag off byte-identical.
+- App: the playoff card (Home and League Rankings) shows Playoff chance and Projected pick (owned-by line, last saved). Under `league.direction_view_sheet` (+ `league.direction_pages`) "View" opens a half sheet: View projected standings, Improve Playoff Chances, Improve Draft Pick; disabled rows say why. No button row.
+- Events: `direction_card_shown`, `direction_page_opened`, `home_tile_tapped` tiles `playoff_options` / `improve_playoffs` / `improve_pick` + `via`; bodies log under the page's route. Deferred: cells A/B, `league.direction_both_middle`, the experiment. Branch `feat/direction-sheet`, not merged. Evidence: `docs/plans/league-projections/direction-pages/evidence.md` §5-§9.
+
 ## 2026-11-15 — Improve pages, step 1: "Improve Playoff Chances" and "Improve Draft Pick", built dark (D-265)
 
 - Two root-stack pages (`ImprovePlayoffChances`, `ImproveDraftPick`; deep links `app/league/improve-playoffs`, `app/league/improve-pick`) with Standings' header and their own FeedbackFAB. Each reads Standings' forecast query (no new request) and renders the existing `PlayoffTargetsBody` / `MaxPfMovesBody` open on arrival (one new prop, `openOnArrival`), a playoff chance / projected pick summary, and links to Standings and to the other page when its list is `ready`.

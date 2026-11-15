@@ -73,6 +73,10 @@ The two *deck-swipe* K's above (like/pass) are additionally scaled by **fit-cong
 
 **Playoff chance (saved projection)** — The share of simulated seasons in which a team makes the playoffs, from the weekly `league_projections` run (model v5: each unplayed week is the team's projected best-lineup total plus noise from the one **universal score SD**). Shown as "Playoff chance" on Home and "Playoff odds" in Projected standings. Not the three-band `outlook.odds` chip.
 
+**Projected pick** — On the Home playoff card (flag `league.direction_card`, D-270) and the Improve pages: the D-257 label for the user's OWN next-year 1st, e.g. "1.08", the team's rank 1..N when the saved forecast orders every team by expected draft slot. Served by the server (`team_direction.projected_pick`, equal to `max_pf_moves.baseline.label`); hidden when the league's stored draft order is reverse standings or lottery. With "owned by [team]" when another team holds the pick.
+
+**Middle (band)** — A playoff chance of at least 35% and under 65% (`team_direction.band = middle`; settings `team_direction.middle_min` / `middle_max`). `low` is below it, `high` at or above it. Decided by the server only.
+
 **Universal score SD** — The single standard deviation (`config/league_projections.json` → `model.score_sd`, 25.0 fantasy points per team-week) applied to every team's unplayed weekly score in the saved projection. Provisional, not calibrated; see `docs/plans/league-projections/universal-sd/`.
 
 **Clinched (playoff spot)** — Proven from the rules, not the simulations (D-262, `backend/league_projections/clinch.py`): even if the team loses every remaining regular-season game, fewer than the league's playoff spots' worth of other teams can finish level with or above it in standing points (2 × wins + ties). A level finish counts against the team, since the tiebreak is future points. Saved per team as `playoff_clinched`; only a clinched team's playoff chance may print as 100%.

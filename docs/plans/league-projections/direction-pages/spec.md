@@ -379,6 +379,13 @@ choices that follow; it needs no event of its own.
 
 Each step is its own pull request, ships with its flag off, and needs an app build.
 
+**2026-11-15, order changed ([D-270](../../../../living-memory/DECISIONS.md)):** the operator asked for
+the half sheet version first ("get an agent building the half sheet version of the home page as the
+initial experience update"). The build after step 1 is the whole `team_direction` block, the card's
+two figures, cell C (the half sheet) and the §9 events for what exists. The button row (cells A and B),
+`league.direction_both_middle` and the experiment definition are deferred. The requirements above are
+unchanged. Evidence: [evidence.md](evidence.md) §5-§9.
+
 ## 11. Operator decisions
 
 Answered by the operator on 2026-11-14 (D-265): "I agree with all recs but one. The sheet
