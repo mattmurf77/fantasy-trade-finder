@@ -82,8 +82,8 @@ S = computed in the weekly job and saved with the run; R = computed when the pag
 | `version` | `1` | no | R | An app that does not know the version renders nothing |
 | `state` | `PlayoffTargetsState` (§4) | no | R | What the section shows. Server-decided |
 | `reason` | `string` | yes | R | Only with `unavailable`; §4.2. An open set |
-| `viewer_roster_id` | `number` | yes | S | Null only for `unavailable` without a usable run |
-| `captured_at` | ISO-8601 string | yes | S | The forecast's capture time |
+| `viewer_roster_id` | `number` | yes | S | Null when `state` is `unavailable` for any reason but `not_computed` |
+| `captured_at` | ISO-8601 string | yes | S | The forecast's capture time. Null exactly when `viewer_roster_id` is |
 | `saved_outlook` | `'championship' \| 'contender' \| 'rebuilder' \| 'jets' \| 'not_sure' \| null` | yes | R | The viewer's own saved outlook, for the default-open rule (§7.1) |
 | `baseline` | `Baseline` (§3.2) | yes | S+R | Null for `unavailable`, `season_over`, `after_trade_deadline` |
 | `eligible_teams` | `number` | no | R | Teams selling now (§2). 0 before that step is reached |
@@ -201,8 +201,8 @@ carries no block (the flag was off at save time, or the step failed or timed out
 ```json
 {
   "playoff_targets": {
-    "version": 1, "state": "unavailable", "reason": "stale", "viewer_roster_id": 7,
-    "captured_at": "2026-11-03T14:30:11+00:00", "saved_outlook": null, "baseline": null,
+    "version": 1, "state": "unavailable", "reason": "stale", "viewer_roster_id": null,
+    "captured_at": null, "saved_outlook": null, "baseline": null,
     "eligible_teams": 0, "sellers_changed": false, "candidates_total": 0, "rows": []
   }
 }
