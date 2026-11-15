@@ -775,6 +775,16 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # The hand-off rides the existing `finder_target_pinned` (side: give,
     # source: maxpf_moves).
     "maxpf_moves_viewed", "maxpf_move_expanded", "draft_order_rule_answered",
+    # ── Playoff targets (flag `league.playoff_targets`, D-264, 2026-11-14) ─
+    # docs/plans/league-projections/playoff-targets/contract.md §9. Both are
+    # app-emitted from the user's own Standings card and registered in the
+    # same commit as the emitters.
+    #   playoff_targets_viewed  — the section body became visible. IMPRESSION:
+    #                             in NON_INTENT_EVENTS.
+    #   playoff_target_expanded — a listed row was opened. INTENT.
+    # The hand-off rides the existing `finder_target_pinned` (side: receive,
+    # source: playoff_targets).
+    "playoff_targets_viewed", "playoff_target_expanded",
     # ── Usage Trends, 2026-10-10 (docs/plans/usage-trends/scope.md §1) ──────
     # Addendum: docs/business/analytics/2026-10-10-usage-trends-events.md.
     # Registered in the SAME commit as the emitters
@@ -1826,7 +1836,9 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `side` ∈ give | receive — the targeting board half the pin landed on
     # (the same vocabulary as player_menu_opened.side). `source` ∈
     # deck_summary | board | maxpf_moves (2026-11-12: "Find trades for
-    # [player]" on the user's own Standings card, side always give).
+    # [player]" on the user's own Standings card, side always give) |
+    # playoff_targets (2026-11-14: the same button in the Playoff targets
+    # section of that card, side always receive).
     "finder_target_pinned":    frozenset({"side", "source"}),
     # `position` is a CORE POSITION (QB|RB|WR|TE) — the QuickSet walk being
     # started, NOT a device platform (the NULL-`platform` incident).
@@ -2140,6 +2152,17 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "maxpf_moves_viewed":          frozenset({"state", "n_moves", "band", "n_listed", "any_pass"}),
     "maxpf_move_expanded":         frozenset({"position", "rank"}),
     "draft_order_rule_answered":   frozenset({"answer", "source"}),
+    # Playoff targets (contract §9). No player id or name in any prop.
+    #   playoff_targets_viewed.state ∈ ready | no_targets | no_sellers |
+    #     near_certain | clinched | eliminated | after_trade_deadline |
+    #     season_over | unavailable (the server's `playoff_targets.state`
+    #     verbatim); n_listed = rows listed (int ≥ 0); any_pass = a listed
+    #     row passes the threshold (bool); n_sellers = teams selling now,
+    #     the server's `eligible_teams` (int ≥ 0); band ∈ jets | rebuilder |
+    #     contender | championship | none (`baseline.playoff_band`).
+    #   playoff_target_expanded.position = the row's position string; rank 1..8.
+    "playoff_targets_viewed":      frozenset({"state", "n_listed", "any_pass", "n_sellers", "band"}),
+    "playoff_target_expanded":     frozenset({"position", "rank"}),
     # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
     # Both props are version INTS (major*10000 + minor*100 + patch, see
     # docs/cross-client-invariants.md): `min_version` is the served

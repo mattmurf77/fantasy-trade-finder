@@ -136,6 +136,7 @@
     "test:standing-offer-362": "node tests/check-standing-offer-362.js",
     "test:standings-order": "node tests/check-standings-order.js",
     "test:max-pf-moves": "node tests/check-max-pf-moves.js",
+    "test:playoff-targets": "node tests/check-playoff-targets.js",
     "test:standings-table": "node tests/check-standings-table.js",
     "test:playoff-odds-display": "node tests/check-playoff-odds-display.js",
     "test:swipe-failure-recovery": "node tests/check-swipe-failure-recovery.js",

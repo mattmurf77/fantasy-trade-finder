@@ -419,6 +419,10 @@ NON_INTENT_EVENTS = frozenset({
     # (maxpf_move_expanded) and answering the draft-order question
     # (draft_order_rule_answered) are intent and stay out of this set.
     "maxpf_moves_viewed",
+    # Playoff targets (D-264): the mirror section on the same card became
+    # visible, an impression. Opening a row (playoff_target_expanded) is
+    # intent and stays out of this set.
+    "playoff_targets_viewed",
     # ── Usage Trends, 2026-10-10 — added in the SAME commit as the emitters
     # (docs/business/analytics/2026-10-10-usage-trends-events.md). Reading the
     # cross-league availability sheet and switching metric / filter chips are

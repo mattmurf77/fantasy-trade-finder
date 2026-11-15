@@ -95,6 +95,54 @@ def _attach_moves(result, prior, snapshot, sidecar, started, job_cancelled, fore
     return {**result, "max_pf_moves": block}
 
 
+def _seller_outlooks(league_id, owners):
+    """{roster_id: saved outlook id or None} for every roster in `owners`
+    ({str(roster_id): [owner id, co-owner ids...]}): the first saved outlook
+    among a roster's owners, primary owner first. One read; a saved outlook
+    only, never an inferred one."""
+    from .. import database as db
+    ids = sorted({uid for row in owners.values() for uid in row})
+    saved = db.load_league_preferences_bulk(ids, str(league_id)) if ids else {}
+    return {int(rid): next((saved[uid]["team_outlook"] for uid in row if (saved.get(uid) or {}).get("team_outlook")), None)
+            for rid, row in owners.items()}
+
+
+def _attach_targets(result, prior, snapshot, sidecar, started, job_cancelled, foreground_busy, league_id):
+    """Playoff targets (flag `league.playoff_targets`, baseline runs only): add
+    the saved block to `result`, after Max PF moves and inside its own time
+    budget. Never raises and never delays the forecast past its budget: any
+    failure or a hit time budget returns `result` without the block, and the
+    read then reports `unavailable` / `not_computed`."""
+    from . import playoff_targets
+    timed_out = []
+    try:
+        options = playoff_targets.settings()
+        owners = sidecar.get("owners") or {}
+        outlooks = _seller_outlooks(league_id, owners)
+        saved = result.get("playoff_targets")
+        if (prior and saved and saved.get("computed") and saved.get("settings_hash") == playoff_targets.settings_hash(options)
+                and playoff_targets.sellers_now(saved.get("sellers") or {}, outlooks)
+                == {rid for rid, s in (saved.get("sellers") or {}).items() if s["eligible"]}):
+            return result
+        clock = time.monotonic()
+        stop = min(clock + options["time_budget_seconds"], started + MOVES_DEADLINE_SECONDS)
+
+        def cancelled():
+            if time.monotonic() >= stop:
+                timed_out.append(True)
+                return True
+            return _checkpoint(job_cancelled, foreground_busy)
+        block = playoff_targets.compute(snapshot, result, sidecar.get("free_agents") or {}, options,
+                                        names=sidecar.get("names"), trade_deadline=sidecar.get("trade_deadline"),
+                                        seller_outlooks=outlooks, owners=owners, cancelled=cancelled)
+        block["elapsed_ms"] = int((time.monotonic() - clock) * 1000)
+    except Exception:
+        # No exception text: it can carry provider payloads (same rule as _run).
+        log.warning("playoff_targets not computed: %s", "time_budget" if timed_out else "failed")
+        return {k: v for k, v in result.items() if k != "playoff_targets"}
+    return {**result, "playoff_targets": block}
+
+
 def _run(fetch_json, foreground_busy=None):
     while is_enabled("league.projections"):
         row = store.claim()
@@ -124,9 +172,11 @@ def _run(fetch_json, foreground_busy=None):
             admit()
             # Max PF moves rides only a fresh baseline capture with its flag on;
             # off, capture and the result are exactly as before.
-            moves = (is_enabled("league.max_pf_moves") and inputs.get("kind") == "baseline"
-                     and not row.get("snapshot_json"))
-            sidecar = {} if moves else None
+            fresh_baseline = inputs.get("kind") == "baseline" and not row.get("snapshot_json")
+            moves = is_enabled("league.max_pf_moves") and fresh_baseline
+            # Playoff targets rides the same capture side channel, on its own flag.
+            targets = is_enabled("league.playoff_targets") and fresh_baseline
+            sidecar = {} if moves or targets else None
             if row.get("snapshot_json"):
                 snapshot = json.loads(row["snapshot_json"])
             else:
@@ -139,11 +189,11 @@ def _run(fetch_json, foreground_busy=None):
                     if cancelled():
                         raise Unavailable("cancelled", state="cancelled")
                     try:
-                        if moves:
+                        if sidecar is not None:
                             sidecar.clear()
                         snapshot = provider.capture(row["league_id"], inputs["league_user_id"], inputs["config"], fetch_json,
                                                     viewer_user_id=_viewer_identity(row["user_id"]),
-                                                    **({"sidecar": sidecar} if moves else {}))
+                                                    **({"sidecar": sidecar} if sidecar is not None else {}))
                         break
                     except Unavailable as exc:
                         if attempt or exc.reason != "inputs_changed_during_capture":
@@ -164,6 +214,11 @@ def _run(fetch_json, foreground_busy=None):
             elif "max_pf_moves" in result:
                 # A result reused from a run saved while the flag was on.
                 result = {k: v for k, v in result.items() if k != "max_pf_moves"}
+            if targets:
+                result = _attach_targets(result, prior, snapshot, sidecar, started, cancelled, foreground_busy,
+                                         row["league_id"])
+            elif "playoff_targets" in result:
+                result = {k: v for k, v in result.items() if k != "playoff_targets"}
             store.finish(row, result)
         except Unavailable as exc:
             store.fail(row, exc)

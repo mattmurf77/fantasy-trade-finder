@@ -78,6 +78,7 @@ export default function StandingsScreen() {
   const isSleeper = platform === 'sleeper';
   const batchProjections = useFlag('league.projections');
   const maxPfMovesOn = useFlag('league.max_pf_moves');
+  const playoffTargetsOn = useFlag('league.playoff_targets');
 
   // View and per-view sort live as long as the screen is mounted, so a
   // league switch in the header keeps them.
@@ -270,6 +271,9 @@ export default function StandingsScreen() {
                       ) : null}
                       {r.forecast && result ? <ProjectionTeamDetail team={r.forecast} result={result} maxPf={{
                         block: data?.max_pf_moves, flagOn: maxPfMovesOn, isSleeper, liveRosterIds, leagueId, userId,
+                      }} targets={{
+                        block: data?.playoff_targets, flagOn: playoffTargetsOn, isSleeper,
+                        liveRosters: rostersQuery.data ?? null,
                       }} /> : null}
                     </View>
                   ) : null}

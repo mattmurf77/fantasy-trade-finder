@@ -33,6 +33,13 @@
     "time_budget_seconds": 60,
     "combined_sizes": [2, 3]
   },
+  "playoff_targets": {
+    "simulations_per_candidate": 5000,
+    "candidates": 8,
+    "min_playoff_gain": 0.01,
+    "near_certain_min": 0.99,
+    "time_budget_seconds": 60
+  },
   "schedule": {
     "weekday": 1,
     "hour": 9,

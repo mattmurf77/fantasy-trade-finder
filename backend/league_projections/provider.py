@@ -9,7 +9,7 @@ from collections import defaultdict, Counter
 from datetime import datetime, timezone
 from typing import Protocol
 
-from ..sleeper_roster import owns_roster
+from ..sleeper_roster import co_owner_ids, owns_roster
 from .core import SLOTS, IDP, Unavailable, decimal, digest, free_agent_fill, idp_bye_fill, league_format, median_outcomes, optimize, score, split_points, semantic_facts
 
 API = "https://api.sleeper.app/v1"
@@ -220,7 +220,8 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
             sidecar=None):
     """`sidecar` (Max PF moves, flag `league.max_pf_moves`): when a dict is
     passed, capture also writes into it the free agents a one-player-removed
-    lineup could need, the league's trade deadline and player names. Nothing
+    lineup could need, the league's trade deadline, player names and each
+    roster's owner ids (playoff targets, flag `league.playoff_targets`). Nothing
     it writes enters the snapshot, so the snapshot, its input hash and every
     simulated number are the same with or without it. None (the default and
     the flag-off path) collects nothing."""
@@ -662,6 +663,10 @@ def capture(league_id, league_user_id, cfg, fetch_json, *, feed=None, captured_a
         sidecar["names"] = {pid: (metadata.get(pid) or {}).get("full_name") or pid
                             for t in teams for key in ("players", "taxi", "reserve") for pid in t["roster"][key]}
         sidecar.setdefault("free_agents", {})
+        # Playoff targets: who owns each roster, so the job can read a
+        # league-mate's saved outlook. Ids only; never enters the snapshot.
+        sidecar["owners"] = {str(r["roster_id"]): [str(u) for u in (r.get("owner_id"), *co_owner_ids(r)) if u]
+                             for r in rosters}
     provenance_counts = defaultdict(Counter)
     for entry in normalized_inputs:
         for key, value in entry["input"].get("stat_provenance", {}).items():

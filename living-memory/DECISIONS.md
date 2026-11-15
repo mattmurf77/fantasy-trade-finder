@@ -42,6 +42,23 @@
 - The engine clamps every request to `market_floor_absolute` (0.65), so 0.60 and 0.55 build exactly the 0.65 deck. Widening below 0.65 would need that policy floor changed, which is out of scope.
 - A mobile cold start that has not fetched flags sends 0.75. That only costs a cache miss, never a wrong deck: every cache keys on the numeric threshold.
 
+## D-264 — Playoff targets: the mirror of Max PF moves, limited to selling teams by a rule applied in the job and again on the read
+
+**Date:** 2026-11-14 · **Who:** the operator ("Build the opposite of the Max PF moves features. The purpose is to identify the players to trade for that maximize playoff chances. This feature should only suggest players on teams that are rebuilding, tanking for team outlook or have a less than 50% chance of making the playoffs."); built by a builder subagent on `feat/playoff-targets`. The product choices below are the builder's defaults, **not yet signed off**: `docs/plans/league-projections/playoff-targets/scope.md` §0.
+**Context:** Max PF moves (D-258) tells a team that wants a better pick which of its own players to move. A team that wants to make the playoffs had no counterpart.
+**Decision:**
+- A section on the viewer's own Standings card lists the players who would raise the viewer's playoff chance most if acquired, as playoff chance now → after. Flag `league.playoff_targets`, **off**.
+- **Selling team** = playoff probability strictly below 0.5 in the forecast run, or a **saved** `rebuilder` / `jets` outlook. An inferred outlook never counts. One definition (`playoff_targets.is_seller`), applied in the weekly job to choose candidates and again on every read with the outlooks saved at that moment: a team that stops selling loses its rows at once; a team that starts selling gets rows with the next forecast, and the block says the set changed.
+- The number assumes the player joins the viewer's roster and leaves his own, with nothing given up and no starter going back. Stated in the footer; it is not a trade evaluation. Removing him from his own team was chosen over leaving him on both rosters, which counts him twice when the teams meet.
+- Two steps for the time budget: an exact lineup re-solve for every player on a selling team, then a paired 5,000-run re-simulation for the 8 largest lineup gains. Rows are ranked by playoff gain.
+- The block and the rows never carry a league-mate's saved outlook or which rule made the team eligible.
+- Reuses Max PF moves' lineup builder (one new `add` argument), snapshot shift and paired-run anchoring; Max PF moves' behaviour, saved block and contract are unchanged. No table, column or route added.
+**Consequences:**
+- A row for a team at or above 50% implies its manager saved Rebuilding or Tanking, which the app had not shown about a league-mate before. Operator's call (scope §0, P2).
+- About 8 s more per baseline job on the 12-team, 14-week fixture (Max PF moves' own step: about 9 s), in its own 60 s budget, after Max PF moves. Render is unmeasured.
+- Ordering step one by lineup points is a shortcut: a player outside the top 8 by points is never re-simulated.
+- After the flag is turned on, sections read "appear after the next update" until the next weekly forecast; there is no operator re-run for this block yet.
+
 ## D-263 — Max PF moves shows the most likely pick and its chance, not the average pick position
 
 **Date:** 2026-11-14 · **Who:** the operator approved replacing the decimal average with the most likely pick and its chance; built by a backend + app subagent.

@@ -58,6 +58,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # league.projections. Off = no block, no extra job work, the draft-order
     # route 404s; every read and saved run is byte-identical.
     "league.max_pf_moves",
+    # Playoff targets (docs/plans/league-projections/playoff-targets/contract.md):
+    # the mirror of Max PF moves. On the user's own Standings card, which
+    # players on selling teams (playoff chance under 50% in the forecast, or
+    # a saved Rebuilding / Tanking outlook) would raise the user's playoff
+    # chance most if acquired. Computed in the weekly forecast job, served as
+    # `playoff_targets` on the forecast read. Requires league.projections.
+    # Off = no block, no extra job work; every read and saved run is unchanged.
+    "league.playoff_targets",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.
