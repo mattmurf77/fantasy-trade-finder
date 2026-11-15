@@ -1,6 +1,6 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, ScrollView, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Text } from './chalkline';
 import { ink, chalk, ice, space, radii } from '../theme/chalkline';
@@ -8,13 +8,15 @@ import { getLeagueRosters, findMyRoster } from '../api/sleeper';
 import { getLeagueProjectionBatch } from '../api/leagueProjections';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { track } from '../api/events';
 import { MaxPfMovesBody } from './MaxPfMovesSection';
 import { PlayoffTargetsBody } from './PlayoffTargetsSection';
 import { deriveSection as deriveMaxPf } from '../utils/maxPfMoves';
 import { deriveSection as deriveTargets } from '../utils/playoffTargets';
 import { DIRECTION_COPY as C } from '../utils/directionPagesCopy';
 import {
-  pageView, summary, pageLinks, PAGE_FLAG, PAGE_TESTID, DIRECTION_PAGES_FLAG, type DirectionPage as Page,
+  pageView, summary, pageLinks, pageSource, openedState, openedProps, PAGE_EVENTS, PAGE_FLAG, PAGE_ROUTE,
+  PAGE_TESTID, DIRECTION_PAGES_FLAG, type DirectionPage as Page,
 } from '../utils/directionPages';
 
 // Improve pages — the content shared by the two root-stack screens,
@@ -79,6 +81,22 @@ function DirectionPageContent({ page, leagueId, userId }: { page: Page; leagueId
     page, leagueId, userId, isSleeper, projectionsOn, featureOn, data, isError: forecastQuery.isError,
   });
 
+  // direction_page_opened (spec §9, D-270): once each time the page gains
+  // focus, as soon as the branch it shows is known (not while loading),
+  // with the route's `source` (absent = a deep link) and the block's state.
+  // The page's route name is the screen, as for the bodies' events.
+  const route = useRoute();
+  const focused = useIsFocused();
+  const source = pageSource(route.params);
+  const state = openedState(view);
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (!focused) { openedRef.current = false; return; }
+    if (openedRef.current || state == null) return;
+    openedRef.current = true;
+    track(PAGE_EVENTS.opened, openedProps(page, source, state), PAGE_ROUTE[page]);
+  }, [focused, state, page, source]);
+
   if (view.kind === 'no_league') {
     return <View style={styles.center} testID={`${id}.no-league`}>
       <Text variant="heading">{C['NO-LEAGUE.title']}</Text>
@@ -116,9 +134,9 @@ function DirectionPageContent({ page, leagueId, userId }: { page: Page; leagueId
       </View> : null}
       {view.kind === 'draft_pick'
         ? <MaxPfMovesBody block={view.block} model={deriveMaxPf(view.block, liveRosterIds)} leagueId={leagueId!}
-            userId={userId} viewedRef={viewedRef} openOnArrival />
+            userId={userId} viewedRef={viewedRef} openOnArrival screen={PAGE_ROUTE[page]} />
         : <PlayoffTargetsBody block={view.block} model={deriveTargets(view.block, rostersQuery.data ?? null)}
-            viewedRef={viewedRef} />}
+            viewedRef={viewedRef} screen={PAGE_ROUTE[page]} />}
       <View style={styles.links}>
         {/* popTo: back to Standings or the other page when it is below in
             the stack, otherwise it replaces this page, so links never pile
@@ -128,7 +146,7 @@ function DirectionPageContent({ page, leagueId, userId }: { page: Page; leagueId
           <Text variant="bodySm" style={styles.linkText}>{links.standings.label}</Text>
         </Pressable>
         {links.other ? <Pressable accessibilityRole="button" testID={`${id}.link.other`} style={styles.link}
-          onPress={() => navigation.popTo(links.other!.route)}>
+          onPress={() => navigation.popTo(links.other!.route, { source: 'other_page' })}>
           <Text variant="bodySm" style={styles.linkText}>{links.other.label}</Text>
         </Pressable> : null}
       </View>

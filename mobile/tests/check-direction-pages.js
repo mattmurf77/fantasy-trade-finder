@@ -14,8 +14,13 @@
 // bodies and no second list (P-5), the list open on arrival (P-7), the
 // links (P-10), deep links (P-11), the Standings link rows with the flag on
 // and today's card with it off (P-13), the league switch (P-14), the flag's
-// registration, the spec's copy, and that nothing from steps 2 and 3 is built.
+// registration, the spec's copy, and that the deferred pieces (the card's
+// button row, cell B, the experiment) are not built.
 //
+// D-270 (the half sheet ships first): the other-page link reads the
+// server's `team_direction.options` when the block is on the read (D12-D15);
+// the page logs `direction_page_opened` once per focus with its source and
+// state, and the bodies log under the page's route name (group N).
 // Run: node tests/check-direction-pages.js
 'use strict';
 
@@ -231,6 +236,27 @@ const BASE = { leagueId: 'L1', userId: 'u1', isSleeper: true, projectionsOn: tru
   assert(!/playoff_probability\s*[<>]=?|0\.35|0\.65|0\.45/.test(utilSrc), 'D11. the page never classifies a probability (the server\'s state decides)');
 }
 
+// ═══ D12-D15. The server's options, where the block is on the read (D-270) ═
+{
+  const flags = { maxPfOn: true, targetsOn: true };
+  const td = (options, version = 1) => ({ version, state: 'ready', reason: null, options });
+  const no = { offered: false, reason: 'none_found' };
+  const yes = { offered: true, reason: null };
+  assert(!u.offered('draft_pick', view({ team_direction: td({ draft_pick: no, playoffs: yes }) }), flags)
+      && u.offered('playoffs', view({ team_direction: td({ draft_pick: no, playoffs: yes }) }), flags),
+    'D12. with team_direction on the read its options decide, even where the blocks alone would offer');
+  const blocksSayNo = view({ max_pf_moves: Object.assign(clone(MAXPF), { state: 'no_moves' }), team_direction: td({ draft_pick: yes, playoffs: no }) });
+  assert(u.offered('draft_pick', blocksSayNo, flags), 'D13. one rule: the server\'s answer, not a second one on the device');
+  assert(u.offered('draft_pick', view({ team_direction: td({ draft_pick: no, playoffs: no }, 2) }), flags)
+      && u.offered('draft_pick', view({ team_direction: undefined }), flags),
+    'D14. no block (flag off, older server) or an unknown version: the step-1 rule over the blocks');
+  const on = Object.assign({ directionPagesOn: true }, flags);
+  assert(u.pageLinks('playoffs', view({ team_direction: td({ draft_pick: no, playoffs: yes }) }), on).other === null
+      && eq(u.pageLinks('draft_pick', view({ team_direction: td({ draft_pick: no, playoffs: yes }) }), on).other,
+        { label: 'Improve Playoff Chances instead', route: 'ImprovePlayoffChances', page: 'playoffs' }),
+    'D15. the other-page link follows the server\'s options');
+}
+
 // ═══ E. Routes, header, FeedbackFAB (P-1, P-2, P-3) ══════════════════════
 const registration = (route) => {
   const start = rootNav.indexOf(`name="${route}"`);
@@ -255,7 +281,8 @@ for (const p of PAGES) {
       && /navigation\.canGoBack\(\)\s*\?\s*navigation\.goBack\(\)\s*:\s*navigation\.navigate\('Main'\)/.test(reg)
       && !/headerLeft\s*:/.test(reg),
     `E3. ${p.route}: the Standings header pattern (league selector header, title, JS back, no native back)`);
-  assert(new RegExp(`${p.route}: undefined;`).test(rootNav), `E4. ${p.route}: in the root param list`);
+  assert(new RegExp(`${p.route}: \\{ source\\?: DirectionSource \\} \\| undefined;`).test(rootNav),
+    `E4. ${p.route}: in the root param list (one optional param, the source, D-270)`);
   const src = strip(read(p.file));
   const fabs = src.match(/<FeedbackFAB\b[^>]*\/>/g) || [];
   assert(fabs.length === 1 && fabs[0].includes(`activeScreen="${p.route}"`) && /aboveTabBar=\{false\}/.test(fabs[0]),
@@ -293,9 +320,9 @@ assert(!/direction_pages/.test(rootNav), 'E8. RootNav reads no flag for the page
   assert(!/\.rows\b|\.listed\b|\.map\(|rowLine|rowDetail|visibleRows|FlatList|SectionList|MAXPF_COPY|TARGETS_COPY/.test(pageSrc),
     'G3. GUARD: the page renders no rows, list or row copy of its own');
   assert(!/<Disclosure\b|initialOpen/.test(pageSrc), 'G4. the body is rendered directly, not inside a collapsed Disclosure');
-  assert(/<MaxPfMovesBody block=\{view\.block\} model=\{deriveMaxPf\(view\.block, liveRosterIds\)\} leagueId=\{leagueId!\}\s+userId=\{userId\} viewedRef=\{viewedRef\} openOnArrival \/>/.test(pageSrc),
+  assert(/<MaxPfMovesBody block=\{view\.block\} model=\{deriveMaxPf\(view\.block, liveRosterIds\)\} leagueId=\{leagueId!\}\s+userId=\{userId\} viewedRef=\{viewedRef\} openOnArrival screen=\{PAGE_ROUTE\[page\]\} \/>/.test(pageSrc),
     'G5. the draft-pick page passes openOnArrival (the one new prop)');
-  assert(/openOnArrival\?: boolean;/.test(maxPfBodySrc) && /viewedRef, openOnArrival = false \}: Props\)/.test(maxPfBodySrc)
+  assert(/openOnArrival\?: boolean;/.test(maxPfBodySrc) && /viewedRef, openOnArrival = false, screen = SCREEN \}: Props\)/.test(maxPfBodySrc)
       && /const gated = model\.isList && !revealed && \(model\.ownerGate \|\| \(!model\.defaultOpen && !openOnArrival\)\);/.test(maxPfBodySrc),
     'G6. openOnArrival (default false) skips only the collapsed "Show moves" step; the "Show anyway" owner gate still applies');
   // Execute the gate expression with the real model for the cases that matter.
@@ -308,8 +335,8 @@ assert(!/direction_pages/.test(rootNav), 'E8. RootNav reads no flag for the page
     'G8. a pick owned by another team: "Show anyway" still shows on the page');
   assert(!/revealed|Show moves|collapsed/i.test(strip(targetsBodySrc)),
     'G9. PlayoffTargetsBody has no collapsed step of its own: rendered directly, its list is open (no prop needed)');
-  assert(/<PlayoffTargetsBody block=\{view\.block\} model=\{deriveTargets\(view\.block, rostersQuery\.data \?\? null\)\}\s+viewedRef=\{viewedRef\} \/>/.test(pageSrc),
-    'G10. the playoff page passes the body exactly the props Standings does');
+  assert(/<PlayoffTargetsBody block=\{view\.block\} model=\{deriveTargets\(view\.block, rostersQuery\.data \?\? null\)\}\s+viewedRef=\{viewedRef\} screen=\{PAGE_ROUTE\[page\]\} \/>/.test(pageSrc),
+    'G10. the playoff page passes the body the props Standings does, plus its route name as the events\' screen (D-270)');
   assert(/navigation\.popTo\('Main', params\)/.test(maxPfBodySrc) && /navigation\.popTo\('Main', params\)/.test(targetsBodySrc),
     'G11. P-9: Find trades is the bodies\' own hand-off (popTo Main), unchanged on the pages');
 }
@@ -324,7 +351,7 @@ assert(!/direction_pages/.test(rootNav), 'E8. RootNav reads no flag for the page
       && pageSrc.indexOf('<PlayoffTargetsBody') < pageSrc.indexOf('testID={`${id}.link.standings`}'),
     'H2. the summary sits above the list, the links under it');
   assert(/onPress=\{\(\) => navigation\.popTo\(links\.standings\.route\)\}/.test(pageSrc)
-      && /onPress=\{\(\) => navigation\.popTo\(links\.other!\.route\)\}/.test(pageSrc) && /\{links\.other \?/.test(pageSrc),
+      && /onPress=\{\(\) => navigation\.popTo\(links\.other!\.route, \{ source: 'other_page' \}\)\}/.test(pageSrc) && /\{links\.other \?/.test(pageSrc),
     'H3. the links use popTo (back to the page below, or replace this one) and the other-page link is conditional');
   assert(/link: \{ minHeight: 44/.test(pageSrc), 'H4. the links are 44pt targets');
   assert(/variant="dataLg"/.test(pageSrc) && /flexWrap: 'wrap'/.test(pageSrc), 'H5. the figures use the mono data type and wrap at large text sizes');
@@ -347,7 +374,7 @@ assert(!/placeholderData|keepPreviousData/.test(pageSrc), 'I2. no previous-leagu
 // ═══ K. Standings (P-13): link rows with the flag on, today's card off ════
 {
   assert(/const directionPagesOn = useFlag\('league\.direction_pages'\);/.test(standingsSrc)
-      && /const pageLinks = directionPagesOn \? \{\s*draftPick: \(\) => navigation\.navigate\('ImproveDraftPick'\),\s*playoffs: \(\) => navigation\.navigate\('ImprovePlayoffChances'\),\s*\} : undefined;/.test(standingsSrc)
+      && /const pageLinks = directionPagesOn \? \{\s*draftPick: \(\) => navigation\.navigate\('ImproveDraftPick', \{ source: 'standings' \}\),\s*playoffs: \(\) => navigation\.navigate\('ImprovePlayoffChances', \{ source: 'standings' \}\),\s*\} : undefined;/.test(standingsSrc)
       && /pageLinks=\{pageLinks\} \/>/.test(standingsSrc),
     'K1. Standings reads league.direction_pages and passes pageLinks only while it is on (undefined off)');
   assert((standingsSrc.match(/useQuery\(/g) || []).length === 3, 'K2. Standings still makes exactly three queries');
@@ -382,11 +409,59 @@ assert(!/placeholderData|keepPreviousData/.test(pageSrc), 'I2. no previous-leagu
     e.isDirectory() ? walk(path.join(d, e.name)) : /\.tsx?$/.test(e.name) && srcFiles.push(path.join(d, e.name)));
   walk('src');
   const all = srcFiles.map((f) => read(f)).join('\n');
-  assert(!/team_direction|direction_card|direction_both_middle|direction_view_sheet|direction_page_opened|direction_card_shown/.test(all),
-    'L3. nothing from steps 2-3: no team_direction block, card flags, sheet or events in the app');
-  assert(!/Improve|DirectionPage|direction/.test(read('src/components/home/HomePlayoffBanner.tsx')), 'L4. the Home playoff card is untouched');
+  // D-270: the half sheet ships first; the card's button row (cells A and
+  // B), `league.direction_both_middle` and the experiment are deferred.
+  const experiments = readRoot('backend/experiments.py');
+  assert(!/direction_both_middle/.test(all + flagsPy + JSON.stringify(features)) && !/direction_/.test(experiments),
+    'L3. deferred (D-270): no league.direction_both_middle anywhere, no experiment definition');
+  const banner = strip(read('src/components/home/HomePlayoffBanner.tsx'));
+  assert(!/<Button\b|improve_playoffs|improve_pick/.test(banner) && /shown: 'none' as const/.test(read('src/utils/directionCard.ts')),
+    'L4. the Home card draws no button row (direction_card_shown.shown is always none)');
   const pkg = JSON.parse(read('package.json'));
   assert(pkg.scripts['test:direction-pages'] === 'node tests/check-direction-pages.js', 'L5. npm run test:direction-pages');
+}
+
+// ═══ N. direction_page_opened and the bodies' screen (spec §9, D-270) ═════
+{
+  assert(u.pageSource(undefined) === 'deep_link' && u.pageSource({}) === 'deep_link' && u.pageSource({ source: 'x' }) === 'deep_link'
+      && ['card', 'sheet', 'standings', 'other_page', 'deep_link'].every((x) => u.pageSource({ source: x }) === x),
+    'N1. source: the route param when it is one of the five, otherwise deep_link (a deep link carries none)');
+  const pv = (patch) => u.pageView(Object.assign({ page: 'draft_pick', data: view() }, BASE, patch));
+  assert(u.openedState(pv({ data: undefined })) === null && u.openedState(pv({})) === 'ready'
+      && u.openedState(pv({ data: view({ max_pf_moves: Object.assign(clone(MAXPF), { state: 'no_miss' }) }) })) === 'no_miss'
+      && u.openedState(pv({ isSleeper: false })) === 'unavailable' && u.openedState(pv({ data: undefined, isError: true })) === 'error'
+      && u.openedState(pv({ leagueId: null })) === 'no_league',
+    'N2. state: the block\'s server state on a list, else the branch shown; null while loading (the event waits)');
+  assert(eq(u.openedProps('playoffs', 'sheet', 'ready'), { page: 'playoffs', source: 'sheet', state: 'ready' })
+      && u.PAGE_EVENTS.opened === 'direction_page_opened', 'N3. the event name and its three props');
+  assert(/const route = useRoute\(\);/.test(pageSrc) && /const focused = useIsFocused\(\);/.test(pageSrc)
+      && /const source = pageSource\(route\.params\);/.test(pageSrc) && /const state = openedState\(view\);/.test(pageSrc)
+      && /if \(!focused\) \{ openedRef\.current = false; return; \}\s*if \(openedRef\.current \|\| state == null\) return;\s*openedRef\.current = true;\s*track\(PAGE_EVENTS\.opened, openedProps\(page, source, state\), PAGE_ROUTE\[page\]\);/.test(pageSrc)
+      && (pageSrc.match(/\btrack\(/g) || []).length === 1,
+    'N4. the page logs once per focus, once its branch is known, under its route name; a blur re-arms it');
+  assert(/navigation\.navigate\('ImproveDraftPick', \{ source: 'standings' \}\)/.test(standingsSrc)
+      && /navigation\.popTo\(links\.other!\.route, \{ source: 'other_page' \}\)/.test(pageSrc)
+      && /params: \{ source: tap\.via \}/.test(read('src/utils/directionCard.ts')),
+    'N5. every entry point names itself: Standings, the other page, the card\'s sheet');
+  const tax = readRoot('backend/analytics_taxonomy.py');
+  const queries = readRoot('backend/analytics_queries.py');
+  const nonIntent = (queries.match(/NON_INTENT_EVENTS[^=]*=[\s\S]*?\n\}\)/) || [''])[0];
+  assert(/"direction_page_opened":\s+frozenset\(\{"page", "source", "state"\}\)/.test(tax)
+      && /"direction_card_shown", "direction_page_opened",/.test(tax)
+      && !/"direction_page_opened"/.test(nonIntent),
+    'N6. direction_page_opened is registered with exactly its props and is intent (not in NON_INTENT_EVENTS)');
+  // The bodies log under the page's route name on a page; Standings is unchanged.
+  for (const [mod, side] of [[maxPf, 'give'], [targets, 'receive']]) {
+    const logs = [];
+    const deps = (screen) => ({ setSide: () => {}, track: (...a) => logs.push(a), navigate: () => {}, now: () => 1, screen });
+    const row = { player_id: 'p', name: 'N', position: 'RB', keep: false, rank: 1 };
+    const args = mod === maxPf ? [row] : [row, 'opp'];
+    mod.handOffToFinder(...args, deps(undefined));
+    mod.handOffToFinder(...args, deps('ImproveDraftPick'));
+    assert(logs.length === 2 && logs[0][2] === 'Standings' && logs[1][2] === 'ImproveDraftPick' && logs[0][1].side === side,
+      `N7. finder_target_pinned (${side}): Standings by default, the page's route name when the page passes it`);
+  }
+  assert(maxPf.SCREEN === 'Standings' && targets.SCREEN === 'Standings', 'N8. Standings still logs as Standings');
 }
 
 // ═══ M. Chalkline ═════════════════════════════════════════════════════════

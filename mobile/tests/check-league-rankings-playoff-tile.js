@@ -46,8 +46,9 @@ const mount = (/<HomePlayoffBanner[\s\S]*?\/>/.exec(slot) || [''])[0];
 assert(mount.includes('key={`${tileUserId}:${leagueId}`}'), 'T2b keyed by user + league, as on Home');
 assert(mount.includes("rosterId={findMyRoster(tileRostersQuery.data, tileUserId ?? '')?.roster_id ?? null}"),
   'T2c roster id via findMyRoster over the league rosters, as on Home');
-assert(mount.includes('onDetails={onTileDetails}') && mount.includes('onReviewOutlook={onTileReviewOutlook}'),
-  'T2d both callbacks wired');
+assert(mount.includes('onDetails={onTileDetails}') && mount.includes('onReviewOutlook={onTileReviewOutlook}')
+  && mount.includes('screen={route.name}') && mount.includes('onDirectionTap={onTileDirection}'),
+  'T2d every callback wired, and the host screen for the card\'s own impression (D-270)');
 assert(/const tileRostersQuery = useQuery\(\{\s*queryKey: \['league-rosters', leagueId\],\s*queryFn: \(\) => getLeagueRosters\(leagueId!\),\s*enabled: batchProjections && outlookSupported && !!leagueId,\s*staleTime: 5 \* 60_000,\s*\}\);/.test(ls),
   'T2e rosters on the shared key, Sleeper + flag gated, session-seed staleTime');
 assert(ls.includes('const tileUserId = useSession((s) => s.user?.user_id);'), 'T2f the user id comes from the session');
@@ -60,8 +61,12 @@ function handler(name) {
   assert(at >= 0, `${name} exists`);
   return ls.slice(at, ls.indexOf('\n  };', at) + 5);
 }
-const js = ts.transpileModule(`${handler('onTileDetails')}\n${handler('onTileReviewOutlook')}\nreturn { onTileDetails, onTileReviewOutlook };`,
+const js = ts.transpileModule(`${handler('onTileDetails')}\n${handler('onTileReviewOutlook')}\n${handler('onTileDirection')}\nreturn { onTileDetails, onTileReviewOutlook, onTileDirection };`,
   { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+// utils/directionCard, executed, for the half sheet's destinations (D-270).
+const cardUtil = {};
+new Function('exports', 'require', ts.transpileModule(read('mobile/src/utils/directionCard.ts'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)(cardUtil, () => ({ DIRECTION_CARD_COPY: {}, DIRECTION_COPY: {} }));
 const PARAMS = { mode: 'guided', editDna: true, suggestOutlook: 'contender' };
 for (const [routeName, isTabRoot] of [['LeagueRankings', true], ['LeagueSummary', false]]) {
   const calls = [];
@@ -70,7 +75,7 @@ for (const [routeName, isTabRoot] of [['LeagueRankings', true], ['LeagueSummary'
     popTo: (...a) => calls.push(['popTo', ...a]),
   };
   const track = (...a) => calls.push(['track', ...a]);
-  const h = new Function('track', 'navigation', 'route', 'isTabRoot', js)(track, navigation, { name: routeName }, isTabRoot);
+  const h = new Function('track', 'navigation', 'route', 'isTabRoot', 'tapDestination', js)(track, navigation, { name: routeName }, isTabRoot, cardUtil.tapDestination);
   h.onTileDetails();
   assert.deepEqual(calls, [
     ['track', 'home_tile_tapped', { tile: 'standings' }, routeName],
@@ -84,6 +89,19 @@ for (const [routeName, isTabRoot] of [['LeagueRankings', true], ['LeagueSummary'
       ? ['navigate', 'Trades', { screen: 'TradesHome', params: PARAMS }]
       : ['popTo', 'Main', { screen: 'Trades', params: { screen: 'TradesHome', params: PARAMS } }],
   ], `T3b/T4b ${routeName}: track, then the Trade DNA sheet with the suggestion`);
+  // D-270: the half sheet. "View" opening it only tracks; each row tracks,
+  // then opens its root-stack route (a page told it came from the sheet).
+  for (const [tap, nav] of [
+    [{ tile: 'playoff_options', via: 'card' }, null],
+    [{ tile: 'standings', via: 'sheet' }, ['navigate', 'Standings', undefined]],
+    [{ tile: 'improve_playoffs', via: 'sheet' }, ['navigate', 'ImprovePlayoffChances', { source: 'sheet' }]],
+    [{ tile: 'improve_pick', via: 'sheet' }, ['navigate', 'ImproveDraftPick', { source: 'sheet' }]],
+  ]) {
+    calls.length = 0;
+    h.onTileDirection(tap);
+    assert.deepEqual(calls, [['track', 'home_tile_tapped', tap, routeName], ...(nav ? [nav] : [])],
+      `T3e/T4e ${routeName}: ${tap.tile} tracks with via, then ${nav ? nav[1] : 'nothing'}`);
+  }
 }
 // Home's own destination is the same selector with the same params.
 assert(hub.includes("navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });"),
@@ -91,10 +109,11 @@ assert(hub.includes("navigation.navigate('Trades', { screen: 'TradesHome', param
 assert(hub.includes("const onProjections = () => {\n    track('home_tile_tapped', { tile: 'standings' }, 'Home');\n    navigation.navigate('Standings');"), 'T3d Home\'s View opens the same page');
 // T4 — existing event, existing props and tile values; no new name.
 // (D-269 added `split`, which rides only on the tile body's position_roster.)
-assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band", "split"\}\)/.test(taxonomy)
+// (D-270 appended `via`, which rides only on the playoff card's half-sheet taps.)
+assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band", "split", "via"\}\)/.test(taxonomy)
   && /#   outlook \| standings \| overall_rank/.test(taxonomy),
   'T4c home_tile_tapped already carries `tile` with outlook / standings');
-assert.equal(count(ls, "track('home_tile_tapped'"), 2, 'T4d exactly the two tile taps emit on League Rankings');
+assert.equal(count(ls, "track('home_tile_tapped'"), 3, 'T4d exactly the two tile taps and the half-sheet tap (D-270) emit on League Rankings');
 
 // ── T5 ────────────────────────────────────────────────────────────────────
 assert.equal(count(banner, "queryKey: ['league-projection-batch', userId, leagueId]"), 1, 'T5a the tile holds the one query key');
@@ -104,7 +123,9 @@ const homeMount = (/<HomePlayoffBanner[\s\S]*?\/>/.exec(hub) || [''])[0];
 assert.equal(homeMount, "<HomePlayoffBanner key={`${user?.user_id}:${leagueId}`}\n"
   + "            rosterId={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.roster_id ?? null}\n"
   + '            onDetails={onProjections}\n'
-  + '            onReviewOutlook={onReviewOutlook} />', 'T5d Home\'s mount is unchanged');
+  + '            onReviewOutlook={onReviewOutlook}\n'
+  + '            screen="Home"\n'
+  + '            onDirectionTap={onDirectionTap} />', 'T5d Home\'s mount: unchanged but for the host screen and the half-sheet handler (D-270)');
 assert(banner.includes('const leagueId = useSession(s => s.league?.league_id);') && banner.includes('!switching'),
   'T5e the tile reads the active league and hides while switching, so a switch re-queries');
 assert(/testID="standings\.back-btn"\s*onPress=\{\(\) =>\s*navigation\.canGoBack\(\)\s*\? navigation\.goBack\(\)/.test(rootNav),

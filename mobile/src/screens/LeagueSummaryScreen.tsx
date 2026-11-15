@@ -42,6 +42,7 @@ import {
 import { findMyRoster, getLeagueRosters } from '../api/sleeper';
 import type { ProjectionOutlook } from '../api/leagueProjections';
 import HomePlayoffBanner from '../components/home/HomePlayoffBanner';
+import { tapDestination, type DirectionTap } from '../utils/directionCard';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
@@ -612,6 +613,15 @@ export default function LeagueSummaryScreen() {
     const params = { mode: 'guided', editDna: true, suggestOutlook: recommended };
     if (isTabRoot) navigation.navigate('Trades', { screen: 'TradesHome', params });
     else navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome', params } });
+  };
+
+  // The tile's half sheet (D-270): Home's event and destinations, attributed
+  // by screen. Every destination is a root-stack route, so a plain navigate
+  // reaches it from the tab root and from the legacy root push alike.
+  const onTileDirection = (tap: DirectionTap) => {
+    track('home_tile_tapped', { tile: tap.tile, via: tap.via }, route.name);
+    const to = tapDestination(tap);
+    if (to) navigation.navigate(to.route, 'params' in to ? to.params : undefined);
   };
 
   const teams = query.data?.teams ?? [];
@@ -1870,7 +1880,9 @@ export default function LeagueSummaryScreen() {
           <HomePlayoffBanner key={`${tileUserId}:${leagueId}`}
             rosterId={findMyRoster(tileRostersQuery.data, tileUserId ?? '')?.roster_id ?? null}
             onDetails={onTileDetails}
-            onReviewOutlook={onTileReviewOutlook} />
+            onReviewOutlook={onTileReviewOutlook}
+            screen={route.name}
+            onDirectionTap={onTileDirection} />
         ) : oddsEnabled ? (
           outlookSupported ? (
             <OutlookStripAndSection query={outlookQuery} leagueId={leagueId} />

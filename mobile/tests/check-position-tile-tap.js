@@ -315,7 +315,8 @@ const consumeText = consumeFn ? flat(ls, consumeFn) : '';
   const ffPy = fs.readFileSync(path.join(REPO, 'backend/feature_flags.py'), 'utf8');
   assert(/\n    "nav\.home_position_roster",\n/.test(ffPy), '8c. registered in backend FLAG_KEYS (code default False)');
   const tax = fs.readFileSync(path.join(REPO, 'backend/analytics_taxonomy.py'), 'utf8');
-  assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band", "split"\}\)/.test(tax),
+  // D-270 appended `via` (the playoff card's half sheet); `split` stays.
+  assert(/"home_tile_tapped":\s+frozenset\(\{"tile", "position", "band", "split", "via"\}\)/.test(tax),
     '8d. home_tile_tapped admits `split`');
 }
 

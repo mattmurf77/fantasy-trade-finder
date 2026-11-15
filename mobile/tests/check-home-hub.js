@@ -250,12 +250,19 @@ const handler = (name) => {
   const WITH_POS = new Set(['buy', 'sell', 'position_ranking']);
   const WITH_SPLIT = new Set(['position_roster']);
   const re = /track\('home_tile_tapped', \{ ([^}]*) \}, 'Home'\);/g;
+  // The playoff card's half sheet (D-270) has ONE call site whose tile is the
+  // tap's own (playoff_options | standings | improve_playoffs | improve_pick,
+  // with `via`); its vocabulary is pinned by executing utils/directionCard in
+  // tests/check-direction-sheet.js. Every other call names its tile literally.
+  const DIRECTION_CALL = "track('home_tile_tapped', { tile: tap.tile, via: tap.via }, 'Home');";
+  assert(count(homeAll, DIRECTION_CALL) === 1 && count(hub, DIRECTION_CALL) === 1,
+    '6g. exactly one direction call site, in the hub, carrying `via`');
   const calls = [];
   for (const f of homeSrc) {
     let m;
-    while ((m = re.exec(f.code))) calls.push({ rel: f.rel, props: m[1], index: m.index, code: f.code });
+    while ((m = re.exec(f.code))) if (m[0] !== DIRECTION_CALL) calls.push({ rel: f.rel, props: m[1], index: m.index, code: f.code });
   }
-  assert(calls.length === count(homeAll, "track('home_tile_tapped'"),
+  assert(calls.length + 1 === count(homeAll, "track('home_tile_tapped'"),
     "6a. every home_tile_tapped call has the `{ … }, 'Home'` shape");
   const tiles = calls.map((c) => (/^tile: '([a-z_]+)'/.exec(c.props) || [])[1]);
   const seen = {};
@@ -284,8 +291,10 @@ const handler = (name) => {
     return /navigate\(|requestLeagueSummary|refetch\(/.test(lead);
   });
   assert(navBefore.length === 0, '6d. each tap is tracked BEFORE it navigates (or refetches)');
-  assert(!/\btrack\('(?!home_tile_tapped')/.test(homeAll),
-    '6e. the hub emits no other client event (screen_viewed / tab_selected stay where they are)');
+  assert(!/\btrack\('(?!home_tile_tapped')/.test(homeAll)
+    && (homeAll.match(/\btrack\((?!'home_tile_tapped')/g) || []).length === 1
+    && /track\(CARD_EVENTS\.shown, shownProps\(direction, sheetOn, !!pick\), screen\);/.test(homeAll),
+    '6e. the hub emits no other client event (screen_viewed / tab_selected stay where they are); the playoff card\'s one impression (direction_card_shown, D-270) is the only other');
   assert(/function bandProp\(s: PositionSplit\): 'seller' \| 'buyer' \| 'mid'/.test(hub),
     '6f. `band` is typed to the closed seller | buyer | mid set');
 }
