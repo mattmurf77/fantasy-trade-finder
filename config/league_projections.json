@@ -40,6 +40,10 @@
     "near_certain_min": 0.99,
     "time_budget_seconds": 60
   },
+  "team_direction": {
+    "middle_min": 0.35,
+    "middle_max": 0.65
+  },
   "schedule": {
     "weekday": 1,
     "hour": 9,

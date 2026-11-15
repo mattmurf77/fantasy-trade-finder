@@ -10,7 +10,7 @@ from flask import Response, jsonify, request
 
 from ..feature_flags import is_enabled
 from .. import database as db
-from . import batch, maxpf_moves, playoff_targets, recommendation, store
+from . import batch, maxpf_moves, playoff_targets, recommendation, store, team_direction
 from .core import Unavailable, VERSION
 from .simulation import config
 
@@ -139,6 +139,24 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             log.warning("playoff_targets read failed: %s", type(exc).__name__)
             return {**playoff_targets.compose("no_run", None), "reason": "read_failed"}
 
+    def direction_block(uid, league_id, result, saved):
+        """The composed `team_direction` block (flag `league.direction_card`,
+        spec §7). Reads the two feature blocks this same read serves, so the
+        card and the pages never disagree. Never raises: a failure is
+        `unavailable` / `read_failed`."""
+        max_pf_on, targets_on = is_enabled("league.max_pf_moves"), is_enabled("league.playoff_targets")
+        try:
+            preferences = db.load_league_preference(user_id=uid, league_id=league_id) or {}
+            return team_direction.compose(
+                result["state"], saved, failure_reason=result["reason"],
+                saved_outlook=preferences.get("team_outlook"),
+                draft_order=db.get_league_draft_order_rule(league_id), cuts=team_direction.settings(),
+                max_pf_on=max_pf_on, max_pf_block=result.get("max_pf_moves"),
+                targets_on=targets_on, targets_block=result.get("playoff_targets"))
+        except Exception as exc:
+            log.warning("team_direction read failed: %s", type(exc).__name__)
+            return team_direction.read_failed(max_pf_on, targets_on)
+
     def load(sess, run_id, *, with_snapshot=False):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
             return None
@@ -214,6 +232,8 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             result["max_pf_moves"] = moves_block(sess, uid, league_id, result, raw_saved)
         if is_enabled("league.playoff_targets"):
             result["playoff_targets"] = targets_block(uid, league_id, result, raw_saved)
+        if is_enabled("league.direction_card"):
+            result["team_direction"] = direction_block(uid, league_id, result, raw_saved)
         return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/leagues/<league_id>/draft-order-rule", methods=["POST"])
