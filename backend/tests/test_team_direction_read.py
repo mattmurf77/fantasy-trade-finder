@@ -171,8 +171,11 @@ def test_flags_ship_off_and_reach_the_app():
 
 def test_no_backend_code_reads_the_sheet_flag():
     def readers(key):
+        # A quoted literal is a read; prose in a comment (the taxonomy names
+        # the flag in its tile vocabulary) is not.
         return sorted(str(p.relative_to(REPO)) for p in (REPO / "backend").rglob("*.py")
-                      if "tests" not in p.parts and key in p.read_text(encoding="utf-8"))
+                      if "tests" not in p.parts and (f'"{key}"' in p.read_text(encoding="utf-8")
+                                                     or f"'{key}'" in p.read_text(encoding="utf-8")))
     assert readers(SHEET) == ["backend/feature_flags.py"]
     gates = sorted(str(p.relative_to(REPO)) for p in (REPO / "backend").rglob("*.py")
                    if "tests" not in p.parts and f'is_enabled("{CARD}")' in p.read_text(encoding="utf-8"))
