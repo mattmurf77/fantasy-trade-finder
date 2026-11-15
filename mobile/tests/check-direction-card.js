@@ -144,8 +144,11 @@ for (const [name, data, flags] of [
 
 // ═══ I. The card decides nothing (spec §5.1) ═══════════════════════════════
 {
-  check(!/0\.35|0\.65|0\.45|REBUILDING|playoff_probability\s*[<>]=?|band\s*[<>]|Math\.(round|floor|ceil)/.test(bannerSrc + utilSrc),
+  check(!/0\.35|0\.65|0\.45|REBUILDING|probability\s*[<>]=?|[<>]=?\s*0?\.\d|band\s*[<>]|Math\.(round|floor|ceil)/.test(bannerSrc + utilSrc),
     'I1. no cut, no comparison of a probability, no rounding in the card or its util');
+  // Executed: the pick shows at any playoff chance the run holds.
+  const at = [0.001, 0.2, 0.45, 0.5, 0.65, 0.9, 0.999, 1].filter((p) => !byId(mount(view(block(), p)), 'home.playoff.pick'));
+  check(at.length === 0, 'I5. the projected pick shows at every playoff chance (the card hides nothing by probability)', at.join(','));
   check(!/direction\.playoff_probability|direction!?\.band|direction!?\.primary/.test(bannerSrc),
     'I2. the card reads neither the band nor the primary to draw anything (only the impression passes them on)');
   // A block whose band and primary disagree with the run: shown as sent, never re-derived.
