@@ -1,3 +1,9 @@
+## 2026-11-15 — Fairness formula record (D-267), branch `docs/fairness-formula-result` (docs only)
+
+- **No code on `main` from this work.** On branch `feat/fairness-formula` (not merged) the builder reported: new `test_fairness_formula.py` 140 passed; 167 directly affected files 5,915 passed, 1 skipped; full backend suite 15,819 passed, 42 skipped, 0 failed; 15 sabotages red then restored; the outlook-evidence formula branch had no targeted test.
+- **Replay (research data, local, aggregates only):** 1,200 trades / 729 lineages, five arms, no arm passed (`docs/plans/fairness-formula/results.md`). The held-back file was never opened; no confirmation run was needed.
+- **Found on main, not fixed:** bilateral r1 and r2 decks on the larger synthetic world depend on `PYTHONHASHSEED`.
+
 ## 2026-11-15 — League format source (D-268), branch `fix/league-format-source`
 
 - **Backend (Python 3.12, local venv, no network):** new `test_league_format_source.py` 34 (power rankings in a one-QB league under a superflex session and header → `1qb_ppr` label, one-QB pool, one-QB personal board; superflex league under a one-QB session stays `sf_tep`; no `leagues` row keeps the session format; request seam on 8 league routes; 7 ranking routes × both toggle directions; `/api/scoring/switch` flips rankings but not power rankings; trade generation builds on the one-QB board and never serves a cached `sf_tep` deck; session/init superflex → one-QB league does not carry `sf_tep`, pre-built deck on `1qb_ppr`; same-league re-init keeps the toggle but pre-builds on the league's format; flag-off paths). Full suite with the flag on (shipped value): **15,713 passed, 42 skipped, 0 failed in 30m10s**. 89 directly affected files + the new file with `FTF_FLAGS` forcing the flag off: **2,254 passed, 8 skipped, 0 failed**.
