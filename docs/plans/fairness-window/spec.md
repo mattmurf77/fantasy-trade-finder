@@ -17,6 +17,10 @@ app's own fairness scale:
 | 0.50 (the "fairness off" setting) | 77% |
 | 1-for-1 player trades at 0.75 | 46% |
 
+Correction (2026-11-14, after the value-blend follow-up): the 41% and 48% rows were measured on a
+DynastyProcess-only copy of the app's scale. The app already blends 50% KeepTradeCut; on that basis
+42–44% of real trades pass 0.75. The conclusion is unchanged.
+
 So the default window excludes most trades that managers actually agree to. A second result from
 the same research: when the generator was replayed offline for real in-season trades at 0.50, a
 trade close to the real one was somewhere in the deck for 46–49% of them but in the first 30
