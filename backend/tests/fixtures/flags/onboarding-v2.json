@@ -4,6 +4,7 @@
   "league.projection_outlook": true,
   "league.max_pf_moves": true,
   "league.playoff_targets": false,
+  "league.direction_pages": false,
   "trade.prepared_inventory": true,
   "trade.first_page_store": true,
   "trade.packed_evidence": true,

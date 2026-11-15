@@ -20,6 +20,12 @@
 - **Also:** recorded the operator's 2026-11-15 sign-off of the fairness-window analytics waiver (`docs/plans/fairness-window/scope.md`).
 - **Known gap:** r1/r2 bilateral decks vary with `PYTHONHASHSEED` on a larger synthetic world (found on `main`, not fixed).
 
+## 2026-11-15 — Improve pages, step 1: "Improve Playoff Chances" and "Improve Draft Pick", built dark (D-265)
+
+- Two root-stack pages (`ImprovePlayoffChances`, `ImproveDraftPick`; deep links `app/league/improve-playoffs`, `app/league/improve-pick`) with Standings' header and their own FeedbackFAB. Each reads Standings' forecast query (no new request) and renders the existing `PlayoffTargetsBody` / `MaxPfMovesBody` open on arrival (one new prop, `openOnArrival`), a playoff chance / projected pick summary, and links to Standings and to the other page when its list is `ready`.
+- Flag `league.direction_pages`, **off**: on, the two Standings sections become rows that open the pages; off, Standings is unchanged. App-only; no backend code reads it. Branch `feat/direction-pages`, not merged; needs D-264 merged for the playoff page.
+- Steps 2-3 (Home card, buttons, half sheet, events, experiment) not built. Judgement calls and checklist: `docs/plans/league-projections/direction-pages/evidence.md`.
+
 ## 2026-11-15 — League surfaces use the league's own format, not the SF/1QB toggle (D-268)
 
 - Bug: a one-QB league read "SF TEP" on League Summary and was valued on the superflex board (decks too), because league routes read the session's format (carry-over from the last league, Tiers/Trios toggle, `X-Scoring-Format`).

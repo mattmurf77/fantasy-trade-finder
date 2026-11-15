@@ -37,9 +37,14 @@ interface Props {
   userId: string | null;
   /** Owned by the open team card, so the impression fires once per opening. */
   viewedRef: React.MutableRefObject<boolean>;
+  /** Improve Draft Pick page (direction-pages spec P-7): the user chose to
+   *  come here, so the collapsed "Show moves" step is skipped. The "Show
+   *  anyway" step for a pick owned by another team still applies. Default
+   *  false: Standings is unchanged. */
+  openOnArrival?: boolean;
 }
 
-export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Props) {
+export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, openOnArrival = false }: Props) {
   const navigation = useNavigation<any>();
   const queryClient = useQueryClient();
   const [revealed, setRevealed] = useState(false);       // Show anyway / Show moves
@@ -69,7 +74,7 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef }: Pr
   }, [leagueId]);
 
   // Gates (§6.2 overrides §6.1): owner first, then collapsed.
-  const gated = model.isList && !revealed && (model.ownerGate || !model.defaultOpen);
+  const gated = model.isList && !revealed && (model.ownerGate || (!model.defaultOpen && !openOnArrival));
   const listOpen = model.isList && !gated;
   const showRulesNote = listOpen && !!model.baseline && !!prompts?.rulesNote;
   useEffect(() => {

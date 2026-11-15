@@ -54,6 +54,22 @@
 - The engine clamps every request to `market_floor_absolute` (0.65), so 0.60 and 0.55 build exactly the 0.65 deck. Widening below 0.65 would need that policy floor changed, which is out of scope.
 - A mobile cold start that has not fetched flags sends 0.75. That only costs a cache miss, never a wrong deck: every cache keys on the numeric threshold.
 
+## D-265 — Improve pages, the Home playoff card and its button: spec approved, the half sheet replaces the buttons
+
+**Date:** 2026-11-14 · **Who:** the operator, on the eight questions in the spec: "I agree with all recs but one. The sheet removes the buttons." Spec: [`../docs/plans/league-projections/direction-pages/spec.md`](../docs/plans/league-projections/direction-pages/spec.md). Nothing is built.
+**Context:** Max PF moves and Playoff targets (D-264, unmerged) both sit inside the user's own team card on Standings, three taps from Home, and Home's playoff row shows no projected pick and no trade action.
+**Decision:**
+- Each feature gets its own page, "Improve Draft Pick" and "Improve Playoff Chances", reusing the existing list component. On Standings the two sections become links to the pages.
+- The Home playoff card (and League Rankings, which mounts the same component) shows playoff chance and projected pick (the D-257 label for the user's own next-year 1st).
+- The server decides the button. Draft pick leads at a playoff chance of 45% or lower, or with a saved Rebuilding or Tanking outlook; otherwise playoffs. A saved Contender or All-in outlook does not override a low chance. A direction is offered only when its feature's `state` is `ready`.
+- "The middle" is a playoff chance of at least 35% and under 65%.
+- Three test cells: (A) one button; (B) both buttons for the middle; (C) no buttons on the card, and "View" opens a half sheet with "View projected standings", "Improve Playoff Chances", "Improve Draft Pick". The operator changed C from the recommendation, which kept the buttons.
+- Labels: "Improve Playoff Chances" and "Improve Draft Pick".
+**Consequences:**
+- Four flags, all default off: `league.direction_pages`, `league.direction_card`, `league.direction_both_middle`, `league.direction_view_sheet`. The last makes the third ignored.
+- The playoff direction cannot show until D-264 is merged and `league.playoff_targets` is on.
+- With under ten users the test cannot be read statistically before launch; until then it is the operator's judgement of three screens.
+
 ## D-264 — Playoff targets: the mirror of Max PF moves, limited to selling teams by a rule applied in the job and again on the read
 
 **Date:** 2026-11-14 · **Who:** the operator ("Build the opposite of the Max PF moves features. The purpose is to identify the players to trade for that maximize playoff chances. This feature should only suggest players on teams that are rebuilding, tanking for team outlook or have a less than 50% chance of making the playoffs."); built by a builder subagent on `feat/playoff-targets`. The product choices below are the builder's defaults, **not yet signed off**: `docs/plans/league-projections/playoff-targets/scope.md` §0.

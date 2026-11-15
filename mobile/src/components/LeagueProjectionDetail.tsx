@@ -12,6 +12,7 @@ import {TARGETS_COPY} from '../utils/playoffTargetsCopy';
 import {sectionMounts as targetsMount, deriveSection as deriveTargets, type LiveRoster} from '../utils/playoffTargets';
 import {PlayoffTargetsBody} from './PlayoffTargetsSection';
 import {missOddsText} from '../utils/playoffOdds';
+import {DIRECTION_COPY} from '../utils/directionPagesCopy';
 
 // The saved forecast's per-team detail, mounted inside the Standings table's
 // open team (screens/StandingsScreen). Moved from the retired
@@ -47,22 +48,31 @@ export interface PlayoffTargetsProps {
   liveRosters: LiveRoster[] | null;
 }
 
+/** Improve pages (direction-pages spec P-13): with `league.direction_pages`
+ *  on, the screen passes these and each of the two sections becomes a single
+ *  row that opens its page. Absent (flag off): both sections render in full,
+ *  exactly as before. */
+export interface PageLinkProps {draftPick: () => void; playoffs: () => void}
+
 /** Final record odds, Weekly projections, Draft pick odds and, on the
  *  viewer's own card only, Max PF moves and Playoff targets for one team. */
-export function ProjectionTeamDetail({team, result, maxPf, targets}: {team: ProjectionTeam; result: ProjectionResult; maxPf?: MaxPfMovesProps; targets?: PlayoffTargetsProps}) {
+export function ProjectionTeamDetail({team, result, maxPf, targets, pageLinks}: {team: ProjectionTeam; result: ProjectionResult; maxPf?: MaxPfMovesProps; targets?: PlayoffTargetsProps; pageLinks?: PageLinkProps}) {
   const names = new Map(result.teams.map(t => [t.roster_id, t.name]));
   // Fires playoff_targets_viewed once per opening of this card.
   const targetsViewed = useRef(false);
-  const playoffTargets = targets?.block && targetsMount({
+  const targetsMounted = targets?.block && targetsMount({
     block: targets.block, flagOn: targets.flagOn, isSleeper: targets.isSleeper,
     ownCard: isOwnCard(team.roster_id, result.viewer_roster_id ?? targets.block.viewer_roster_id),
   }) ? {block: targets.block, model: deriveTargets(targets.block, targets.liveRosters)} : null;
+  // P-13: a link row replaces the inline section while pageLinks is set.
+  const playoffTargets = pageLinks ? null : targetsMounted;
   // Fires maxpf_moves_viewed once per opening of this card (it unmounts on close).
   const maxPfViewed = useRef(false);
-  const moves = maxPf?.block && maxPf.leagueId && sectionMounts({
+  const movesMounted = maxPf?.block && maxPf.leagueId && sectionMounts({
     block: maxPf.block, flagOn: maxPf.flagOn, isSleeper: maxPf.isSleeper,
     ownCard: isOwnCard(team.roster_id, result.viewer_roster_id, maxPf.block),
   }) ? {block: maxPf.block, leagueId: maxPf.leagueId, model: deriveSection(maxPf.block, maxPf.liveRosterIds)} : null;
+  const moves = pageLinks ? null : movesMounted;
   return <View style={styles.sections} testID="standings.open.detail">
     <Disclosure label="Final record odds">
       {team.final_record_distribution.map(r => <Text key={r.record.join('–')} variant="bodySm">{r.record.join('–')}: {pct(r.probability)}</Text>)}
@@ -91,6 +101,21 @@ export function ProjectionTeamDetail({team, result, maxPf, targets}: {team: Proj
     {playoffTargets ? <Disclosure label={TARGETS_COPY['C-TITLE']} testID="standings.targets.toggle" initialOpen={playoffTargets.model.initialOpen}>
       <PlayoffTargetsBody block={playoffTargets.block} model={playoffTargets.model} viewedRef={targetsViewed} />
     </Disclosure> : null}
+    {movesMounted && pageLinks ? <PageLink label={MAXPF_COPY['C-TITLE']} hint={DIRECTION_COPY['TITLE.draft_pick']}
+      onPress={pageLinks.draftPick} testID="standings.maxpf.link" /> : null}
+    {targetsMounted && pageLinks ? <PageLink label={TARGETS_COPY['C-TITLE']} hint={DIRECTION_COPY['TITLE.playoffs']}
+      onPress={pageLinks.playoffs} testID="standings.targets.link" /> : null}
+  </View>;
+}
+
+/** A Disclosure-shaped row that opens a page instead ("Max PF moves ›"). */
+function PageLink({label, hint, onPress, testID}: {label: string; hint: string; onPress: () => void; testID: string}) {
+  return <View style={styles.disclosure}>
+    <Pressable accessibilityRole="button" accessibilityHint={DIRECTION_COPY['HINT.opens'].replace('{title}', hint)}
+      testID={testID} onPress={onPress} style={styles.toggle}>
+      <Text variant="bodySm" style={[styles.text, styles.toggleLabel]}>{label}</Text>
+      <Icon name="chevron-right" size={16} color={chalk.base} />
+    </Pressable>
   </View>;
 }
 
