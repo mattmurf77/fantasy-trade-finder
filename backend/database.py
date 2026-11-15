@@ -3875,6 +3875,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("fairness_floor_divergence", 0.55, "interview: consensus fairness gate for divergence cards = min(fairness_threshold, this) — extreme-case veto only"),
     # ── #189 — relaxed fallback for empty targeted sweeps ────────────────
     ("relaxed_fairness_threshold", 0.55, "#189: stage-1 fairness bar for the relaxed fallback pass on empty targeted jobs (never tightens below the caller's threshold)"),
+    ("fairness_window_default", 0.75, "fairness window: the default 'fair' threshold while trade.fairness_window_v2 is on (served as fairness_on_threshold); 0.55-0.75, anything else serves 0.75; not read while the flag is off"),
     ("relaxed_surplus_floor",      0.0,  "#189: stage-2 value for min_side_surplus(_marginal) in the relaxed pass; 0 still requires non-negative surplus both sides"),
     # ── #172/#189 follow-up — asset-centric trade ideas (trade.asset_ideas) ──
     ("asset_ideas_lateral_band", 0.10,  "asset ideas: ± consensus-value band around the pinned asset classifying a counterpart as Lateral; above=Upgrade, below=Downgrade piece"),
