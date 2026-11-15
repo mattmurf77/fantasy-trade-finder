@@ -207,7 +207,7 @@ All on a laptop, no network, Python 3.12 venv, Node with `mobile/node_modules` f
 | `pytest backend/tests/test_team_direction_read.py` (new) | **6 passed** |
 | `pytest backend/tests/test_direction_card_analytics.py` (new) | **4 passed** |
 | `pytest` on the three new files, the touched `test_analytics_taxonomy_home_hub.py`, the forecast-read, flag, analytics and events files, and every test file that reads `config/features.json`, the flag fixtures or `FLAG_KEYS` (55 files) | **1716 passed** in 118 s |
-| `pytest backend/tests` (full suite) | FULL_SUITE_RESULT |
+| `pytest backend/tests` (full suite) | **15,798 passed, 43 skipped, 0 failed** in 25m36s (at commit `c42ffe22`) |
 | `npx tsc --noEmit` in `mobile/` | clean, no output |
 | `bash mobile/scripts/testid-lint.sh` | `testid-lint OK` |
 | `node tests/check-direction-card.js` (new; `npm run test:direction-card`) | **73 of 73** |
