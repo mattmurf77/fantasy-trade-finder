@@ -29,9 +29,24 @@ export function fairnessOnFromPref(raw: string | null | undefined): boolean {
   return raw === 'on';
 }
 
+/** Flag `trade.fairness_window_v2` (docs/plans/fairness-window/spec.md): the
+ *  server's configured "Balanced trades" threshold, the top-level
+ *  `fairness_on_threshold` on GET /api/feature-flags (present only while the
+ *  flag is on). api/flags.ts writes it on the success path only and never
+ *  persists it; until then, and whenever it is absent or out of range, ON
+ *  sends FAIRNESS_ON_THRESHOLD exactly as before. FAIRNESS_ON_THRESHOLD itself
+ *  never moves: it is also the definition of "balanced" (NORMAL_LOW). */
+export const SERVED_FAIRNESS_MIN = 0.55;
+let _servedFairnessOn: number | null = null;
+export function setServedFairnessOnThreshold(raw: unknown): void {
+  _servedFairnessOn = typeof raw === 'number' && Number.isFinite(raw)
+    && raw >= SERVED_FAIRNESS_MIN && raw <= FAIRNESS_ON_THRESHOLD ? raw : null;
+}
+
 /** The `fairness_threshold` to send for a resolved preference. OFF still
  *  sends a (low) value rather than dropping the field, so the server cache
  *  key stays stable. */
 export function fairnessThresholdFor(fairnessOn: boolean): number {
-  return fairnessOn ? FAIRNESS_ON_THRESHOLD : FAIRNESS_OFF_THRESHOLD;
+  if (!fairnessOn) return FAIRNESS_OFF_THRESHOLD;
+  return _servedFairnessOn ?? FAIRNESS_ON_THRESHOLD;
 }

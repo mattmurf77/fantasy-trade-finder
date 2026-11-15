@@ -1353,6 +1353,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # trades this league year (stored public profiles) and revision 4 demotes
     # offers to a manager trading clearly less than their league. OFF ⇒ no key.
     "trade.partner_activity",
+    # docs/plans/fairness-window/spec.md. ON ⇒ the default "fair" threshold
+    # (a /api/trades/generate request with no fairness_threshold, and the
+    # app's "Balanced trades" toggle via GET /api/feature-flags
+    # `fairness_on_threshold`) is the `fairness_window_default` model_config
+    # knob (backend/fairness_window.py). OFF (default) ⇒ 0.75 everywhere, no
+    # payload key, model_config not read. Explicit thresholds never change.
+    "trade.fairness_window_v2",
     # docs/plans/offer-learnings/ WS1b: a Calibration round of its own for revision 4
     # (outlook_calibration.R4_ROUND_ID), offered after the current round. Supersedes
     # grading.revision4_arm, which is inert while this is on. OFF => today's behaviour.

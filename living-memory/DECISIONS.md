@@ -1,5 +1,19 @@
 # Decisions — Fantasy Trade Finder
 
+## D-266 — The default "fair" threshold is one server value behind `trade.fairness_window_v2`; the "balanced" bar does not follow it
+
+**Date:** 2026-11-14 · **Who:** the operator approved the spec (`docs/plans/fairness-window/spec.md`); built by a builder subagent on `feat/fairness-window`.
+**Context:** the deck's 0.75 "fair" default lived in the app, two backend defaults and comments. The research showed most real trades sit below it. Whether a wider window helps had to be measured before anything changed for users.
+**Decision:**
+- `backend/fairness_window.py` is the source: `FAIR_DEFAULT = 0.75`. Flag on ⇒ the `fairness_window_default` knob, allowed 0.55–0.75, anything else 0.75. It is served to the app as `fairness_on_threshold` on `GET /api/feature-flags`, only while the flag is on. `/api/trades/generate` resolves an absent unpinned threshold through it before building any cache key.
+- Explicit thresholds, pinned (0.50), off (0.50), relaxed (0.55) and divergence (0.55) are untouched.
+- **The consensus note's "balanced" bar (`NORMAL_LOW`, `CONSENSUS_BALANCED_MIN`, web `FAIRNESS_BALANCED_MIN`) and `FAIRNESS_ON_THRESHOLD` stay 0.75 whatever the flag says.** They define "balanced"; a card admitted at 0.68 is shown but is not called balanced. The swap sheet reads no threshold at all (a ±15% band).
+- Web and extension keep sending the user's slider value.
+- The knob's value is chosen by the pre-registered replay rule in the spec. **Result (600 trades, 458 lineages): no candidate passed, so the knob stays 0.75** (`docs/plans/fairness-window/results.md`). The best candidate was 0.65: +0.5 pts close match in the first 30 [−0.5, +1.5], at 1.21× build time.
+**Consequences:**
+- The engine clamps every request to `market_floor_absolute` (0.65), so 0.60 and 0.55 build exactly the 0.65 deck. Widening below 0.65 would need that policy floor changed, which is out of scope.
+- A mobile cold start that has not fetched flags sends 0.75. That only costs a cache miss, never a wrong deck: every cache keys on the numeric threshold.
+
 ## D-264 — Playoff targets: the mirror of Max PF moves, limited to selling teams by a rule applied in the job and again on the read
 
 **Date:** 2026-11-14 · **Who:** the operator ("Build the opposite of the Max PF moves features. The purpose is to identify the players to trade for that maximize playoff chances. This feature should only suggest players on teams that are rebuilding, tanking for team outlook or have a less than 50% chance of making the playoffs."); built by a builder subagent on `feat/playoff-targets`. The product choices below are the builder's defaults, **not yet signed off**: `docs/plans/league-projections/playoff-targets/scope.md` §0.
