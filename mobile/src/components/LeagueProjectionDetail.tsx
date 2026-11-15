@@ -3,11 +3,14 @@ import {View, Pressable, StyleSheet} from 'react-native';
 import {Button, Icon, Text} from './chalkline';
 import {ink, chalk, space} from '../theme/chalkline';
 import type {ProjectionResult, ProjectionTeam, ProjectionWeek} from '../api/leagueProjections';
-import type {MaxPfMoves} from '../api/leagueProjections';
+import type {MaxPfMoves, PlayoffTargets} from '../api/leagueProjections';
 import {lineupRowText} from '../utils/projectionCoverage';
 import {MAXPF_COPY} from '../utils/maxPfMovesCopy';
 import {sectionMounts, isOwnCard, deriveSection} from '../utils/maxPfMoves';
 import {MaxPfMovesBody} from './MaxPfMovesSection';
+import {TARGETS_COPY} from '../utils/playoffTargetsCopy';
+import {sectionMounts as targetsMount, deriveSection as deriveTargets, type LiveRoster} from '../utils/playoffTargets';
+import {PlayoffTargetsBody} from './PlayoffTargetsSection';
 import {missOddsText} from '../utils/playoffOdds';
 
 // The saved forecast's per-team detail, mounted inside the Standings table's
@@ -37,10 +40,23 @@ export interface MaxPfMovesProps {
   liveRosterIds: string[] | null; leagueId: string | null; userId: string | null;
 }
 
+/** Playoff targets inputs for the viewer's own card (the mirror of
+ *  MaxPfMovesProps); `liveRosters` is the page's roster query, every team. */
+export interface PlayoffTargetsProps {
+  block: PlayoffTargets | null | undefined; flagOn: boolean; isSleeper: boolean;
+  liveRosters: LiveRoster[] | null;
+}
+
 /** Final record odds, Weekly projections, Draft pick odds and, on the
- *  viewer's own card only, Max PF moves for one team. */
-export function ProjectionTeamDetail({team, result, maxPf}: {team: ProjectionTeam; result: ProjectionResult; maxPf?: MaxPfMovesProps}) {
+ *  viewer's own card only, Max PF moves and Playoff targets for one team. */
+export function ProjectionTeamDetail({team, result, maxPf, targets}: {team: ProjectionTeam; result: ProjectionResult; maxPf?: MaxPfMovesProps; targets?: PlayoffTargetsProps}) {
   const names = new Map(result.teams.map(t => [t.roster_id, t.name]));
+  // Fires playoff_targets_viewed once per opening of this card.
+  const targetsViewed = useRef(false);
+  const playoffTargets = targets?.block && targetsMount({
+    block: targets.block, flagOn: targets.flagOn, isSleeper: targets.isSleeper,
+    ownCard: isOwnCard(team.roster_id, result.viewer_roster_id ?? targets.block.viewer_roster_id),
+  }) ? {block: targets.block, model: deriveTargets(targets.block, targets.liveRosters)} : null;
   // Fires maxpf_moves_viewed once per opening of this card (it unmounts on close).
   const maxPfViewed = useRef(false);
   const moves = maxPf?.block && maxPf.leagueId && sectionMounts({
@@ -71,6 +87,9 @@ export function ProjectionTeamDetail({team, result, maxPf}: {team: ProjectionTea
     </Disclosure>
     {moves ? <Disclosure label={MAXPF_COPY['C-TITLE']} testID="standings.maxpf.toggle" initialOpen={moves.model.initialOpen}>
       <MaxPfMovesBody block={moves.block} model={moves.model} leagueId={moves.leagueId} userId={maxPf?.userId ?? null} viewedRef={maxPfViewed} />
+    </Disclosure> : null}
+    {playoffTargets ? <Disclosure label={TARGETS_COPY['C-TITLE']} testID="standings.targets.toggle" initialOpen={playoffTargets.model.initialOpen}>
+      <PlayoffTargetsBody block={playoffTargets.block} model={playoffTargets.model} viewedRef={targetsViewed} />
     </Disclosure> : null}
   </View>;
 }
