@@ -175,7 +175,9 @@ const R3 = READY.rows[2];
   assert(u.ownerGateActive(withBlock(owned, { state: 'no_moves' })) && !u.ownerGateActive(NO_MISS),
     'D3. the gate applies to no_moves too, never to other states');
   const comp = read('src/components/MaxPfMovesSection.tsx');
-  assert(/const gated = model\.isList && !revealed && \(model\.ownerGate \|\| !model\.defaultOpen\);/.test(comp)
+  // direction-pages P-7 adds `openOnArrival` (default false), which skips only
+  // the collapsed step; check-direction-pages.js pins it.
+  assert(/const gated = model\.isList && !revealed && \(model\.ownerGate \|\| \(!model\.defaultOpen && !openOnArrival\)\);/.test(comp)
       && /model\.ownerGate \? model\.ownerLine : model\.collapsedLine/.test(comp),
     'D4. the body shows the owner line before the collapsed line, and the list only after the tap');
 }

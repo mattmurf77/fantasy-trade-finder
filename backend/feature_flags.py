@@ -66,6 +66,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # `playoff_targets` on the forecast read. Requires league.projections.
     # Off = no block, no extra job work; every read and saved run is unchanged.
     "league.playoff_targets",
+    # Improve pages (docs/plans/league-projections/direction-pages/spec.md
+    # §3, §8; D-265): the app's two dedicated pages, "Improve Playoff
+    # Chances" and "Improve Draft Pick". Gates the Standings link rows and
+    # every entry point to the pages (the routes are registered
+    # unconditionally). App-only in step 1: no backend code reads it, and
+    # every response is byte-identical in either state. Requires
+    # league.projections.
+    "league.direction_pages",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.

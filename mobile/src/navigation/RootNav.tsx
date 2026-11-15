@@ -38,6 +38,8 @@ import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import UsageTrendsScreen from '../screens/UsageTrendsScreen';
 import StandingsScreen from '../screens/StandingsScreen';
+import ImprovePlayoffChancesScreen from '../screens/ImprovePlayoffChancesScreen';
+import ImproveDraftPickScreen from '../screens/ImproveDraftPickScreen';
 import WinNowScreen from '../screens/WinNowScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
 // #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
@@ -159,6 +161,12 @@ type AuthStack = {
   // and never read: builds before the single table (and their deep links)
   // passed `{ segment: 'projected' }`, and it must still land without error.
   Standings: { segment?: 'projected' } | undefined;
+  // Improve pages (docs/plans/league-projections/direction-pages/spec.md
+  // §3, D-265): the dedicated pages for Playoff targets and Max PF moves.
+  // No params: each reads the session league. Registered UNCONDITIONALLY;
+  // `league.direction_pages` gates the entry points, not the routes.
+  ImprovePlayoffChances: undefined;
+  ImproveDraftPick: undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
   // session's league and the session's own user, because cross-user receipts
@@ -957,6 +965,58 @@ export default function RootNav({ booted }: { booted: boolean }) {
                 back={
                   <HeaderBack
                     testID="standings.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
+                }
+              />
+            ),
+          })}
+        />
+        {/* Improve pages (direction-pages spec §3, D-265) — "Improve Playoff
+            Chances" and "Improve Draft Pick", pushed from the Standings link
+            rows (flag league.direction_pages) and their deep links.
+            Registered UNCONDITIONALLY: the flag gates the entry points, not
+            the routes. Standings' header (LeagueTopBarHeader, #151 JS back,
+            RNS#3294); each screen mounts its own FeedbackFAB. */}
+        <Stack.Screen
+          name="ImprovePlayoffChances"
+          component={ImprovePlayoffChancesScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Improve Playoff Chances',
+            header: () => (
+              <LeagueTopBarHeader
+                title="Improve Playoff Chances"
+                back={
+                  <HeaderBack
+                    testID="improve-playoffs.back-btn"
+                    onPress={() =>
+                      navigation.canGoBack()
+                        ? navigation.goBack()
+                        : navigation.navigate('Main')
+                    }
+                  />
+                }
+              />
+            ),
+          })}
+        />
+        <Stack.Screen
+          name="ImproveDraftPick"
+          component={ImproveDraftPickScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Improve Draft Pick',
+            header: () => (
+              <LeagueTopBarHeader
+                title="Improve Draft Pick"
+                back={
+                  <HeaderBack
+                    testID="improve-pick.back-btn"
                     onPress={() =>
                       navigation.canGoBack()
                         ? navigation.goBack()

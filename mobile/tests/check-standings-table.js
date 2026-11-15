@@ -323,7 +323,8 @@ assert(/\{ width: COL_WIDTH\[column\], justifyContent: 'flex-end' \}/.test(st) &
       /testID="standings\.open\.left-out">\{lines\.leftOut\}/.test(st) &&
       // Max PF moves (2026-11-12) adds the `maxPf` inputs; check-max-pf-moves.js pins them.
       // Playoff targets (2026-11-14) adds the `targets` inputs; check-playoff-targets.js pins them.
-      /\{r\.forecast && result \? <ProjectionTeamDetail team=\{r\.forecast\} result=\{result\} maxPf=\{\{[^}]*\}\} targets=\{\{[^}]*\}\} \/> : null\}/.test(st),
+      // Improve pages (direction-pages spec P-13) add `pageLinks`; check-direction-pages.js pins it.
+      /\{r\.forecast && result \? <ProjectionTeamDetail team=\{r\.forecast\} result=\{result\} maxPf=\{\{[^}]*\}\} targets=\{\{[^}]*\}\} pageLinks=\{pageLinks\} \/> : null\}/.test(st),
     'B4g. the open team shows the util lines, then the moved forecast sub-sections');
   assert(/paddingHorizontal: space\.xs - 1,/.test(card) && /row: \{ paddingHorizontal: space\.xs,/.test(st),
     "B4h. card border + padding = the closed row's padding, so columns do not move");
