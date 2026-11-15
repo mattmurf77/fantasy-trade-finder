@@ -381,6 +381,13 @@ FLAG_KEYS: tuple[str, ...] = (
     # HomeScreen decides once per mount. Registered here so the flag ships
     # through /api/feature-flags like every other key.
     "nav.home_hub",
+    # Home position tile body tap (2026-11-15 operator ask, docs/plans/
+    # position-tile-tap/scope.md, D-269) — tapping a Home hub position tile's
+    # body opens League rankings filtered to that position with the user's
+    # own team drilled in (their players at that position) and a header
+    # "Home" control back. Buy / Sell unchanged. Off = the tile exactly as
+    # before (no body tap). CLIENT-ONLY: no route reads this key.
+    "nav.home_position_roster",
     # Usage Trends (2026-10-10 operator ask, docs/plans/usage-trends/scope.md) —
     # in-season RB/WR/TE snaps / carries / targets over user-picked completed
     # weeks with team share and spikes, joined to the caller's league rosters.

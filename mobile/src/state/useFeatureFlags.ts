@@ -122,6 +122,10 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // install's first Home would be the old four rows until a revalidate.
   // A server `false` kill-switches on the next Home mount.
   'nav.home_hub': true,
+  // `nav.home_position_roster`: the Home position tile's body opens your
+  // roster at that position in League rankings (D-269). Same value as
+  // config/features.json; a server `false` removes the body tap.
+  'nav.home_position_roster': true,
   // `usage_trends.enabled`: Usage Trends (docs/plans/usage-trends/scope.md),
   // shipped ON (operator, 2026-10-10). Absent here, a fresh install's first
   // Home would lack the Usage Rates tile until a revalidate. A server

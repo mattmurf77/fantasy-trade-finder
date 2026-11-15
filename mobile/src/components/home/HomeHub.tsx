@@ -14,6 +14,7 @@ import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import {
   requestLeagueSummaryAll,
+  requestLeagueSummaryRoster,
   requestLeagueSummarySplit,
 } from '../../state/leagueSummaryIntent';
 import {
@@ -50,7 +51,8 @@ import HomePlayoffBanner from './HomePlayoffBanner';
 //
 // Analytics: one `home_tile_tapped` per press, BEFORE navigating, with the
 // closed `tile` vocabulary; `position` + `band` ride on buy / sell /
-// position_ranking only. Pinned by tests/check-home-hub.js.
+// position_ranking / position_roster only, and `split` on position_roster
+// only. Pinned by tests/check-home-hub.js.
 
 // The honest "not available" standings copy names the platform (R7: ESPN/MFL
 // current standings are out of v1).
@@ -81,6 +83,9 @@ export default function HomeHub() {
   const posCandidatesOn = useFlag('league.pos_candidates');
   // Usage Rates tile (flag `usage_trends.enabled`, docs/plans/usage-trends/).
   const usageOn = useFlag('usage_trends.enabled');
+  // Position tile body tap → your roster at that position (D-269, docs/plans/
+  // position-tile-tap/scope.md). Off ⇒ no onOpen, the tile is unchanged.
+  const tileRosterOn = useFlag('nav.home_position_roster');
 
   // ── Queries (scope §6.2) ──────────────────────────────────────────────
   const prefsQuery = useQuery({
@@ -186,6 +191,14 @@ export default function HomeHub() {
   const onRanking = (s: PositionSplit) => {
     track('home_tile_tapped', { tile: 'position_ranking', position: s.position, band: bandProp(s) }, 'Home');
     requestLeagueSummarySplit(leagueId!, s.position, 'buy');
+    navigation.navigate('League', { screen: 'LeagueRankings' });
+  };
+  // The tile body: League rankings filtered to the position with the user's
+  // own team drilled in. `split` is the tile's state (shown | no_split |
+  // no_median), so a no-split tile's tap is readable apart from Mid-pack.
+  const onOpenRoster = (s: PositionSplit) => {
+    track('home_tile_tapped', { tile: 'position_roster', position: s.position, band: bandProp(s), split: s.state }, 'Home');
+    requestLeagueSummaryRoster(leagueId!, s.position);
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };
   const onLinkLeague = () => {
@@ -329,6 +342,7 @@ export default function HomeHub() {
           onBuy={() => onBuy(s)}
           onSell={() => onSell(s)}
           onRanking={() => onRanking(s)}
+          onOpen={tileRosterOn ? () => onOpenRoster(s) : undefined}
           emphasis={emphasis[s.position] ?? null}
         />
       )),
