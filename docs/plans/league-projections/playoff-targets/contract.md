@@ -113,7 +113,7 @@ S = computed in the weekly job and saved with the run; R = computed when the pag
 | `replaces` | `Replaced[]` | S | Who leaves the viewer's starting lineup for him, most weeks first, at most 3: `{player_id, name, short_name, free_agent, weeks}`. `player_id: null` is a slot nobody held |
 | `replaces_more` | `number` | S | How many more there are beyond the 3 |
 | `playoff_probability` | `{now: number, after: number}` | S | The viewer's playoff chance. `after > now` on every saved row |
-| `passes_threshold` | `boolean` | S | `after − now ≥ min_playoff_gain` (0.01) |
+| `passes_threshold` | `boolean` | S | `after − now ≥ min_playoff_gain` (0.02 from 2026-11-16, D-272; was 0.01) |
 | `seller` | `Seller` | S+R | `{roster_id, name, playoff_probability, playoff_clinched, playoff_eliminated}`: the team he is on, its name and playoff chance in this run. Never an outlook |
 
 ## 4. States

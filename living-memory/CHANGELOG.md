@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-16 — Playoff targets threshold raised to 2 points (D-272)
+
+- **What:** `playoff_targets.min_playoff_gain` 0.01 → 0.02 in `config/league_projections.json`; config reference, contract and scope updated.
+- **Why:** the backtest (PR #698) found the shown gain accurate on average (+8.6 shown vs 9.1% realised) but rows promising 1-2 points came true 0.3% of the time against 1.5% shown.
+- **When it shows:** each league's next weekly forecast re-computes the block.
+
 ## 2026-11-15 — Fairness formula measured, not adopted (D-267)
 
 - **What:** tested a compressed-sum admission formula (Σ value^0.7 and three variants) against today's package math by replaying 1,200 real in-season trades. No arm passed; best was +0.0 points on close match in the first 30 cards. Record: `docs/plans/fairness-formula/{spec,scope,results}.md`.

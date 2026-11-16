@@ -59,7 +59,7 @@ from backend.tests.test_maxpf_moves import HAND_CFG, _result, _world, hand_snaps
 
 REPO = Path(__file__).resolve().parents[2]
 CONTRACT = REPO / "docs/plans/league-projections/playoff-targets/contract.md"
-OPTIONS = {"simulations_per_candidate": 5000, "candidates": 8, "min_playoff_gain": 0.01,
+OPTIONS = {"simulations_per_candidate": 5000, "candidates": 8, "min_playoff_gain": 0.02,
            "near_certain_min": 0.99, "time_budget_seconds": 60}
 SMALL = {**OPTIONS, "simulations_per_candidate": 1000, "candidates": 4}
 VIEWER = 7
@@ -268,7 +268,7 @@ def test_rows_are_valid_and_ranked_by_playoff_gain():
     for row in block["rows"]:
         now, after = row["playoff_probability"]["now"], row["playoff_probability"]["after"]
         assert now == team["playoff_probability"] and now < after <= 1
-        assert row["passes_threshold"] == (after - now >= 0.01)
+        assert row["passes_threshold"] == (after - now >= OPTIONS["min_playoff_gain"] - 1e-9)
         assert previous is None or after - now <= previous
         previous = after - now
         assert row["player_id"] in rosters[row["seller_roster_id"]] and row["player_id"] not in rosters[VIEWER]

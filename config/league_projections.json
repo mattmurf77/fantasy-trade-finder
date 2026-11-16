@@ -36,7 +36,7 @@
   "playoff_targets": {
     "simulations_per_candidate": 5000,
     "candidates": 8,
-    "min_playoff_gain": 0.01,
+    "min_playoff_gain": 0.02,
     "near_certain_min": 0.99,
     "time_budget_seconds": 60
   },

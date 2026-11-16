@@ -1,3 +1,9 @@
+## 2026-11-16 — Playoff targets threshold 0.01 → 0.02 (D-272), branch `feat/playoff-targets-threshold-2`
+
+- **Change:** `config/league_projections.json` `playoff_targets.min_playoff_gain` 0.02. Pin moved in `test_playoff_targets.py` (`OPTIONS` 0.02; the `passes_threshold` assertion now reads `OPTIONS["min_playoff_gain"]` with the code's 1e-9 tolerance).
+- **Backend (local venv, no network):** `test_playoff_targets.py` + `test_league_projection_baseline_retention.py` **45 passed**; `test_playoff_targets_{analytics,job,read}.py` + `test_direction_card_analytics.py` + `test_direction_pages_flag.py` **27 passed**. Full suite is CI on the PR. No app change.
+- **Not verified:** the new threshold on a real weekly run (next Tuesday's forecast re-computes every block because the settings hash changes).
+
 ## 2026-11-15 — Fairness formula record (D-267), branch `docs/fairness-formula-result` (docs only)
 
 - **No code on `main` from this work.** On branch `feat/fairness-formula` (not merged) the builder reported: new `test_fairness_formula.py` 140 passed; 167 directly affected files 5,915 passed, 1 skipped; full backend suite 15,819 passed, 42 skipped, 0 failed; 15 sabotages red then restored; the outlook-evidence formula branch had no targeted test.
