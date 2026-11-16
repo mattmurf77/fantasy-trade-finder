@@ -8,6 +8,7 @@
 - [1. Code walk](#1-code-walk)
 - [2. Measured job time](#2-measured-job-time)
 - [3. Manual TestFlight checklist](#3-manual-testflight-checklist)
+- [4. Backtest against completed seasons](#4-backtest-against-completed-seasons)
 
 ## 1. Code walk
 
@@ -153,3 +154,12 @@ Sleeper league in season, before its trade deadline.
 A regression this checklist is built to catch: a row from a team that is not selling (step 5),
 the player landing on the give side (step 8), and the section appearing on someone else's
 card (step 2).
+
+## 4. Backtest against completed seasons
+
+Scope waiver W3, closed 2026-11-15 by [backtest/](backtest/README.md) (research, no code change):
+13 completed league-seasons (2022–2025, 4 lineages), forecasts before weeks 4/6/8/10, 4,336 listed
+rows, each replayed with actual points with and without the move. Shown chance gain +8.6 points
+on average, realised 9.1% (bias −0.5, −2.9 to +1.8); calibrated from 2 points up, rows of 1–2
+points almost never come true (1 of 350); the #1 row comes true 17.7% vs 3.3% for a random
+candidate. Recommends keeping the calculation and raising `min_playoff_gain` to 0.02.
