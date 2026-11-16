@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-267 — The compressed-sum fairness formula was measured and not adopted; the deck keeps today's package math
+
+**Date:** 2026-11-15 · **Who:** the operator asked for the test; built and measured by a builder subagent on `feat/fairness-formula`; the main session decided not to merge the engine change.
+**Context:** research found a compressed sum (Σ value^0.7, no package discount) told real trades from made-up ones better than the app's package math. Whether it puts trades like the real ones on the first page had to be measured before anything changed (`docs/plans/fairness-formula/spec.md`).
+**Decision:**
+- **No arm passed** the pre-declared rule (1,200 real in-season trades, 729 lineages; `docs/plans/fairness-formula/results.md`). Close match in the first 30 cards: today 5.3%; Σv^0.7 at 0.75 −0.3 pts [−1.2, +0.5]; Σv^0.7 at the 1-for-1-equivalent threshold −1.4 [−2.6, −0.3]; plain sum +0.0 (identical first 30 for every trade); Σraw^0.7 −0.2 [−1.1, +0.7].
+- The deck's admission formula stays as it is. The flag-gated engine change, replay tool and tests are **not on `main`**; they are kept on branch `feat/fairness-formula` (head 1ac1b027). Merging dormant engine code would have cost a deck-pipeline bump (every stored deck rebuilt) for no user benefit.
+**Consequences:**
+- The r4 deck's order comes from both managers' support scores on today's package values, so changing the admission formula moves the back of the deck, not the first page. With D-266 (window width), two admission levers have now been measured and neither moves the first page; the remaining lever is ordering.
+- Do not re-run this test. A future formula test must change what orders the deck, and must decide whether the serving policy (`trade_policy`) follows the formula.
+- Found while testing, not fixed: bilateral r1 and r2 decks on a larger synthetic world vary with `PYTHONHASHSEED` on `main`.
+
 ## D-271 — The Improve pages, the Home playoff card, its half sheet and Playoff targets are turned on
 
 **Date:** 2026-11-15 · **Who:** the operator, after PRs #689, #690, #693 and #696 were merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on" ("Leave as is": the half sheet keeps no Done button). Then, told that `league.playoff_targets` was staying off and the sheet would have two rows: "I want playoff targets on".

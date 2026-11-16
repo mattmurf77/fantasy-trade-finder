@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-15 — Fairness formula measured, not adopted (D-267)
+
+- **What:** tested a compressed-sum admission formula (Σ value^0.7 and three variants) against today's package math by replaying 1,200 real in-season trades. No arm passed; best was +0.0 points on close match in the first 30 cards. Record: `docs/plans/fairness-formula/{spec,scope,results}.md`.
+- **Not merged:** the flag-gated engine change and replay tool stay on branch `feat/fairness-formula` (head 1ac1b027). `main` has the record only.
+- **Why it matters next:** admission (window width D-266, formula D-267) does not move the first page; the deck's order does. Any next test must target ordering.
+- **Also:** recorded the operator's 2026-11-15 sign-off of the fairness-window analytics waiver (`docs/plans/fairness-window/scope.md`).
+- **Known gap:** r1/r2 bilateral decks vary with `PYTHONHASHSEED` on a larger synthetic world (found on `main`, not fixed).
+
 ## 2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets turned on (D-271)
 
 - Operator, after #689, #690, #693 and #696 merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on" (no Done button on the sheet); then "I want playoff targets on".

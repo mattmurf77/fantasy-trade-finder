@@ -1,3 +1,9 @@
+## 2026-11-15 — Fairness formula record (D-267), branch `docs/fairness-formula-result` (docs only)
+
+- **No code on `main` from this work.** On branch `feat/fairness-formula` (not merged) the builder reported: new `test_fairness_formula.py` 140 passed; 167 directly affected files 5,915 passed, 1 skipped; full backend suite 15,819 passed, 42 skipped, 0 failed; 15 sabotages red then restored; the outlook-evidence formula branch had no targeted test.
+- **Replay (research data, local, aggregates only):** 1,200 trades / 729 lineages, five arms, no arm passed (`docs/plans/fairness-formula/results.md`). The held-back file was never opened; no confirmation run was needed.
+- **Found on main, not fixed:** bilateral r1 and r2 decks on the larger synthetic world depend on `PYTHONHASHSEED`.
+
 ## 2026-11-15 — Improve pages, Home card, half sheet and Playoff targets flags ON (D-271), branch `feat/direction-flags-on`
 
 - **Flip:** `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet` true in `config/features.json` and the three fixtures; code default false. Pins moved to true: `test_direction_pages_flag.py` (renamed `test_flag_registered_code_default_off_shipped_on`), `test_team_direction_read.py` (renamed `test_flags_code_default_off_shipped_on_and_reach_the_app`), `check-direction-card.js` L1/L2, `check-direction-pages.js` L1/L2, `check-direction-sheet.js` R2. Flag-off tests that pass the flags explicitly unchanged.
