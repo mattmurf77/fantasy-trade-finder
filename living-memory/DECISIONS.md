@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-272 — Playoff targets keeps its calculation; a row needs a 2-point playoff-chance gain to pass
+
+**Date:** 2026-11-16 · **Who:** the operator, after the backtest: "I'm aligned with your recommendations" (keep the calculation, no caveat line, raise the threshold from 1 point to 2).
+**Context:** D-271 turned Playoff targets on with no backtest (scope W3). The backtest (PR #698, `docs/plans/league-projections/playoff-targets/backtest/` on that branch) replayed 13 finished league-seasons (2022-2025, 4 of the operator's league lineages, 4,336 listed rows at weeks 4, 6, 8, 10) with real scores. Shown chance gain +8.6 points vs 9.1% realised (bias −0.5, 95% −2.9 to +1.8); the top row came true 17.7% of the time vs 3.3% for a random positive-gain player from the same sellers. Rows promising 1-2 points came true 0.3% of the time (1 of 350) vs 1.5% shown; every band from 2 points up was calibrated.
+**Decision:**
+- `config/league_projections.json` `playoff_targets.min_playoff_gain` 0.01 → 0.02. About 9% of rows that passed now do not.
+- The calculation and the page copy are unchanged; no caveat line is added.
+**Consequences:**
+- A league whose only passing rows were 1-2 points now reads `no_targets`.
+- The setting is part of the block's input, so every league re-computes on its next weekly forecast (Tuesday 09:30 Eastern); saved blocks keep the old threshold until then.
+- Not tested by the backtest: the cost of what is given up in a trade (P4), forecasts made weeks ahead (it used each week's final projections), and seller teams by saved outlook (only the under-50% rule).
+- Rollback: set it back to 0.01.
+
 ## D-267 — The compressed-sum fairness formula was measured and not adopted; the deck keeps today's package math
 
 **Date:** 2026-11-15 · **Who:** the operator asked for the test; built and measured by a builder subagent on `feat/fairness-formula`; the main session decided not to merge the engine change.

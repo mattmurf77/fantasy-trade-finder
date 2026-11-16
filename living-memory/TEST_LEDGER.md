@@ -1,3 +1,9 @@
+## 2026-11-16 — Playoff targets threshold 0.01 → 0.02 (D-272), branch `feat/playoff-targets-threshold-2`
+
+- **Change:** `config/league_projections.json` `playoff_targets.min_playoff_gain` 0.02. Pin moved in `test_playoff_targets.py` (`OPTIONS` 0.02; the `passes_threshold` assertion now reads `OPTIONS["min_playoff_gain"]` with the code's 1e-9 tolerance).
+- **Backend (local venv, no network):** `test_playoff_targets.py` + `test_league_projection_baseline_retention.py` **45 passed**; `test_playoff_targets_{analytics,job,read}.py` + `test_direction_card_analytics.py` + `test_direction_pages_flag.py` **27 passed**. Full suite is CI on the PR. No app change.
+- **Not verified:** the new threshold on a real weekly run (next Tuesday's forecast re-computes every block because the settings hash changes).
+
 ## 2026-11-15 — Playoff targets backtest against completed seasons (research, scope waiver W3), branch `research/playoff-targets-backtest`
 
 - **Question (operator):** how accurate are the gains Playoff targets shows (live, D-271)? Waiver W3 said the number had never been backtested.
