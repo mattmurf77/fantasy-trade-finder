@@ -3,7 +3,7 @@
 **Date:** 2026-11-14
 **Entry point:** direct ask (operator-approved spec, [spec.md](spec.md))
 **Builder:** builder subagent on `feat/fairness-window`
-**Operator sign-off on waivers:** needed for the §1 waiver (surfaced in the PR)
+**Operator sign-off on waivers:** the operator signed off the §1 analytics waiver on 2026-11-15 (PR #691 was merged on that sign-off).
 
 ---
 
