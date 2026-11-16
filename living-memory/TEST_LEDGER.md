@@ -1,3 +1,10 @@
+## 2026-11-15 — Improve pages, Home card and half sheet flags ON (D-271), branch `feat/direction-flags-on`
+
+- **Flip:** `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet` true in `config/features.json` and the three fixtures; code default false. Pins moved to true: `test_direction_pages_flag.py` (renamed `test_flag_registered_code_default_off_shipped_on`), `test_team_direction_read.py` (renamed `test_flags_code_default_off_shipped_on_and_reach_the_app`), `check-direction-card.js` L1/L2, `check-direction-pages.js` L1/L2, `check-direction-sheet.js` R2. Flag-off tests that pass the flags explicitly unchanged.
+- **Backend (Python 3.12, local venv, no network):** the four direction files + `test_seed_ui_test_db.py`: **101 passed**. Every backend test file naming the flag fixtures, `league.direction_*`, `feature_flags` or `feature-flags` (197 files): **5,872 passed, 2 skipped, 0 failed in 11m43s**. Full suite is CI on the PR.
+- **App:** `tsc --noEmit` clean; testid-lint OK; all 192 `check-*.js` green (direction-card 73, direction-pages 125, direction-sheet 64, playoff-targets 84).
+- **Not verified:** anything on a device (D-056). Needs TestFlight 1.22.0 (195) from `83142801`, pending; then evidence.md §4 and §9, read with §10. FTF_SKIP_SIM_GATE=1 on push.
+
 ## 2026-11-15 — Home card, half sheet version (D-270), branch `feat/direction-sheet`, flags off
 
 - **Backend (Python 3.12, local venv, no network):** new `test_team_direction.py` 11 (settings; band at 0.35 / 0.65; lean at 0.45 and per outlook; primary fallback; §5.5 examples; every §7.3 reason; every unusable state; projected pick = `max_pf_moves.baseline.label` and the D-257 slot for every team; hidden for a non-max-PF order; owner), `test_team_direction_read.py` 6 (flag off byte-identical with the composer forbidden; block = composer over the served blocks; options and stored draft order; no run / stale / read failure; both flags registered and off; sheet flag app-only), `test_direction_card_analytics.py` 4. Touched set (55 files incl. every flag/fixture reader): **1716 passed**. Full suite: **15,798 passed, 43 skipped, 0 failed in 25m36s**.

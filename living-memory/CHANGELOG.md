@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-15 — Improve pages, Home playoff card and half sheet turned on (D-271)
+
+- Operator, after #689, #690, #693 and #696 merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on". No Done button on the sheet.
+- `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet` true in `config/features.json` and the three flag fixtures; code default false. `league.playoff_targets` stays off, so the sheet lists two rows (no "Improve Playoff Chances").
+- The app side needs TestFlight 1.22.0 (195), from `83142801`; builds 194 and earlier are unaffected. Nothing run on a device; checklists in `docs/plans/league-projections/direction-pages/evidence.md` §4, §9, §10.
+
 ## 2026-11-15 — Home playoff card, the half sheet version first: two figures and "View" opens a sheet, built dark (D-270)
 
 - Operator: "get an agent building the half sheet version of the home page as the initial experience update". Server: the forecast read's `team_direction` block (spec §7, complete: band, primary, options with reasons, projected pick), composed on read behind `league.direction_card`; settings `team_direction.middle_min` / `middle_max`. Nothing saved; flag off byte-identical.

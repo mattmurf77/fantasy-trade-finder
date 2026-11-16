@@ -18,6 +18,7 @@
 - [7. The half sheet build: sabotages](#7-the-half-sheet-build-sabotages)
 - [8. The half sheet build: code walk](#8-the-half-sheet-build-code-walk)
 - [9. The half sheet build: manual TestFlight checklist](#9-the-half-sheet-build-manual-testflight-checklist)
+- [10. Flags turned on (D-271)](#10-flags-turned-on-d-271)
 
 ## 0. Scope and judgement calls
 
@@ -128,7 +129,7 @@ Standings does not change rendering.
 ### 3.4 The backend
 
 `league.direction_pages` is in `FLAG_KEYS` (`backend/feature_flags.py`), false in
-`config/features.json` and the three fixtures. No other backend module names it
+`config/features.json` and the three fixtures (**2026-11-15: true in both from D-271**, §10). No other backend module names it
 (`test_no_backend_code_reads_the_flag`), and the forecast read is byte-identical in either state
 (`test_forecast_read_is_byte_identical_in_either_state`).
 
@@ -335,3 +336,49 @@ match the page (3), the percentage no longer opening Standings (7), a sheet that
 rows in a different order for some teams (12), and the card or sheet missing on League Rankings (14).
 Not checked here and worth a look on the device: whether the 48pt drag threshold feels right.
 
+## 10. Flags turned on (D-271)
+
+2026-11-15, after PRs #689, #690, #693 and #696 were merged, the operator: "Leave as is. Merge all of
+this, deploy, rollout on TestFlight and turn all three flags on" ("Leave as is": the sheet keeps no
+Done button). `league.direction_pages`, `league.direction_card` and `league.direction_view_sheet` are
+true in `config/features.json` and the three flag fixtures; the code default stays false.
+`league.playoff_targets` was not named and stays false.
+
+**What `feature_off` hides while `league.playoff_targets` is off.** The forecast read sends no
+`playoff_targets` block (`backend/league_projections/api.py:233-234`), and `team_direction` reports
+`options.playoffs = {offered: false, reason: "feature_off"}` (`team_direction.py:105-108`). So:
+
+- the half sheet lists two rows, "View projected standings" and "Improve Draft Pick"; "Improve
+  Playoff Chances" is not listed (`mobile/src/utils/directionCard.ts:101`);
+- Standings' own team card shows only the "Max PF moves" link row; there is no "Playoff targets"
+  row or section (`mobile/src/components/LeagueProjectionDetail.tsx:63-68`, `:106-107`; the mount
+  rule needs the flag, `mobile/src/utils/playoffTargets.ts:52-54`);
+- Improve Draft Pick has no link to Improve Playoff Chances (`mobile/src/utils/directionPages.ts:115-118`,
+  `:143`);
+- the deep link `app/league/improve-playoffs` still opens the page, which shows its unavailable card
+  (`mobile/src/utils/directionPages.ts:61`).
+
+**What was run on the flipped tree** (counts also in `living-memory/TEST_LEDGER.md`, 2026-11-15, D-271):
+the pins that held these flags false now hold them true, under new names where the old name said
+"ships off": `test_flag_registered_code_default_off_shipped_on` (was
+`test_flag_is_registered_and_ships_off`) and `test_flags_code_default_off_shipped_on_and_reach_the_app`
+(was `test_flags_ship_off_and_reach_the_app`); in §2 and §7 read S9 and S19 as "set it false". The
+check scripts' L1/L2 (`check-direction-card.js`, `check-direction-pages.js`) and R2
+(`check-direction-sheet.js`) pin true. Tests that exercise the flags off pass them explicitly and are
+unchanged (`check-home-playoff-banner.js`, the flag-off cases in the three checks,
+`test_flag_off_read_is_byte_identical`).
+
+**The checklists are still the open evidence** (nothing has been run on a device, D-056). They need the
+next TestFlight build, 1.22.0 (195), built from `83142801`; builds 194 and earlier have none of this
+code and ignore the server's `team_direction` block. With the flags now on for everyone, and
+`league.playoff_targets` off:
+
+- §4 item 1 and §9 items 1, 2 and 18 need a flag set false; these flags are now on for every user, so
+  those items mean a server flag change (or are skipped).
+- §4 item 2 shows one row, "Max PF moves"; items 7-9 have no playoff page to reach; item 13's
+  `improve-playoffs` link shows the unavailable card.
+- §9 item 8 expects two rows, not three; item 11's "flag off: that row is absent" is the shipped state;
+  item 12 compares the same two rows.
+
+Still deferred (D-270): the card's button row (cells A and B), `league.direction_both_middle`, and the
+experiment definition.

@@ -21,9 +21,10 @@ flags endpoint.
   user's preferences.
 - test_unusable_reads: no run, stale (figures kept as last saved), a failed
   read (`read_failed`, the forecast itself still served).
-- test_flags_ship_off_and_reach_the_app: both flags in FLAG_KEYS, false by
-  default, false in config/features.json with a comment, false in the three
-  fixtures, served on GET /api/feature-flags.
+- test_flags_code_default_off_shipped_on_and_reach_the_app: both flags in
+  FLAG_KEYS, false by default in code, true in config/features.json with a
+  comment and true in the three fixtures (ON from 2026-11-15, D-271), served
+  on GET /api/feature-flags.
 - test_no_backend_code_reads_the_sheet_flag: `league.direction_view_sheet`
   is app-only; `league.direction_card` is checked only by the forecast read.
   Sabotage: name the sheet flag in a backend module.
@@ -146,13 +147,15 @@ def test_unusable_reads(client, engine, monkeypatch):  # noqa: F811
     assert body["run"]["result"]["teams"] and body["max_pf_moves"]["state"] != "unavailable"
 
 
-def test_flags_ship_off_and_reach_the_app():
+def test_flags_code_default_off_shipped_on_and_reach_the_app():
+    """D-271 (operator, 2026-11-15): both flags ship ON. The code default stays
+    off; the three flag fixtures mirror the shipped value."""
     features = json.loads((REPO / "config/features.json").read_text())
     for key, comment in ((CARD, "_comment_league_direction_card"), (SHEET, "_comment_league_direction_view_sheet")):
         assert key in feature_flags.FLAG_KEYS and feature_flags.DEFAULT_FLAGS[key] is False, key
-        assert features[key] is False and "D-270" in features[comment], key
+        assert features[key] is True and "D-270" in features[comment], key
         for name in FIXTURES:
-            assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[key] is False, (key, name)
+            assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[key] is True, (key, name)
     assert "league.direction_both_middle" not in feature_flags.FLAG_KEYS, "cell B is deferred (D-270)"
     import backend.server as server
     server.app.config["TESTING"] = True

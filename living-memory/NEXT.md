@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-15 — Improve pages, Home playoff card and half sheet ON (D-271): TestFlight 195, then the checklists](#2026-11-15--improve-pages-home-playoff-card-and-half-sheet-on-d-271-testflight-195-then-the-checklists)
 - [2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag](#2026-11-14--playoff-targets-d-264-operator-choices-merge-testflight-checklist-then-the-flag)
 - [2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups](#2026-11-12--max-pf-moves-d-258-backtest-gate-then-the-follow-ups)
 - [2026-11-11 — Projection model v5: TestFlight build and checklist, first v5 forecasts, then calibrate the SD](#2026-11-11--projection-model-v5-testflight-build-and-checklist-first-v5-forecasts-then-calibrate-the-sd)
@@ -74,6 +75,16 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-15 — Improve pages, Home playoff card and half sheet ON (D-271): TestFlight 195, then the checklists
+
+PRs #693 and #696 merged; `league.direction_pages`, `league.direction_card` and `league.direction_view_sheet` turned on ([D-271](DECISIONS.md)). `league.playoff_targets` stays off, so the sheet has two rows and no "Improve Playoff Chances". Not queued above the seven active items. In order:
+
+1. **TestFlight 1.22.0 (195), built from `83142801`** (pending). *Why now:* builds 194 and earlier have none of this code; the flags change nothing on them.
+2. **Run the checklists** in `docs/plans/league-projections/direction-pages/evidence.md` §4 and §9 on build 195, read with §10 (two sheet rows while Playoff targets is off; the flag-off items now need a server flag change). Only runtime evidence the app side gets (D-056).
+3. **If Playoff targets is turned on later** (its own queue below), re-run §9 items 8, 11 and 12 and §4 items 2 and 7-9 for the third row and the playoff page.
+
+Still deferred (D-270): the card's button row (cells A/B), `league.direction_both_middle`, the experiment definition.
 
 ## 2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag
 

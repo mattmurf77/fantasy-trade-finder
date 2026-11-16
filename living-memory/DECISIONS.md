@@ -1,5 +1,19 @@
 # Decisions — Fantasy Trade Finder
 
+## D-271 — The Improve pages, the Home playoff card and its half sheet are turned on; Playoff targets stays off
+
+**Date:** 2026-11-15 · **Who:** the operator, after PRs #689, #690, #693 and #696 were merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on". "Leave as is" means the half sheet keeps no Done button.
+**Context:** D-265 (step 1, the pages) and D-270 (the card's two figures and the half sheet) shipped dark behind `league.direction_pages`, `league.direction_card` and `league.direction_view_sheet`, with the TestFlight checklists in `docs/plans/league-projections/direction-pages/evidence.md` §4 and §9 as the gate.
+**Decision:**
+- The three flags are true in `config/features.json` and the three flag fixtures. The code default stays false.
+- `league.playoff_targets` (D-264) was not named and stays false.
+**Consequences:**
+- While `league.playoff_targets` is off, the server reports the playoffs option as `feature_off`. The half sheet lists two rows, "View projected standings" and "Improve Draft Pick"; "Improve Playoff Chances" is not listed. Standings shows only the "Max PF moves" link row, Improve Draft Pick has no link to the playoff page, and the deep link `app/league/improve-playoffs` opens the page's unavailable card.
+- The app side needs the next TestFlight build, 1.22.0 (195), built from `83142801`. Builds 194 and earlier have none of this code and are unaffected; they ignore the server's `team_direction` block.
+- Nothing has been run on a device (D-056). The checklists in evidence.md §4 and §9 are the open evidence; evidence.md §10 says which items change now that the flags are on.
+- Still deferred (D-270): the card's button row (cells A and B), `league.direction_both_middle`, and the experiment definition.
+- Kill: set a flag false and `POST /api/feature-flags/reload`. Nothing is stored behind any of the three.
+
 ## D-270 — The half sheet version of the Home playoff card ships first; the button row and the experiment are deferred
 
 **Date:** 2026-11-15 · **Who:** the operator: "get an agent building the half sheet version of the home page as the initial experience update". Built by a builder subagent on `feat/direction-sheet` (on top of step 1, `feat/direction-pages`). Spec: [`../docs/plans/league-projections/direction-pages/spec.md`](../docs/plans/league-projections/direction-pages/spec.md) §10.3 note; evidence in its `evidence.md` §5-§9.
