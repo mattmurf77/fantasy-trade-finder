@@ -785,6 +785,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # The hand-off rides the existing `finder_target_pinned` (side: receive,
     # source: playoff_targets).
     "playoff_targets_viewed", "playoff_target_expanded",
+    # ── Improve pages and the Home playoff card (D-265, D-270, 2026-11-15) ─
+    # docs/plans/league-projections/direction-pages/spec.md §9. App-emitted,
+    # registered in the same commit as the emitters.
+    #   direction_card_shown  — the playoff card rendered with a
+    #                           `team_direction` block, once per mount.
+    #                           IMPRESSION: in NON_INTENT_EVENTS.
+    #   direction_page_opened — an Improve page gained focus. INTENT.
+    # The card's own taps ride `home_tile_tapped` (tiles improve_playoffs,
+    # improve_pick, playoff_options; prop `via`). The list bodies' existing
+    # events carry the page's route name as the screen on a page.
+    "direction_card_shown", "direction_page_opened",
     # ── Usage Trends, 2026-10-10 (docs/plans/usage-trends/scope.md §1) ──────
     # Addendum: docs/business/analytics/2026-10-10-usage-trends-events.md.
     # Registered in the SAME commit as the emitters
@@ -2117,6 +2128,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   find_trade | rank | matches | trends | usage_rates | free_agents — task tiles
     #   (usage_rates: the Usage Trends tile, only while usage_trends.enabled)
     #   link_league | retry                          — empty/error states
+    #   playoff_options                              — the playoff card's
+    #     "View" while it opens the half sheet (flag league.direction_view_sheet,
+    #     D-270); `standings` stays the percentage tap and the sheet's
+    #     "View projected standings"
+    #   improve_playoffs | improve_pick              — a sheet row that opens
+    #     an Improve page (D-270; the card's buttons, cells A/B, are deferred)
     # `position` (QB|RB|WR|TE) and `band` (seller|buyer|mid — the USER's
     # band at that position) ride ONLY on buy / sell / position_ranking /
     # position_roster. `split` (shown | no_split | no_median — the tile's
@@ -2125,7 +2142,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # `band` with `tile` is what makes the suggested-side emphasis readable:
     # a Seller tapping Sell took the suggestion. No league id, no team, no
     # player, no device platform (a user_events COLUMN, never a prop).
-    "home_tile_tapped":            frozenset({"tile", "position", "band", "split"}),
+    # `via` (card | sheet, D-270) rides ONLY on the playoff card's direction
+    # taps: playoff_options (card), and standings / improve_playoffs /
+    # improve_pick chosen in the half sheet (sheet). Absent everywhere else,
+    # so today's taps keep their exact shape.
+    "home_tile_tapped":            frozenset({"tile", "position", "band", "split", "via"}),
     # `segment` — the view the tap SELECTED: record | points from the single
     # standings table (2026-11-12, docs/plans/home-engagement/
     # scope-standings-table.md); current | projected on older builds (the
@@ -2163,6 +2184,20 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #   playoff_target_expanded.position = the row's position string; rank 1..8.
     "playoff_targets_viewed":      frozenset({"state", "n_listed", "any_pass", "n_sellers", "band"}),
     "playoff_target_expanded":     frozenset({"position", "rank"}),
+    # Improve pages and the Home playoff card (spec §9; D-265, D-270). No
+    # player id or name in any prop.
+    #   direction_card_shown.band ∈ low | middle | high | none (the server's
+    #     `team_direction.band`; none while the forecast is not usable);
+    #     primary ∈ playoffs | draft_pick | none (the server's); shown ∈
+    #     playoffs | draft_pick | both | none (buttons drawn on the card:
+    #     always none until cells A/B ship); sheet = "View" opens the half
+    #     sheet (bool); pick_shown = the projected pick figure is drawn (bool).
+    #   direction_page_opened.page ∈ playoffs | draft_pick; source ∈ card |
+    #     sheet | standings | other_page | deep_link; state = the page's
+    #     feature block `state` verbatim, or unavailable | error | no_league
+    #     when the page shows no list.
+    "direction_card_shown":        frozenset({"band", "primary", "shown", "sheet", "pick_shown"}),
+    "direction_page_opened":       frozenset({"page", "source", "state"}),
     # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
     # Both props are version INTS (major*10000 + minor*100 + patch, see
     # docs/cross-client-invariants.md): `min_version` is the served

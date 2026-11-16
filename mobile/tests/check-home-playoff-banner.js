@@ -180,16 +180,40 @@ let active = { user: { user_id: 'viewer' }, league: { league_id: 'league-a' },
 let queryData = data(.8);
 let queryError = false;
 let queryLoading = false;
-let flags = { 'league.projections': true, 'league.projection_outlook': true };
+// D-270: the card's two new flags (and the pages flag the sheet needs) are
+// read, and every assertion below runs with them OFF: today's row, unchanged
+// (spec H-12). The card with them on is tests/check-direction-card.js.
+let flags = { 'league.projections': true, 'league.projection_outlook': true,
+  'league.direction_card': false, 'league.direction_view_sheet': false, 'league.direction_pages': false };
 let options;
 const calls = [];
 const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: props || {}, children }) };
+// Hooks by call order, so a second useState (the sheet) keeps its own slot.
+const hookStore = [];
+let hookAt = 0;
+const tracked = [];
+const runUtil = (rel, req) => {
+  const m = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(read(rel), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText,
+    { exports: m.exports, module: m, require: req });
+  return m.exports;
+};
+const cardCopy = runUtil('src/utils/directionCardCopy.ts', () => { throw new Error('copy has no imports'); });
+const pagesCopy = runUtil('src/utils/directionPagesCopy.ts', () => { throw new Error('copy has no imports'); });
+const cardUtil = runUtil('src/utils/directionCard.ts', r => ({ './directionCardCopy': cardCopy, './directionPagesCopy': pagesCopy })[r]);
 const NAMES = { championship: 'All-in', contender: 'Contending', rebuilder: 'Rebuilding', jets: 'Tanking' };
 const receipt = read('src/components/OutlookBiasReceipt.tsx');
 for (const [key, name] of Object.entries(NAMES)) assert(new RegExp(`${key}: \\{ lean: '[^']*', name: '${name}' \\}`).test(receipt));
 const token = new Proxy({}, { get: (_, key) => new Proxy({}, { get: (__, inner) => `${String(key)}.${String(inner)}` }) });
 const modules = {
-  react: { __esModule: true, default: React, useState: () => [open, value => { open = typeof value === 'function' ? value(open) : value; }] },
+  react: { __esModule: true, default: React,
+    useState: initial => {
+      const at = hookAt++;
+      if (!(at in hookStore)) hookStore[at] = initial;
+      return [hookStore[at], value => { hookStore[at] = typeof value === 'function' ? value(hookStore[at]) : value; }];
+    },
+    useRef: initial => { const at = hookAt++; if (!(at in hookStore)) hookStore[at] = { current: initial }; return hookStore[at]; },
+    useEffect: effect => { hookAt++; effect(); } },
   'react-native': { Pressable: 'Pressable', StyleSheet: { create: value => value }, View: 'View' },
   '@tanstack/react-query': { useQuery: value => { options = value; return { data: queryData, isError: queryError, isLoading: queryLoading }; } },
   '../chalkline': { Icon: 'Icon', Text: 'Text' },
@@ -201,6 +225,11 @@ const modules = {
   '../../utils/playoffOdds': playoffOdds,
   '../OutlookBiasReceipt': { outlookDisplayName: value => (value ? NAMES[value] ?? null : null) },
   './StatusRow': { RowAction: 'RowAction' },
+  '../../api/events': { track: (...a) => tracked.push(a) },
+  '../../utils/directionCard': cardUtil,
+  '../../utils/directionCardCopy': cardCopy,
+  '../../utils/directionPagesCopy': pagesCopy,
+  './DirectionSheet': { __esModule: true, default: 'DirectionSheet' },
 };
 const componentExports = {};
 vm.runInNewContext(ts.transpileModule(component, { compilerOptions: {
@@ -208,8 +237,9 @@ vm.runInNewContext(ts.transpileModule(component, { compilerOptions: {
 } }).outputText, { exports: componentExports, require: name => {
   assert(name in modules, `Unexpected component dependency: ${name}`); return modules[name];
 } });
-const props = { rosterId: 2, onDetails: () => calls.push('details'), onReviewOutlook: outlook => calls.push(`review:${outlook}`) };
-const render = () => componentExports.default(props);
+const props = { rosterId: 2, onDetails: () => calls.push('details'), onReviewOutlook: outlook => calls.push(`review:${outlook}`),
+  screen: 'Home', onDirectionTap: tap => calls.push(`direction:${tap.tile}`) };
+const render = () => { hookAt = 0; return componentExports.default(props); };
 const nodes = node => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === 'object' ? [node, ...nodes(node.children)] : [];
 const byId = (tree, id) => nodes(tree).find(n => n.props?.testID === id);
 const words = node => Array.isArray(node) ? node.flatMap(words) : typeof node === 'string' ? [node]
@@ -369,4 +399,7 @@ active.switching = true; assert.equal(render(), null); assert.equal(options.enab
 active.switching = false; active.hasToken = false; assert.equal(render(), null);
 active.hasToken = true; active.leagues[0].platform = 'espn'; assert.equal(render(), null);
 active.leagues[0].platform = 'sleeper'; flags['league.projections'] = false; assert.equal(render(), null);
+// Flags off: no impression, no sheet, no direction tap, whatever the read holds.
+assert.equal(tracked.length, 0, 'flags off: direction_card_shown never fires');
+assert(!calls.some(c => String(c).startsWith('direction:')), 'flags off: no direction tap');
 console.log('Home playoff banner: current/stale/old-model/incomplete, recommendation, link, explanation and read-only checks passed');

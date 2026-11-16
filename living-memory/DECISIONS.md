@@ -12,6 +12,18 @@
 - Do not re-run this test. A future formula test must change what orders the deck, and must decide whether the serving policy (`trade_policy`) follows the formula.
 - Found while testing, not fixed: bilateral r1 and r2 decks on a larger synthetic world vary with `PYTHONHASHSEED` on `main`.
 
+## D-270 — The half sheet version of the Home playoff card ships first; the button row and the experiment are deferred
+
+**Date:** 2026-11-15 · **Who:** the operator: "get an agent building the half sheet version of the home page as the initial experience update". Built by a builder subagent on `feat/direction-sheet` (on top of step 1, `feat/direction-pages`). Spec: [`../docs/plans/league-projections/direction-pages/spec.md`](../docs/plans/league-projections/direction-pages/spec.md) §10.3 note; evidence in its `evidence.md` §5-§9.
+**Context:** D-265's build order put the single-button card (cell A) in step 2 and cell B, the half sheet (cell C), the events and the experiment in step 3. The operator wants cell C to be the first Home update that ships.
+**Decision:**
+- This build is the server's `team_direction` block, complete as spec §7 defines it (band, primary and both options included, so later steps need no server change), behind `league.direction_card`; the card's two figures on Home and League Rankings; the half sheet behind `league.direction_view_sheet`; and the §9 events for what exists (`direction_card_shown`, `direction_page_opened`, `home_tile_tapped` tiles `playoff_options` / `improve_playoffs` / `improve_pick` with `via`, the bodies' events under the page's route name).
+- **Deferred:** the button row on the card (cells A and B), the flag `league.direction_both_middle`, and the experiment definition. With the card on and the sheet off, the card shows the two figures with no buttons and "View" opens Standings; `direction_card_shown.shown` is always `none`.
+- The spec's requirements and its §11 decisions are unchanged.
+**Consequences:**
+- Cell C can be judged on the operator's own account before A or B exist; reading the three-cell test needs a later build of A/B and the experiment.
+- The sheet also requires `league.direction_pages` in the app, because its rows are entry points to the pages that flag gates.
+
 ## D-268 — A league's own stored format governs every league surface; the SF/1QB toggle is for ranking screens only
 
 **Date:** 2026-11-15 · **Who:** the operator reported a one-QB league labelled "SF TEP" on League Summary; the main session diagnosed it; built by a builder subagent on `fix/league-format-source`.

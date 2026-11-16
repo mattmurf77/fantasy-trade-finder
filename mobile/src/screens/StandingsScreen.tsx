@@ -86,8 +86,8 @@ export default function StandingsScreen() {
   const directionPagesOn = useFlag('league.direction_pages');
   const navigation = useNavigation<any>();
   const pageLinks = directionPagesOn ? {
-    draftPick: () => navigation.navigate('ImproveDraftPick'),
-    playoffs: () => navigation.navigate('ImprovePlayoffChances'),
+    draftPick: () => navigation.navigate('ImproveDraftPick', { source: 'standings' }),
+    playoffs: () => navigation.navigate('ImprovePlayoffChances', { source: 'standings' }),
   } : undefined;
 
   // View and per-view sort live as long as the screen is mounted, so a

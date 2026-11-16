@@ -262,6 +262,9 @@ export interface HandOffDeps {
   track: (event: string, props: Record<string, unknown>, screen: string) => void;
   navigate: (params: ReturnType<typeof finderNavParams>) => void;
   now: () => number;
+  /** The screen the event is logged under: an Improve page's route name on
+   *  the page (direction-pages spec §9); Standings when absent. */
+  screen?: string;
 }
 /** Pins the row's player on the receive side, clears give, logs, then opens
  *  Find a Trade with him prefilled on the canvas against his team. Does
@@ -270,7 +273,7 @@ export function handOffToFinder(row: PlayoffTargetRow, opponentId: string | null
   if (!opponentId) return false;
   deps.setSide('receive', [{ id: row.player_id, name: row.name, position: row.position }]);
   deps.setSide('give', []);
-  deps.track(TARGETS_EVENTS.pinned, { ...PINNED_PROPS }, SCREEN);
+  deps.track(TARGETS_EVENTS.pinned, { ...PINNED_PROPS }, deps.screen ?? SCREEN);
   deps.navigate(finderNavParams(row, opponentId, deps.now()));
   return true;
 }

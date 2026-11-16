@@ -27,6 +27,7 @@ import {
   type PositionSplit,
 } from '../../utils/positionSplit';
 import { currentStandings, standingsSummary } from '../../utils/standings';
+import { tapDestination, type DirectionTap } from '../../utils/directionCard';
 import { outlookDisplayName } from '../OutlookBiasReceipt';
 import StatusRow from './StatusRow';
 import PositionTile from './PositionTile';
@@ -170,6 +171,14 @@ export default function HomeHub() {
   const onProjections = () => {
     track('home_tile_tapped', { tile: 'standings' }, 'Home');
     navigation.navigate('Standings');
+  };
+  // The playoff card's half sheet (D-270): "View" opening it, and each
+  // row. Same event with the closed `tile` vocabulary plus `via`; a row then
+  // opens Standings or an Improve page (told it came from the sheet).
+  const onDirectionTap = (tap: DirectionTap) => {
+    track('home_tile_tapped', { tile: tap.tile, via: tap.via }, 'Home');
+    const to = tapDestination(tap);
+    if (to) navigation.navigate(to.route, 'params' in to ? to.params : undefined);
   };
   const onOverallRank = () => {
     track('home_tile_tapped', { tile: 'overall_rank' }, 'Home');
@@ -378,7 +387,9 @@ export default function HomeHub() {
           <HomePlayoffBanner key={`${user?.user_id}:${leagueId}`}
             rosterId={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.roster_id ?? null}
             onDetails={onProjections}
-            onReviewOutlook={onReviewOutlook} />
+            onReviewOutlook={onReviewOutlook}
+            screen="Home"
+            onDirectionTap={onDirectionTap} />
           <View style={styles.rows}>
             <StatusRow
               testID="home.status.outlook"

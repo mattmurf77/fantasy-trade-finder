@@ -30,9 +30,12 @@ interface Props {
   model: SectionModel;
   /** Owned by the open team card, so the impression fires once per opening. */
   viewedRef: React.MutableRefObject<boolean>;
+  /** The screen the body's events are logged under: the Improve page's
+   *  route name on that page (spec §9, D-270). Default Standings. */
+  screen?: string;
 }
 
-export function PlayoffTargetsBody({ block, model, viewedRef }: Props) {
+export function PlayoffTargetsBody({ block, model, viewedRef, screen = SCREEN }: Props) {
   const navigation = useNavigation<any>();
   const [showAll, setShowAll] = useState(false);
   const [openRank, setOpenRank] = useState<number | null>(null);
@@ -40,7 +43,7 @@ export function PlayoffTargetsBody({ block, model, viewedRef }: Props) {
   useEffect(() => {
     if (viewedRef.current) return;
     viewedRef.current = true;
-    track(TARGETS_EVENTS.viewed, viewedProps(block, model), SCREEN);
+    track(TARGETS_EVENTS.viewed, viewedProps(block, model), screen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -53,12 +56,13 @@ export function PlayoffTargetsBody({ block, model, viewedRef }: Props) {
       // the same route Max PF moves' hand-off takes.
       navigate: (params) => navigation.popTo('Main', params),
       now: Date.now,
+      screen,
     });
 
   const toggleRow = (row: PlayoffTargetRow) => {
     const opening = openRank !== row.rank;
     setOpenRank(opening ? row.rank : null);
-    if (opening) track(TARGETS_EVENTS.expanded, expandedProps(row), SCREEN);
+    if (opening) track(TARGETS_EVENTS.expanded, expandedProps(row), screen);
   };
 
   const { rows, showAllButton } = visibleRows(model.listed, showAll);

@@ -105,10 +105,18 @@ export interface OfferFlags {
   maxPfOn: boolean;
   targetsOn: boolean;
 }
-/** Draft pick: its flag, `state` ready and you own your own pick.
- *  Playoffs: its flag and `state` ready. `ready` is the server's word that at
- *  least one row clears the feature's threshold; nothing is computed here. */
+/** With the server's `team_direction` block on the read (flag
+ *  `league.direction_card`, D-270), its `options` are the one rule: the card,
+ *  the sheet and the pages read the same answer. Without it (flag off, older
+ *  server), the step-1 rule over the two blocks: draft pick = its flag,
+ *  `state` ready and you own your own pick; playoffs = its flag and `state`
+ *  ready. `ready` is the server's word that at least one row clears the
+ *  feature's threshold; nothing is computed here. */
 export function offered(page: DirectionPage, data: ProjectionView | undefined, flags: OfferFlags): boolean {
+  const direction = data?.team_direction;
+  if (direction && direction.version === 1 && direction.options && typeof direction.options === 'object') {
+    return direction.options[page]?.offered === true;
+  }
   if (page === 'draft_pick') {
     const b = data?.max_pf_moves;
     return flags.maxPfOn && !!b && maxPfMounts({ block: b, flagOn: true, isSleeper: true, ownCard: true })
@@ -136,4 +144,26 @@ export function pageLinks(page: DirectionPage, data: ProjectionView | undefined,
       ? { label: C[`LINK.other.${other}` as const], route: PAGE_ROUTE[other], page: other }
       : null,
   };
+}
+
+// ── direction_page_opened (spec §9, D-270) ──────────────────────────────
+export type DirectionSource = 'card' | 'sheet' | 'standings' | 'other_page' | 'deep_link';
+export const PAGE_EVENTS = { opened: 'direction_page_opened' } as const;
+const SOURCES: readonly DirectionSource[] = ['card', 'sheet', 'standings', 'other_page', 'deep_link'];
+/** Where the page was opened from: the route's `source` param, set by each
+ *  entry point. A deep link carries none. */
+export function pageSource(params: unknown): DirectionSource {
+  const source = (params as { source?: unknown } | undefined)?.source;
+  return SOURCES.includes(source as DirectionSource) ? (source as DirectionSource) : 'deep_link';
+}
+/** The event's `state`: the feature block's server `state` when the page
+ *  shows its list, else the branch it shows (unavailable / error /
+ *  no_league). Null while loading: the event waits for the answer. */
+export function openedState(view: PageView): string | null {
+  if (view.kind === 'loading') return null;
+  if (view.kind === 'draft_pick' || view.kind === 'playoffs') return view.block.state;
+  return view.kind;
+}
+export function openedProps(page: DirectionPage, source: DirectionSource, state: string) {
+  return { page, source, state };
 }

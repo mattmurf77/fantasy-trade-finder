@@ -74,6 +74,18 @@ FLAG_KEYS: tuple[str, ...] = (
     # every response is byte-identical in either state. Requires
     # league.projections.
     "league.direction_pages",
+    # The Home playoff card (direction-pages spec §4, §7, §8; D-265, D-270):
+    # the forecast read gains the composed `team_direction` block (band,
+    # leading direction, whether each Improve page is offered, the projected
+    # pick), and the card shows the projected pick beside the playoff chance.
+    # Composed on read, nothing saved. Off = no block; every read is
+    # byte-identical. Requires league.direction_pages.
+    "league.direction_card",
+    # Cell C of the spec's test (§5.6): "View" on the card opens a half sheet
+    # (View projected standings, Improve Playoff Chances, Improve Draft Pick)
+    # instead of Standings, and the card has no button row. App-only: no
+    # backend code reads it. Requires league.direction_card.
+    "league.direction_view_sheet",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.
