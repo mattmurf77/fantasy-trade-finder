@@ -80,7 +80,7 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 
 PRs #693 and #696 merged; `league.direction_pages`, `league.direction_card` and `league.direction_view_sheet` turned on ([D-271](DECISIONS.md)). `league.playoff_targets` stays off, so the sheet has two rows and no "Improve Playoff Chances". Not queued above the seven active items. In order:
 
-1. **TestFlight 1.22.0 (195), built from `83142801`** (pending). *Why now:* builds 194 and earlier have none of this code; the flags change nothing on them.
+1. **TestFlight 1.22.0 (195), built from `83142801`** (built and uploaded to App Store Connect 2026-11-15: EAS build `a79831cb-021f-4711-aac7-db6be8c7dfd2`, submission `849bab07-c58d-49c7-8401-556e88ae9a4f`; Apple's processing and tester availability not confirmed). *Why now:* builds 194 and earlier have none of this code; the flags change nothing on them.
 2. **Run the checklists** in `docs/plans/league-projections/direction-pages/evidence.md` §4 and §9 on build 195, read with §10 (two sheet rows while Playoff targets is off; the flag-off items now need a server flag change). Only runtime evidence the app side gets (D-056).
 3. **If Playoff targets is turned on later** (its own queue below), re-run §9 items 8, 11 and 12 and §4 items 2 and 7-9 for the third row and the playoff page.
 

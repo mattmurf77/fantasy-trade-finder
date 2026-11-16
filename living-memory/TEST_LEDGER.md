@@ -3,7 +3,7 @@
 - **Flip:** `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet` true in `config/features.json` and the three fixtures; code default false. Pins moved to true: `test_direction_pages_flag.py` (renamed `test_flag_registered_code_default_off_shipped_on`), `test_team_direction_read.py` (renamed `test_flags_code_default_off_shipped_on_and_reach_the_app`), `check-direction-card.js` L1/L2, `check-direction-pages.js` L1/L2, `check-direction-sheet.js` R2. Flag-off tests that pass the flags explicitly unchanged.
 - **Backend (Python 3.12, local venv, no network):** the four direction files + `test_seed_ui_test_db.py`: **101 passed**. Every backend test file naming the flag fixtures, `league.direction_*`, `feature_flags` or `feature-flags` (197 files): **5,872 passed, 2 skipped, 0 failed in 11m43s**. Full suite is CI on the PR.
 - **App:** `tsc --noEmit` clean; testid-lint OK; all 192 `check-*.js` green (direction-card 73, direction-pages 125, direction-sheet 64, playoff-targets 84).
-- **Not verified:** anything on a device (D-056). Needs TestFlight 1.22.0 (195) from `83142801`, pending; then evidence.md §4 and §9, read with §10. FTF_SKIP_SIM_GATE=1 on push.
+- **Not verified:** anything on a device (D-056). Needs TestFlight 1.22.0 (195) from `83142801` (EAS build `a79831cb-021f-4711-aac7-db6be8c7dfd2`, clean checkout, `npm ci`, `tsc` clean; uploaded 2026-11-15, submission `849bab07-c58d-49c7-8401-556e88ae9a4f`); then evidence.md §4 and §9, read with §10. FTF_SKIP_SIM_GATE=1 on push.
 
 ## 2026-11-15 — Home card, half sheet version (D-270), branch `feat/direction-sheet`, flags off
 
