@@ -18,6 +18,7 @@
 - [7. The half sheet build: sabotages](#7-the-half-sheet-build-sabotages)
 - [8. The half sheet build: code walk](#8-the-half-sheet-build-code-walk)
 - [9. The half sheet build: manual TestFlight checklist](#9-the-half-sheet-build-manual-testflight-checklist)
+- [10. Flags turned on (D-271)](#10-flags-turned-on-d-271)
 
 ## 0. Scope and judgement calls
 
@@ -128,7 +129,7 @@ Standings does not change rendering.
 ### 3.4 The backend
 
 `league.direction_pages` is in `FLAG_KEYS` (`backend/feature_flags.py`), false in
-`config/features.json` and the three fixtures. No other backend module names it
+`config/features.json` and the three fixtures (**2026-11-15: true in both from D-271**, §10). No other backend module names it
 (`test_no_backend_code_reads_the_flag`), and the forecast read is byte-identical in either state
 (`test_forecast_read_is_byte_identical_in_either_state`).
 
@@ -335,3 +336,61 @@ match the page (3), the percentage no longer opening Standings (7), a sheet that
 rows in a different order for some teams (12), and the card or sheet missing on League Rankings (14).
 Not checked here and worth a look on the device: whether the 48pt drag threshold feels right.
 
+## 10. Flags turned on (D-271)
+
+2026-11-15, after PRs #689, #690, #693 and #696 were merged, the operator: "Leave as is. Merge all of
+this, deploy, rollout on TestFlight and turn all three flags on" ("Leave as is": the sheet keeps no
+Done button); then, told Playoff targets would stay off and the sheet would have two rows: "I want
+playoff targets on". `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet`
+and `league.playoff_targets` are true in `config/features.json` and the three flag fixtures; the code
+default stays false. `league.max_pf_moves` has been on since D-259.
+
+**What ships.** The half sheet lists three rows in spec order; Standings' own team card shows both
+link rows; each page links to the other when that page is offered. Playoff targets is computed in the
+weekly forecast job and saved with the run (`backend/league_projections/service.py:178`, `:217-219`);
+the read only composes the saved block (`backend/league_projections/api.py:120-140`, `:233-234`). Until
+a league's next weekly forecast (Tuesday 09:30 Eastern), its block is `unavailable` / `not_computed`
+(`backend/league_projections/playoff_targets.py:308-310`), so:
+
+- the sheet's "Improve Playoff Chances" row is listed but disabled with "Not available until the next
+  forecast." (`team_direction.py:111-113`, `mobile/src/utils/directionCardCopy.ts:18`);
+- Standings still shows the "Playoff targets" link row (`unavailable` is a known state,
+  `mobile/src/utils/playoffTargets.ts:21-23`), and Improve Playoff Chances reads "Playoff targets are
+  worked out with the weekly forecast. They appear after the next update."
+  (`mobile/src/utils/playoffTargetsCopy.ts:49`);
+- Improve Draft Pick has no link to Improve Playoff Chances (`directionPages.ts:115-118`, `:143`).
+
+**Kill state.** With `league.playoff_targets` off, the server reports the playoffs option as
+`feature_off` (`team_direction.py:105-108`) and the sheet does not list that row
+(`mobile/src/utils/directionCard.ts:101`); Standings shows only the "Max PF moves" link row
+(`LeagueProjectionDetail.tsx:63-68`, `:106-107`) and `app/league/improve-playoffs` opens the
+unavailable card (`directionPages.ts:61`).
+
+**What was run on the flipped tree** (counts in `living-memory/TEST_LEDGER.md`, 2026-11-15, D-271):
+the pins that held these flags false now hold them true, under new names where the old name said
+"ships off": `test_flag_registered_code_default_off_shipped_on` (was
+`test_flag_is_registered_and_ships_off`), `test_flags_code_default_off_shipped_on_and_reach_the_app`
+(was `test_flags_ship_off_and_reach_the_app`), and in the playoff-targets suite
+`test_flag_code_default_off_shipped_on_and_reaches_the_app` (was
+`test_flag_ships_off_and_reaches_the_app`); in §2 and §7 read S9 and S19 as "set it false". The check
+scripts' L1/L2 (`check-direction-card.js`, `check-direction-pages.js`) and R2
+(`check-direction-sheet.js`) pin true. Tests that exercise a flag off pass it explicitly and are
+unchanged (`check-home-playoff-banner.js`, the flag-off cases in the three checks,
+`test_flag_off_read_is_byte_identical`, `test_playoff_targets_job.py`).
+
+**The checklists are still the open evidence** (nothing has been run on a device, D-056). They need
+TestFlight 1.22.0 (195), built from `83142801`; builds 194 and earlier have none of the direction code
+and ignore the server's `team_direction` block. Run them after a weekly forecast saved after the flags
+went on, so the playoff row and page have a list. With the flags on for everyone:
+
+- §4 item 1 and §9 items 1, 2 and 18 need a flag set false, which is a server flag change for every
+  user (or skip them); §9 item 11's "flag off" half likewise.
+- Before that forecast, §9 item 8 shows the playoff row disabled ("Not available until the next
+  forecast.") and §4 items 7-9 cannot reach a list.
+- The playoff-targets checklist (`../playoff-targets/evidence.md` §3) runs on the same build and
+  forecast.
+
+No backtest of the playoff-chance gain has been run (playoff-targets scope W3).
+
+Still deferred (D-270): the card's button row (cells A and B), `league.direction_both_middle`, and the
+experiment definition.

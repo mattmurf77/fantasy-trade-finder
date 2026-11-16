@@ -201,10 +201,10 @@ for (const [name, data, flags] of [
 {
   const features = JSON.parse(readRoot('config/features.json'));
   const flagsPy = readRoot('backend/feature_flags.py');
-  check(features['league.direction_card'] === false && /"league\.direction_card",/.test(flagsPy)
-      && u.DIRECTION_CARD_FLAG === 'league.direction_card', 'L1. league.direction_card: registered, false');
+  check(features['league.direction_card'] === true && /"league\.direction_card",/.test(flagsPy)
+      && u.DIRECTION_CARD_FLAG === 'league.direction_card', 'L1. league.direction_card: registered, true in features.json (ON from 2026-11-15, D-271)');
   for (const name of ['release', 'onboarding-v2', 'profiles-on']) {
-    check(JSON.parse(readRoot(`backend/tests/fixtures/flags/${name}.json`))['league.direction_card'] === false, `L2. fixture ${name}.json mirrors it`);
+    check(JSON.parse(readRoot(`backend/tests/fixtures/flags/${name}.json`))['league.direction_card'] === true, `L2. fixture ${name}.json mirrors it (true)`);
   }
   const pkg = JSON.parse(read('package.json'));
   check(pkg.scripts['test:direction-card'] === 'node tests/check-direction-card.js', 'L3. npm run test:direction-card');

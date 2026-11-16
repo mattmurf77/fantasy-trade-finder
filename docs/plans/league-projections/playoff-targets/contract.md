@@ -336,6 +336,12 @@ Flag `league.playoff_targets`: default False in `backend/feature_flags.py`, `fal
 `config/features.json` with a `_comment_` line, mirrored `false` in the three flag fixtures.
 Requires `league.projections`.
 
+**2026-11-15 ([D-271](../../../../living-memory/DECISIONS.md)):** turned on, operator: "I want
+playoff targets on". `true` in `config/features.json` and the three fixtures; the code default
+stays False. The §0 choices in [scope.md](scope.md) were not answered one by one; the defaults
+ship. A league's block appears after its next weekly forecast; until then the read serves
+`unavailable` / `not_computed` (§4.2).
+
 | Path | Flag off | Flag on |
 |---|---|---|
 | `GET .../projection-runs/latest` | No `playoff_targets` key; `run.result` / `attempt.result` carry no `playoff_targets` key | Adds `playoff_targets` |

@@ -398,11 +398,11 @@ assert(!/placeholderData|keepPreviousData/.test(pageSrc), 'I2. no previous-leagu
 {
   const features = JSON.parse(readRoot('config/features.json'));
   const flagsPy = readRoot('backend/feature_flags.py');
-  assert(features['league.direction_pages'] === false && /"league\.direction_pages",/.test(flagsPy),
-    'L1. league.direction_pages is registered in feature_flags.py and false in config/features.json');
+  assert(features['league.direction_pages'] === true && /"league\.direction_pages",/.test(flagsPy),
+    'L1. league.direction_pages is registered in feature_flags.py and true in config/features.json (ON from 2026-11-15, D-271)');
   for (const name of ['release', 'onboarding-v2', 'profiles-on']) {
-    assert(JSON.parse(readRoot(`backend/tests/fixtures/flags/${name}.json`))['league.direction_pages'] === false,
-      `L2. fixture ${name}.json mirrors it (false)`);
+    assert(JSON.parse(readRoot(`backend/tests/fixtures/flags/${name}.json`))['league.direction_pages'] === true,
+      `L2. fixture ${name}.json mirrors it (true)`);
   }
   const srcFiles = [];
   const walk = (d) => fs.readdirSync(path.join(MOBILE, d), { withFileTypes: true }).forEach((e) =>

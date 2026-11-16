@@ -20,6 +20,14 @@
 - **Also:** recorded the operator's 2026-11-15 sign-off of the fairness-window analytics waiver (`docs/plans/fairness-window/scope.md`).
 - **Known gap:** r1/r2 bilateral decks vary with `PYTHONHASHSEED` on a larger synthetic world (found on `main`, not fixed).
 
+## 2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets turned on (D-271)
+
+- Operator, after #689, #690, #693 and #696 merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on" (no Done button on the sheet); then "I want playoff targets on".
+- `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet`, `league.playoff_targets` true in `config/features.json` and the three flag fixtures; code default false. The sheet lists three rows.
+- Playoff targets is computed in the weekly job, so each league's list appears after its next forecast (Tuesday 09:30 ET); until then the playoff row is disabled ("Not available until the next forecast."). No backtest; scope §0 choices not answered one by one. No extra provider call. `FTF_FLAGS` names none of the four.
+- #696 merged as `83142801`; Render deploy `dep-dbt4vgc9v7es73cjt2ug` live 2026-11-15 with the flags still off. The flags go live with this change's deploy.
+- The app side needs TestFlight 1.22.0 (195): EAS build `a79831cb-021f-4711-aac7-db6be8c7dfd2` from `83142801`, uploaded to App Store Connect 2026-11-15 (submission `849bab07-c58d-49c7-8401-556e88ae9a4f`). Builds 194 and earlier are unaffected. Nothing run on a device; checklists in `docs/plans/league-projections/direction-pages/evidence.md` §4, §9, §10.
+
 ## 2026-11-15 — Home playoff card, the half sheet version first: two figures and "View" opens a sheet, built dark (D-270)
 
 - Operator: "get an agent building the half sheet version of the home page as the initial experience update". Server: the forecast read's `team_direction` block (spec §7, complete: band, primary, options with reasons, projected pick), composed on read behind `league.direction_card`; settings `team_direction.middle_min` / `middle_max`. Nothing saved; flag off byte-identical.
