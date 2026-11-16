@@ -143,6 +143,33 @@ export interface PlayoffTargets {
   candidates_total: number; rows: PlayoffTargetRow[];
 }
 export interface ProjectionRun {run_id: string; status: string; reason: string | null; result: ProjectionResult | null}
+// ── The Home playoff card's block (flag `league.direction_card`; spec
+// docs/plans/league-projections/direction-pages/spec.md §7, D-270). Composed
+// by the server on the forecast read; the app shows it as given and never
+// classifies a probability (utils/directionCard.ts).
+export type DirectionKey = 'playoffs' | 'draft_pick';
+export interface DirectionOption {
+  offered: boolean;
+  /** Null when offered. An open set (spec §7.3); an unknown one reads "Not available right now." */
+  reason: string | null;
+}
+export interface ProjectedPick {
+  label: string; slot: number; owns_own_pick: boolean; owner_name: string;
+}
+export interface TeamDirection {
+  version: number;
+  state: 'ready' | 'unavailable';
+  reason: string | null;
+  captured_at: string | null;
+  playoff_probability: number | null;
+  playoff_clinched: boolean;
+  playoff_eliminated: boolean;
+  /** Null with no saved run, team not in it, or a non-max-PF draft order. */
+  projected_pick: ProjectedPick | null;
+  band: 'low' | 'middle' | 'high' | null;
+  primary: DirectionKey | null;
+  options: Record<DirectionKey, DirectionOption>;
+}
 export interface ProjectionView {
   state: string; reason: string | null; run: ProjectionRun | null; attempt: ProjectionRun | null;
   next_attempt_not_before: string | null; cadence: 'weekly'; schedule_timezone: string;
@@ -156,6 +183,8 @@ export interface ProjectionView {
   max_pf_moves?: MaxPfMoves;
   /** Absent while flag `league.playoff_targets` is off (or on an older server). */
   playoff_targets?: PlayoffTargets;
+  /** Absent while flag `league.direction_card` is off (or on an older server). */
+  team_direction?: TeamDirection;
 }
 export const getLeagueProjectionBatch = (leagueId: string) =>
   api.get<ProjectionView>(`/api/leagues/${encodeURIComponent(leagueId)}/projection-runs/latest`);

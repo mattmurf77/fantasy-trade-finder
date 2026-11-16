@@ -411,10 +411,13 @@ const R3 = READY.rows[2];
     'K6. the four event names');
   const comp = read('src/components/MaxPfMovesSection.tsx');
   const tracks = comp.match(/\btrack\(/g) || [];
-  assert(tracks.length === 4 && /if \(opening\) track\(MAXPF_EVENTS\.expanded, combinedExpandedProps\(entry\), SCREEN\)/.test(comp)
-      && /track\(MAXPF_EVENTS\.viewed, viewedProps\(block, model\), SCREEN\)/.test(comp)
-      && /if \(opening\) track\(MAXPF_EVENTS\.expanded, expandedProps\(row\), SCREEN\)/.test(comp)
-      && /track\(MAXPF_EVENTS\.answered, answeredProps\(rule, questionSource\), SCREEN\)/.test(comp),
+  // `screen` defaults to SCREEN ('Standings'); the Improve Draft Pick page
+  // passes its route name (direction-pages spec §9, D-270).
+  assert(tracks.length === 4 && /if \(opening\) track\(MAXPF_EVENTS\.expanded, combinedExpandedProps\(entry\), screen\)/.test(comp)
+      && /track\(MAXPF_EVENTS\.viewed, viewedProps\(block, model\), screen\)/.test(comp)
+      && /if \(opening\) track\(MAXPF_EVENTS\.expanded, expandedProps\(row\), screen\)/.test(comp)
+      && /track\(MAXPF_EVENTS\.answered, answeredProps\(rule, questionSource\), screen\)/.test(comp)
+      && /openOnArrival = false, screen = SCREEN \}: Props\)/.test(comp) && /now: Date\.now,\s*screen,\s*\}\);/.test(comp),
     'K7. the component emits viewed (on body mount), expanded (on open only), answered (after the POST); pinned rides the hand-off');
   assert(/if \(viewedRef\.current\) return;\s*viewedRef\.current = true;/.test(comp)
       && /const maxPfViewed = useRef\(false\);/.test(read('src/components/LeagueProjectionDetail.tsx')),

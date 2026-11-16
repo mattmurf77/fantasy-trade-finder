@@ -40,6 +40,7 @@ import UsageTrendsScreen from '../screens/UsageTrendsScreen';
 import StandingsScreen from '../screens/StandingsScreen';
 import ImprovePlayoffChancesScreen from '../screens/ImprovePlayoffChancesScreen';
 import ImproveDraftPickScreen from '../screens/ImproveDraftPickScreen';
+import type { DirectionSource } from '../utils/directionPages';
 import WinNowScreen from '../screens/WinNowScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
 // #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
@@ -163,10 +164,12 @@ type AuthStack = {
   Standings: { segment?: 'projected' } | undefined;
   // Improve pages (docs/plans/league-projections/direction-pages/spec.md
   // §3, D-265): the dedicated pages for Playoff targets and Max PF moves.
-  // No params: each reads the session league. Registered UNCONDITIONALLY;
-  // `league.direction_pages` gates the entry points, not the routes.
-  ImprovePlayoffChances: undefined;
-  ImproveDraftPick: undefined;
+  // Each reads the session league. Registered UNCONDITIONALLY;
+  // `league.direction_pages` gates the entry points, not the routes. The one
+  // optional param names where the page was opened from, for
+  // `direction_page_opened.source` (D-270); absent = a deep link.
+  ImprovePlayoffChances: { source?: DirectionSource } | undefined;
+  ImproveDraftPick: { source?: DirectionSource } | undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
   // session's league and the session's own user, because cross-user receipts

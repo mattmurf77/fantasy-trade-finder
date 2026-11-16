@@ -319,7 +319,10 @@ const manyRows = (n) => Array.from({ length: n }, (_, i) => Object.assign(clone(
   const props = JSON.stringify([u.viewedProps(READY, m), u.expandedProps(R1), u.PINNED_PROPS]);
   assert(!/9001|Sato|Harbor/.test(props), 'H5. no player id, player name or team name in any event property');
   assert((bodySrc.match(/track\(TARGETS_EVENTS\.viewed/g) || []).length === 1 && /viewedRef\.current = true/.test(bodySrc)
-      && /track\(TARGETS_EVENTS\.expanded, expandedProps\(row\), SCREEN\)/.test(bodySrc),
+      && /track\(TARGETS_EVENTS\.expanded, expandedProps\(row\), screen\)/.test(bodySrc)
+      // `screen` defaults to SCREEN ('Standings'); the Improve Playoff
+      // Chances page passes its route name (direction-pages spec §9, D-270).
+      && /viewedRef, screen = SCREEN \}: Props\)/.test(bodySrc) && /now: Date\.now,\s*screen,\s*\}\);/.test(bodySrc),
     'H6. the component fires viewed once per card opening and expanded on opening a row');
   const taxonomy = fs.readFileSync(path.join(ROOT, 'backend/analytics_taxonomy.py'), 'utf8');
   const queries = fs.readFileSync(path.join(ROOT, 'backend/analytics_queries.py'), 'utf8');

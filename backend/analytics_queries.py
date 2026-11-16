@@ -423,6 +423,11 @@ NON_INTENT_EVENTS = frozenset({
     # visible, an impression. Opening a row (playoff_target_expanded) is
     # intent and stays out of this set.
     "playoff_targets_viewed",
+    # Improve pages / Home playoff card (D-270): the card rendered with its
+    # `team_direction` block, an impression on Home or League Rankings. The
+    # page open (direction_page_opened) and the card's taps
+    # (home_tile_tapped, already here) are classified on their own.
+    "direction_card_shown",
     # ── Usage Trends, 2026-10-10 — added in the SAME commit as the emitters
     # (docs/business/analytics/2026-10-10-usage-trends-events.md). Reading the
     # cross-league availability sheet and switching metric / filter chips are

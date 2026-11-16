@@ -1577,6 +1577,17 @@ Shared between the server and the app ([contract](plans/league-projections/playo
 - The app never re-computes a number, and every string comes from the contract's §10 table (`mobile/src/utils/playoffTargetsCopy.ts`, compared both ways by `mobile/tests/check-playoff-targets.js`). The footer must keep saying what the number assumes: nothing given up, no starter going back, the true gain usually smaller.
 - The hand-off pins the **receive** side (`finder_target_pinned {side: receive, source: playoff_targets}`); Max PF moves pins give.
 
+### Team direction: the Home playoff card (2026-11-15, D-265, D-270, flag `league.direction_card`)
+
+Shared between the server and the app ([spec](plans/league-projections/direction-pages/spec.md) §5, §7):
+
+- **The band cuts are server-owned settings**, `config/league_projections.json` → `team_direction.middle_min` 0.35 and `middle_max` 0.65, on the unrounded playoff chance: `low` below 0.35, `middle` from 0.35 up to (not including) 0.65, `high` from 0.65. The lean cut is the fixed `recommendation.REBUILDING_MAX` (0.45, inclusive to the draft pick), the same cut that decides which Standings section starts open. The app never compares a probability: it shows `band`, `primary` and `options` as sent (`mobile/src/utils/directionCard.ts`, guarded by `mobile/tests/check-direction-card.js` I1/I5).
+- **One "offered" rule.** Whether each Improve page is offered is `team_direction.options`; the card's sheet and the pages' other-page link both read it when the block is on the read (the pages fall back to the step-1 rule over the two feature blocks when it is not).
+- The `options.*.reason` set is open; the sheet's disabled-row line comes from the spec's §7.3 table (`utils/directionCardCopy.ts`) and an unknown reason reads "Not available right now."; `feature_off` hides the row.
+- **The projected pick is served, never composed**: the D-257 label (`pick_projection.slot_ranks`), equal to `max_pf_moves.baseline.label` (`backend/tests/test_team_direction.py`), null for a `reverse_standings` / `lottery_or_other` draft order.
+
+**Locations to update together:** `backend/league_projections/team_direction.py`, `config/league_projections.json`, `mobile/src/utils/directionCard.ts`, `mobile/src/utils/directionCardCopy.ts`, `mobile/src/utils/directionPages.ts` (`offered`), the spec §5 and §7.
+
 ### Playoff odds: 100% and 0% need a proof (2026-11-13, D-262)
 
 Operator 2026-11-13: a playoff chance prints as 100% only when the team has mathematically clinched, and 0% only when it is mathematically eliminated. The server proves both from the rules and saves them on every forecast team (`playoff_clinched`, `playoff_eliminated`; absent = not proven). The rule, identical in `mobile/src/utils/playoffOdds.ts`, `web/js/playoff-odds.js` and `backend/league_projections/clinch.py` (`odds_text`):

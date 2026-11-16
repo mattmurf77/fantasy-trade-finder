@@ -5,6 +5,8 @@
   "league.max_pf_moves": true,
   "league.playoff_targets": false,
   "league.direction_pages": false,
+  "league.direction_card": false,
+  "league.direction_view_sheet": false,
   "trade.prepared_inventory": true,
   "trade.first_page_store": true,
   "trade.packed_evidence": true,

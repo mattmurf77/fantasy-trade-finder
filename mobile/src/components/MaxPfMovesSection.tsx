@@ -42,9 +42,12 @@ interface Props {
    *  anyway" step for a pick owned by another team still applies. Default
    *  false: Standings is unchanged. */
   openOnArrival?: boolean;
+  /** The screen the body's events are logged under: the Improve page's
+   *  route name on that page (spec §9, D-270). Default Standings. */
+  screen?: string;
 }
 
-export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, openOnArrival = false }: Props) {
+export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, openOnArrival = false, screen = SCREEN }: Props) {
   const navigation = useNavigation<any>();
   const queryClient = useQueryClient();
   const [revealed, setRevealed] = useState(false);       // Show anyway / Show moves
@@ -59,7 +62,7 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, open
   useEffect(() => {
     if (viewedRef.current) return;
     viewedRef.current = true;
-    track(MAXPF_EVENTS.viewed, viewedProps(block, model), SCREEN);
+    track(MAXPF_EVENTS.viewed, viewedProps(block, model), screen);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -92,7 +95,7 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, open
     try {
       await setDraftOrderRule(leagueId, rule);
       markDraftOrderAsked(leagueId);
-      track(MAXPF_EVENTS.answered, answeredProps(rule, questionSource), SCREEN);
+      track(MAXPF_EVENTS.answered, answeredProps(rule, questionSource), screen);
       setPrompts((p) => (p ? { ...p, asked: true } : p));
       setQuestion(null);
       queryClient.invalidateQueries({ queryKey: ['league-projection-batch', userId, leagueId] });
@@ -113,18 +116,19 @@ export function MaxPfMovesBody({ block, model, leagueId, userId, viewedRef, open
       // canvas prefill from utils/maxPfMoves.finderNavParams.
       navigate: (params) => navigation.popTo('Main', params),
       now: Date.now,
+      screen,
     });
 
   const toggleRow = (row: MaxPfMoveRow) => {
     const opening = openRank !== row.rank;
     setOpenRank(opening ? row.rank : null);
-    if (opening) track(MAXPF_EVENTS.expanded, expandedProps(row), SCREEN);
+    if (opening) track(MAXPF_EVENTS.expanded, expandedProps(row), screen);
   };
 
   const toggleCombined = (entry: MaxPfCombined) => {
     const opening = openSize !== entry.size;
     setOpenSize(opening ? entry.size : null);
-    if (opening) track(MAXPF_EVENTS.expanded, combinedExpandedProps(entry), SCREEN);
+    if (opening) track(MAXPF_EVENTS.expanded, combinedExpandedProps(entry), screen);
   };
 
   const { rows, showAllButton } = visibleRows(model.listed, showAll);

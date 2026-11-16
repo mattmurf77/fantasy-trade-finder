@@ -24,8 +24,10 @@ from backend.database import metadata, user_events_table
 
 
 _PROPS: dict[str, dict] = {
+    # `via` (D-270) rides only on the playoff card's direction taps; the row
+    # is exact, so it is listed here with the rest.
     "home_tile_tapped": {"tile": "position_roster", "position": "RB", "band": "seller",
-                         "split": "shown"},
+                         "split": "shown", "via": "sheet"},
     "standings_segment_changed": {"segment": "projected"},
 }
 
