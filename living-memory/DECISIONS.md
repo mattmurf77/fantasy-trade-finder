@@ -1,5 +1,22 @@
 # Decisions — Fantasy Trade Finder
 
+## D-271 — The Improve pages, the Home playoff card, its half sheet and Playoff targets are turned on
+
+**Date:** 2026-11-15 · **Who:** the operator, after PRs #689, #690, #693 and #696 were merged: "Leave as is. Merge all of this, deploy, rollout on TestFlight and turn all three flags on" ("Leave as is": the half sheet keeps no Done button). Then, told that `league.playoff_targets` was staying off and the sheet would have two rows: "I want playoff targets on".
+**Context:** D-265 (step 1, the pages), D-270 (the card's two figures and the half sheet) and D-264 (Playoff targets) shipped dark behind `league.direction_pages`, `league.direction_card`, `league.direction_view_sheet` and `league.playoff_targets`, with TestFlight checklists as the gate (`docs/plans/league-projections/direction-pages/evidence.md` §4, §9; `docs/plans/league-projections/playoff-targets/evidence.md` §3).
+**Decision:**
+- The four flags are true in `config/features.json` and the three flag fixtures. The code default stays false.
+- The playoff-targets scope §0 choices (P1-P15, W1-W5) were not answered one by one; the builder's defaults ship as built.
+**Consequences:**
+- The half sheet lists three rows: "View projected standings", "Improve Playoff Chances", "Improve Draft Pick". Standings shows both link rows.
+- Playoff targets is computed in the weekly forecast job and saved with the run (`backend/league_projections/service.py:178`, `:217-219`), not on read; the read only composes the saved block (`backend/league_projections/api.py:120-140`, `:233-234`). So the list appears after each league's next weekly forecast (Tuesday 09:30 Eastern, `config/league_projections.json` `schedule`). Until then the block is `unavailable` / `not_computed`: the sheet row is disabled with "Not available until the next forecast." (`team_direction.py:111-113`, `mobile/src/utils/directionCardCopy.ts:18`), Standings still shows the "Playoff targets" link row, and the page it opens reads "Playoff targets are worked out with the weekly forecast. They appear after the next update." (`mobile/src/utils/playoffTargetsCopy.ts:49`); Improve Draft Pick has no link to the playoff page. There is no operator re-run for this block (scope W4).
+- Job cost: one more step per fresh baseline run, in its own 60 s budget and inside the job's 480 s limit (`service.py:17`, `:127-128`; about 8 s on the fixture, D-264; Render unmeasured). No extra provider call: Max PF moves (on, D-259) already requests the capture side channel this step reads (`service.py:176-179`).
+- The playoff-chance gain has had no backtest (scope W3) and assumes nothing is given up (P4). Nothing has been run on a device (D-056).
+- Production `FTF_FLAGS` (read 2026-11-15) names none of the four flags, so `config/features.json` decides.
+- The app side needs TestFlight 1.22.0 (195), built from `83142801`; builds 194 and earlier have none of the direction code and ignore `team_direction`. The checklists above are the open evidence; direction-pages evidence.md §10 lists what to read with them.
+- Still deferred (D-270): the card's button row (cells A and B), `league.direction_both_middle`, and the experiment definition.
+- Kill: set a flag false and `POST /api/feature-flags/reload`. With `league.playoff_targets` off the server reports the playoffs option as `feature_off` and the sheet drops that row.
+
 ## D-270 — The half sheet version of the Home playoff card ships first; the button row and the experiment are deferred
 
 **Date:** 2026-11-15 · **Who:** the operator: "get an agent building the half sheet version of the home page as the initial experience update". Built by a builder subagent on `feat/direction-sheet` (on top of step 1, `feat/direction-pages`). Spec: [`../docs/plans/league-projections/direction-pages/spec.md`](../docs/plans/league-projections/direction-pages/spec.md) §10.3 note; evidence in its `evidence.md` §5-§9.

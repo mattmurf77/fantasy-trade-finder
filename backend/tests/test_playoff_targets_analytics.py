@@ -11,10 +11,11 @@ registered in the same commit as the app's emitters.
 - test_finder_target_pinned_keeps_its_shape_and_documents_the_new_source.
 - test_events_land_with_every_prop: POST /api/events accepts all three with
   their props intact, the receive-side pin included.
-- test_flag_ships_off_and_reaches_the_app: `league.playoff_targets` is in
-  FLAG_KEYS, false by default, false in config/features.json, and on
-  GET /api/feature-flags (the app's flag source). Sabotage: drop the key from
-  FLAG_KEYS; set it true in config/features.json.
+- test_flag_code_default_off_shipped_on_and_reaches_the_app:
+  `league.playoff_targets` is in FLAG_KEYS, false by default in code, true in
+  config/features.json and the three fixtures (ON from 2026-11-15, D-271), and
+  on GET /api/feature-flags (the app's flag source). Sabotage: drop the key
+  from FLAG_KEYS; set it false in config/features.json.
 """
 import inspect
 import json
@@ -100,12 +101,14 @@ def test_events_land_with_every_prop(harness):
         assert landed == props, name
 
 
-def test_flag_ships_off_and_reaches_the_app():
+def test_flag_code_default_off_shipped_on_and_reaches_the_app():
+    """D-271 (operator, 2026-11-15): the flag ships ON. The code default stays
+    off; the three flag fixtures mirror the shipped value."""
     key = "league.playoff_targets"
     assert key in feature_flags.FLAG_KEYS and feature_flags.DEFAULT_FLAGS[key] is False
-    assert json.loads((REPO / "config/features.json").read_text())[key] is False
+    assert json.loads((REPO / "config/features.json").read_text())[key] is True
     for name in ("release", "onboarding-v2", "profiles-on"):
-        assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[key] is False, name
+        assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[key] is True, name
     server.app.config["TESTING"] = True
     client = server.app.test_client()
     old = feature_flags._flags_cache

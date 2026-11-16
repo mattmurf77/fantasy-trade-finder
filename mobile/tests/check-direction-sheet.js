@@ -208,9 +208,9 @@ check(!/useQuery|useSession|useFlag|fetch\(|api\.|track\(|navigation/.test(sheet
     'home.playoff.sheet.improve-playoffs', 'home.playoff.sheet.improve-pick'].every((id) => sheetRaw.includes(`'${id}'`) || sheetRaw.includes(`"${id}"`)),
   'R1. static literal testIDs (testid-lint can read them)');
   const features = JSON.parse(readRoot('config/features.json'));
-  check(features['league.direction_view_sheet'] === false && /"league\.direction_view_sheet",/.test(readRoot('backend/feature_flags.py'))
-      && ['release', 'onboarding-v2', 'profiles-on'].every((n) => JSON.parse(readRoot(`backend/tests/fixtures/flags/${n}.json`))['league.direction_view_sheet'] === false),
-  'R2. league.direction_view_sheet: registered, false, mirrored in the three fixtures');
+  check(features['league.direction_view_sheet'] === true && /"league\.direction_view_sheet",/.test(readRoot('backend/feature_flags.py'))
+      && ['release', 'onboarding-v2', 'profiles-on'].every((n) => JSON.parse(readRoot(`backend/tests/fixtures/flags/${n}.json`))['league.direction_view_sheet'] === true),
+  'R2. league.direction_view_sheet: registered, true (ON from 2026-11-15, D-271), mirrored in the three fixtures');
   check(JSON.parse(read('package.json')).scripts['test:direction-sheet'] === 'node tests/check-direction-sheet.js', 'R3. npm run test:direction-sheet');
 }
 

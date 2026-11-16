@@ -2,13 +2,14 @@
 docs/plans/league-projections/direction-pages/spec.md §8, §10.3; D-265).
 
 Step 1 is app-only. The backend's whole job is to register the flag, ship it
-off, mirror it in the three flag fixtures, and serve it to the app; no
-backend code reads it, so no response changes in either state.
+(off at first; ON from 2026-11-15, D-271), mirror it in the three flag
+fixtures, and serve it to the app; no backend code reads it, so no response
+changes in either state.
 
-- test_flag_is_registered_and_ships_off: in FLAG_KEYS, false by default,
-  false in config/features.json with its `_comment_` line, false in the three
-  fixtures. Sabotage: drop the key from FLAG_KEYS; set it true in
-  config/features.json; drop it from profiles-on.json.
+- test_flag_registered_code_default_off_shipped_on: in FLAG_KEYS, false by
+  default in code, true in config/features.json with its `_comment_` line,
+  true in the three fixtures (D-271). Sabotage: drop the key from FLAG_KEYS;
+  set it false in config/features.json; drop it from profiles-on.json.
 - test_flag_reaches_the_app: GET /api/feature-flags (the app's flag source)
   serves it, false by default and true when turned on.
 - test_no_backend_code_reads_the_flag: the only backend module naming it is
@@ -37,13 +38,16 @@ KEY = "league.direction_pages"
 FIXTURES = ("release", "onboarding-v2", "profiles-on")
 
 
-def test_flag_is_registered_and_ships_off():
+def test_flag_registered_code_default_off_shipped_on():
+    """D-271 (operator, 2026-11-15): the flag ships ON. The code default stays
+    off, so a missing or unreadable features.json still means off; the three
+    flag fixtures mirror the shipped value."""
     assert KEY in feature_flags.FLAG_KEYS and feature_flags.DEFAULT_FLAGS[KEY] is False
     features = json.loads((REPO / "config/features.json").read_text())
-    assert features[KEY] is False
+    assert features[KEY] is True
     assert "D-265" in features["_comment_league_direction_pages"]
     for name in FIXTURES:
-        assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[KEY] is False, name
+        assert json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())[KEY] is True, name
 
 
 def test_flag_reaches_the_app():
