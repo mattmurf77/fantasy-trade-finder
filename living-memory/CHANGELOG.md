@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-16 — Win-now generator checked on real requests: founder labels, a rule test, the launch bars (nothing changed)
+
+- **What:** three local, offline measurements on the operator's own 14 recorded requests (2 manager-league pairs); record in `docs/plans/win-now-season-signal/real-request-checks.md`. Revision 5 stays off; no code, flag or knob moved.
+- **Founder labels:** the 41 overrides change 32–41 labels per league but only nudge revision 5's decks (27–30 of the first 30 cards unchanged in most cases; revision 2 → 5 shares 8–23). Direction mostly as intended; lineup points hold or improve.
+- **Rule test:** no simple rule change replaces the overrides (best: 8 of 39 live corrections, 2 uncorrected players relabelled). The overrides stay.
+- **Launch bars (validation §3.4, §6, §7):** 13 pass, 3 fail (deck size 0.775 of revision 2; label table 0.55 points a week behind the numbers; outlook flip 0.29), 4 too little data. Sample is far below the bar (needs 40 requests, 5 pairs).
+- **Next:** re-run the bars when production has recorded enough requests with usable evidence.
+
 ## 2026-11-16 — Playoff targets threshold raised to 2 points (D-272)
 
 - **What:** `playoff_targets.min_playoff_gain` 0.01 → 0.02 in `config/league_projections.json`; config reference, contract and scope updated.

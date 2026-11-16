@@ -1,3 +1,11 @@
+## 2026-11-16 — Win-now season signal on real recorded requests (measurement only), branch `docs/label-check-results` (docs only)
+
+- **No code changed.** Record: `docs/plans/win-now-season-signal/real-request-checks.md`. Inputs: the operator's own 14 recorded owner requests with usable season evidence since 2026-11-12 (read-only pull, kept local and git-ignored), 2 manager-league pairs, 10 recorded with the 41 founder label overrides.
+- **Label effect (Opus subagent script, local, sockets blocked, in-memory SQLite, `PYTHONHASHSEED=0`):** revision 2 / revision 5 without overrides / revision 5 with overrides, five outlooks each, 70 cases. Rebuilt evidence matched the recorded digest 10 of 10; revision 5 twice identical 15 of 15; an independent re-run of 2 requests in a fresh process matched 10 of 10 cases; headline averages recomputed from the raw rows by the main session.
+- **Rule test (Opus subagent script):** the parameterised label rule reproduced the engine's label 271 of 271 and 281 of 281 before scoring; seven rule families swept; best rule's counts (7 of 39 in every league, 8 in any, 2 uncorrected relabelled) recomputed independently by the main session.
+- **Launch bars:** `PYTHONHASHSEED=0 python -m backend.eval.season_replay --dir <14 requests>` exit 1: 13 pass, 3 fail (§6 deck size 0.775; §3.4 label table vs numbers −0.55; §3.4 outlook flip 0.29), 4 insufficient, 2 n/a.
+- **Not verified:** anything beyond two rosters (one repeated 13 times); Contending, Rebuilding and pinned requests (none recorded); database-backed deck stages and the client; which page the overrides were saved from (inferred). Output files checked for league, user, run and member ids: none.
+
 ## 2026-11-16 — Playoff targets threshold 0.01 → 0.02 (D-272), branch `feat/playoff-targets-threshold-2`
 
 - **Change:** `config/league_projections.json` `playoff_targets.min_playoff_gain` 0.02. Pin moved in `test_playoff_targets.py` (`OPTIONS` 0.02; the `passes_threshold` assertion now reads `OPTIONS["min_playoff_gain"]` with the code's 1e-9 tolerance).
