@@ -120,6 +120,12 @@ larger rosters and more slots, or a league with more than 12 teams. The saved bl
 
 ## 3. Manual TestFlight checklist
 
+**2026-11-15 ([D-271](../../../../living-memory/DECISIONS.md)):** the flag is on for everyone
+(`config/features.json`), not just a test environment, so step 15 means a server flag change.
+Run after a weekly forecast saved after the flag went on. With `league.direction_pages` on (also
+D-271), step 1's "Playoff targets" is a link row that opens Improve Playoff Chances, where the list
+is shown open; read steps 3-13 there. Not run yet; nothing has been run on a device (D-056).
+
 For the operator, on a TestFlight build that contains this branch, with
 `league.playoff_targets` on for the test environment and a weekly forecast saved **after** the
 flag was turned on (before that the section reads "appear after the next update"). Use a

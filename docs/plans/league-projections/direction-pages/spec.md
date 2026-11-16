@@ -388,8 +388,8 @@ unchanged. Evidence: [evidence.md](evidence.md) §5-§9.
 
 **2026-11-15, flags on ([D-271](../../../../living-memory/DECISIONS.md)):** after the merges the operator
 turned on `league.direction_pages`, `league.direction_card` and `league.direction_view_sheet`
-(`config/features.json` and the three fixtures; code default still false). `league.playoff_targets`
-stays off. The §8 table's "Default" column is the code default. Evidence: [evidence.md](evidence.md) §10.
+(`config/features.json` and the three fixtures; code default still false), then, on a second word
+("I want playoff targets on"), `league.playoff_targets` too. The §8 table's "Default" column is the code default. Evidence: [evidence.md](evidence.md) §10.
 
 ## 11. Operator decisions
 
