@@ -12,12 +12,13 @@
 ---
 
 
-## 2026-11-16 — Founders' review: Review pages (D-274), branch `feat/founder-review-pages`, unmerged
+## 2026-11-16 — Founders' review: Review pages (D-274), merged as `a9fd2460` (PR #702), live, TestFlight 1.22.0 (196)
 
 - **What:** a third choice in Calibration › Founders' review. The operator uploads review pages (HTML with `textarea[data-k]` boxes) with the cron secret; founders open them full screen in a web view and their comments save to the server per box per account. Pages live only in the database (`founder_pages`, `founder_page_notes`), never in the public repo.
 - **Server:** `backend/founder_pages.py` (validation), accessors in `database.py`, routes `/api/founder/pages*` (founder gate + new flag `founder.review_pages`, shipped on) and `/api/admin/founder-pages*` (cron secret, 8 MiB cap, chunked-safe). New tables by `create_all` at start-up.
 - **App:** `FounderPagesReview` + `FounderPageViewer` (Modal, safe area); no token in the web view, navigation blocked, bridge validated, batched saves with retry, flush and warn on close; `utils/openExternal.openWebLink` added.
-- **Next:** merge, upload a page, run the TestFlight checklist in `pages-scope.md` §3.
+- **Shipped 2026-11-16:** PR #702 merged on green CI as `a9fd2460`; Render deploy live on that commit (new tables created at start-up; `GET /api/admin/founder-pages` 200 with the secret, 401 without; `GET /api/founder/pages` 404 without a founder session). One page uploaded through the operator route (2,339,373 bytes, 1,321 comment boxes, the Personal tendencies section left out by the operator's decision). App side: TestFlight 1.22.0 (196), EAS build `4c12ecf3-5b5d-48af-a161-78a281ff8e4c` from `a9fd2460`, uploaded to App Store Connect (submission `cb4f1b7c-8780-4217-9fcc-72be46a822a2`).
+- **Next:** the operator runs the TestFlight checklist in `pages-scope.md` §3 on build 196; comments are read back with `GET /api/admin/founder-pages/<slug>/notes`.
 
 ## 2026-11-16 — Playoff targets operator re-run `retry_missing_targets` (D-273)
 
