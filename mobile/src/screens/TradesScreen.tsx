@@ -303,6 +303,7 @@ import type { DeclineReasonResult } from '../api/declineReasons';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag, useOnboardingFeature, onboardingEnabled, useFeatureFlags } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG } from '../navigation/navContinuity';
 import {
   useOnboardingState,
   getOnboardingState,
@@ -908,6 +909,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // ── Teardown-remediation flags (all default false — flag off is
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
+  // R9 / R13 (flag `nav.continuity`, D-275): "See liked" opens the liked
+  // trades (Matches › Awaiting) rather than Portfolio (finding F3, gap GP1),
+  // and the standing-offer toast's "Matches → Standing offers" is a link.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
   // F1 signal spine (flag deck.signal_v2): thread impression_id + dwell +
   // engagement bits through dispositions/events. Off ⇒ no timers, no extra
@@ -10563,7 +10568,14 @@ export default function TradesScreen({ navigation, route }: any) {
                     label="See liked"
                     variant="secondary"
                     compact
-                    onPress={() => navigation.navigate('Portfolio')}
+                    onPress={() =>
+                      continuityOn
+                        ? navigation.navigate('Matches', {
+                            segment: 'awaiting',
+                            ...(leagueId ? { leagueId } : {}),
+                            at: Date.now(),
+                          })
+                        : navigation.navigate('Portfolio')}
                   />
                   {/* Button budget (PRD §5.3): the card keeps ONE primary.
                       With the pin line up, `Pin targets →` is it and Done
@@ -11133,6 +11145,18 @@ export default function TradesScreen({ navigation, route }: any) {
                 + `${offer.player_name} for a 1st. Manage it in Matches → `
                 + 'Standing offers.',
               tone: 'success',
+              // R13: the sentence's destination as the toast's action
+              // (the Toast primitive's one link slot), held 5 s like the
+              // other actionable toasts so it can be reached.
+              ...(continuityOn
+                ? {
+                    holdMs: 5000,
+                    action: {
+                      label: 'Standing offers',
+                      onPress: () => navigation.navigate('Matches', { segment: 'standing', at: Date.now() }),
+                    },
+                  }
+                : {}),
             });
           }}
         />

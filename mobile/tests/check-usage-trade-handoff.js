@@ -34,7 +34,10 @@ function fixture() {
   let revision = 1, focused = true;
   const env = {
     useSession: { getState: () => state },
-    navigation: { isFocused: () => focused, navigate: (...a) => navigations.push(a) },
+    navigation: { isFocused: () => focused, navigate: (...a) => navigations.push(a), popTo: (...a) => navigations.push(a) },
+    // nav.continuity (D-275) only picks popTo over navigate for the final
+    // hop; the lifecycle under test is the same either way (flag off here).
+    continuityOn: false,
     tradeAction: { current: { serial: 0, searchId: null } },
     getSessionRevision: () => revision, trackAction: () => {},
     data: { leagues: [{ league_id: 'b', rosters: { p: 'owner' }, owners: { owner: 'Partner' } },

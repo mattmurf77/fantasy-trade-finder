@@ -38,6 +38,7 @@ import { getRankings, reorderRankings, splitRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, backOrFallback } from '../navigation/navContinuity';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 import type { Position, RankedPlayer, ScoringFormat, Tier } from '../shared/types';
 
@@ -74,6 +75,11 @@ export default function QuickRankScreen() {
   // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): faint content
   // text promotes to dim (the chip-meta floor lives in RankChipGrid).
   const cleanup = useFlag('visual.chalkline_cleanup');
+  // R4 (flag `nav.continuity`, D-275): the "nothing to go back to" test is
+  // this page's OWN stack. `canGoBack()` also counts the bottom tabs, which
+  // can always go back to Home, so the fallback below was never reached
+  // (finding C1).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
 
   // S3 PRD-01 — report the pinned walk footer to the feedback FAB (same
   // contract as Quick set: focused-only, FAB ignores it while
@@ -172,9 +178,9 @@ export default function QuickRankScreen() {
 
   const finish = useCallback(() => {
     // Same exit as QuickSetTiers: back to the board this wrote to.
-    if (navigation.canGoBack()) navigation.goBack();
+    if (backOrFallback(navigation.getState?.(), navigation.canGoBack(), continuityOn) === 'back') navigation.goBack();
     else navigation.navigate('Tiers');
-  }, [navigation]);
+  }, [navigation, continuityOn]);
 
   const goTo = useCallback(
     (idx: number) => {

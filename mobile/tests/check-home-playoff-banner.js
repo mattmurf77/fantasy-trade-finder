@@ -168,8 +168,11 @@ assert(!/onBuy=|onSell=/.test(mount));
 const reviewAt = hub.indexOf('const onReviewOutlook = (');
 const review = hub.slice(reviewAt, hub.indexOf('\n  };', reviewAt));
 assert(reviewAt >= 0);
+// nav.home_return (D-275) arms the "‹ Home" control between the two; it
+// writes nothing and fires no event (check-nav-continuity.js B1).
 assert.deepEqual(review.split('\n').slice(1).map(line => line.trim()), [
   "track('home_tile_tapped', { tile: 'outlook' }, 'Home');",
+  "armReturn('review_outlook');",
   "navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });",
 ]);
 assert(!/saveLeaguePreferences|setAssetPref|useMutation/.test(hub), 'Home writes no preference');

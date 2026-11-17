@@ -35,6 +35,7 @@ import {
 } from '../api/faMove';
 import { getUsageTrends, type UsageMetric, type UsagePeriodWeeks, type UsagePlayer } from '../api/usageTrends';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG } from '../navigation/navContinuity';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, dropPendingSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
@@ -108,6 +109,10 @@ export default function UsageTrendsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const enabled = useFlag('usage_trends.enabled');
+  // R2 (flag `nav.continuity`, D-275): Trade and Re-rank return to the tabs
+  // underneath (popTo 'Main') instead of stacking a second copy of the app
+  // over this page (finding D3). Off ⇒ the plain navigate, as before.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const leagueId = useSession((s) => s.league?.league_id);
   const leagueName = useSession((s) => s.league?.league_name);
   const leagues = useSession((s) => s.leagues);
@@ -398,7 +403,10 @@ export default function UsageTrendsScreen() {
       autoRun: true,
     });
     tradeAction.current.searchId = null;
-    navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
+    // R2 + R3: back to the existing tabs, and to the existing Acquire
+    // landing if another Acquire page is on top of it (`pop`).
+    if (continuityOn) navigation.popTo('Main', { screen: 'Trades', params: { screen: 'TradesHome', pop: true } });
+    else navigation.navigate('Main', { screen: 'Trades', params: { screen: 'TradesHome' } });
   };
 
   // D1: the listed leagues' capabilities, prefetched in the background when an
@@ -438,10 +446,12 @@ export default function UsageTrendsScreen() {
 
   const doRerank = (p: UsagePlayer) => {
     trackAction('rerank', p, focusId);
-    navigation.navigate('Main', {
+    const to = {
       screen: 'Rank',
       params: { screen: 'QuickSetTiers', params: { position: p.position, positionSeq: Date.now() } },
-    });
+    };
+    if (continuityOn) navigation.popTo('Main', to);
+    else navigation.navigate('Main', to);
   };
 
   const reportAvailability = (p: UsagePlayer) => {

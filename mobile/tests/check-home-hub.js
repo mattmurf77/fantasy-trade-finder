@@ -388,9 +388,12 @@ const handler = (name) => {
   // The playoff tile's "Review outlook" is the same event and destination
   // plus the suggestion param — and nothing else: no write, no new event.
   const review = handler('onReviewOutlook').split('\n').slice(1).map((l) => l.trim());
-  assert(review.length === 2
+  // nav.home_return (D-275) arms the "‹ Home" control between the two; it
+  // writes nothing and fires no event (check-nav-continuity.js B1).
+  assert(review.length === 3
     && review[0] === "track('home_tile_tapped', { tile: 'outlook' }, 'Home');"
-    && review[1] === "navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });",
+    && review[1] === "armReturn('review_outlook');"
+    && review[2] === "navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });",
     '12c. onReviewOutlook tracks the outlook tile, then opens the selector with suggestOutlook, and does nothing else');
   assert(!/saveLeaguePreferences|setAssetPref|useMutation/.test(homeAll),
     '12d. nothing under components/home writes a preference');

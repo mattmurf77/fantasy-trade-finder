@@ -43,7 +43,7 @@ Also mounted here: TanStack Query `focusManager` ← AppState, `onlineManager` �
 | `assets/` | App icon / adaptive icon / splash / favicon | [assets/CLAUDE.md](assets/CLAUDE.md) |
 | `.maestro/` | Retained UI flows — **historical, never run** (D-056) | [.maestro/README.md](.maestro/README.md) |
 | `scripts/` | testID lint + contrast guard (live); sim build/run/capture harness (dormant per D-056) | [scripts/README.md](scripts/README.md) |
-| `tests/` | 84 dependency-free structural guards run under plain node | [tests/README.md](tests/README.md) |
+| `tests/` | 85 dependency-free structural guards run under plain node | [tests/README.md](tests/README.md) |
 | `ios/`, `android/` | Prebuilt native projects (checked in — `expo prebuild` output) | — |
 
 The iOS project folder is `ios/DTFDynastyTradeFinder/` and the Expo slug is `dtf-dynasty-trade-finder`. Both keep the pre-rename identifiers **deliberately** (D-057) — scheme/project names are invisible to users, and renaming would churn Pods, workspace, scheme and EAS config for nothing. The bundle ID `com.fantasytradefinder.app` is immutable and stays. The display-name change is two lines: `expo.name` in `app.json` and `CFBundleDisplayName` in `ios/DTFDynastyTradeFinder/Info.plist` (bare workflow — `app.json` alone does nothing).

@@ -126,6 +126,12 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // roster at that position in League rankings (D-269). Same value as
   // config/features.json; a server `false` removes the body tap.
   'nav.home_position_roster': true,
+  // `nav.home_return` + `nav.continuity` (D-275, docs/plans/nav-continuity/
+  // scope.md): the Home tiles' "‹ Home" control, and the navigation
+  // continuity fixes. Same values as config/features.json; a server `false`
+  // restores today's navigation at the next revalidate.
+  'nav.home_return': true,
+  'nav.continuity': true,
   // `usage_trends.enabled`: Usage Trends (docs/plans/usage-trends/scope.md),
   // shipped ON (operator, 2026-10-10). Absent here, a fresh install's first
   // Home would lack the Usage Rates tile until a revalidate. A server

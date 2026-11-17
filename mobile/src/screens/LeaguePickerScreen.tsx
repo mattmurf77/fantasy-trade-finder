@@ -63,6 +63,13 @@ interface Props {
   /** P0-3 — case-C hint: render the invite notice row even once the store's
    *  intent has been consumed. */
   inviteNotice?: boolean;
+  /** R1 (flag `nav.continuity`, D-275) — set by RootNav only when the picker
+   *  was opened from inside the app (the tabs sit under it): a Close control
+   *  back to where the user came from. Unset at sign-in and flag off. */
+  onClose?: () => void;
+  /** R1 — same condition: the one-league auto-forward must not fire, the user
+   *  came here to add or link a league (finding D2). */
+  openedInApp?: boolean;
 }
 
 // Show user's leagues → tap one → run sessionInit against it → done.
@@ -76,6 +83,8 @@ export default function LeaguePickerScreen({
   invitedLeagueName,
   autoPinLeagueId,
   inviteNotice,
+  onClose,
+  openedInApp,
 }: Props) {
   // #266 — needed for the transition-settled auto-open below. Typed loose
   // like the rest of the screens; only addListener('transitionEnd') is used.
@@ -233,12 +242,15 @@ export default function LeaguePickerScreen({
   useEffect(() => {
     if (autoSkipTried.current) return;
     if (loading || error || selectingId || autoOpenEspnLink || autoOpenMflLink) return;
+    // R1 (D-275): opened from inside the app — never forward. `openedInApp`
+    // is only ever true with flag `nav.continuity` on (RootNav).
+    if (openedInApp) return;
     if (cached.length !== 1) return;
     if (!onboardingEnabled('onboarding.league_autoskip')) return;
     autoSkipTried.current = true;
     void pickLeague(cached[0], { auto: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cached, loading, error, selectingId, autoOpenEspnLink, autoOpenMflLink]);
+  }, [cached, loading, error, selectingId, autoOpenEspnLink, autoOpenMflLink, openedInApp]);
 
   // P0-3 — pin the invited league as soon as it appears in the list.
   //
@@ -519,7 +531,14 @@ export default function LeaguePickerScreen({
           </Text>
           <Text style={styles.sub}>Leagues for {user?.display_name || '…'}</Text>
         </View>
-        <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
+        {onClose ? (
+          <View style={styles.headerActions}>
+            <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
+            <Button testID="leagues.close" label="Close" variant="ghost" compact onPress={onClose} />
+          </View>
+        ) : (
+          <Button label="Sign out" variant="ghost" compact onPress={onSignOut} />
+        )}
       </View>
 
       {canVerifySleeper && (
@@ -770,6 +789,8 @@ const styles = StyleSheet.create({
   },
   title: { ...type.heading },
   sub: { ...type.bodySm, marginTop: 2 },
+  // R1 — Sign out and Close side by side when the picker is opened in-app.
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   centered: {
     flex: 1,
     alignItems: 'center',

@@ -48,6 +48,7 @@ import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import type { Player } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { useOutlookStripExpanded } from '../state/outlookStrip';
 import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
@@ -494,6 +495,10 @@ export default function LeagueSummaryScreen() {
   // from LeagueScreen with #181). The root-stack variant must NOT register:
   // it would clobber the tab root's handler while both are mounted.
   const retapOn = useFlag('ux.retap_active_tab');
+  // R3 (flag `nav.continuity`, D-275): the hand-offs to the Acquire landing
+  // return to the existing landing (`pop`) instead of stacking a second one
+  // over whatever Acquire page is open (finding B2, G-056).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const scrollRef = useRef<ScrollView>(null);
   useEffect(
     () =>
@@ -1431,9 +1436,9 @@ export default function LeagueSummaryScreen() {
           autoRun: true,
         });
       }
-      navigation.navigate('Trades', { screen: 'TradesHome' });
+      navigation.navigate('Trades', continuityOn ? { screen: 'TradesHome', pop: true } : { screen: 'TradesHome' });
     },
-    [navigation, candidatePos, candidateDir, selectedIdx, route.name, selected],
+    [navigation, candidatePos, candidateDir, selectedIdx, route.name, selected, continuityOn],
   );
 
   // ── #302 — the drill-in exit lives on the fixed stack header ──────────

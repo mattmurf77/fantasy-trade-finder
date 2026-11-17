@@ -6,6 +6,7 @@ React Navigation config. Behavior, gates, and sharp edges are in [CLAUDE.md](CLA
 |---|---|
 | `RootNav.tsx` | Root native-stack. Auth routing (SignIn → LeaguePicker → Main), all root-level pushed surfaces, and the app-wide mounts that sit above the tabs |
 | `TabNav.tsx` | Bottom tabs and each tab's own stack |
+| `navContinuity.ts` | Pure navigation decisions for the "‹ Home" control (flag `nav.home_return`) and the continuity fixes (flag `nav.continuity`), D-275; executed by `tests/check-nav-continuity.js` |
 | `rankChooserModel.ts` | Shared content model for the rank-method chooser, consumed by both `RankHomeScreen` and TabNav's `RankMenu` sheet so they cannot diverge |
 | `scrollToTop.ts` | Re-tap-to-top registry (flag `ux.retap_active_tab`) — a tab's root screen registers its scroll handler via `registerScrollToTop` |
 

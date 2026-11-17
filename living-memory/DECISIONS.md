@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-275 — Home tiles that cross tabs show "‹ Home" for the visit (Q1 (a)); the audit's small continuity fixes ship behind one flag
+
+**Date:** 2026-11-17 · **Who:** the operator's ask through the main session ("wiring Home's tiles to the Home control, plus the smaller navigation fixes from the audit"), Q1 = option (a) following D-269; built by a builder subagent on `feat/nav-continuity`. Scope: `docs/plans/nav-continuity/scope.md`.
+**Context:** the 2026-11-12 navigation map found ten Home tiles that switch tabs with no way back (A1), and small continuity breaks R1–R4, R8, R9, R13 (picker with no exit, stacked copies of the app and of pages, unreachable Back fallbacks, sign-out leaving pages underneath, Portfolio's system back, dead "go to X" sentences, Tiers dropping unsaved moves).
+**Decision:**
+- Flag `nav.home_return` (code default false, shipped true): D-269's arrival-scoped control generalised into one store (`state/homeReturn`) and ONE control (`components/HomeReturnBar`, "‹ Home") drawn by `TabNav` under the top bar; Home arms it for Team outlook, Review outlook, Overall rank, Buy, Sell, See P ranking, Find a trade, View matches; it lasts until another tab gets focus. Rank players and Check trends (rank pages) are excluded: the 2026-08-16 one-exit ruling stands and Q5 is not taken. The position tile body keeps D-269's header control (no second control). Not extended to non-Home origins or the Trios streak chip (it is on Trios, not Home).
+- Flag `nav.continuity` (code default false, shipped true) gates R1–R4, R8, R9, R13. Pages already underneath are returned to with React Navigation's `navigate(…, { pop: true })` (G-056); root-stack pages return to the tabs with `popTo('Main')`; Back-or-fallback controls test their own stack's index; sign-out / deletion / expiry `reset` to SignIn.
+- The decisions are pure functions in `navigation/navContinuity.ts`, executed by `tests/check-nav-continuity.js`.
+**Consequences:**
+- No new analytics event for the "‹ Home" tap, Close or the Tiers prompt (waiver awaiting operator sign-off; `screen_viewed` carries the return).
+- The rank chooser's card now REMOVES the chooser when the chosen page is already under it; a page not in the stack is still pushed over the chooser (the #162/#165 navigate-not-replace rule holds).
+- Either flag false + reload restores today's navigation without a build.
+
 ## D-274 — Founders' review pages are hosted behind the founder gate and stored in the database, never in the repo; comments are saved server-side
 
 **Date:** 2026-11-16 · **Who:** the operator's ask through the main session; built by a builder subagent on `feat/founder-review-pages`.

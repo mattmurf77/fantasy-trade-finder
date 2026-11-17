@@ -996,7 +996,16 @@ setOnSessionExpired(() => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { navigationRef } = require('../navigation/RootNav') as typeof import('../navigation/RootNav');
     if (navigationRef.isReady() && navigationRef.getCurrentRoute?.()?.name !== 'SignIn') {
-      navigationRef.navigate('SignIn' as never);
+      // R8 (flag `nav.continuity`, D-275): RESET to the sign-in page, as the
+      // test-profile swap does, so the expired session's pages are not left
+      // underneath it (finding D7). Off: the push, as before.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { useFeatureFlags } = require('./useFeatureFlags') as typeof import('./useFeatureFlags');
+      if (useFeatureFlags.getState().flags['nav.continuity']) {
+        navigationRef.reset({ index: 0, routes: [{ name: 'SignIn' as never }] });
+      } else {
+        navigationRef.navigate('SignIn' as never);
+      }
     }
   } catch {
     /* navigation not mounted yet — RootNav's gating handles the next boot */

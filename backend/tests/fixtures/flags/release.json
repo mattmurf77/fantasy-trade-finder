@@ -155,6 +155,8 @@
   "nav.home_tab": true,
   "nav.home_hub": true,
   "nav.home_position_roster": true,
+  "nav.home_return": true,
+  "nav.continuity": true,
   "usage_trends.enabled": true,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,

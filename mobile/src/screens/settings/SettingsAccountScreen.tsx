@@ -40,6 +40,8 @@ import { styles } from './styles';
 import AccountIdentitySection from './sections/AccountIdentitySection';
 import SignOutRow from './sections/SignOutRow';
 import AccountDataSection from './sections/AccountDataSection';
+import { useFlag } from '../../state/useFeatureFlags';
+import { CONTINUITY_FLAG, signInReset } from '../../navigation/navContinuity';
 
 export default function SettingsAccountScreen({ navigation }: any) {
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
@@ -48,6 +50,12 @@ export default function SettingsAccountScreen({ navigation }: any) {
   // from SleeperConnect now returns to this page rather than to the tabs.
   const navigate = (route: string, params?: object) => navigation.navigate(route, params);
   const onNotice = (msg: string, tone?: 'success' | 'warn') => setToast({ msg, tone });
+  // R8 (flag `nav.continuity`, D-275): sign-out and deletion RESET the stack
+  // to the sign-in page, as the test-profile swap does (state/testProfile.ts);
+  // a replace left the tabs and Settings underneath (finding D7).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
+  const toSignIn = () =>
+    continuityOn ? navigation.reset(signInReset()) : navigation.replace('SignIn');
 
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
@@ -59,11 +67,11 @@ export default function SettingsAccountScreen({ navigation }: any) {
           // picker after the account-only Sleeper link succeeds.
           onSleeperLinked={() => navigation.replace('LeaguePicker')}
         />
-        <SignOutRow onSignedOut={() => navigation.replace('SignIn')} />
+        <SignOutRow onSignedOut={toSignIn} />
         <AccountDataSection
           onNotice={onNotice}
           navigate={navigate}
-          onAccountDeleted={() => navigation.replace('SignIn')}
+          onAccountDeleted={toSignIn}
         />
       </ScrollView>
       <Toast

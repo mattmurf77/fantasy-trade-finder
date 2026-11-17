@@ -140,6 +140,7 @@ import { teamLabel } from '../utils/teamLabel';
 import { useAppActive } from '../hooks/useAppActive';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG } from '../navigation/navContinuity';
 import type { Player, Position } from '../shared/types';
 
 const POLL_INTERVAL_MS = 15_000;
@@ -194,6 +195,10 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   // league's picks are assigned, since that is what lets recording stay
   // "confirm, not select" (the app already knows whose pick 1.03 is).
   const manualPicksOn = useFlag('draft.manual_picks');
+  // R2 (flag `nav.continuity`, D-275): "Rank the rookies" returns to the tabs
+  // underneath instead of stacking a second copy of the app over the pushed
+  // room (finding D3), and tells Rookie Ranks which room to come back to.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const [mode, setMode] = useState<DraftMode>('real');
   const mockMode = mockOn && mode === 'mock';
   const [setupOpen, setSetupOpen] = useState(false);
@@ -480,6 +485,19 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const goToRookieRanks = useCallback(() => {
     // The bridge is two-way as of W1: RookieRanks gets a return route, so
     // acting on a rookie from the board no longer costs your place.
+    if (continuityOn) {
+      // popTo pops this pushed room (the tab copy has 'Main' current, so
+      // nothing is popped there). `returnInTabs` lets Rookie Ranks' "Back to
+      // the draft room" return to the Draft TAB rather than push a new room.
+      navigation?.popTo?.('Main', {
+        screen: 'Rank',
+        params: {
+          screen: 'RookieRanks',
+          params: { returnTo: 'DraftRoom', returnLeagueId: leagueId, returnInTabs: inTabs },
+        },
+      });
+      return;
+    }
     navigation?.navigate?.('Main', {
       screen: 'Rank',
       params: {
@@ -487,7 +505,7 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
         params: { returnTo: 'DraftRoom', returnLeagueId: leagueId },
       },
     });
-  }, [navigation, leagueId]);
+  }, [navigation, leagueId, continuityOn, inTabs]);
 
   const onSaveAnchored = useCallback(
     (playerId: string, res: { value: number }) => {

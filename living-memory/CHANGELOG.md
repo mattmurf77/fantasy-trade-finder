@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), branch `feat/nav-continuity` (not merged)
+
+- **What:** flag `nav.home_return` — eight Home tiles that cross tabs show "‹ Home" under the top bar for that visit (rank pages and D-269's roster arrival excluded). Flag `nav.continuity` — the audit's R1–R4, R8, R9, R13: picker Close + no one-league auto-forward in-app; no second copy of the tabs; links return to pages underneath (`pop`); own-stack Back fallbacks; sign-out/deletion/expiry reset; Portfolio Back; See liked → Matches › Awaiting; three sentence links; Tiers unsaved prompt.
+- **Code:** `navigation/navContinuity.ts` (pure), `state/homeReturn.ts`, `components/HomeReturnBar.tsx`; call sites in 20 screens/navigators. Both flags false in code, true in config + 3 fixtures + client defaults.
+- **Evidence:** `check-nav-continuity.js` (executes the decisions), six existing checks re-pinned, backend flag test. TestFlight checklist in the scope doc.
+- **Next:** main session review + push; operator runs the checklist; analytics waiver sign-off.
+
 ## 2026-11-16 — Founders' review: Review pages (D-274), merged as `a9fd2460` (PR #702), live, TestFlight 1.22.0 (196)
 
 - **What:** a third choice in Calibration › Founders' review. The operator uploads review pages (HTML with `textarea[data-k]` boxes) with the cron secret; founders open them full screen in a web view and their comments save to the server per box per account. Pages live only in the database (`founder_pages`, `founder_page_notes`), never in the public repo.

@@ -40,6 +40,7 @@ import {
 import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { TickLabel, Button, Icon } from '../components/chalkline';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, tiersLeavePrompts } from '../navigation/navContinuity';
 import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
@@ -451,6 +452,32 @@ export default function TiersScreen() {
   // the key changes for the former, the mutations clear the flag for the latter.
   const bucketsDirtyRef = useRef(false);
   const bucketKeyRef = useRef('');
+
+  // R13 (flag `nav.continuity`, D-275): an unsaved-changes prompt. Leaving
+  // removes this page ("More ways to rank" returning to the chooser, a Rank
+  // re-tap, a swipe back), which used to drop unsaved moves without a word
+  // (finding D5). Same wording as Roster setup's tier prompt. Moving to
+  // another tab is not a removal and keeps the moves, as before.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
+  const tiersSaving = saveMutation.isPending;
+  useEffect(() => {
+    if (!continuityOn) return;
+    return navigation.addListener('beforeRemove', (e: any) => {
+      if (!tiersLeavePrompts(bucketsDirtyRef.current, tiersSaving, true, e?.data?.action?.type)) return;
+      e.preventDefault();
+      Alert.alert('Discard your tier changes?', undefined, [
+        { text: 'Keep editing', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            bucketsDirtyRef.current = false;
+            navigation.dispatch(e.data.action);
+          },
+        },
+      ]);
+    });
+  }, [continuityOn, navigation, tiersSaving]);
 
   // Re-auto-bucket whenever the rankings response changes OR position switches.
   useEffect(() => {

@@ -332,7 +332,9 @@ assert(
   'sabotage detected: addGive/addReceive accumulate — the operator asked for replace',
 );
 assert(
-  /navigation\.navigate\('Trades', \{ screen: 'TradesHome' \}\)/.test(actionDecl || ''),
+  // nav.continuity (D-275, R3) adds `pop: true` so the landing already under
+  // another Acquire page is returned to (G-056); the destination is the same.
+  /navigation\.navigate\('Trades', (?:continuityOn \? \{ screen: 'TradesHome', pop: true \} : )?\{ screen: 'TradesHome' \}\)/.test(actionDecl || ''),
   '#300 the handoff routes to the shipped Trades landing',
   'sabotage detected: navigating to an unrouted or mode-scoped destination',
 );

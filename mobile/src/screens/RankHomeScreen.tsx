@@ -15,6 +15,7 @@ import { usePremiumImport } from '../state/premiumImport';
 import type { PremiumSource } from '../utils/rankPresets';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import {
   guideV2Active,
   recordGuideReceipt,
@@ -65,6 +66,12 @@ import { CONSOLIDATED_VIEW, useRookieScope } from '../state/rookieScope';
 export default function RankHomeScreen({ navigation, route }: any) {
   const setPref = useSession((s) => s.setRankingMethodPref);
   const importOn = useFlag('ranks.import');
+  // R3 / R13 (flag `nav.continuity`, D-275): a method card returns to that
+  // page when it is already underneath (the page "More ways to rank" was
+  // tapped on) instead of opening a new, blank copy over the chooser
+  // (finding D5); "Settings" in the closing note is a link.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
+  const settingsHubOn = useFlag('account.settings_hub');
   // rookie-draft M2 / O1-expanded — the chooser is where a user goes to
   // find a way to rank, so the consolidated rookie view gets a discoverable
   // home here as well as the in-context link on every rank surface's scope
@@ -130,7 +137,12 @@ export default function RankHomeScreen({ navigation, route }: any) {
     // from the chosen surface could never return here — testers read that
     // as being stuck in a loop. Pushing keeps the chooser underneath;
     // launch routing is unaffected (it reads the saved pref, not the stack).
-    navigation.navigate(m.route);
+    // R3: with the flag, a page already underneath is returned to (`pop`)
+    // with its own params kept (`merge`: a Quick Set walk keeps its
+    // position); a page not in the stack is pushed exactly as before, so the
+    // chooser stays underneath it.
+    if (continuityOn) navigation.navigate(m.route, undefined, returnOptions(true, true));
+    else navigation.navigate(m.route);
   };
 
   const onImportApplied = (count: number) => {
@@ -342,10 +354,28 @@ export default function RankHomeScreen({ navigation, route }: any) {
           </View>
         ) : null}
 
-        <Text style={styles.mixNote}>
-          Every method writes to the same board — mix anytime. Change your
-          pick in Settings.
-        </Text>
+        {continuityOn ? (
+          // R13 (flag `nav.continuity`, D-275): "Settings" is a link to the
+          // page that holds the ranking-method choice (finding J2): the
+          // Ranking page of the Settings hub, or the flat Settings list.
+          <Text style={styles.mixNote}>
+            {'Every method writes to the same board — mix anytime. Change your pick in '}
+            <Text
+              testID="rank-home.settings-link"
+              accessibilityRole="link"
+              style={styles.mixNoteLink}
+              onPress={() => navigation.navigate(settingsHubOn ? 'SettingsRanking' : 'Settings')}
+            >
+              Settings
+            </Text>
+            .
+          </Text>
+        ) : (
+          <Text style={styles.mixNote}>
+            Every method writes to the same board — mix anytime. Change your
+            pick in Settings.
+          </Text>
+        )}
       </ScrollView>
 
       <ImportRankingsSheet
@@ -484,4 +514,5 @@ const styles = StyleSheet.create({
     paddingTop: space.sm,
   },
   mixNote: { ...type.bodySm, color: chalk.faint, textAlign: 'center' },
+  mixNoteLink: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
 });
