@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { ink, chalk, ice, fonts, radii, space } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
-import { useSession, NO_LEAGUE_ID } from '../state/useSession';
+import { useSession, NO_LEAGUE_ID, refreshAfterLeagueChange } from '../state/useSession';
 import SignInScreen, { EntryPlatformIntent } from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import LeagueJoinScreen from '../screens/LeagueJoinScreen';
@@ -663,10 +663,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
             <LeaguePickerScreen
               // R2: in-app, return to the tabs underneath (popTo) instead of
               // stacking a second copy of the app on top (finding D3).
-              onLeaguePicked={() =>
-                pickerExit(pickerOpenedInApp(navigation.getState(), route.key), continuityOn) === 'popTo'
-                  ? navigation.popTo('Main')
-                  : navigation.replace('Main')}
+              // The tabs stay mounted on that path, so the pick must do what
+              // the in-place league switch does (refreshAfterLeagueChange).
+              onLeaguePicked={() => {
+                if (pickerExit(pickerOpenedInApp(navigation.getState(), route.key), continuityOn) === 'popTo') {
+                  refreshAfterLeagueChange();
+                  navigation.popTo('Main');
+                } else {
+                  navigation.replace('Main');
+                }
+              }}
               onSignOut={async () => {
                 await useSession.getState().signOut();
                 // R8: nothing of the signed-out session stays underneath.

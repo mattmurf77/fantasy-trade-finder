@@ -257,8 +257,23 @@ const NO_ARM = [
   assert(/const continuityOn = useFlag\(CONTINUITY_FLAG\);/.test(rn), 'B2a. RootNav reads `nav.continuity`');
   assert(/const inApp = continuityOn && pickerOpenedInApp\(navigation\.getState\(\), route\.key\);/.test(rn),
     'B2b. in-app = flag on AND the tabs are under the picker');
-  assert(/pickerExit\(pickerOpenedInApp\(navigation\.getState\(\), route\.key\), continuityOn\) === 'popTo'\s*\?\s*navigation\.popTo\('Main'\)\s*:\s*navigation\.replace\('Main'\)/.test(rn),
-    'B2c. a pick returns to the existing tabs in-app, else replace (today)');
+  assert(/if \(pickerExit\(pickerOpenedInApp\(navigation\.getState\(\), route\.key\), continuityOn\) === 'popTo'\) \{\s*refreshAfterLeagueChange\(\);\s*navigation\.popTo\('Main'\);\s*\} else \{\s*navigation\.replace\('Main'\);\s*\}/.test(rn),
+    'B2c. a pick returns to the existing tabs in-app (after the league-change refresh), else replace (today)');
+  {
+    // The tabs stay mounted on the popTo path, so the pick must refresh what
+    // the in-place switch refreshes: one shared function, used by both.
+    const us2 = src('src/state/useSession.ts');
+    const fn = (us2.match(/export function refreshAfterLeagueChange\(\): void \{([\s\S]*?)\n\}/) || [])[1] || '';
+    assert(/noteTradeInputChange\('after_league_switch'\)/.test(fn)
+      && ['portfolio', 'rankings', 'progress', 'streak', 'tiers-status', 'awaiting-trades'].every((k) => fn.includes("['" + k + "']"))
+      && fn.includes("['matches', 'all']"),
+      'B2c2. refreshAfterLeagueChange tells the trade inputs and invalidates the league-agnostic caches');
+    const swStart = us2.indexOf('switchLeague: async');
+    const sw = us2.slice(swStart, us2.indexOf('setInvitedBy: (username) =>', swStart));
+    assert(swStart > 0 && sw.length > 200, 'B2c3-pre. switchLeague located');
+    assert(/refreshAfterLeagueChange\(\);/.test(sw) && !/invalidateQueries/.test(sw),
+      'B2c3. the in-place switch uses the same function (no second copy to drift)');
+  }
   assert(/onClose=\{inApp \? \(\) => navigation\.goBack\(\) : undefined\}/.test(rn) && /openedInApp=\{inApp\}/.test(rn),
     'B2d. Close (back to where it was opened) only in-app');
   const lp = src('src/screens/LeaguePickerScreen.tsx');
