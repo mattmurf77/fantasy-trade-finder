@@ -194,6 +194,8 @@ counterparty board disclosure or client analytics event is added.
 - [`offer_import_consents`](#offer_import_consents)
 - [`revised_offer_cards`](#revised_offer_cards)
 - [`founder_rule_notes`](#founder_rule_notes)
+- [`founder_pages`](#founder_pages)
+- [`founder_page_notes`](#founder_page_notes)
 - [`trade_policy_shadow`](#trade_policy_shadow)
 
 **Players / Drafts / Picks**
@@ -1059,6 +1061,42 @@ A founder's comment or question on one yes/no rule of the trade engine (Founders
 | `created_at` | str, not null | ISO UTC time this version was saved (the current note's `updated_at`; the first version's is its `created_at`) |
 
 Index: `ix_founder_rule_notes_rule` on `(rule_key, id)`. A new table, created by `metadata.create_all` on fresh and existing databases; no `migration_cols` row.
+
+---
+
+## `founder_pages`
+
+An operator review document for Founders' review "Review pages" ([design](plans/founder-review/pages-design.md)): a self-contained HTML page whose comment boxes are `textarea[data-k]`. Uploaded at runtime through `PUT /api/admin/founder-pages/<slug>` (X-Cron-Secret) and stored only here: the repo is public, so page content is never committed. One row per slug; a re-upload replaces `title`, `html`, `bytes` and `updated_at`. Written through `database.save_founder_page` after `founder_pages.parse_upload`; deleted by `delete_founder_page` (with its notes). Names no person.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `slug` | str, not null, unique | `[a-z0-9-]{1,64}` |
+| `title` | str, not null | at most 200 characters; defaults to the slug |
+| `html` | text, not null | the whole document, UTF-8, at most 8 MiB |
+| `bytes` | int, not null | UTF-8 size of `html` |
+| `created_at` | str, not null | ISO UTC, first upload |
+| `updated_at` | str, not null | ISO UTC, latest upload |
+
+A new table, created by `metadata.create_all` on fresh and existing databases; no `migration_cols` row.
+
+---
+
+## `founder_page_notes`
+
+A founder's comment in one box of one review page. One row per (page, box, account) holding the box's current text; an empty or whitespace-only save deletes the row (no history). Written through `database.save_founder_page_notes` after `founder_pages.parse_notes`; a founder reads only their own (`load_founder_page_notes`); the operator read (`load_founder_page_notes_for_operator`, `GET /api/admin/founder-pages/<slug>/notes`) returns key, label, body and time, never the account id. Deleted with the page, and deleted and exported with the author's account (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `page_slug` | str, not null | `founder_pages.slug` |
+| `box_key` | str, not null | the box's `data-k`, free text, 1–128 characters |
+| `label` | str, not null | the box's `data-label`, at most 300 characters (may be "") |
+| `body` | text, not null | at most 10,000 characters, never blank |
+| `user_id` | str, not null | ACCOUNT id of the founder who wrote it |
+| `updated_at` | str, not null | ISO UTC, latest save |
+
+Unique: `uq_founder_page_notes_box` on `(page_slug, box_key, user_id)`. A new table, created by `metadata.create_all`; no `migration_cols` row.
 
 ---
 

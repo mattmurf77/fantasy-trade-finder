@@ -797,6 +797,10 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # Founders' review (rule waterfall): a founder's notes on the engine's rules,
     # written under their own account.
     "founder_rule_notes",
+    # Founders' review (review pages): a founder's comments on an operator
+    # review page, written under their own account. The pages themselves
+    # (founder_pages) name no person.
+    "founder_page_notes",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each

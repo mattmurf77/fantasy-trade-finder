@@ -146,3 +146,57 @@ export function saveRuleNote(ruleKey: string, body: string): Promise<RuleNote> {
 export function getRuleNoteHistory(ruleKey: string, options?: Opts): Promise<{ rule_key: string; history: RuleNoteVersion[] }> {
   return api.get(`/api/founder/rule-notes/${encodeURIComponent(ruleKey)}`, options);
 }
+
+// ── Review pages ────────────────────────────────────────────────────────────
+// docs/plans/founder-review/pages-design.md. The operator's review documents,
+// stored on the server (never in the repo) and opened in a web view. Same
+// founder gate plus flag `founder.review_pages`, both server-side: a 404 on
+// the list hides the "Review pages" choice (listFounderPages returns null).
+// The page's HTML is fetched here, through the normal client, so no session
+// token, cookie or API URL ever reaches the web view; its comments come back
+// over the message bridge and are saved here too.
+
+export interface FounderPageSummary {
+  slug: string;
+  title: string;
+  bytes: number;
+  updated_at: string;
+  /** The caller's own notes on this page. */
+  notes: number;
+}
+
+export interface FounderPageDocument {
+  slug: string;
+  title: string;
+  updated_at: string;
+  html: string;
+  /** The caller's own notes: {box key: body}. */
+  notes: Record<string, string>;
+}
+
+export type FounderPageNoteSet = Record<string, { label: string; body: string }>;
+
+/** The pages, or null when the server has no such route for this session (404). */
+export async function listFounderPages(options?: Opts): Promise<FounderPageSummary[] | null> {
+  try {
+    const r = await api.get<{ pages: FounderPageSummary[] }>('/api/founder/pages', {
+      ...options, quietStatuses: [404],
+    });
+    return Array.isArray(r?.pages) ? r.pages : [];
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** One page (about 2.5 MB): the slow cap, so a slow network is not "took too long". */
+export function getFounderPage(slug: string, options?: Opts): Promise<FounderPageDocument> {
+  return api.get<FounderPageDocument>(`/api/founder/pages/${encodeURIComponent(slug)}`, {
+    ...options, timeoutMs: 45_000,
+  });
+}
+
+/** Upsert the caller's notes (a blank body clears one). */
+export function saveFounderPageNotes(slug: string, set: FounderPageNoteSet): Promise<{ saved: number; cleared: number }> {
+  return api.put(`/api/founder/pages/${encodeURIComponent(slug)}/notes`, { set });
+}

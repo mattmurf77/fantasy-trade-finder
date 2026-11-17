@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-16 — Founders' review: Review pages (D-274), branch `feat/founder-review-pages`, unmerged
+
+- **What:** a third choice in Calibration › Founders' review. The operator uploads review pages (HTML with `textarea[data-k]` boxes) with the cron secret; founders open them full screen in a web view and their comments save to the server per box per account. Pages live only in the database (`founder_pages`, `founder_page_notes`), never in the public repo.
+- **Server:** `backend/founder_pages.py` (validation), accessors in `database.py`, routes `/api/founder/pages*` (founder gate + new flag `founder.review_pages`, shipped on) and `/api/admin/founder-pages*` (cron secret, 8 MiB cap, chunked-safe). New tables by `create_all` at start-up.
+- **App:** `FounderPagesReview` + `FounderPageViewer` (Modal, safe area); no token in the web view, navigation blocked, bridge validated, batched saves with retry, flush and warn on close; `utils/openExternal.openWebLink` added.
+- **Next:** merge, upload a page, run the TestFlight checklist in `pages-scope.md` §3.
+
 ## 2026-11-16 — Playoff targets operator re-run `retry_missing_targets` (D-273)
 
 - **What:** the projection cron route takes `{"retry_missing_targets": true}` (weekly mode, flag `league.playoff_targets`): makes due now every current-model latest success with no current targets block (absent, not computed other than `not_eligible`, or an old `settings_hash`, so every pre-D-272 block at 0.01). Response `retried_missing_targets`; flag off adds `retried_missing_targets_skipped`. Twin of `retry_missing_moves`; both share `batch._retry_missing_baselines`.

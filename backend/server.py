@@ -91,6 +91,9 @@ from .database import (
     load_founder_label_overrides, save_founder_label_overrides,
     FounderNoteError, save_founder_rule_note, load_founder_rule_notes,
     load_founder_rule_note_history,
+    save_founder_page, load_founder_pages, load_founder_page, founder_page_exists,
+    load_founder_page_notes, save_founder_page_notes, load_founder_page_notes_for_operator,
+    delete_founder_page,
     upsert_user, upsert_league, league_median_setting, AccountGone,
     save_ranking_swipes, save_trade_swipes,
     save_trade_decision, load_swipe_decisions, load_trade_decisions,
@@ -268,6 +271,7 @@ from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import test_profile as _tp               # onboarding test profile (dev.test_profile)
+from . import founder_pages as _founder_pages_mod   # founders' review pages (founder.review_pages)
 from . import fairness_window as _fairness_window  # default "fair" threshold (trade.fairness_window_v2)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
@@ -30709,6 +30713,138 @@ def admin_founder_rule_notes():
     notes = [{**note, "history": load_founder_rule_note_history(note["rule_key"])}
              for note in load_founder_rule_notes(include_empty=True) if note["versions"]]
     return jsonify(catalog_version=rule_catalog.VERSION, notes=notes)
+
+
+# ─── Founders' review, "Review pages" ────────────────────────────────────────
+# docs/plans/founder-review/pages-design.md. The operator's review documents
+# (single-file HTML with comment boxes), uploaded at runtime through the
+# X-Cron-Secret admin routes and stored in founder_pages (the repo is public:
+# page content is never committed). Founders read them in the app and their
+# comments are saved per box per account (founder_page_notes). The founder
+# routes need the founder gate AND flag founder.review_pages; anything else is
+# 404. Validation in backend/founder_pages.py. Logs carry counts only.
+
+FOUNDER_PAGE_MAX_BYTES = _founder_pages_mod.MAX_PAGE_BYTES
+FOUNDER_PAGE_NOTES_MAX_BYTES = _founder_pages_mod.MAX_NOTES_BODY_BYTES
+
+
+def _founder_pages_session():
+    """The founder's session when the review pages are on for it, else None."""
+    if not is_enabled("founder.review_pages"):
+        return None
+    return _founder_session()
+
+
+def _founder_pages_body(cap: int):
+    """The raw request body, or None when it is over ``cap`` bytes. Checked before the
+    read (Content-Length) and at it (a per-request max_content_length of cap + 1, so a
+    chunked body is never read past the cap): the transport guard of POST /api/feedback,
+    never Flask's app-global MAX_CONTENT_LENGTH."""
+    from werkzeug.exceptions import RequestEntityTooLarge
+    if (request.content_length or 0) > cap:
+        return None
+    request.max_content_length = cap + 1
+    try:
+        raw = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        return None
+    return None if len(raw) > cap else raw
+
+
+@app.route("/api/founder/pages", methods=["GET"])
+def founder_pages_list():
+    """GET — {pages: [{slug, title, bytes, updated_at, notes}]}, newest first; ``notes``
+    counts the caller's own notes. 404 off the gate (the app then hides the choice)."""
+    sess = _founder_pages_session()
+    if sess is None:
+        return _founder_not_found()
+    return jsonify(pages=load_founder_pages(viewer_id=str(sess["user_id"])))
+
+
+@app.route("/api/founder/pages/<slug>", methods=["GET"])
+def founder_page_get(slug):
+    """GET — {slug, title, updated_at, html, notes: {box_key: body}} (the caller's own
+    notes only). 404 for an unknown slug."""
+    sess = _founder_pages_session()
+    if sess is None:
+        return _founder_not_found()
+    page = load_founder_page(slug) if _founder_pages_mod.valid_slug(slug) else None
+    if page is None:
+        return _founder_not_found()
+    return jsonify(slug=page["slug"], title=page["title"], updated_at=page["updated_at"],
+                   html=page["html"], notes=load_founder_page_notes(slug, str(sess["user_id"])))
+
+
+@app.route("/api/founder/pages/<slug>/notes", methods=["PUT"])
+def founder_page_notes_put(slug):
+    """PUT {set: {box_key: {label, body}}} — upsert the caller's notes (a blank body deletes
+    the row): {saved, cleared}. 404 unknown page; 400 invalid_body / too_many_keys (over
+    200) / invalid_key / invalid_note / label_too_long / body_too_long; 413 too_large."""
+    sess = _founder_pages_session()
+    if sess is None:
+        return _founder_not_found()
+    if not _founder_pages_mod.valid_slug(slug) or not founder_page_exists(slug):
+        return _founder_not_found()
+    raw = _founder_pages_body(FOUNDER_PAGE_NOTES_MAX_BYTES)
+    if raw is None:
+        return jsonify(error="too_large", limit=FOUNDER_PAGE_NOTES_MAX_BYTES), 413
+    try:
+        body = json.loads(raw) if raw else None
+    except ValueError:
+        body = None
+    try:
+        items = _founder_pages_mod.parse_notes(body)
+    except _founder_pages_mod.InvalidRequest as exc:
+        return jsonify(error=exc.code), 400
+    result = save_founder_page_notes(slug, str(sess["user_id"]), items)
+    log.info("founder-pages: notes saved=%d cleared=%d", result["saved"], result["cleared"])
+    return jsonify(result)
+
+
+@app.route("/api/admin/founder-pages", methods=["GET"])
+def admin_founder_pages_list():
+    """GET (X-Cron-Secret) — {pages: [{slug, title, bytes, updated_at, notes}]}; ``notes``
+    is every founder's total. Not flag-gated."""
+    _require_cron_auth()
+    return jsonify(pages=load_founder_pages())
+
+
+@app.route("/api/admin/founder-pages/<slug>", methods=["PUT", "DELETE"])
+def admin_founder_page(slug):
+    """PUT ?title= with a raw text/html body (X-Cron-Secret) — create or replace the page:
+    {slug, title, bytes, created, updated_at}. 400 invalid_slug / empty_body / not_utf8 /
+    not_html / title_too_long; 413 too_large (over 8 MiB).
+    DELETE — the page and every note on it: {deleted: true, notes: n}; 404 unknown."""
+    _require_cron_auth()
+    if request.method == "DELETE":
+        result = delete_founder_page(slug) if _founder_pages_mod.valid_slug(slug) else {"deleted": False}
+        if not result["deleted"]:
+            return jsonify(error="not_found"), 404
+        log.info("founder-pages: page deleted notes=%d", result["notes"])
+        return jsonify(result)
+    if not _founder_pages_mod.valid_slug(slug):
+        return jsonify(error="invalid_slug"), 400
+    raw = _founder_pages_body(FOUNDER_PAGE_MAX_BYTES)
+    if raw is None:
+        return jsonify(error="too_large", limit=FOUNDER_PAGE_MAX_BYTES), 413
+    try:
+        title, html = _founder_pages_mod.parse_upload(slug, request.args.get("title"), raw)
+    except _founder_pages_mod.InvalidRequest as exc:
+        return jsonify(error=exc.code), (413 if exc.code == "too_large" else 400)
+    result = save_founder_page(slug, title, html)
+    log.info("founder-pages: page %s bytes=%d", "created" if result["created"] else "replaced",
+             result["bytes"])
+    return jsonify(result)
+
+
+@app.route("/api/admin/founder-pages/<slug>/notes", methods=["GET"])
+def admin_founder_page_notes(slug):
+    """GET (X-Cron-Secret) — {slug, notes: [{key, label, body, updated_at}]}: every
+    founder's notes on the page, by box. Never an account id. 404 unknown page."""
+    _require_cron_auth()
+    if not _founder_pages_mod.valid_slug(slug) or not founder_page_exists(slug):
+        return jsonify(error="not_found"), 404
+    return jsonify(slug=slug, notes=load_founder_page_notes_for_operator(slug))
 
 
 @app.route("/api/admin/engine-metrics", methods=["GET"])

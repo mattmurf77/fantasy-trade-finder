@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-274 — Founders' review pages are hosted behind the founder gate and stored in the database, never in the repo; comments are saved server-side
+
+**Date:** 2026-11-16 · **Who:** the operator's ask through the main session; built by a builder subagent on `feat/founder-review-pages`.
+**Context:** the operator writes review documents (single-file HTML with comment boxes) for the founders. The GitHub repo is public, so the pages cannot be committed or served as static files, and the founders' answers had only a browser download as an export.
+**Decision:**
+- Pages are uploaded at runtime (`PUT /api/admin/founder-pages/<slug>`, `X-Cron-Secret`, 8 MiB cap) into `founder_pages`; founders read them only through `/api/founder/pages*` (the founder gate plus flag `founder.review_pages`, shipped on).
+- The app fetches the HTML through its normal API client and shows it in a web view as a string on `about:blank`: no session token, cookie or API URL reaches the page; all navigation away is blocked (http(s) links open in the browser).
+- Comments come back over the web view message bridge (contract: `textarea[data-k]`, optional `data-label`), are validated on both sides and saved per box per account in `founder_page_notes`; the operator reads them back without account ids.
+**Consequences:**
+- Page content lives only in the production database: back it up outside the repo; a re-upload replaces it and keeps the comments while the box keys stay the same.
+- Design: `docs/plans/founder-review/pages-design.md`. Rollback: `founder.review_pages` false + reload hides the choice; the admin routes stay for readback.
+
 ## D-273 — Playoff targets gets an operator re-run (`retry_missing_targets`), built to the Max PF moves pattern
 
 **Date:** 2026-11-16 · **Who:** the operator: "Build it and run it".
