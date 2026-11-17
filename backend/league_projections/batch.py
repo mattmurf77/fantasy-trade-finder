@@ -127,12 +127,27 @@ def _moves_missing(raw):
     return block.get("settings_hash") != maxpf_moves.settings_hash(maxpf_moves.settings())
 
 
-def _retry_missing_moves_baselines(now):
-    """Operator-only, after `league.max_pf_moves` is turned on: a target whose
-    latest successful baseline was made under the current model and saved no
-    computed moves block, that is not leased and has no attempt in flight, is
-    due now. Returns how many were marked. Leaves computed blocks alone, so
-    repeated calls converge to zero."""
+def _targets_missing(raw, current_hash):
+    """No current Playoff targets block in a saved result, by `_moves_missing`'s
+    rules. `compute` writes `computed: false` only as `not_eligible` (the team
+    is not in the run), the settled answer, so that one is left alone; any
+    other `computed: false` counts as missing. A computed block whose
+    `settings_hash` is not `current_hash` (e.g. saved under `min_playoff_gain`
+    0.01, before D-272) is missing too. A computed block with a `skipped`
+    reason (season over, clinched, no sellers...) is current: a re-run under
+    the same settings repeats it."""
+    block = json.loads(raw or "{}").get("playoff_targets")
+    if not isinstance(block, dict):
+        return True
+    if not block.get("computed"):
+        return block.get("reason") != "not_eligible"
+    return block.get("settings_hash") != current_hash
+
+
+def _retry_missing_baselines(now, missing):
+    """A target whose latest successful baseline was made under the current
+    model and whose `result_json` is `missing(result_json)`, that is not leased
+    and has no attempt in flight, is due now. Returns how many were marked."""
     t, s, a = (db.league_projection_targets_table, db.league_projection_runs_table.alias("s"),
                db.league_projection_runs_table.alias("a"))
     with db.engine.begin() as conn:
@@ -141,11 +156,29 @@ def _retry_missing_moves_baselines(now):
                             .where(s.c.status == "complete", a.c.status.not_in(("queued", "running")),
                                    t.c.next_due_at > now.isoformat(),
                                    or_(t.c.lease_until.is_(None), t.c.lease_until <= now.isoformat()))).all()
-        missing = [target_id for target_id, inputs, result in rows
-                   if json.loads(inputs or "{}").get("expected_model_version") == VERSION and _moves_missing(result)]
-        if missing:
-            conn.execute(update(t).where(t.c.target_id.in_(missing)).values(next_due_at=now.isoformat()))
-    return len(missing)
+        marked = [target_id for target_id, inputs, result in rows
+                  if json.loads(inputs or "{}").get("expected_model_version") == VERSION and missing(result)]
+        if marked:
+            conn.execute(update(t).where(t.c.target_id.in_(marked)).values(next_due_at=now.isoformat()))
+    return len(marked)
+
+
+def _retry_missing_moves_baselines(now):
+    """Operator-only, after `league.max_pf_moves` is turned on: a target whose
+    latest successful baseline was made under the current model and saved no
+    computed moves block, that is not leased and has no attempt in flight, is
+    due now. Returns how many were marked. Leaves computed blocks alone, so
+    repeated calls converge to zero."""
+    return _retry_missing_baselines(now, _moves_missing)
+
+
+def _retry_missing_targets_baselines(now):
+    """Operator-only (D-273), the Playoff targets twin of the above: a
+    current-model latest success with no current targets block
+    (`_targets_missing`) is due now. Returns how many were marked."""
+    from . import playoff_targets
+    current = playoff_targets.settings_hash(playoff_targets.settings())
+    return _retry_missing_baselines(now, lambda raw: _targets_missing(raw, current))
 
 
 def target(user_id, league_id):
@@ -180,7 +213,7 @@ def _bootstrap_connected(limit, *, user_id=None, league_id=None):
 
 
 def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=None, foreground_busy=None, retry_incomplete=False,
-             retry_unsupported=False, retry_missing_moves=False):
+             retry_unsupported=False, retry_missing_moves=False, retry_missing_targets=False):
     """Weekly dispatch, or explicit operator-only first baseline preparation.
 
     Initial preparation never refreshes a previously attempted baseline and
@@ -191,8 +224,12 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
     attempt refused as unsupported (`unsupported_policy`), e.g. after a rules
     change newly supports a league format. retry_missing_moves (operator-only,
     weekly mode, needs `league.max_pf_moves` on) does the same for a current-model
-    latest success saved without a computed Max PF moves block. Scheduled ticks
-    pass none of them.
+    latest success saved without a computed Max PF moves block.
+    retry_missing_targets (operator-only, weekly mode, needs
+    `league.playoff_targets` on) does the same for one with no current Playoff
+    targets block (absent, not computed, or another settings hash). Scheduled
+    ticks pass none of them. A target marked by one option is already due, so
+    a later option in the same call does not count it again.
     """
     if type(initial) is not bool:
         raise ValueError("invalid_initial_mode")
@@ -208,6 +245,10 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
         raise ValueError("invalid_retry_missing_moves")
     if retry_missing_moves and initial:
         raise ValueError("retry_missing_moves_requires_weekly_mode")
+    if type(retry_missing_targets) is not bool:
+        raise ValueError("invalid_retry_missing_targets")
+    if retry_missing_targets and initial:
+        raise ValueError("retry_missing_targets_requires_weekly_mode")
     if (user_id is None) != (league_id is None) or (user_id is not None and
             (not isinstance(user_id, str) or not isinstance(league_id, str) or
              not 1 <= len(user_id) <= 128 or not league_id.isdigit() or len(league_id) > 32)):
@@ -229,6 +270,8 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
     retried_unsupported = _retry_unsupported_baselines(now) if retry_unsupported else None
     moves_on = retry_missing_moves and is_enabled("league.max_pf_moves")
     retried_missing_moves = _retry_missing_moves_baselines(now) if moves_on else 0
+    targets_on = retry_missing_targets and is_enabled("league.playoff_targets")
+    retried_missing_targets = _retry_missing_targets_baselines(now) if targets_on else 0
     if not initial:
         _expire_other_model_baselines(now)
     eligibility = [t.c.last_attempt_id.is_(None)] if initial else [t.c.next_due_at <= now.isoformat()]
@@ -276,6 +319,10 @@ def dispatch(fetch_json, *, initial=False, limit=None, user_id=None, league_id=N
         result["retried_missing_moves"] = retried_missing_moves
         if not moves_on:
             result["retried_missing_moves_skipped"] = "max_pf_moves_disabled"
+    if retry_missing_targets:
+        result["retried_missing_targets"] = retried_missing_targets
+        if not targets_on:
+            result["retried_missing_targets_skipped"] = "playoff_targets_disabled"
     return result
 
 

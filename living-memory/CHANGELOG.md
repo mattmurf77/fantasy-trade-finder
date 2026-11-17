@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-16 — Playoff targets operator re-run `retry_missing_targets` (D-273)
+
+- **What:** the projection cron route takes `{"retry_missing_targets": true}` (weekly mode, flag `league.playoff_targets`): makes due now every current-model latest success with no current targets block (absent, not computed other than `not_eligible`, or an old `settings_hash`, so every pre-D-272 block at 0.01). Response `retried_missing_targets`; flag off adds `retried_missing_targets_skipped`. Twin of `retry_missing_moves`; both share `batch._retry_missing_baselines`.
+- **Worker:** unchanged; `_attach_targets` already recomputes a missing or stale block.
+- **Docs:** api-reference, runbook (curl + "finished" rule), scope W4 closed, NEXT.md.
+- **Not verified:** a production call (operator runs it after deploy).
+
 ## 2026-11-16 — Win-now generator checked on real requests: founder labels, a rule test, the launch bars (nothing changed)
 
 - **What:** three local, offline measurements on the operator's own 14 recorded requests (2 manager-league pairs); record in `docs/plans/win-now-season-signal/real-request-checks.md`. Revision 5 stays off; no code, flag or knob moved.
