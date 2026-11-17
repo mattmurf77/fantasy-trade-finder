@@ -1,3 +1,9 @@
+## 2026-11-16 — Playoff targets operator re-run (D-273), branch `feat/playoff-targets-rerun`
+
+- **New:** `backend/tests/test_playoff_targets_rerun.py` **31 passed** in 8 s: missing / not-computed / old-hash (0.01) blocks marked; current, `skipped` and `not_eligible` (any hash) left alone; leased, queued/running attempt, other-model, no-success left alone; converges; combined with the other three options (counted once); flag off says so and never reads settings; early returns mark nothing; ticks without it never read the flag or add keys; validation errors; route whitelist + 400 mapping; end to end through `service._run` (no block → computed under 0.01 → stale after 0.02 → recomputed with the current hash → 0).
+- **Sabotage:** `_targets_missing` ignoring the hash: 5 red, restored.
+- **Wider (local venv, `FTF_SKIP_SIM_GATE=1`, no network):** with `test_maxpf_moves_rerun.py`, `test_maxpf_moves_combined.py`, `test_league_projection_batch.py`, `test_league_projection_initial_batch.py`, `test_league_projection_foreground_review.py`, `test_cron_sweep_scope.py`, `test_playoff_targets*.py`: **225 passed** in 211 s. Full suite is CI.
+
 ## 2026-11-16 — Win-now season signal on real recorded requests (measurement only), branch `docs/label-check-results` (docs only)
 
 - **No code changed.** Record: `docs/plans/win-now-season-signal/real-request-checks.md`. Inputs: the operator's own 14 recorded owner requests with usable season evidence since 2026-11-12 (read-only pull, kept local and git-ignored), 2 manager-league pairs, 10 recorded with the 41 founder label overrides.

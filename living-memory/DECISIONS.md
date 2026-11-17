@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-273 — Playoff targets gets an operator re-run (`retry_missing_targets`), built to the Max PF moves pattern
+
+**Date:** 2026-11-16 · **Who:** the operator: "Build it and run it".
+**Context:** scope W4 left Playoff targets without an operator re-run (D-271). Forecasts saved before the flag went on have no block, and D-272 changed `min_playoff_gain`, so every saved block carries an old `settings_hash`; both wait for Tuesday's weekly forecast.
+**Decision:**
+- `POST /api/cron/league-projections` accepts `{"retry_missing_targets": true}` (weekly mode only, flag `league.playoff_targets`), mirroring `retry_missing_moves` (D-260): same target rule (current-model latest success, not leased, no attempt in flight), same response shape (`retried_missing_targets`, `retried_missing_targets_skipped: "playoff_targets_disabled"`).
+- Missing means: no block; `computed: false` other than `not_eligible`; or a computed block whose `settings_hash` is not current. `compute` writes `computed: false` only as `not_eligible`, so that is the one settled reason (as for moves, whatever its hash). A computed block with a `skipped` reason (season over, clinched, near certain, no sellers...) is current.
+- The worker needed no change: `_attach_targets` reuses a saved block only when it is computed with the current hash, so a marked target recomputes.
+**Consequences:**
+- The query is shared with `retry_missing_moves` (`batch._retry_missing_baselines`). A target missing both blocks is counted once, under the first option.
+- Rollback: stop calling it; nothing persistent changes beyond `next_due_at`.
+
 ## D-272 — Playoff targets keeps its calculation; a row needs a 2-point playoff-chance gain to pass
 
 **Date:** 2026-11-16 · **Who:** the operator, after the backtest: "I'm aligned with your recommendations" (keep the calculation, no caveat line, raise the threshold from 1 point to 2).
