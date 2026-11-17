@@ -118,6 +118,14 @@ async function opened(url: string): Promise<boolean> {
   }
 }
 
+/** A plain web link (no platform app to try first): open it in the system browser, or
+ *  show the failure alert. Founders' review pages use it for a page's http(s) links. */
+export async function openWebLink(url: string): Promise<boolean> {
+  if (await opened(url)) return true;
+  showOpenFailed();
+  return false;
+}
+
 // Copy: #351 PRD §4.4 option (ii), verbatim. Wording is design-lead's.
 function showAppMissing(store: { name: string; url: string }): void {
   Alert.alert(

@@ -78,8 +78,11 @@ assert(/if \(e instanceof ApiError && e\.status === 404\) return null;/.test(API
   && /\/api\/founder\/rule-waterfall\?league_id=/.test(API),
   '1a. getRuleWaterfall answers null on 404 (an older server, or not a founder)');
 assert(/const rulesAvailable = rulesQ\.data != null;/.test(HOST)
-  && /if \(!rulesAvailable\) return <FounderLabelReview leagueId=\{leagueId\} \/>;/.test(HOST),
-  '1b. without the route the section is the player label review alone (no choice rendered)');
+  // 2026-11-16: "Review pages" (check-founder-pages.js) is a second way to get the choice;
+  // without either route the section is still the label review alone.
+  && /if \(!rulesAvailable && !pagesAvailable\) return <FounderLabelReview leagueId=\{leagueId\} \/>;/.test(HOST)
+  && /\{rulesAvailable \? \(\s*<Pressable\s+testID="founder-review\.use\.rules"/.test(HOST),
+  '1b. without the route the section is the player label review alone (no choice rendered), and Trade rules renders only with it');
 assert(/const showRules = rulesAvailable && useCase === 'rules';/.test(HOST)
   && /testID="founder-review\.use\.labels"/.test(HOST) && /testID="founder-review\.use\.rules"/.test(HOST)
   && />Player labels</.test(HOST) && />Trade rules</.test(HOST),

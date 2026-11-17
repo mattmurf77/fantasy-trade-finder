@@ -274,6 +274,8 @@
   "grading.blind": true,
   "_comment_founder_review": "2026-11-11 Founders' review (docs/plans/founder-review/): a founder-only section in Calibration to review and correct the win-now season signal's player labels. Ships FALSE. Access needs this flag AND the caller's account id in the FOUNDER_ACCOUNTS env var AND a verified session; anything else is 404. Overrides only reach users through bilateral revision 5 (owner_bilateral_revision_5_enabled).",
   "founder.review": true,
+  "_comment_founder_review_pages": "2026-11-16 Founders' review, Review pages (docs/plans/founder-review/pages-design.md): a third choice in Founders' review that opens the operator's review documents (stored in the database, uploaded through the X-Cron-Secret admin routes, never committed) in a web view and saves the founder's comments server-side. Ships TRUE: it is founder-only behind founder.review's gate (FOUNDER_ACCOUNTS + a verified, non-demo session), so it is inert for everyone else. OFF = /api/founder/pages* answer 404 and the app hides the choice; the admin routes are not flag-gated. Rollback: set false + POST /api/feature-flags/reload.",
+  "founder.review_pages": true,
   "grading.outlook_round": false,
   "grading.outlook_prepare": false,
   "grading.revision4_arm": false,

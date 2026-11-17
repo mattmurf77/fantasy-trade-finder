@@ -1141,6 +1141,40 @@ founder_rule_notes_table = Table("founder_rule_notes", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# founder_pages / founder_page_notes — review pages and the founders' comments
+# ---------------------------------------------------------------------------
+# Founders' review, "Review pages" (docs/plans/founder-review/pages-design.md).
+# The operator's review documents (self-contained HTML with comment boxes)
+# are uploaded at runtime (PUT /api/admin/founder-pages/<slug>) and live only
+# here: the repo is public, so page content is never committed. One row per
+# slug; a re-upload replaces it. Validation in backend/founder_pages.py.
+# New tables, so metadata.create_all creates them; no migration_cols row.
+founder_pages_table = Table("founder_pages", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("slug",       String,  nullable=False, unique=True),   # [a-z0-9-]{1,64}
+    Column("title",      String,  nullable=False),
+    Column("html",       Text,    nullable=False),                # the whole document
+    Column("bytes",      Integer, nullable=False),                # UTF-8 size of html
+    Column("created_at", String,  nullable=False),
+    Column("updated_at", String,  nullable=False),
+)
+
+# One row per (page, comment box, founder): the box's current text. An empty
+# body deletes the row. box_key is the page's own data-k (free text, <= 128).
+# Deleted and exported with the author's account
+# (accounts._ADDITIONAL_PRIVATE_TABLES); deleted with the page.
+founder_page_notes_table = Table("founder_page_notes", metadata,
+    Column("id",         Integer, primary_key=True, autoincrement=True),
+    Column("page_slug",  String,  nullable=False),   # founder_pages.slug
+    Column("box_key",    String,  nullable=False),   # the textarea's data-k
+    Column("label",      String,  nullable=False),   # its data-label (may be "")
+    Column("body",       Text,    nullable=False),   # <= 10,000 characters, never blank
+    Column("user_id",    String,  nullable=False),   # ACCOUNT id of the founder who wrote it
+    Column("updated_at", String,  nullable=False),
+    UniqueConstraint("page_slug", "box_key", "user_id", name="uq_founder_page_notes_box"),
+)
+
+# ---------------------------------------------------------------------------
 # trade_policy_shadow — candidates the TREATMENT policy rejected
 # ---------------------------------------------------------------------------
 # Without this table the treatment's discarded candidates vanish from the
@@ -20002,3 +20036,111 @@ def load_founder_rule_note_history(rule_key: str, *, viewer_id: str | None = Non
         rows = conn.execute(select(t).where(t.c.rule_key == rule_key).order_by(t.c.id)).fetchall()
     return [{"body": r._mapping["body"], "author": _founder_author(r._mapping["user_id"], viewer_id),
              "created_at": r._mapping["created_at"]} for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# founder_pages / founder_page_notes — accessors (founder review, review pages)
+# ---------------------------------------------------------------------------
+# Callers validate first (backend/founder_pages.py); these only store and
+# shape. No account id ever leaves through a return value.
+
+def save_founder_page(slug: str, title: str, html: str, *, now: str | None = None) -> dict:
+    """Create or replace the page ``slug``. Returns {slug, title, bytes, created, updated_at}."""
+    t = founder_pages_table
+    stamp = now or _now()
+    size = len(html.encode("utf-8"))
+    with engine.begin() as conn:
+        existing = conn.execute(select(t.c.id).where(t.c.slug == slug)).first()
+        if existing is None:
+            conn.execute(insert(t).values(slug=slug, title=title, html=html, bytes=size,
+                                          created_at=stamp, updated_at=stamp))
+        else:
+            conn.execute(update(t).where(t.c.slug == slug).values(
+                title=title, html=html, bytes=size, updated_at=stamp))
+    return {"slug": slug, "title": title, "bytes": size, "created": existing is None,
+            "updated_at": stamp}
+
+
+def load_founder_pages(*, viewer_id: str | None = None) -> list[dict]:
+    """Every page, newest first: {slug, title, bytes, updated_at, notes}. ``notes`` counts
+    the viewer's own notes, or every founder's when ``viewer_id`` is None (operator read)."""
+    p, n = founder_pages_table, founder_page_notes_table
+    counts = select(n.c.page_slug, func.count().label("c")).group_by(n.c.page_slug)
+    if viewer_id is not None:
+        counts = counts.where(n.c.user_id == str(viewer_id))
+    with engine.connect() as conn:
+        by_slug = {r.page_slug: int(r.c) for r in conn.execute(counts)}
+        rows = conn.execute(select(p.c.slug, p.c.title, p.c.bytes, p.c.updated_at)
+                            .order_by(p.c.updated_at.desc(), p.c.slug)).fetchall()
+    return [{"slug": r.slug, "title": r.title, "bytes": int(r.bytes), "updated_at": r.updated_at,
+             "notes": by_slug.get(r.slug, 0)} for r in rows]
+
+
+def load_founder_page(slug: str) -> dict | None:
+    """{slug, title, html, bytes, updated_at}, or None for an unknown slug."""
+    t = founder_pages_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t.c.slug, t.c.title, t.c.html, t.c.bytes, t.c.updated_at)
+                           .where(t.c.slug == slug)).first()
+    return None if row is None else dict(row._mapping)
+
+
+def founder_page_exists(slug: str) -> bool:
+    t = founder_pages_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.id).where(t.c.slug == slug)).first() is not None
+
+
+def load_founder_page_notes(slug: str, viewer_id: str) -> dict[str, str]:
+    """The viewer's own notes on one page: {box_key: body}."""
+    t = founder_page_notes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t.c.box_key, t.c.body).where(
+            t.c.page_slug == slug, t.c.user_id == str(viewer_id))).fetchall()
+    return {r.box_key: r.body for r in rows}
+
+
+def save_founder_page_notes(slug: str, author_id: str, items: list, *,
+                            now: str | None = None) -> dict:
+    """Upsert / delete the author's notes on one page in one transaction. ``items`` is
+    [(box_key, label, body)]; a blank (empty or whitespace-only) body deletes the row.
+    Returns {saved, cleared} (cleared counts rows actually removed)."""
+    t = founder_page_notes_table
+    stamp = now or _now()
+    saved = cleared = 0
+    with engine.begin() as conn:
+        for key, label, body in items:
+            where = (t.c.page_slug == slug, t.c.box_key == key, t.c.user_id == str(author_id))
+            if not body.strip():
+                cleared += conn.execute(delete(t).where(*where)).rowcount or 0
+                continue
+            existing = conn.execute(select(t.c.id).where(*where)).first()
+            if existing is None:
+                conn.execute(insert(t).values(page_slug=slug, box_key=key, label=label, body=body,
+                                              user_id=str(author_id), updated_at=stamp))
+            else:
+                conn.execute(update(t).where(t.c.id == existing.id).values(
+                    label=label, body=body, updated_at=stamp))
+            saved += 1
+    return {"saved": saved, "cleared": cleared}
+
+
+def load_founder_page_notes_for_operator(slug: str) -> list[dict]:
+    """Every founder's notes on one page, by box key then time: {key, label, body,
+    updated_at}. Never the account id."""
+    t = founder_page_notes_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t.c.box_key, t.c.label, t.c.body, t.c.updated_at)
+                            .where(t.c.page_slug == slug)
+                            .order_by(t.c.box_key, t.c.updated_at, t.c.id)).fetchall()
+    return [{"key": r.box_key, "label": r.label, "body": r.body, "updated_at": r.updated_at}
+            for r in rows]
+
+
+def delete_founder_page(slug: str) -> dict:
+    """Delete a page and every note on it. Returns {deleted: bool, notes: n}."""
+    p, n = founder_pages_table, founder_page_notes_table
+    with engine.begin() as conn:
+        notes = conn.execute(delete(n).where(n.c.page_slug == slug)).rowcount or 0
+        pages = conn.execute(delete(p).where(p.c.slug == slug)).rowcount or 0
+    return {"deleted": bool(pages), "notes": notes}

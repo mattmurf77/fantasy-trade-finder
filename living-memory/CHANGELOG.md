@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-16 — Founders' review: Review pages (D-273), branch `feat/founder-review-pages`, unmerged
+
+- **What:** a third choice in Calibration › Founders' review. The operator uploads review pages (HTML with `textarea[data-k]` boxes) with the cron secret; founders open them full screen in a web view and their comments save to the server per box per account. Pages live only in the database (`founder_pages`, `founder_page_notes`), never in the public repo.
+- **Server:** `backend/founder_pages.py` (validation), accessors in `database.py`, routes `/api/founder/pages*` (founder gate + new flag `founder.review_pages`, shipped on) and `/api/admin/founder-pages*` (cron secret, 8 MiB cap, chunked-safe). New tables by `create_all` at start-up.
+- **App:** `FounderPagesReview` + `FounderPageViewer` (Modal, safe area); no token in the web view, navigation blocked, bridge validated, batched saves with retry, flush and warn on close; `utils/openExternal.openWebLink` added.
+- **Next:** merge, upload a page, run the TestFlight checklist in `pages-scope.md` §3.
+
 ## 2026-11-16 — Win-now generator checked on real requests: founder labels, a rule test, the launch bars (nothing changed)
 
 - **What:** three local, offline measurements on the operator's own 14 recorded requests (2 manager-league pairs); record in `docs/plans/win-now-season-signal/real-request-checks.md`. Revision 5 stays off; no code, flag or knob moved.

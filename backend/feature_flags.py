@@ -1354,6 +1354,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # review in Calibration). OFF => /api/founder/* 404 and the app shows nothing.
     # Access also needs FOUNDER_ACCOUNTS (env) and a verified session.
     "founder.review",
+    # docs/plans/founder-review/pages-design.md — "Review pages" in Founders'
+    # review: operator review documents stored in the database, opened in a web
+    # view, comments saved server-side. Needs founder.review's gate too. OFF =>
+    # /api/founder/pages* 404 and the app hides the choice. The X-Cron-Secret
+    # upload/readback routes are not flag-gated.
+    "founder.review_pages",
     "grading.outlook_round",
     "grading.outlook_prepare",
     # docs/plans/offer-learnings/scope-next-move.md (WS5, R2) — at most one
