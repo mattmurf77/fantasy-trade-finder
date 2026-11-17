@@ -5,7 +5,7 @@
 documents behind the founder gate, open them in the app, save the comments to the server.
 **Builder:** Claude Code builder subagent, worktree `feat/founder-review-pages`; the main session
 reviews and merges.
-**Operator sign-off on waivers:** needed for §1 (analytics waived: founder-only tool).
+**Operator sign-off on waivers:** given 2026-11-16 for §1 (analytics waived: founder-only tool; operator: "Yes, sign off").
 
 Design: [pages-design.md](pages-design.md).
 
@@ -99,7 +99,7 @@ Design: [pages-design.md](pages-design.md).
 | `living-memory/HLD.md` | n/a because no architecture shift |
 | `docs/cross-client-invariants.md` | n/a because the limits are pinned app ↔ server by the structural guard, and no other client uses them |
 | `docs/glossary.md` | n/a because "Founders' review" is already defined; "review page" is plain English |
-| ADR or `DECISIONS.md` entry | updated | D-273: review pages are hosted behind the founder gate, stored in the database and never in the public repo; comments are saved server-side |
+| ADR or `DECISIONS.md` entry | updated | D-274: review pages are hosted behind the founder gate, stored in the database and never in the public repo; comments are saved server-side |
 
 ## 5. Ship gate declaration
 

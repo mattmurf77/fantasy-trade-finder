@@ -2083,6 +2083,15 @@ curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/
 
 `retried_missing_moves` counts the targets made due: those whose latest success is a current-model baseline with no computed block, not leased and with no attempt in flight. The same call queues up to the batch limit (4, `config/league_projections.json`) at one pending run per account; the rest are already due, and each 15-minute realtime tick queues up to 4 more, so **one call is enough** (call it again only to speed things up; a repeat never marks a target twice). Each re-run captures fresh, reuses the saved forecast when the league is unchanged, and adds only the block. **Finished** when a call made at least 10 minutes after the previous one returns `"queued": 0` and `"retried_missing_moves": 0`. A target whose block failed again (time budget) is marked again by the next call. `retried_missing_moves_skipped: "max_pf_moves_disabled"` means the flag is off and nothing was marked. Never edit `next_due_at` by hand.
 
+**Re-running Playoff targets** (`league.playoff_targets`, D-273): forecasts saved before the flag went on have no targets block, and blocks saved before the threshold went from 0.01 to 0.02 (D-272) carry the old settings hash. Both wait for the league's weekly slot unless re-run:
+
+```bash
+curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{"retry_missing_targets": true}' https://fantasy-trade-finder.onrender.com/api/cron/league-projections
+```
+
+`retried_missing_targets` counts the targets made due: latest success a current-model baseline whose block is absent, not computed (other than `not_eligible`, which is settled), or computed under other settings; not leased; no attempt in flight. Same batch limit, same one call is enough, same re-run behaviour as the Max PF one above. It can be sent with `"retry_missing_moves": true` in one body; a target missing both is counted once, under `retried_missing_moves`. **Finished** when a call made at least 10 minutes after the previous one returns `"queued": 0` and `"retried_missing_targets": 0`. `retried_missing_targets_skipped: "playoff_targets_disabled"` means the flag is off and nothing was marked.
+
 **Guardrail tests:** `backend/tests/test_league_projection_best_available.py::test_team_changed_player_is_unpriced_and_stale_row_scores_nothing`, `::test_team_changed_player_alone_for_a_slot_leaves_it_unknown`, `::test_team_changed_player_on_new_team_bye_is_a_bye`, `::test_strict_contract_still_refuses_a_team_changed_player`.
 
 ## Fast deck: a 150-card page can leave an almost empty deck (2026-11-11)

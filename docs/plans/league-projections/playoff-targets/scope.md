@@ -22,7 +22,7 @@ The wire contract is [contract.md](contract.md). Decision id **D-264**.
 | W1 | No Maestro flow, no simulator capture, no `screens/` capture | D-056 retired them. Evidence is §3 |
 | W2 | No website (`web/`) surface | Max PF moves has none either; the Standings card in the app is where its mirror lives |
 | W3 | No backtest of the number against real seasons | The forecast's own accuracy is unmeasured at horizon; this feature reads it and adds one assumption (P4). A backtest is a separate piece of work, as it was for Max PF moves |
-| W4 | No operator re-run for forecasts saved before the flag is turned on | Max PF moves got one later (D-260). Without it the section reads "appear after the next update" until the next weekly forecast. Listed in NEXT.md |
+| W4 | ~~No operator re-run for forecasts saved before the flag is turned on~~ **Closed 2026-11-16 (D-273):** the cron route's `retry_missing_targets` re-runs blocks that are missing, not computed or saved under other settings (runbook) | Max PF moves got one later (D-260). Without it the section reads "appear after the next update" until the next weekly forecast |
 | W5 | No auto-run of the trade search from "Find trades" | Same as Max PF moves' W4: the hand-off pins and lands on the canvas |
 
 **Product choices made for the operator** (each is a default; say which to change)

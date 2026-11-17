@@ -1,7 +1,7 @@
 # Founders' review — Review pages (design)
 
 **Date:** 2026-11-16 · **Status:** built on `feat/founder-review-pages`, unmerged ·
-**Scope block:** [pages-scope.md](pages-scope.md) · **Decision:** D-273 (living-memory/DECISIONS.md)
+**Scope block:** [pages-scope.md](pages-scope.md) · **Decision:** D-274 (living-memory/DECISIONS.md)
 
 A third choice in Founders' review, next to "Player labels" and "Trade rules": the operator's
 review documents (self-contained single-file HTML pages with comment boxes) opened inside the

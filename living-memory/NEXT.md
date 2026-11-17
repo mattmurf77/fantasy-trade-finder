@@ -97,7 +97,7 @@ Built dark on `feat/playoff-targets` (PR open, not merged). Flag `league.playoff
 4. **Turn the flag on** (`config/features.json` + the three flag fixtures, or the reload route). Sections read "appear after the next update" until the next weekly forecast (Tuesday 09:30 ET).
 
 Follow-ups, not built:
-- An operator re-run for forecasts saved without the block (Max PF moves' `retry_missing_moves`, D-260, covers only its own block).
+- ~~An operator re-run for forecasts saved without the block~~ Built 2026-11-16: `retry_missing_targets` (D-273, runbook).
 - A backtest of the playoff-chance gain against real seasons (W3).
 - Read the weekly job's real time once the flag is on (`elapsed_ms` in the saved block); the fixture figure is from a laptop.
 - Auto-run of the trade search from the hand-off (W5), shared with Max PF moves' own follow-up.
