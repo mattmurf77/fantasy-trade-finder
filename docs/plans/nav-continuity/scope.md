@@ -3,7 +3,7 @@
 **Date:** 2026-11-17
 **Entry point:** direct ask (operator, through the main session): "wiring Home's tiles to the Home control, plus the smaller navigation fixes from the audit". The audit is the 2026-11-12 navigation map (`docs/reviews/2026-11-12-navigation-map/README.md` on branch `docs/navigation-map`) and its fix list. Decision Q1 taken as option (a), following D-269. Q5 not taken (rank pages keep their one exit). Out of scope: R6, R7, R10, R11, R12 and decisions Q2–Q7.
 **Builder:** builder subagent on `feat/nav-continuity` (D-275)
-**Operator sign-off on waivers:** NEEDED — one analytics waiver (§1) and one deliberate omission (§What is not built). Not signed off by the builder.
+**Operator sign-off on waivers:** GIVEN 2026-11-17 — the operator answered "Yes, sign off" to the main session's question on the analytics waiver (§1). The sign-off covers that waiver only; the deliberate omission (§What is not built) is restated to the operator in the release message for build 197.
 
 ---
 
@@ -57,7 +57,7 @@ With either flag off, its behaviour is exactly today's: every changed call site 
 
 - [ ] (a) New events specced — none.
 - [x] **(b) Existing events cover most of it:** `home_tile_tapped` (which tile was tapped), `tab_selected` (a tap on the Home tab), `screen_viewed` (every page change, with `prev_screen`). A tap on "‹ Home" shows up as `screen_viewed` Home with the destination as `prev_screen`, without a `tab_selected` row.
-- [ ] **(c) WAIVED — needs operator sign-off:** no dedicated event for the "‹ Home" tap, the picker's Close, or the Tiers prompt's choice. Rationale: navigation chrome; the brief limited the build to the controls. If the operator wants a direct count, the follow-up is one client event (`home_return_tapped {tab}`) registered in `analytics_taxonomy.py` and `NON_INTENT_EVENTS` in the same commit.
+- [x] **(c) WAIVED — operator sign-off 2026-11-17 ("Yes, sign off"):** no dedicated event for the "‹ Home" tap, the picker's Close, or the Tiers prompt's choice. Rationale: navigation chrome; the brief limited the build to the controls. If the operator wants a direct count, the follow-up is one client event (`home_return_tapped {tab}`) registered in `analytics_taxonomy.py` and `NON_INTENT_EVENTS` in the same commit.
 
 ## 2. Schema & flag scope
 
