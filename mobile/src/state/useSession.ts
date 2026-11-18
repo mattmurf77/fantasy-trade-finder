@@ -287,6 +287,33 @@ export function syncPurchasesIdentity(s: SessionState): void {
   if (id) void initPurchases(id);
 }
 
+/**
+ * What must happen after the active league changes while the tabs stay
+ * mounted: tell the trade inputs, and invalidate the caches whose keys do not
+ * carry the league id. Shared by `switchLeague` (the in-place switch) and by
+ * the in-app league picker when it returns to the tabs underneath instead of
+ * replacing them (R2, flag `nav.continuity`, D-275): without a remount nothing
+ * else refetches these.
+ */
+export function refreshAfterLeagueChange(): void {
+  noteTradeInputChange('after_league_switch');
+  // Invalidate league-agnostic caches whose CONTENTS change on a
+  // league swap. `[leagueId]`-keyed queries auto-refetch on key
+  // change, but stable keys don't — so portfolio, the cross-league
+  // matches inbox, and awaiting-trades all keep the previous
+  // league's data for up to staleTime (30s/15s respectively).
+  // Mirrors api-layer review #A4.
+  queryClient.invalidateQueries({ queryKey: ['portfolio'] });
+  queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+  queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+  // League switch means rankings/progress/streak are all stale —
+  // invalidate all format/position variants by prefix.
+  queryClient.invalidateQueries({ queryKey: ['rankings'] });
+  queryClient.invalidateQueries({ queryKey: ['progress'] });
+  queryClient.invalidateQueries({ queryKey: ['streak'] });
+  queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+}
+
 export const useSession = create<SessionState>((set, get) => ({
   user: null,
   league: null,
@@ -537,22 +564,7 @@ export const useSession = create<SessionState>((set, get) => ({
       context.assertCurrent();
       await get().setLeague(lg, context.assertCurrent);
       context.assertCurrent();
-      noteTradeInputChange('after_league_switch');
-      // Invalidate league-agnostic caches whose CONTENTS change on a
-      // league swap. `[leagueId]`-keyed queries auto-refetch on key
-      // change, but stable keys don't — so portfolio, the cross-league
-      // matches inbox, and awaiting-trades all keep the previous
-      // league's data for up to staleTime (30s/15s respectively).
-      // Mirrors api-layer review #A4.
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
-      queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
-      // League switch means rankings/progress/streak are all stale —
-      // invalidate all format/position variants by prefix.
-      queryClient.invalidateQueries({ queryKey: ['rankings'] });
-      queryClient.invalidateQueries({ queryKey: ['progress'] });
-      queryClient.invalidateQueries({ queryKey: ['streak'] });
-      queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
+      refreshAfterLeagueChange();
     } finally {
       if (requestId === switchRequestId) set({ switching: false });
     }
@@ -996,7 +1008,16 @@ setOnSessionExpired(() => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { navigationRef } = require('../navigation/RootNav') as typeof import('../navigation/RootNav');
     if (navigationRef.isReady() && navigationRef.getCurrentRoute?.()?.name !== 'SignIn') {
-      navigationRef.navigate('SignIn' as never);
+      // R8 (flag `nav.continuity`, D-275): RESET to the sign-in page, as the
+      // test-profile swap does, so the expired session's pages are not left
+      // underneath it (finding D7). Off: the push, as before.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { useFeatureFlags } = require('./useFeatureFlags') as typeof import('./useFeatureFlags');
+      if (useFeatureFlags.getState().flags['nav.continuity']) {
+        navigationRef.reset({ index: 0, routes: [{ name: 'SignIn' as never }] });
+      } else {
+        navigationRef.navigate('SignIn' as never);
+      }
     }
   } catch {
     /* navigation not mounted yet — RootNav's gating handles the next boot */

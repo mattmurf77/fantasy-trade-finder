@@ -33,6 +33,8 @@ import StatusRow from './StatusRow';
 import PositionTile from './PositionTile';
 import TaskTile from './TaskTile';
 import HomePlayoffBanner from './HomePlayoffBanner';
+import { armHomeReturn } from '../../state/homeReturn';
+import { HOME_RETURN_FLAG, type HomeTileTap } from '../../navigation/navContinuity';
 
 // Home hub (flag `nav.home_hub`, Direction D; docs/plans/home-engagement/
 // scope.md §6.3, mockup mockups/home-engagement/index.html#dir-d). Mounted by
@@ -87,6 +89,16 @@ export default function HomeHub() {
   // Position tile body tap → your roster at that position (D-269, docs/plans/
   // position-tile-tap/scope.md). Off ⇒ no onOpen, the tile is unchanged.
   const tileRosterOn = useFlag('nav.home_position_roster');
+  // "‹ Home" on the destination of a tile that crosses to another tab (flag
+  // `nav.home_return`, D-275, decision Q1 (a)). Armed AFTER the tap is
+  // tracked and BEFORE it navigates, so the destination tab's focus finds
+  // it. navigation/navContinuity.homeReturnTabFor decides which taps arm:
+  // rank pages (Rank players, Check trends) and D-269's roster arrival do
+  // not. Off ⇒ nothing is armed.
+  const homeReturnOn = useFlag(HOME_RETURN_FLAG);
+  const armReturn = (tap: HomeTileTap) => {
+    if (homeReturnOn) armHomeReturn(tap);
+  };
 
   // ── Queries (scope §6.2) ──────────────────────────────────────────────
   const prefsQuery = useQuery({
@@ -153,6 +165,7 @@ export default function HomeHub() {
   // ── Handlers: track, then navigate (scope §6.2) ──────────────────────
   const onOutlook = () => {
     track('home_tile_tapped', { tile: 'outlook' }, 'Home');
+    armReturn('outlook');
     navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true } });
   };
   // The playoff tile's "Review outlook": the same destination as the Team
@@ -160,6 +173,7 @@ export default function HomeHub() {
   // saves nothing — the user's tap on an outlook card is the write.
   const onReviewOutlook = (recommended: ProjectionOutlook) => {
     track('home_tile_tapped', { tile: 'outlook' }, 'Home');
+    armReturn('review_outlook');
     navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true, suggestOutlook: recommended } });
   };
   const onStandings = () => {
@@ -182,16 +196,19 @@ export default function HomeHub() {
   };
   const onOverallRank = () => {
     track('home_tile_tapped', { tile: 'overall_rank' }, 'Home');
+    armReturn('overall_rank');
     requestLeagueSummaryAll(leagueId!);
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };
   const onBuy = (s: PositionSplit) => {
     track('home_tile_tapped', { tile: 'buy', position: s.position, band: bandProp(s) }, 'Home');
+    armReturn('buy');
     requestLeagueSummarySplit(leagueId!, s.position, 'buy');
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };
   const onSell = (s: PositionSplit) => {
     track('home_tile_tapped', { tile: 'sell', position: s.position, band: bandProp(s) }, 'Home');
+    armReturn('sell');
     requestLeagueSummarySplit(leagueId!, s.position, 'sell');
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };
@@ -199,6 +216,7 @@ export default function HomeHub() {
   // (side 'buy'); League rankings draws no banner when the split isn't shown.
   const onRanking = (s: PositionSplit) => {
     track('home_tile_tapped', { tile: 'position_ranking', position: s.position, band: bandProp(s) }, 'Home');
+    armReturn('position_ranking');
     requestLeagueSummarySplit(leagueId!, s.position, 'buy');
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };
@@ -438,6 +456,7 @@ export default function HomeHub() {
           detail="Fair packages with any leaguemate"
           onPress={() => {
             track('home_tile_tapped', { tile: 'find_trade' }, 'Home');
+            armReturn('find_trade');
             navigation.navigate('Trades');
           }}
         />
@@ -465,6 +484,7 @@ export default function HomeHub() {
           badge={hasLeague && mutual > 0 ? `${mutual} mutual` : null}
           onPress={() => {
             track('home_tile_tapped', { tile: 'matches' }, 'Home');
+            armReturn('matches');
             navigation.navigate('Matches');
           }}
         />

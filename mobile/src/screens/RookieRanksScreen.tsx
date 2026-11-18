@@ -112,6 +112,9 @@ export default function RookieRanksScreen({ route, navigation }: any = {}) {
   // renders.
   const returnTo: string | undefined = route?.params?.returnTo;
   const returnLeagueId: string | undefined = route?.params?.returnLeagueId;
+  // R2 (D-275): set by the Draft TAB's room (flag `nav.continuity`) so the
+  // way back returns to that tab instead of pushing a second room over it.
+  const returnInTabs: boolean = route?.params?.returnInTabs === true;
 
   const queryClient = useQueryClient();
   const activeFormat = useSession((s) => s.activeFormat);
@@ -435,10 +438,12 @@ export default function RookieRanksScreen({ route, navigation }: any = {}) {
           accessibilityRole="button"
           accessibilityLabel="Back to the draft room"
           onPress={() =>
-            navigation?.navigate?.(
-              'DraftRoom',
-              returnLeagueId ? { leagueId: returnLeagueId } : undefined,
-            )
+            returnInTabs
+              ? navigation?.navigate?.('Draft')
+              : navigation?.navigate?.(
+                  'DraftRoom',
+                  returnLeagueId ? { leagueId: returnLeagueId } : undefined,
+                )
           }
           style={({ pressed }) => [
             styles.backRow,

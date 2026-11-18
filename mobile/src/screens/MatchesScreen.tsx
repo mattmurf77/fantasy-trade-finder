@@ -56,6 +56,7 @@ import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof'
 import { useSession } from '../state/useSession';
 import { usePushPriming } from '../state/usePushPriming';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
 import {
@@ -219,6 +220,11 @@ export default function MatchesScreen() {
   // byte-identical behavior) ──────────────────────────────────────────
   const swipeUndoOn = useFlag('ux.swipe_undo');           // S3 PRD-03
   const inlineHomeOn = useFlag('calc.inline_home');       // D-158 B1
+  // R3 / R13 (flag `nav.continuity`, D-275): links to the Acquire landing
+  // return to the existing landing (`pop`) instead of stacking a second one
+  // over whatever Acquire page is open (finding B2); a `segment: 'standing'`
+  // arrival (the standing-offer toast's link) opens that segment.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const menuOn = useFlag('ux.player_context_menu');       // S3 PRD-02
   // S1 PRD-05 (flag ux.retap_active_tab) — focused Matches re-tap scrolls
   // the active segment's list to top. Only one FlatList is mounted at a
@@ -281,6 +287,9 @@ export default function MatchesScreen() {
   useEffect(() => {
     const s = route.params?.segment;
     if (s === 'mutual' || s === 'awaiting') setSegment(s);
+    // R13 (flag `nav.continuity`, D-275): the standing-offer toast's link.
+    // Only while the segment exists (its pill renders under the same flag).
+    else if (s === 'standing' && continuityOn && standingOffersOn) setSegment('standing');
     if (s === 'awaiting') {
       awaitingSourceRef.current = guidedArrival === 'n6.1' ? 'guide' : 'tab';
     }
@@ -681,6 +690,7 @@ export default function MatchesScreen() {
           },
           canvasPrefillSeq: Date.now(),
         },
+        ...(continuityOn ? { pop: true } : {}),
       });
       return;
     }
@@ -1550,7 +1560,7 @@ export default function MatchesScreen() {
               testID="matches.go-to-trades"
               label="Find a trade"
               variant={inviteLeads ? 'secondary' : 'primary'}
-              onPress={() => navigation.navigate('Trades', { screen: 'TradesHome' })}
+              onPress={() => navigation.navigate('Trades', continuityOn ? { screen: 'TradesHome', pop: true } : { screen: 'TradesHome' })}
             />
             {inviteLeads ? null : inviteBlock}
             {/* Compact unlock module — ACTIVE league only (its counts are

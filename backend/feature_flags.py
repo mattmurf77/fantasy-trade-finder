@@ -416,6 +416,23 @@ FLAG_KEYS: tuple[str, ...] = (
     # "Home" control back. Buy / Sell unchanged. Off = the tile exactly as
     # before (no body tap). CLIENT-ONLY: no route reads this key.
     "nav.home_position_roster",
+    # Home return control (2026-11-17 operator ask, decision Q1 option (a) of
+    # the navigation map, docs/plans/nav-continuity/scope.md, D-275) — a Home
+    # hub tile that crosses to another tab (Team outlook, Review outlook,
+    # Overall rank, Buy, Sell, a position ranking, Find a trade, View
+    # matches) shows a "‹ Home" control on that tab for the visit only. Rank
+    # pages are left out (the 2026-08-16 one-exit ruling). Off = today's
+    # plain tab switch. CLIENT-ONLY: no route reads this key.
+    "nav.home_return",
+    # Navigation continuity fixes (same ask, R1-R4, R8, R9, R13 of the
+    # navigation map, D-275) — the in-app league picker's Close and no
+    # one-league auto-forward, returning to the tabs / pages already
+    # underneath instead of stacking copies, own-stack Back fallbacks, a stack
+    # reset on sign-out / deletion / session expiry, Portfolio's Back and
+    # "See liked" → Matches > Awaiting, three sentence links and Tiers'
+    # unsaved-changes prompt. Off = every one of those exactly as before.
+    # CLIENT-ONLY: no route reads this key.
+    "nav.continuity",
     # Usage Trends (2026-10-10 operator ask, docs/plans/usage-trends/scope.md) —
     # in-season RB/WR/TE snaps / carries / targets over user-picked completed
     # weeks with team share and spikes, joined to the caller's league rosters.

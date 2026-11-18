@@ -71,6 +71,9 @@ import CalibrationScreen from '../screens/CalibrationScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import TopBar from '../components/TopBar';
+import HomeReturnBar from '../components/HomeReturnBar';
+import { useHomeReturn } from '../state/homeReturn';
+import { CONTINUITY_FLAG, backOrFallback, returnOptions } from './navContinuity';
 import { useTradePagePrewarm } from '../hooks/useTradePagePrewarm';
 
 // Tab definitions. The "Rank" tab fans out into 4 sub-screens — Trios swipe,
@@ -115,14 +118,22 @@ export type TradesRoute =
 // fall to the stack's stable home (`fallback`). Never greyed, never dead.
 // FB #79 generalized this beyond Rank: the Trades stack's Calculator screen
 // hit the same dead native back, so the fallback route is now a prop.
+//
+// R4 (flag `nav.continuity`, D-275): `canGoBack()` also asks the parent
+// navigators, and the bottom tabs can always go back to the first tab, so
+// with the Home tab present the fallback was never reached and Back went to
+// Home (finding C1). Flag on, the test is this page's OWN stack.
 function HeaderBack({ navigation, fallback }: { navigation: any; fallback: string }) {
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   return (
     <Pressable
       testID="stack.back-btn"
       accessibilityRole="button"
       accessibilityLabel="Back"
       onPress={() =>
-        navigation.canGoBack() ? navigation.goBack() : navigation.navigate(fallback)
+        backOrFallback(navigation.getState?.(), navigation.canGoBack(), continuityOn) === 'back'
+          ? navigation.goBack()
+          : navigation.navigate(fallback)
       }
       hitSlop={space.md}
       style={({ pressed }) => [styles.headerBack, pressed && { opacity: 0.6 }]}
@@ -183,11 +194,21 @@ const subScreenOptions = (title: string, fallback: string) =>
 // RankHome through this control, RankHome keeps its own back control to the
 // preferred surface, and the iOS edge-swipe gesture is untouched. The
 // RankMenu sheet itself stays mounted for the FLAG-OFF tab-press path.
+//
+// R3 (flag `nav.continuity`, D-275): when the chooser is already underneath
+// (it opened this page), return to it instead of stacking a second chooser
+// (G-056). Leaving a page this way removes it, so Tiers asks before it drops
+// unsaved moves (TiersScreen's beforeRemove prompt).
 function MoreWaysButton({ navigation }: { navigation: any }) {
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   return (
     <Pressable
       testID="rank.more-ways"
-      onPress={() => navigation.navigate('RankHome')}
+      onPress={() =>
+        continuityOn
+          ? navigation.navigate('RankHome', undefined, returnOptions(true))
+          : navigation.navigate('RankHome')
+      }
       hitSlop={8}
     >
       {({ pressed }) => (
@@ -455,6 +476,7 @@ function TradesStackNav() {
   // standalone home exactly as before (no mode param, TradeDeck
   // unregistered).
   const finderHubOn = useFlag('trades.finder_hub');
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   return (
     <TradesStack.Navigator screenOptions={{ headerShown: false }}>
       <TradesStack.Screen
@@ -499,10 +521,14 @@ function TradesStackNav() {
         component={TradeBrowseAllScreen}
         options={subScreenOptions('All trades', 'TodaysTrade')}
       />
+      {/* R9 (flag `nav.continuity`, D-275): the app's own JS "‹ Back"
+          like every other Acquire sub-page (finding F2: it was the only one
+          on the system back, which is dead on iOS 26, RNS#3294). Flag off:
+          the plain header exactly as before. */}
       <TradesStack.Screen
         name="Portfolio"
         component={PortfolioScreen}
-        options={chalklineHeader('Portfolio')}
+        options={continuityOn ? subScreenOptions('Portfolio', 'TradesHome') : chalklineHeader('Portfolio')}
       />
       {/* #357/#358/#359 — Team Review. Registered inside the TRADES stack
           because the operator's framing was explicit: a Team Review button
@@ -819,8 +845,17 @@ export default function TabNav() {
           don't include `top` in their SafeAreaView edges so the system
           inset isn't double-counted. */}
       <TopBar />
+      {/* R5 (flag `nav.home_return`, D-275): the "‹ Home" control for a
+          Home tile's cross-tab arrival. Renders nothing unless armed. */}
+      <HomeReturnBar />
       <Tab.Navigator
         initialRouteName={launchTab}
+        // Every tab focus is reported so the Home return control lasts for
+        // the arrival's visit only (state/homeReturn). Reporting is all it
+        // does: no navigation, no analytics.
+        screenListeners={({ route }) => ({
+          focus: () => useHomeReturn.getState().noteTabFocus(route.name),
+        })}
         screenOptions={{
           headerShown: false,
           tabBarStyle: {

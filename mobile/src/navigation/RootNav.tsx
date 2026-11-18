@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { ink, chalk, ice, fonts, radii, space } from '../theme/chalkline';
 import { Icon } from '../components/chalkline';
-import { useSession, NO_LEAGUE_ID } from '../state/useSession';
+import { useSession, NO_LEAGUE_ID, refreshAfterLeagueChange } from '../state/useSession';
 import SignInScreen, { EntryPlatformIntent } from '../screens/SignInScreen';
 import LeaguePickerScreen from '../screens/LeaguePickerScreen';
 import LeagueJoinScreen from '../screens/LeagueJoinScreen';
@@ -65,6 +65,7 @@ import VerifySheet from '../components/VerifySheet';
 import Toast from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, pickerExit, pickerOpenedInApp, signInReset } from './navContinuity';
 import { WarmPaywallConfig } from '../state/useWarmPaywallConfig';
 import {
   getLinkingV2,
@@ -483,6 +484,10 @@ export default function RootNav({ booted }: { booted: boolean }) {
   // the hydrated value at mount; NavigationContainer only reads `linking`
   // once, so a mid-session flag flip applies on next launch (documented).
   const deeplinkV2 = useFlag('ux.deeplink_router_v2');
+  // R1 / R2 / R8 (flag `nav.continuity`, D-275): the league picker's in-app
+  // arrival (Close, no one-league auto-forward, a pick returns to the tabs
+  // underneath) and the picker's Sign out resetting the stack.
+  const continuityOn = useFlag(CONTINUITY_FLAG);
 
   // Registers the device's Expo push token with the backend once the
   // user has signed in AND unlocked Find-a-Trade. The hook always wires
@@ -650,13 +655,35 @@ export default function RootNav({ booted }: { booted: boolean }) {
           )}
         </Stack.Screen>
         <Stack.Screen name="LeaguePicker">
-          {({ navigation, route }) => (
+          {({ navigation, route }) => {
+            // Opened from inside the app = the tabs ('Main') sit under it.
+            // At sign-in it REPLACES SignIn, so nothing is under it.
+            const inApp = continuityOn && pickerOpenedInApp(navigation.getState(), route.key);
+            return (
             <LeaguePickerScreen
-              onLeaguePicked={() => navigation.replace('Main')}
+              // R2: in-app, return to the tabs underneath (popTo) instead of
+              // stacking a second copy of the app on top (finding D3).
+              // The tabs stay mounted on that path, so the pick must do what
+              // the in-place league switch does (refreshAfterLeagueChange).
+              onLeaguePicked={() => {
+                if (pickerExit(pickerOpenedInApp(navigation.getState(), route.key), continuityOn) === 'popTo') {
+                  refreshAfterLeagueChange();
+                  navigation.popTo('Main');
+                } else {
+                  navigation.replace('Main');
+                }
+              }}
               onSignOut={async () => {
                 await useSession.getState().signOut();
-                navigation.replace('SignIn');
+                // R8: nothing of the signed-out session stays underneath.
+                if (continuityOn) navigation.reset(signInReset());
+                else navigation.replace('SignIn');
               }}
+              // R1: a Close back to the page it was opened from, and no
+              // one-league auto-forward (findings D1, D2). Both unset at
+              // sign-in, and both unset with the flag off.
+              onClose={inApp ? () => navigation.goBack() : undefined}
+              openedInApp={inApp}
               // #130 — Settings' "Link an ESPN league" row lands here with
               // the sheet already open (flag-gated inside the screen).
               autoOpenEspnLink={route.params?.espnLink === true}
@@ -670,7 +697,8 @@ export default function RootNav({ booted }: { booted: boolean }) {
               invitedBy={route.params?.invitedBy ?? null}
               invitedLeagueName={route.params?.invitedLeagueName ?? null}
             />
-          )}
+            );
+          }}
         </Stack.Screen>
         {/* P0-3 — the invite JOIN interstitial. headerShown:false because it
             is an interstitial, not a pushed detail screen: a spent invite

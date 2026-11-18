@@ -90,7 +90,7 @@ assert(
   'S-1 the handoff carries autoRun: true',
 );
 assert(
-  /\[navigation, candidatePos, candidateDir, selectedIdx, route\.name, selected\],?\s*\)/.test(actionDecl),
+  /\[navigation, candidatePos, candidateDir, selectedIdx, route\.name, selected(?:, continuityOn)?\],?\s*\)/.test(actionDecl),
   'S-1 the callback dep array contains `selected`',
   'sabotage detected: dropping it — the closure now READS selected, so a stale drill-in team gets scoped (the missing dep was inert before #330, live after)',
 );

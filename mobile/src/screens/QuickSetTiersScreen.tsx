@@ -40,6 +40,7 @@ import { getRankings, saveTiers, splitRankings } from '../api/rankings';
 import { TIERS, TIER_LABEL, tierForElo } from '../utils/tierBands';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, backOrFallback } from '../navigation/navContinuity';
 import { useScoringFormat } from '../hooks/useScoringFormat';
 import { getOnboardingState, patchOnboardingState } from '../state/useOnboardingState';
 import { setPendingQuicksetRegen } from '../state/onboardingBus';
@@ -95,6 +96,11 @@ export default function QuickSetTiersScreen() {
   // S2 PRD-04 ride-along (flag visual.chalkline_cleanup): 9px chip metas
   // rise to the 11px type floor; faint content text promotes to dim.
   const cleanup = useFlag('visual.chalkline_cleanup');
+  // R4 (flag `nav.continuity`, D-275): the "nothing to go back to" test is
+  // this page's OWN stack. `canGoBack()` also counts the bottom tabs, which
+  // can always go back to Home, so the fallback below was never reached
+  // (finding C1).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
 
   // S3 PRD-01 — report the pinned walk footer to the feedback FAB so it
   // rides above Back/Skip/Save instead of covering them. Focused-only
@@ -403,7 +409,7 @@ export default function QuickSetTiersScreen() {
         // stack's first mount (no history); fall through to the Tiers board
         // it just wrote, same fallback as the header back control.
         const exit = () => {
-          if (navigation.canGoBack()) navigation.goBack();
+          if (backOrFallback(navigation.getState?.(), navigation.canGoBack(), continuityOn) === 'back') navigation.goBack();
           else navigation.navigate('Tiers');
         };
         // #136 — offer Quick Rank as the natural next step: order the
@@ -426,7 +432,7 @@ export default function QuickSetTiersScreen() {
       setSelected(new Set(savedMap[TIERS[idx]] ?? []));
       setSearch(''); // #138 — the filter is per step
     },
-    [navigation, position, rookieScope.isRookie, onboardingReturn],
+    [navigation, position, rookieScope.isRookie, onboardingReturn, continuityOn],
   );
 
   const saveMutation = useMutation({

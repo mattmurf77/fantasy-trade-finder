@@ -556,7 +556,7 @@ const planBody = planStart === -1
     }
     const afterAwait = saveBody.indexOf('await saveLeaguePreferences(');
     const noted = saveBody.indexOf('noteTeamReviewSave(leagueId);');
-    const finish = (/testID="team-review\.finish"[\s\S]*?nav\.navigate\('TradesHome'\);/.exec(s) || [''])[0];
+    const finish = (/testID="team-review\.finish"[\s\S]*?nav\.navigate\('TradesHome'(?:, undefined, returnOptions\(continuityOn\))?\);/.exec(s) || [''])[0];
     if (afterAwait === -1 || noted < afterAwait) {
       bad('20b. Team Review posts only after a save landed', 'noteTeamReviewSave must follow the awaited write inside savePrefs');
     } else if (count(s, 'noteTeamReviewSave(') !== 1) {

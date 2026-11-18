@@ -17,6 +17,7 @@ import Svg, { Path } from 'react-native-svg';
 import {
   ink,
   chalk,
+  ice,
   semantic,
   tier as tierColors,
   position as positionColors,
@@ -36,6 +37,7 @@ import { reorderRankings, saveTiers } from '../api/rankings';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, backOrFallback, returnOptions } from '../navigation/navContinuity';
 import { useRosterSetup } from '../state/rosterSetup';
 import { setPendingGuidedRegen } from '../state/onboardingBus';
 import { useMyRosterAssets } from '../hooks/useMyRosterAssets';
@@ -204,6 +206,11 @@ export default function RosterSetupScreen() {
   // push), so the SCREEN carries the flag. Every entry point is already
   // gated; a stale deep push with the flag off renders nothing but Back.
   const rosterSetupOn = useFlag('trades.roster_setup');
+  // R4 (flag `nav.continuity`, D-275): the "nothing to go back to" test is
+  // this page's OWN stack. `canGoBack()` also counts the bottom tabs, which
+  // can always go back to Home, so the fallback below was never reached
+  // (finding C1).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
 
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id || null;
@@ -545,9 +552,9 @@ export default function RosterSetupScreen() {
 
   const leave = useCallback(() => {
     exitHandledRef.current = true;
-    if (navigation.canGoBack()) navigation.goBack();
+    if (backOrFallback(navigation.getState?.(), navigation.canGoBack(), continuityOn) === 'back') navigation.goBack();
     else navigation.navigate('TradesHome');
-  }, [navigation]);
+  }, [navigation, continuityOn]);
 
   // Back (header control or edge swipe) = Skip at the current step (prd §7).
   // Bookkeeping only — the pop itself proceeds. On the rank step the setup
@@ -558,6 +565,14 @@ export default function RosterSetupScreen() {
   const implicitExitRef = useRef<(e: any) => void>(() => {});
   implicitExitRef.current = (e: any) => {
     if (exitHandledRef.current || !rosterSetupOn) return;
+    // R8 (flag `nav.continuity`, D-275): sign-out, deletion and session
+    // expiry now RESET the whole stack, which removes this page too. That is
+    // not the user skipping a step, and the session is already gone, so a
+    // "Discard your tier changes?" prompt could only strand them: let it go.
+    if (continuityOn && e?.data?.action?.type === 'RESET') {
+      exitHandledRef.current = true;
+      return;
+    }
     // A tier save in flight holds the pop with no prompt and no bookkeeping:
     // the user stays until the sequence settles (Skip is disabled meanwhile).
     if (stepRef.current === 'tiers' && tierSavingRef.current) {
@@ -807,6 +822,18 @@ export default function RosterSetupScreen() {
     await drain();
     leave();
   }, [drain, leave]);
+  // R13 (flag `nav.continuity`, D-275): the closing line's link. Same exit
+  // as See trades (writes drained first, the exit marked handled so Back's
+  // skip bookkeeping does not fire), but to the existing Acquire landing
+  // (`pop`, G-056) with its Trade DNA sheet open (`editDna`, the param Home's
+  // Team outlook uses; the landing clears it once consumed).
+  const onOpenTradeDna = useCallback(async () => {
+    if (leaving) return;
+    setLeaving(true);
+    await drain();
+    exitHandledRef.current = true;
+    navigation.navigate('TradesHome', { editDna: true }, returnOptions(true));
+  }, [drain, leaving, navigation]);
 
   // ── FAB offset (S3 PRD-01 contract: focused-only, 0 on blur/unmount) ─
   const [footerH, setFooterH] = useState(0);
@@ -1110,7 +1137,25 @@ export default function RosterSetupScreen() {
           ) : (
             <Text style={styles.lede}>Nothing changed. Your trades use consensus values.</Text>
           )}
-          <Text style={styles.doneHint}>Change any of this later in Trade DNA › Your roster.</Text>
+          {continuityOn ? (
+            // R13 (flag `nav.continuity`, D-275): the sentence's destination
+            // is a link: the Trade DNA sheet on the Acquire landing, which
+            // holds the Your roster row (finding J2).
+            <Text style={styles.doneHint}>
+              {'Change any of this later in '}
+              <Text
+                testID="roster-setup.done.dna-link"
+                accessibilityRole="link"
+                style={styles.doneHintLink}
+                onPress={() => void onOpenTradeDna()}
+              >
+                Trade DNA › Your roster
+              </Text>
+              .
+            </Text>
+          ) : (
+            <Text style={styles.doneHint}>Change any of this later in Trade DNA › Your roster.</Text>
+          )}
         </ScrollView>
         <View style={styles.footer} onLayout={onFooterLayout}>
           <Button
@@ -1284,4 +1329,5 @@ const styles = StyleSheet.create({
   doneMore: { ...type.bodySm },
   doneNext: { ...type.bodySm, color: chalk.base },
   doneHint: { ...type.bodySm, marginTop: space.sm },
+  doneHintLink: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
 });

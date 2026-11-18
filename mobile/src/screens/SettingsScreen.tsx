@@ -50,6 +50,7 @@ import { track } from '../api/events';
 import SteerSlider from '../components/SteerSlider';
 import { useSession, type RankMethodPref } from '../state/useSession';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, signInReset } from '../navigation/navContinuity';
 import SubscriptionSection from '../components/SubscriptionSection';
 import { openAppleSubscriptions } from '../components/SubscriptionSection';
 import { DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE } from '../copy/deleteAccount';
@@ -102,6 +103,12 @@ export default function SettingsScreen({ navigation }: any) {
   const [toast, setToast] = useState<{ msg: string; tone?: 'success' | 'warn' } | null>(null);
   // ── Teardown wave-2 flags (all dark by default) ────────────────────────
   const settingsV2              = useFlag('account.settings_v2');
+  // R8 (flag `nav.continuity`, D-275): sign-out and account deletion RESET
+  // the stack to the sign-in page, as the test-profile swap does; a replace
+  // left the tabs and Settings underneath (finding D7).
+  const continuityOn            = useFlag(CONTINUITY_FLAG);
+  const toSignIn = () =>
+    continuityOn ? navigation.reset?.(signInReset()) : navigation.replace?.('SignIn');
   // D-155 — names the guide bubble's speaker; off keeps "The Analyst".
   const ramOn                   = useOnboardingFeature('onboarding.mascot_ram');
   const dataExportEnabled       = useFlag('account.data_export');
@@ -592,7 +599,7 @@ export default function SettingsScreen({ navigation }: any) {
     try {
       await deleteAccount();
       await signOut();
-      navigation.replace?.('SignIn');
+      toSignIn();
     } catch (e: any) {
       if (dataExportEnabled && e instanceof ApiError && e.status === 403) {
         // S6A-09: the verified-step-up 403 used to dead-end in a toast.
@@ -1380,7 +1387,7 @@ export default function SettingsScreen({ navigation }: any) {
         accessibilityRole="button"
         onPress={async () => {
           await signOut();
-          navigation.replace?.('SignIn');
+          toSignIn();
         }}
         style={({ pressed }) => [styles.signOut, pressed && styles.rowPressed]}
       >

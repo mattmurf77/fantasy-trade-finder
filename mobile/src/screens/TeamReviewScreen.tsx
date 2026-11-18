@@ -12,6 +12,7 @@ import { AnalystAvatar } from '../components/analyst';
 import { ink, chalk, ice, flare, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import { track } from '../api/events';
@@ -136,6 +137,10 @@ const signed = (n: number) => `${n >= 0 ? '+' : '−'}${Math.abs(n).toFixed(2)}`
 
 export default function TeamReviewScreen() {
   const nav = useNavigation<any>();
+  // R3 (flag `nav.continuity`, D-275): "Find my trades" returns to the Acquire
+  // landing this review was opened from instead of stacking a second, blank
+  // landing over the review (finding D4, G-056).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
   const league = useSession((s) => s.league);
   const leagueId = league?.league_id ?? null;
 
@@ -411,7 +416,7 @@ export default function TeamReviewScreen() {
               // split the terminator series, which is exactly what the
               // taxonomy comment on this block warns against.
               void markTeamReviewCompleted(leagueId as string);
-              nav.navigate('TradesHome');
+              nav.navigate('TradesHome', undefined, returnOptions(continuityOn));
             }}
           >
             <ChalkText style={styles.ctaText}>Find my trades</ChalkText>

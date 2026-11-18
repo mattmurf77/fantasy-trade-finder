@@ -50,6 +50,7 @@ import { importEspnLeague } from '../api/espn';
 import { ApiError } from '../api/client';
 import { useSession, beginLeagueContext, completeLeagueContext, currentSessionGuard } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
+import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { track } from '../api/events';
 import { useWhatsNew } from '../hooks/useWhatsNew';
 import RankChipBadge from '../components/RankChipBadge';
@@ -118,6 +119,10 @@ export default function LeagueScreen() {
   const { entry: whatsNew, dismiss: dismissWhatsNew } = useWhatsNew();
   // FB-37 — Matches tiles deep-link to the Matches tab.
   const navigation = useNavigation<any>();
+  // R3 (flag `nav.continuity`, D-275): Find a trade and Rankings return to
+  // the page already underneath (the Acquire landing; League rankings, which
+  // pushed this page) instead of stacking a second copy (findings B1, B2).
+  const continuityOn = useFlag(CONTINUITY_FLAG);
 
   // ESPN read-only import (flag `espn.link`) — platform comes from the
   // cached league list (set at link time / picker refresh). ESPN leagues
@@ -475,7 +480,7 @@ export default function LeagueScreen() {
   const goRank = () => { tapAction('rank'); navigation.navigate('Rank'); };
   const goFindTrade = () => {
     tapAction('find_trades');
-    navigation.navigate('Trades', { screen: 'TradesHome' });
+    navigation.navigate('Trades', continuityOn ? { screen: 'TradesHome', pop: true } : { screen: 'TradesHome' });
   };
 
   // "Invite leaguemates" for BOTH League Home affordances — the promoted
@@ -680,7 +685,7 @@ export default function LeagueScreen() {
             label="Rankings"
             sub="Every team ranked"
             accessibilityLabel="League rankings"
-            onPress={() => { tapAction('rankings'); navigation.navigate('LeagueRankings'); }}
+            onPress={() => { tapAction('rankings'); navigation.navigate('LeagueRankings', undefined, returnOptions(continuityOn)); }}
           />
           <ExploreTile
             testID="league.free-agents-row"
