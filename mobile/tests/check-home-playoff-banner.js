@@ -11,6 +11,10 @@
 //   F  "Review outlook" calls the handler and writes nothing
 //   G  the server's suggestion sentence renders in the expanded explanation,
 //      above the explanation sentence, exactly when "Consider" shows
+//   H  the prompt follows the outlook the app holds as SAVED: recommended ==
+//      saved ⇒ no prompt, even while the cached read still says `differs`
+//   I  every outlook save refreshes the saved forecast read too, through the
+//      one shared helper (utils/outlookSaved.refreshAfterOutlookSave)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -132,6 +136,27 @@ assert.equal(model(data(), 2, false, now).explanation, null);
 assert.equal('sides' in model(data(), 2, false, now), false);
 assert.equal('partial' in model(data(), 2, false, now), false);
 
+// ── H. the saved outlook decides `differs` once the app holds it ───────────
+// The operator's case: the cached read says differs (saved was Rebuilding),
+// then Tanking is saved. Recommended == saved ⇒ no prompt, before any refetch.
+assert.equal(model(withRec(recommended('jets')), 2, false, now, 'jets').recommendation, null);
+assert.equal(model(withRec(recommended('contender')), 2, false, now, 'contender').recommendation, null);
+// Saved differs from the recommendation ⇒ the prompt, whatever the cached flag.
+assert.equal(model(withRec(recommended('contender')), 2, false, now, 'rebuilder').recommendation.outlook, 'contender');
+assert.equal(model(withRec(recommended('contender', { differs: false })), 2, false, now, 'jets').recommendation.outlook, 'contender');
+assert.equal(model(withRec(recommended('contender')), 2, false, now, null).recommendation.outlook, 'contender'); // Nothing declared.
+assert.equal(model(withRec(recommended('contender')), 2, false, now, 'not_sure').recommendation.outlook, 'contender');
+// Saved outlook not loaded yet (undefined) ⇒ the server's own `differs`.
+assert.equal(model(withRec(recommended('contender')), 2, false, now, undefined).recommendation.outlook, 'contender');
+assert.equal(model(withRec(recommended('contender', { differs: false })), 2, false, now, undefined).recommendation, null);
+// It never widens the other gates: unavailable, not current, no outlook.
+assert.equal(model(withRec(recommended('contender', { status: 'unavailable' })), 2, false, now, 'jets').recommendation, null);
+assert.equal(model(withRec(recommended('contender'), .8, 'stale'), 2, false, now, 'jets').recommendation, null);
+assert.equal(model(withRec(recommended('contender')), 2, true, now, 'jets').recommendation, null);
+assert.equal(model(withRec(recommended(null)), 2, false, now, 'jets').recommendation, null);
+// The explanation sentence is unchanged by the saved outlook.
+assert.equal(model(withRec(recommended('jets')), 2, false, now, 'jets').explanation, 'An 80.0% playoff chance is in the Contending range.');
+
 // ── D–F. the component ────────────────────────────────────────────────────
 const component = read('src/components/home/HomePlayoffBanner.tsx');
 const hub = read('src/components/home/HomeHub.tsx');
@@ -189,6 +214,8 @@ let queryLoading = false;
 let flags = { 'league.projections': true, 'league.projection_outlook': true,
   'league.direction_card': false, 'league.direction_view_sheet': false, 'league.direction_pages': false };
 let options;
+let prefsOptions;
+let prefsData; // The ['league-prefs', leagueId] read: nothing loaded until H.
 const calls = [];
 const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: props || {}, children }) };
 // Hooks by call order, so a second useState (the sheet) keeps its own slot.
@@ -218,13 +245,16 @@ const modules = {
     useRef: initial => { const at = hookAt++; if (!(at in hookStore)) hookStore[at] = { current: initial }; return hookStore[at]; },
     useEffect: effect => { hookAt++; effect(); } },
   'react-native': { Pressable: 'Pressable', StyleSheet: { create: value => value }, View: 'View' },
-  '@tanstack/react-query': { useQuery: value => { options = value; return { data: queryData, isError: queryError, isLoading: queryLoading }; } },
+  '@tanstack/react-query': { useQuery: value => {
+    if (value.queryKey[0] === 'league-prefs') { prefsOptions = value; return { data: prefsData }; }
+    options = value; return { data: queryData, isError: queryError, isLoading: queryLoading }; } },
+  '../../api/league': { getLeaguePreferences: () => { throw new Error('Render must not fetch directly'); } },
   '../chalkline': { Icon: 'Icon', Text: 'Text' },
   '../../theme/chalkline': token,
   '../../api/leagueProjections': { getLeagueProjectionBatch: () => { throw new Error('Render must not fetch directly'); } },
   '../../state/useSession': { NO_LEAGUE_ID: 'no_league', useSession: select => select(active) },
   '../../state/useFeatureFlags': { useFlag: name => { assert(name in flags, `Unexpected flag: ${name}`); return flags[name]; } },
-  '../../utils/homePlayoffBanner': { homePlayoffBanner: (value, roster, failed) => model(value, roster, failed, now) },
+  '../../utils/homePlayoffBanner': { homePlayoffBanner: (value, roster, failed, _now, saved) => model(value, roster, failed, now, saved) },
   '../../utils/playoffOdds': playoffOdds,
   '../OutlookBiasReceipt': { outlookDisplayName: value => (value ? NAMES[value] ?? null : null) },
   './StatusRow': { RowAction: 'RowAction' },
@@ -398,11 +428,64 @@ flags['league.projection_outlook'] = true;
 byId(tree, 'home.playoff.explain').props.onPress(); tree = render();
 assert.equal(byId(tree, 'home.playoff.explanation'), undefined);
 
+// H (component half) — the saved outlook comes from the shared prefs key the
+// hosts already read, and the prompt follows it.
+assert.deepEqual(Array.from(prefsOptions.queryKey), ['league-prefs', 'league-a']);
+assert.equal(prefsOptions.enabled, true);
+queryData = withRec(recommended('jets', { playoff_probability: .05 }), .05);
+prefsData = { team_outlook: 'rebuilder' }; tree = render();
+assert.deepEqual(words(byId(tree, 'home.playoff.recommendation')), ['Consider Tanking', 'Review outlook']);
+prefsData = { team_outlook: 'jets' }; tree = render(); // Tanking saved; the cached read still says differs.
+assert.equal(byId(tree, 'home.playoff.recommendation'), undefined);
+assert.equal(byId(tree, 'home.playoff.review-outlook'), undefined);
+prefsData = undefined;
+
 active.switching = true; assert.equal(render(), null); assert.equal(options.enabled, false);
+assert.equal(prefsOptions.enabled, false);
 active.switching = false; active.hasToken = false; assert.equal(render(), null);
 active.hasToken = true; active.leagues[0].platform = 'espn'; assert.equal(render(), null);
 active.leagues[0].platform = 'sleeper'; flags['league.projections'] = false; assert.equal(render(), null);
 // Flags off: no impression, no sheet, no direction tap, whatever the read holds.
 assert.equal(tracked.length, 0, 'flags off: direction_card_shown never fires');
 assert(!calls.some(c => String(c).startsWith('direction:')), 'flags off: no direction tap');
-console.log('Home playoff banner: current/stale/old-model/incomplete, recommendation, link, explanation and read-only checks passed');
+// ── I. every outlook save refreshes the saved forecast read ────────────────
+// The helper, executed against a recording QueryClient.
+const helperSource = read('src/utils/outlookSaved.ts');
+const helper = runUtil('src/utils/outlookSaved.ts', () => ({}));
+const invalidated = [];
+helper.refreshAfterOutlookSave({ invalidateQueries: filter => invalidated.push(filter) }, 'league-a');
+assert(invalidated.some(f => JSON.stringify(f.queryKey) === '["league-prefs","league-a"]' && !f.predicate), 'the prefs key is refreshed');
+const batch = invalidated.find(f => f.queryKey[0] === 'league-projection-batch');
+assert(batch && batch.predicate, 'the forecast read is refreshed');
+assert.equal(batch.predicate({ queryKey: ['league-projection-batch', 'viewer', 'league-a'] }), true);
+assert.equal(batch.predicate({ queryKey: ['league-projection-batch', 'viewer', 'league-b'] }), false, 'only this league');
+assert.equal(invalidated.length, 2);
+assert(!/refetchQueries|resetQueries|removeQueries|queueLeague|api\.post/.test(helperSource), 'a stored read: invalidate only');
+// Every file that writes the outlook (any POST through saveLeaguePreferences
+// or saveLeagueOutlook) calls the helper at least once per write, imports it,
+// and no longer hand-invalidates only the prefs key.
+const SRC = path.join(__dirname, '..', 'src');
+const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(dir, e.name))
+  : /\.tsx?$/.test(e.name) ? [path.join(dir, e.name)] : []);
+const stripComments = src => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const writers = walk(SRC).filter(p => !p.endsWith(path.join('api', 'league.ts')))
+  .map(p => [path.relative(SRC, p), stripComments(fs.readFileSync(p, 'utf8'))])
+  .filter(([, src]) => /\bsaveLeague(Preferences|Outlook)\(/.test(src));
+const writerNames = writers.map(([rel]) => rel.split(path.sep).join('/')).sort();
+assert.deepEqual(writerNames, ['components/TradeDnaSheet.tsx', 'screens/TeamReviewScreen.tsx',
+  'screens/TradeFinderHubScreen.tsx', 'screens/TradesScreen.tsx'], 'the known outlook writers (a new one must call the helper too)');
+for (const [rel, src] of writers) {
+  const writes = (src.match(/\bsaveLeague(Preferences|Outlook)\(/g) || []).length;
+  const refreshes = (src.match(/refreshAfterOutlookSave\(\w+, leagueId\)/g) || []).length;
+  assert(src.includes("import { refreshAfterOutlookSave } from '../utils/outlookSaved';"), `${rel} imports the shared refresh`);
+  assert(refreshes >= writes, `${rel}: ${writes} outlook write(s), ${refreshes} shared refresh call(s)`);
+  assert(!/invalidateQueries\(\{\s*queryKey:\s*\['league-prefs'/.test(src), `${rel} refreshes through the helper, not by hand`);
+}
+// The only POSTs to the preferences route are in api/league.ts (two: the
+// full save and the outlook-only save, both wrapped above).
+const postsPrefs = src => (src.match(/\.post(<[^>]*>)?\(\s*['`]\/api\/league\/preferences['`?]/g) || []).length;
+assert.equal(postsPrefs(stripComments(read('src/api/league.ts'))), 2);
+assert.deepEqual(walk(SRC).filter(p => postsPrefs(stripComments(fs.readFileSync(p, 'utf8'))) > 0)
+  .map(p => path.relative(SRC, p).split(path.sep).join('/')), ['api/league.ts']);
+
+console.log('Home playoff banner: current/stale/old-model/incomplete, recommendation, link, explanation, saved-outlook and outlook-save refresh checks passed');

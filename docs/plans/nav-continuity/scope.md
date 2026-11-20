@@ -3,6 +3,7 @@
 **Date:** 2026-11-17
 **Entry point:** direct ask (operator, through the main session): "wiring Home's tiles to the Home control, plus the smaller navigation fixes from the audit". The audit is the 2026-11-12 navigation map (`docs/reviews/2026-11-12-navigation-map/README.md` on branch `docs/navigation-map`) and its fix list. Decision Q1 taken as option (a), following D-269. Q5 not taken (rank pages keep their one exit). Out of scope: R6, R7, R10, R11, R12 and decisions Q2–Q7.
 **Builder:** builder subagent on `feat/nav-continuity` (D-275)
+**Amended 2026-11-19 (D-276, [home-return-unify](../home-return-unify/scope.md)):** with flag `nav.home_return_unified` on (shipped on), the position tile body arms this "‹ Home" bar too and League rankings drops D-269's header control; the rows and step below that say otherwise describe that flag OFF.
 **Operator sign-off on waivers:** GIVEN 2026-11-17 — the operator answered "Yes, sign off" to the main session's question on the analytics waiver (§1). The sign-off covers that waiver only; the deliberate omission (§What is not built) is restated to the operator in the release message for build 197.
 
 ---
@@ -21,7 +22,7 @@ When a Home tile moves the user to another tab, a **"‹ Home"** control appears
 | Buy, Sell, See P ranking (position tile) | League rankings | yes |
 | Find a trade | Acquire (whatever page is open there) | yes |
 | View matches | Matches | yes |
-| Position tile body (D-269) | League rankings, own team | its own D-269 header "Home" control, unchanged (no second control) |
+| Position tile body (D-269) | League rankings, own team | `nav.home_return_unified` on (D-276): **yes**, and the bar's tap also closes the arrival's drill-in (`home_back`). Off: its own D-269 header "Home" control, unchanged (no second control) |
 | Rank players | Rank tab (a rank page) | **no**: rank pages keep exactly one exit (operator ruling 2026-08-16, `check-rank-nav-exit.js`; Q5 not taken) |
 | Check trends | Trends (a rank page) | **no**: same ruling |
 | Standings, playoff card's View and its sheet rows, Usage Rates, Search free agents, Link a league | pages opened over the tabs | already have a Back that returns to Home |
@@ -98,7 +99,7 @@ Setup: a TestFlight build with this branch, a Sleeper account with ONE league (f
 6. Home → **View matches**. Expect: Matches with "‹ Home". *Flag off:* no bar.
 7. After 3: instead of "‹ Home", tap the **Matches** tab, then the **League** tab. Expect: no "‹ Home" on League any more (the visit ended).
 8. Home → **Rank players** and → **Check trends**. Expect: NO "‹ Home" (rank pages keep "More ways to rank" as their one exit) in both flag states.
-9. Home → a position tile's **body** (D-269). Expect: League rankings with your team open and the header "Home" on the right, and NO "‹ Home" bar (only one Home control).
+9. Home → a position tile's **body** (D-269). Expect (with `nav.home_return_unified` OFF): League rankings with your team open and the header "Home" on the right, and NO "‹ Home" bar (only one Home control). With it on (the shipped value since D-276), see `docs/plans/home-return-unify/scope.md` checklist instead.
 
 **`nav.continuity`**
 

@@ -82,13 +82,17 @@ const modules = {
     useRef: (initial) => { const at = state.at++; if (!(at in state.hooks)) state.hooks[at] = { current: initial }; return state.hooks[at]; },
     useEffect: (effect) => { state.at++; effect(); } },
   'react-native': { Pressable: 'Pressable', StyleSheet: { create: (v) => v }, View: 'View' },
-  '@tanstack/react-query': { useQuery: () => ({ data: state.data, isError: state.error, isLoading: state.loading }) },
+  // The saved-preferences read (the outlook the prompt compares with) has
+  // nothing saved here unless a check sets `state.prefs`.
+  '@tanstack/react-query': { useQuery: (o) => (o.queryKey[0] === 'league-prefs' ? { data: state.prefs }
+    : { data: state.data, isError: state.error, isLoading: state.loading }) },
+  '../../api/league': { getLeaguePreferences: () => { throw new Error('render must not fetch'); } },
   '../chalkline': { Icon: 'Icon', Text: 'Text' },
   '../../theme/chalkline': token,
   '../../api/leagueProjections': { getLeagueProjectionBatch: () => { throw new Error('render must not fetch'); } },
   '../../state/useSession': { NO_LEAGUE_ID: 'no_league', useSession: (select) => select(state.active) },
   '../../state/useFeatureFlags': { useFlag: (name) => { assert(name in state.flags, `unexpected flag ${name}`); return state.flags[name]; } },
-  '../../utils/homePlayoffBanner': { homePlayoffBanner: (v, r, f) => bannerUtil.homePlayoffBanner(v, r, f, NOW) },
+  '../../utils/homePlayoffBanner': { homePlayoffBanner: (v, r, f, _now, saved) => bannerUtil.homePlayoffBanner(v, r, f, NOW, saved) },
   '../../utils/playoffOdds': playoffOdds,
   '../../api/events': { track: (...a) => state.tracked.push(a) },
   '../../utils/directionCard': cardUtil,

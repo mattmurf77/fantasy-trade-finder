@@ -132,6 +132,12 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // restores today's navigation at the next revalidate.
   'nav.home_return': true,
   'nav.continuity': true,
+  // `nav.home_return_unified` (D-276, docs/plans/home-return-unify/
+  // scope.md): with `nav.home_return`, the position tile body arms the same
+  // "‹ Home" bar and League rankings drops D-269's header control. Same
+  // value as config/features.json; a server `false` restores D-269's
+  // header control at the next revalidate.
+  'nav.home_return_unified': true,
   // `usage_trends.enabled`: Usage Trends (docs/plans/usage-trends/scope.md),
   // shipped ON (operator, 2026-10-10). Absent here, a fresh install's first
   // Home would lack the Usage Rates tile until a revalidate. A server

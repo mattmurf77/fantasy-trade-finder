@@ -36,6 +36,7 @@ import { guideV2Active, recordGuideReceipt } from '../state/useGuide';
 import { GUIDE_RECEIPTS } from './analystScript';
 import { track } from '../api/events';
 import { haptics } from '../utils/haptics';
+import { refreshAfterOutlookSave } from '../utils/outlookSaved';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
@@ -459,7 +460,7 @@ export default function TradeDnaSheet({ visible, onClose, full, openSource, sugg
         avoid_positions: vars.avoid,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      refreshAfterOutlookSave(queryClient, leagueId);
     },
   });
 

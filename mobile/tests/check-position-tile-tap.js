@@ -268,9 +268,23 @@ const consumeText = consumeFn ? flat(ls, consumeFn) : '';
 // or "All teams"; a second back control on the legacy root push; leaving
 // without the close event.
 {
+  // D-276: the rule moved into navContinuity.rosterHeaderHomeVisible, with a
+  // `unified` argument (`nav.home_return` AND `nav.home_return_unified`) that
+  // hides the control because the "‹ Home" bar replaces it. Executed here:
+  // unified off must be D-269's rule exactly; unified on, never shown.
   const show = declOf(ls, 'showHomeBack');
-  assert(!!show && flat(ls, show.initializer) === 'isTabRoot && homeBackId != null && selectedId === homeBackId',
-    '7a. shown only on the tab root, for the drill-in the tile arrival opened');
+  assert(!!show && flat(ls, show.initializer) === 'rosterHeaderHomeVisible(isTabRoot, homeBackId, selectedId, homeReturnUnified)',
+    '7a. shown through rosterHeaderHomeVisible(isTabRoot, homeBackId, selectedId, homeReturnUnified)');
+  const ncSrc = fs.readFileSync(path.join(MOBILE, 'src/navigation/navContinuity.ts'), 'utf8');
+  const rhv = run(ncSrc, { exports: {} }, 'exports.rosterHeaderHomeVisible');
+  let d269 = true;
+  let never = true;
+  for (const root of [true, false]) for (const arr of ['a', null]) for (const sel of ['a', 'b', null]) {
+    if (rhv(root, arr, sel, false) !== (root && arr != null && sel === arr)) d269 = false;
+    if (rhv(root, arr, sel, true)) never = false;
+  }
+  assert(d269, '7a2. unified off: only on the tab root, for the drill-in the tile arrival opened (D-269 exactly)');
+  assert(never, '7a3. unified on: never shown (the "‹ Home" bar is the one Home control)');
   const sets = callsTo(ls, 'setHomeBackId');
   const nonNull = sets.filter((c) => flat(ls, c.arguments[0]) !== 'null');
   assert(nonNull.length === 1 && flat(ls, nonNull[0].arguments[0]) === 'id',

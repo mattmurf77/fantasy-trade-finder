@@ -34,7 +34,12 @@ import PositionTile from './PositionTile';
 import TaskTile from './TaskTile';
 import HomePlayoffBanner from './HomePlayoffBanner';
 import { armHomeReturn } from '../../state/homeReturn';
-import { HOME_RETURN_FLAG, type HomeTileTap } from '../../navigation/navContinuity';
+import {
+  HOME_RETURN_FLAG,
+  HOME_RETURN_UNIFIED_FLAG,
+  homeReturnUnifiedOn,
+  type HomeTileTap,
+} from '../../navigation/navContinuity';
 
 // Home hub (flag `nav.home_hub`, Direction D; docs/plans/home-engagement/
 // scope.md §6.3, mockup mockups/home-engagement/index.html#dir-d). Mounted by
@@ -93,11 +98,15 @@ export default function HomeHub() {
   // `nav.home_return`, D-275, decision Q1 (a)). Armed AFTER the tap is
   // tracked and BEFORE it navigates, so the destination tab's focus finds
   // it. navigation/navContinuity.homeReturnTabFor decides which taps arm:
-  // rank pages (Rank players, Check trends) and D-269's roster arrival do
-  // not. Off ⇒ nothing is armed.
+  // rank pages (Rank players, Check trends) do not; D-269's roster arrival
+  // does only in unified mode (D-276: `nav.home_return_unified` on top of
+  // `nav.home_return`), where League rankings drops its own header "Home"
+  // control so the bar is the one control. Off ⇒ nothing is armed.
   const homeReturnOn = useFlag(HOME_RETURN_FLAG);
+  const unifiedOn = useFlag(HOME_RETURN_UNIFIED_FLAG);
+  const homeReturnUnified = homeReturnUnifiedOn(homeReturnOn, unifiedOn);
   const armReturn = (tap: HomeTileTap) => {
-    if (homeReturnOn) armHomeReturn(tap);
+    if (homeReturnOn) armHomeReturn(tap, homeReturnUnified);
   };
 
   // ── Queries (scope §6.2) ──────────────────────────────────────────────
@@ -225,6 +234,7 @@ export default function HomeHub() {
   // no_median), so a no-split tile's tap is readable apart from Mid-pack.
   const onOpenRoster = (s: PositionSplit) => {
     track('home_tile_tapped', { tile: 'position_roster', position: s.position, band: bandProp(s), split: s.state }, 'Home');
+    if (homeReturnUnified) armReturn('position_roster');
     requestLeagueSummaryRoster(leagueId!, s.position);
     navigation.navigate('League', { screen: 'LeagueRankings' });
   };

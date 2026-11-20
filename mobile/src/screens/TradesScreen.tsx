@@ -343,6 +343,7 @@ import {
 // P0-2 — the read gate's 403 gets its own copy on the deck-failure card.
 import { readErrorCopy } from '../utils/verification';
 import { applyJobResult } from '../utils/applyJobResult';
+import { refreshAfterOutlookSave } from '../utils/outlookSaved';
 // #384 — the merged calculator's tour hands the deck its second half.
 import { calcTourRunning, calcTourDeckArrived } from '../utils/calcTour';
 import type { Player, TradeCard, TradeJobSnapshot, ScoringFormat } from '../shared/types';
@@ -1682,7 +1683,7 @@ export default function TradesScreen({ navigation, route }: any) {
     mutationFn: (outlook: NonNullable<Outlook>) =>
       saveLeagueOutlook(leagueId!, outlook),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      refreshAfterOutlookSave(queryClient, leagueId);
       setToast({ msg: 'Outlook saved', tone: 'success' });
     },
     onError: (e: Error) => {
@@ -8029,7 +8030,7 @@ export default function TradesScreen({ navigation, route }: any) {
       // configured in the DNA sheet, on a submit that never mentioned it.
       avoid_positions: prefsQuery.data?.avoid_positions ?? [],
     });
-    queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+    refreshAfterOutlookSave(queryClient, leagueId);
     setToast({ msg: 'Outlook saved', tone: 'success' });
     // D14a — opened from the P30 end card: the submit is the apply tap.
     if (endAdjustRef.current) {
