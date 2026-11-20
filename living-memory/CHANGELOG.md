@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-19 — Home's "Consider <outlook>" prompt stayed after the outlook was saved: fixed (D-277), branch `fix/outlook-prompt-refresh`
+
+- **Bug (operator):** Home's playoff card said "Consider Tanking · Review outlook"; after saving Tanking the prompt stayed. Cause confirmed: the server works out `differs` from the saved outlook at read time, but every outlook save invalidated only `['league-prefs', leagueId]`, never the cached `['league-projection-batch', userId, leagueId]` read, and Home stays mounted.
+- **Fix (no server change, no flag):** `utils/outlookSaved.refreshAfterOutlookSave` refreshes both keys; all five save sites use it (TradeDnaSheet, TeamReviewScreen `savePrefs`, TradeFinderHubScreen, TradesScreen ×2). `utils/homePlayoffBanner` compares the recommended outlook with the saved one once `['league-prefs']` has landed, so the prompt goes at once. Covers Home and League rankings (same component).
+- **TestFlight check:** (1) Home shows "Consider X"; tap Review outlook, save X, come back to Home: the prompt is gone, no pull-to-refresh. (2) Open League rankings: no prompt there either. (3) Change the outlook back to the old one: the prompt returns on Home.
+- **Not done:** web `league-projections.js` reads `rec.differs` per page load (no cache; not affected in the same way).
+
 ## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), merged as `59422d6f` (PR #705), live, TestFlight 1.22.0 (197)
 
 - **What:** flag `nav.home_return` — eight Home tiles that cross tabs show "‹ Home" under the top bar for that visit (rank pages and D-269's roster arrival excluded). Flag `nav.continuity` — the audit's R1–R4, R8, R9, R13: picker Close + no one-league auto-forward in-app; no second copy of the tabs; links return to pages underneath (`pop`); own-stack Back fallbacks; sign-out/deletion/expiry reset; Portfolio Back; See liked → Matches › Awaiting; three sentence links; Tiers unsaved prompt.

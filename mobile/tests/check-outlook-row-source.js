@@ -25,7 +25,9 @@
 //      values, `not_sure` → "Not sure" alongside) and imported by the
 //      calculator; neither the calculator nor TradesScreen hand-copies it.
 //   4. Every file that calls `saveLeaguePreferences(` also invalidates
-//      ['league-prefs'; in TeamReviewScreen the invalidation sits INSIDE
+//      ['league-prefs' (directly, or through `utils/outlookSaved`'s
+//      `refreshAfterOutlookSave`, which is pinned here to invalidate that
+//      key); in TeamReviewScreen the invalidation sits INSIDE
 //      `savePrefs` (between its declaration and its dependency array), so the
 //      window and depth beats invalidate too, not just the plan beat.
 //   5. TeamReviewScreen records completion when the `plan` beat becomes
@@ -179,7 +181,13 @@ const store = strip(read(STORE));
   const writers = walk(SRC)
     .filter((p) => p !== API)
     .filter((p) => /saveLeaguePreferences\(/.test(strip(fs.readFileSync(p, 'utf8'))));
-  const missing = writers.filter((p) => !/invalidateQueries\(\{\s*queryKey:\s*\['league-prefs'/.test(strip(fs.readFileSync(p, 'utf8'))));
+  // The shared outlook-save refresh counts as the invalidation only while it
+  // really invalidates ['league-prefs', leagueId].
+  const helper = strip(fs.readFileSync(path.join(SRC, 'utils/outlookSaved.ts'), 'utf8'));
+  const helperOk = /invalidateQueries\(\{\s*queryKey:\s*\['league-prefs',\s*leagueId\]\s*\}\)/.test(helper);
+  const invalidates = (src) => /invalidateQueries\(\{\s*queryKey:\s*\['league-prefs'/.test(src)
+    || (helperOk && /refreshAfterOutlookSave\(\w+,\s*leagueId\)/.test(src));
+  const missing = writers.filter((p) => !invalidates(strip(fs.readFileSync(p, 'utf8'))));
   if (!writers.length) bad('4a. preference writers found', 'no file calls saveLeaguePreferences( — the walk is broken');
   else if (missing.length) {
     bad("4a. every saveLeaguePreferences( caller invalidates ['league-prefs'",
@@ -191,7 +199,8 @@ const store = strip(read(STORE));
   const body = decl === -1 || deps === -1 ? '' : screen.slice(decl, deps);
   if (!body) bad('4b. savePrefs is a useCallback with a dependency array', 'could not isolate `const savePrefs = useCallback(` … `}, [` in TeamReviewScreen');
   else if (!/saveLeaguePreferences\(/.test(body)) bad('4b. savePrefs is the write site', 'saveLeaguePreferences( is not inside savePrefs');
-  else if (!/invalidateQueries\(\{\s*queryKey:\s*\['league-prefs',\s*leagueId\]\s*\}\)/.test(body)) {
+  else if (!/invalidateQueries\(\{\s*queryKey:\s*\['league-prefs',\s*leagueId\]\s*\}\)/.test(body)
+    && !(helperOk && /refreshAfterOutlookSave\(qc,\s*leagueId\)/.test(body))) {
     bad("4b. TeamReviewScreen invalidates ['league-prefs', leagueId] INSIDE savePrefs",
       'the invalidation is not between `const savePrefs` and its dependency array. Only the plan beat invalidated before; ' +
       'the window and depth beats left the landing row stale (#424 latent half).');

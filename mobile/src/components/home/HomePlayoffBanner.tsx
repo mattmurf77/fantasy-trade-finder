@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Icon, Text } from '../chalkline';
 import { chalk, fonts, ice, ink, radii, space, type } from '../../theme/chalkline';
 import { getLeagueProjectionBatch, type ProjectionOutlook } from '../../api/leagueProjections';
+import { getLeaguePreferences } from '../../api/league';
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import { homePlayoffBanner } from '../../utils/homePlayoffBanner';
@@ -57,6 +58,11 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
   const available = enabled && hasToken && !switching && !!userId && !!leagueId && leagueId !== NO_LEAGUE_ID && platform === 'sleeper';
   const query = useQuery({ queryKey: ['league-projection-batch', userId, leagueId],
     queryFn: () => getLeagueProjectionBatch(leagueId!), enabled: available, staleTime: 60_000 });
+  // The saved outlook, on the key every preference writer refreshes (the
+  // hosts already read it, so this is a cache hit): the "Consider" prompt
+  // hides the moment the saved outlook matches the recommendation.
+  const prefsQuery = useQuery({ queryKey: ['league-prefs', leagueId],
+    queryFn: () => getLeaguePreferences(leagueId!), enabled: available });
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const shownRef = useRef(false);
@@ -64,7 +70,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
   // row below is the block's; the card classifies nothing.
   const direction = available ? cardBlock(query.data, cardOn) : null;
   const sheetOn = cardOn && sheetFlag && pagesOn;
-  const view = homePlayoffBanner(query.data, rosterId, query.isError);
+  const view = homePlayoffBanner(query.data, rosterId, query.isError, Date.now(), prefsQuery.data?.team_outlook);
   const percent = view.probability != null ? playoffOddsText(view.probability, view.proof, 0.1) : null;
   const pick = pickFigure(direction, percent != null);
   // direction_card_shown: once per mount, the first render with a block.

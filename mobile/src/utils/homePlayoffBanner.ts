@@ -17,6 +17,9 @@ export function homePlayoffBanner(
   rosterId: number | null,
   readFailed: boolean,
   now = Date.now(),
+  /** The outlook the app holds as saved (`['league-prefs', leagueId]`'s
+   *  `team_outlook`); undefined while that read has not landed. */
+  savedOutlook?: string | null,
 ) {
   const result = data?.run?.status === 'complete' ? data.run.result : null;
   const team = rosterId == null ? undefined : result?.teams.find(t => t.roster_id === rosterId);
@@ -40,7 +43,12 @@ export function homePlayoffBanner(
   const rec = data?.outlook_recommendation;
   const available = current && rec?.status === 'available';
   const recProbability = rec?.playoff_probability;
-  const recommendation: PlayoffRecommendation | null = available && rec.differs && rec.recommended_outlook
+  // `differs` is the server's comparison with the outlook saved when the
+  // forecast was read. Once the app holds the saved outlook, compare with
+  // that instead: a save made since then (to the recommended outlook, say)
+  // must not leave "Consider <outlook>" showing until the read refreshes.
+  const differs = savedOutlook === undefined ? rec?.differs : rec?.recommended_outlook !== savedOutlook;
+  const recommendation: PlayoffRecommendation | null = available && differs && rec.recommended_outlook
     ? { outlook: rec.recommended_outlook,
         probability: typeof recProbability === 'number' && Number.isFinite(recProbability) ? recProbability : probability!,
         suggestion: rec.suggestion }
