@@ -31,6 +31,7 @@ import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
 import { useFlag } from '../state/useFeatureFlags';
 import { haptics } from '../utils/haptics';
+import { refreshAfterOutlookSave } from '../utils/outlookSaved';
 import {
   getLeaguePreferences,
   saveLeaguePreferences,
@@ -350,7 +351,7 @@ export default function TradeFinderHubScreen({ navigation, route }: any) {
         avoid_positions: [],
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      refreshAfterOutlookSave(queryClient, leagueId);
     },
   });
 

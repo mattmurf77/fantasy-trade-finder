@@ -4,6 +4,13 @@
 - **Sabotages, red then restored (5):** roster tap arming the bar with unified off (B1f); header control shown in unified mode (A6b, 7a3); unified roster tap arming nothing (A1f, A2n-p, A6j-k, B1c); the bar signalling after it navigates (B1k); the listener without the new-signal check (B9d).
 - **Backend (local venv, no network):** new `test_home_return_unified_flag.py` 4 passed; with every flag / config / taxonomy test file (18 files) 220 passed. Full suite: CI.
 - **Not verified:** anything on a device (D-056). Checklist: `docs/plans/home-return-unify/scope.md` §3 (10 steps, flag-off included).
+## 2026-11-19 — Outlook prompt refresh fix (D-277), branch `fix/outlook-prompt-refresh`
+
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **194** `check-*.js` green.
+- **`check-home-playoff-banner.js`** extended (31 new assertions): H executes `utils/homePlayoffBanner` with a saved outlook (recommended == saved ⇒ no prompt, also when the cached read says `differs`; saved ≠ recommended ⇒ prompt; not loaded ⇒ server's `differs`; other gates unchanged) and renders the real component with the prefs read; I executes `refreshAfterOutlookSave` against a recording QueryClient (prefs key + this league's forecast key only) and pins that each of the four writer files calls it at least once per write, with the two POSTs to `/api/league/preferences` only in `api/league.ts`.
+- **Re-pinned:** `check-outlook-row-source.js` 4a/4b accept the helper while it invalidates `['league-prefs', leagueId]`; `direction-card-harness.js` stubs the prefs read.
+- **Sabotages, red then restored (4):** util ignores the saved outlook; helper stops refreshing the forecast key; TradesScreen's confirm save goes back to prefs-only; the banner stops passing the saved outlook.
+- **Not verified:** anything on a device (D-056). Checklist in the CHANGELOG entry (3 steps).
 
 ## 2026-11-17 — Release: navigation fixes live, TestFlight 1.22.0 (197)
 

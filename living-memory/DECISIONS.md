@@ -10,6 +10,14 @@
 **Consequences:**
 - `league_team_closed {via: 'home_back'}` now has two emitters, one per flag state; nothing in the event says which (waiver awaiting operator sign-off).
 - Either flag false + reload restores D-269's header control without a build. Graduation removes D-269's control and the flag.
+## D-277 — The Home playoff card's "Consider" prompt compares the recommendation with the saved outlook; every outlook save refreshes the forecast read
+
+**Date:** 2026-11-19 · **Who:** operator bug report through the main session; built by a builder subagent on `fix/outlook-prompt-refresh`.
+**Context:** the server computes `outlook_recommendation.differs` against the saved outlook when the forecast is read; the app cached that read and no outlook save refreshed it, so "Consider Tanking" stayed after Tanking was saved.
+**Decision:**
+- One helper, `utils/outlookSaved.refreshAfterOutlookSave`, used by every `saveLeaguePreferences` / `saveLeagueOutlook` caller, invalidates `['league-prefs', leagueId]` and the league's `['league-projection-batch', *, leagueId]`.
+- `utils/homePlayoffBanner` takes the saved `team_outlook` (from the shared prefs key): once loaded, "differs" is `recommended_outlook !== saved` (both directions); until then the server's `differs` stands. The recommended outlook itself stays the server's: the client still classifies nothing.
+**Consequences:** the prompt is right the moment a save lands; no flag (a bug fix restoring the documented rule, behind the existing `league.projection_outlook`). A new outlook writer must call the helper (`check-home-playoff-banner.js` I fails otherwise).
 
 ## D-275 — Home tiles that cross tabs show "‹ Home" for the visit (Q1 (a)); the audit's small continuity fixes ship behind one flag
 
