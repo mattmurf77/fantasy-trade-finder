@@ -1,3 +1,10 @@
+## 2026-11-17 — Release: navigation fixes live, TestFlight 1.22.0 (197)
+
+- **CI:** PR #705 all four jobs green on head `9e04b493`; merged as `59422d6f` (`--match-head-commit`).
+- **Server, production:** Render deploy live on `59422d6f` (finished 2026-11-18T02:38Z). `GET /api/feature-flags` returns `nav.home_return` true and `nav.continuity` true (both absent on the previous deploy, read minutes earlier).
+- **App:** clean detached checkout of `59422d6f`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-nav-continuity.js` 111 passed. EAS build `b5b57ec4-4af4-4782-8949-8f3e8845d591` FINISHED (confirmed with `build:list`), 1.22.0 (197); submission `0a5835db-89e0-460e-8832-eebdf159edcf` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/nav-continuity/scope.md` §3 (29 steps) on build 197.
+
 ## 2026-11-17 — Home "‹ Home" control + navigation continuity fixes (D-275), branch `feat/nav-continuity`
 
 - **App:** `npm ci`, `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK. New `check-nav-continuity.js` **111 passed** (108 from the builder, 3 added in review) (executes `navigation/navContinuity` and the real `state/homeReturn` store; pins every call site with its flag-off branch). All **194** `check-*.js` green, `check-rank-nav-exit.js` unchanged and green. Six existing checks re-pinned where they pinned a changed line (home-hub 12c, home-playoff-banner F, team-review 20b, league-candidates-300, offer-prefill-330 S-1, usage-trade-handoff env).

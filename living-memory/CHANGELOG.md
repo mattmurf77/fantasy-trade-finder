@@ -12,12 +12,14 @@
 ---
 
 
-## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), branch `feat/nav-continuity` (not merged)
+## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), merged as `59422d6f` (PR #705), live, TestFlight 1.22.0 (197)
 
 - **What:** flag `nav.home_return` — eight Home tiles that cross tabs show "‹ Home" under the top bar for that visit (rank pages and D-269's roster arrival excluded). Flag `nav.continuity` — the audit's R1–R4, R8, R9, R13: picker Close + no one-league auto-forward in-app; no second copy of the tabs; links return to pages underneath (`pop`); own-stack Back fallbacks; sign-out/deletion/expiry reset; Portfolio Back; See liked → Matches › Awaiting; three sentence links; Tiers unsaved prompt.
 - **Code:** `navigation/navContinuity.ts` (pure), `state/homeReturn.ts`, `components/HomeReturnBar.tsx`; call sites in 20 screens/navigators. Both flags false in code, true in config + 3 fixtures + client defaults.
 - **Evidence:** `check-nav-continuity.js` (executes the decisions), six existing checks re-pinned, backend flag test. TestFlight checklist in the scope doc.
-- **Next:** main session review + push; operator runs the checklist; analytics waiver sign-off.
+- **Shipped 2026-11-17:** PR #705 merged on green CI as `59422d6f`; Render deploy live on that commit; `/api/feature-flags` serves both flags true. EAS build `b5b57ec4-4af4-4782-8949-8f3e8845d591`, 1.22.0 (197), submitted to App Store Connect. Analytics waiver signed off by the operator ("Yes, sign off", recorded in the scope doc).
+- **Also 2026-11-17:** recovery-ledger sweep run (12 worktrees, 8 branches; `docs/recovery/2026-11-17-release-193-196-sweep.md`). Nine more audits added to the operator's review page and the hosted copy re-uploaded through the operator route (`created: false`, comments kept); the Sleeper pull reports stay out.
+- **Next:** the operator runs the 29-step checklist (scope doc §3) on build 197. Rollback: either flag false in `config/features.json`.
 
 ## 2026-11-16 — Founders' review: Review pages (D-274), merged as `a9fd2460` (PR #702), live, TestFlight 1.22.0 (196)
 
