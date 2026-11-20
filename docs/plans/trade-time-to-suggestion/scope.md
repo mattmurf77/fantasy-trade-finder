@@ -164,7 +164,7 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - the U3 three-page run and the P30 end;
   - the U5 fresh-account run;
   - the U2 roster-change run;
-  - the K-F5 run (L4b; activates when #351 D1 ships; not a launch gate);
+  - the K-F5 run (L4b; gates the D1 switch-on, not the 11-18 launch);
   - the §9.6 scripted two-device session, which is the AC-L1 proof.
 
   Step 13 (blocked sends) runs only in a test league the
