@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import {
   HOME_RETURN_IDLE,
+  HOME_RETURN_NO_SIGNAL,
   homeReturnArm,
   homeReturnOnTabFocus,
+  homeReturnSignal,
+  type HomeReturnSignal,
   type HomeReturnState,
   type HomeTileTap,
 } from '../navigation/navContinuity';
@@ -14,24 +17,37 @@ import {
 // focused one. Never persisted: an arrival must not replay on a cold start.
 // The transitions are navigation/navContinuity's pure functions, executed by
 // tests/check-nav-continuity.js.
+//
+// `returned` is the bar's one-shot tap signal (D-276, flag
+// `nav.home_return_unified`): the bar bumps it before it navigates, naming
+// the armed tab, and a page with something to close on the way out
+// (LeagueSummaryScreen's roster arrival) reacts in a synchronous
+// `useHomeReturn.subscribe` listener. The bar stays page-agnostic.
 
 interface HomeReturnStore extends HomeReturnState {
   /** The tab that currently has focus in the bottom tabs, as last reported. */
   focusedTab: string | null;
-  arm: (tap: HomeTileTap) => void;
+  /** The last "‹ Home" tap (one-shot: a new `seq` per tap). */
+  returned: HomeReturnSignal;
+  arm: (tap: HomeTileTap, unified?: boolean) => void;
   noteTabFocus: (tab: string) => void;
+  /** The bar was tapped: signal it, for the tab it was armed for. */
+  requestReturn: () => void;
   clear: () => void;
 }
 
 export const useHomeReturn = create<HomeReturnStore>((set, get) => ({
   ...HOME_RETURN_IDLE,
   focusedTab: null,
-  arm: (tap) => set(homeReturnArm(tap)),
+  returned: HOME_RETURN_NO_SIGNAL,
+  arm: (tap, unified = false) => set(homeReturnArm(tap, unified)),
   noteTabFocus: (tab) => set({ ...homeReturnOnTabFocus({ tab: get().tab }, tab), focusedTab: tab }),
+  requestReturn: () => set({ returned: homeReturnSignal(get().returned, get().tab) }),
   clear: () => set(HOME_RETURN_IDLE),
 }));
 
-/** Non-hook arm for HomeHub's tap handlers. */
-export function armHomeReturn(tap: HomeTileTap): void {
-  useHomeReturn.getState().arm(tap);
+/** Non-hook arm for HomeHub's tap handlers. `unified` is
+ *  navContinuity.homeReturnUnifiedOn(...) at the tap. */
+export function armHomeReturn(tap: HomeTileTap, unified = false): void {
+  useHomeReturn.getState().arm(tap, unified);
 }

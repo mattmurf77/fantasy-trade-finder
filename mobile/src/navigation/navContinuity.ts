@@ -8,6 +8,10 @@
 // Two server flags, both shipped on, each off ⇒ today's behaviour exactly:
 //   * `nav.home_return`  — R5 / Q1 (a): a Home tile that crosses to another
 //     tab arms a "Home" control that shows on that tab for the visit only.
+//   * `nav.home_return_unified` — on top of `nav.home_return` (D-276): the
+//     position tile body (D-269's roster arrival) arms the same "‹ Home"
+//     control and League rankings drops its own header "Home" control, so
+//     every Home tile has ONE Home control that looks and acts the same.
 //   * `nav.continuity`   — R1-R4, R8, R9, R13: the picker's Close and its
 //     in-app arrival, returning to pages already underneath, the own-stack
 //     Back fallbacks, the stack reset on sign-out, Portfolio's Back and the
@@ -15,6 +19,7 @@
 
 export const HOME_RETURN_FLAG = 'nav.home_return';
 export const CONTINUITY_FLAG = 'nav.continuity';
+export const HOME_RETURN_UNIFIED_FLAG = 'nav.home_return_unified';
 
 // ── R5 — the Home return control ────────────────────────────────────────
 
@@ -48,12 +53,16 @@ export type HomeTileTap =
  *   - `rank` and `trends` land on RANK PAGES, whose one exit is "More ways
  *     to rank" (operator ruling 2026-08-16, check-rank-nav-exit.js; Q5 not
  *     taken), so they are left exactly as they are;
- *   - `position_roster` is D-269's arrival, which already has its own
- *     header "Home" control in League rankings (flag
- *     `nav.home_position_roster`); arming a second one would show two.
+ *   - `position_roster` is D-269's arrival. Not unified (the default): it
+ *     has its own header "Home" control in League rankings (flag
+ *     `nav.home_position_roster`), so arming the bar would show two.
+ *     Unified (`homeReturnUnifiedOn`): it arms League like the other tiles,
+ *     and League rankings draws no header control (`rosterHeaderHomeVisible`).
  */
-export function homeReturnTabFor(tap: HomeTileTap): HomeReturnTab | null {
+export function homeReturnTabFor(tap: HomeTileTap, unified = false): HomeReturnTab | null {
   switch (tap) {
+    case 'position_roster':
+      return unified ? 'League' : null;
     case 'outlook':
     case 'review_outlook':
     case 'find_trade':
@@ -70,6 +79,13 @@ export function homeReturnTabFor(tap: HomeTileTap): HomeReturnTab | null {
   }
 }
 
+/** Unified mode (D-276): only when BOTH `nav.home_return` and
+ *  `nav.home_return_unified` are on. Either off ⇒ D-269 and D-275 exactly as
+ *  they were (two kinds of control, never both on one arrival). */
+export function homeReturnUnifiedOn(homeReturnOn: boolean, unifiedOn: boolean): boolean {
+  return homeReturnOn && unifiedOn;
+}
+
 /** The armed return: which tab it belongs to, or none. */
 export interface HomeReturnState {
   tab: HomeReturnTab | null;
@@ -78,8 +94,8 @@ export interface HomeReturnState {
 export const HOME_RETURN_IDLE: HomeReturnState = { tab: null };
 
 /** A Home tap: arm for its tab (or disarm, for a tap that arms none). */
-export function homeReturnArm(tap: HomeTileTap): HomeReturnState {
-  return { tab: homeReturnTabFor(tap) };
+export function homeReturnArm(tap: HomeTileTap, unified = false): HomeReturnState {
+  return { tab: homeReturnTabFor(tap, unified) };
 }
 
 /** A tab came into focus. Arriving on the armed tab keeps the control;
@@ -95,6 +111,52 @@ export function homeReturnVisible(
   flagOn: boolean,
 ): boolean {
   return flagOn && state.tab != null && state.tab === focusedTab;
+}
+
+/** A tap on "‹ Home": a one-shot signal, numbered so each tap is a new one,
+ *  naming the tab the control was armed for. The bar knows nothing about
+ *  the page underneath; a page that has something to close on the way out
+ *  (League rankings' roster arrival) listens for it. */
+export interface HomeReturnSignal {
+  seq: number;
+  tab: HomeReturnTab | null;
+}
+
+export const HOME_RETURN_NO_SIGNAL: HomeReturnSignal = { seq: 0, tab: null };
+
+export function homeReturnSignal(prev: HomeReturnSignal, armedTab: HomeReturnTab | null): HomeReturnSignal {
+  return { seq: prev.seq + 1, tab: armedTab };
+}
+
+/** D-269's header "Home" control in League rankings: on the tab root, for
+ *  the drill-in the position tile arrival opened, while it is still open —
+ *  and never in unified mode, where the "‹ Home" bar is the one control. */
+export function rosterHeaderHomeVisible(
+  isTabRoot: boolean,
+  arrivalTeamId: string | null,
+  selectedTeamId: string | null,
+  unified: boolean,
+): boolean {
+  return !unified && isTabRoot && arrivalTeamId != null && selectedTeamId === arrivalTeamId;
+}
+
+/** Unified mode: a "‹ Home" tap armed for League closes the drill-in the
+ *  roster arrival opened (`closeTeam('home_back')`, as D-269's control does)
+ *  if it is still the open one; anything else is left as it is. */
+export function rosterClosesOnHomeReturn(
+  unified: boolean,
+  signal: HomeReturnSignal,
+  isTabRoot: boolean,
+  arrivalTeamId: string | null,
+  selectedTeamId: string | null,
+): boolean {
+  return (
+    unified &&
+    signal.tab === 'League' &&
+    isTabRoot &&
+    arrivalTeamId != null &&
+    selectedTeamId === arrivalTeamId
+  );
 }
 
 // ── R4 — "nothing to go back to" fallbacks ──────────────────────────────

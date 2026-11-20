@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-276 — One Home control: the position tile body uses the "‹ Home" bar too, behind `nav.home_return_unified`
+
+**Date:** 2026-11-19 · **Who:** the operator's ask through the main session ("ONE Home control that looks and behaves the same everywhere"); built by a builder subagent on `feat/home-return-unify`. Scope: `docs/plans/home-return-unify/scope.md`.
+**Context:** after D-275 a Home tile tap left the user with one of two different controls: the "‹ Home" bar under the top bar (most tiles) or D-269's header "Home" control on the right of League rankings (the position tile body).
+**Decision:**
+- New client flag `nav.home_return_unified` (code default false, shipped true). Unified mode = it AND `nav.home_return`. Then the position tile body arms the bar for League, the header control is never drawn, and the bar's tap closes the arrival's drill-in if it is still open (`closeTeam('home_back')`, the existing event and reason, once) before going Home. The bar's visibility rule (the visit to the tab) replaces D-269's "while that team is open".
+- Mechanism: the decisions are pure functions in `navigation/navContinuity.ts`; the `homeReturn` store carries a one-shot tap signal (`returned: {seq, tab}`), raised by the bar before it navigates; LeagueSummaryScreen subscribes (zustand listeners are synchronous) only in unified mode. The bar holds no League knowledge.
+**Consequences:**
+- `league_team_closed {via: 'home_back'}` now has two emitters, one per flag state; nothing in the event says which (waiver awaiting operator sign-off).
+- Either flag false + reload restores D-269's header control without a build. Graduation removes D-269's control and the flag.
+
 ## D-275 — Home tiles that cross tabs show "‹ Home" for the visit (Q1 (a)); the audit's small continuity fixes ship behind one flag
 
 **Date:** 2026-11-17 · **Who:** the operator's ask through the main session ("wiring Home's tiles to the Home control, plus the smaller navigation fixes from the audit"), Q1 = option (a) following D-269; built by a builder subagent on `feat/nav-continuity`. Scope: `docs/plans/nav-continuity/scope.md`.

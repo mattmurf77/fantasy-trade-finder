@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify` (not merged)
+
+- **What:** flag `nav.home_return_unified` (with `nav.home_return`): the Home position tile body arms the same "‹ Home" bar as the other tiles; League rankings no longer draws D-269's header "Home" control; tapping "‹ Home" closes that arrival's drill-in (`league_team_closed` via `home_back`, once) and returns Home. Rank pages unchanged. Either flag off = D-269 as before.
+- **Code:** `navigation/navContinuity.ts` (unified decisions), `state/homeReturn.ts` (one-shot tap signal), `HomeReturnBar.tsx`, `HomeHub.tsx`, `LeagueSummaryScreen.tsx`. Flag false in code, true in config + 3 fixtures + client defaults.
+- **Evidence:** `check-nav-continuity.js` 149, `check-position-tile-tap.js` 56, backend flag test. Checklist in the scope doc.
+- **Next:** main session review, push, merge; operator runs the scope doc checklist; analytics waiver needs sign-off.
+
 ## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), merged as `59422d6f` (PR #705), live, TestFlight 1.22.0 (197)
 
 - **What:** flag `nav.home_return` — eight Home tiles that cross tabs show "‹ Home" under the top bar for that visit (rank pages and D-269's roster arrival excluded). Flag `nav.continuity` — the audit's R1–R4, R8, R9, R13: picker Close + no one-league auto-forward in-app; no second copy of the tabs; links return to pages underneath (`pop`); own-stack Back fallbacks; sign-out/deletion/expiry reset; Portfolio Back; See liked → Matches › Awaiting; three sentence links; Tiers unsaved prompt.

@@ -2,7 +2,9 @@
 // Navigation continuity (D-275, docs/plans/nav-continuity/scope.md): the
 // Home tiles' "‹ Home" control (flag `nav.home_return`, R5 / Q1 (a)) and the
 // smaller fixes R1-R4, R8, R9, R13 of the 2026-11-12 navigation map (flag
-// `nav.continuity`).
+// `nav.continuity`). Also D-276 (docs/plans/home-return-unify/scope.md, flag
+// `nav.home_return_unified`): one Home control for the position tile body
+// too (A1d-A1f, A2m-A2t, A6, B1, B9), checked in both flag states.
 //
 // No simulator (D-056). Part A EXECUTES the navigation decisions: the pure
 // helpers in src/navigation/navContinuity.ts and the real zustand store in
@@ -87,6 +89,17 @@ const NO_ARM = [
   }
   assert(nc.HOME_RETURN_FLAG === 'nav.home_return' && nc.CONTINUITY_FLAG === 'nav.continuity',
     'A1c. the two flag keys');
+  // D-276: unified mode changes exactly one tap, and only both flags on.
+  assert(nc.HOME_RETURN_UNIFIED_FLAG === 'nav.home_return_unified', 'A1d. the unified flag key');
+  assert(nc.homeReturnUnifiedOn(true, true) === true && nc.homeReturnUnifiedOn(true, false) === false
+    && nc.homeReturnUnifiedOn(false, true) === false && nc.homeReturnUnifiedOn(false, false) === false,
+    'A1e. unified only when BOTH nav.home_return and nav.home_return_unified are on');
+  const ALL_TAPS = [...Object.keys(ARMS), ...NO_ARM];
+  const changed = ALL_TAPS.filter((t) => nc.homeReturnTabFor(t, true) !== nc.homeReturnTabFor(t, false));
+  assert(changed.length === 1 && changed[0] === 'position_roster' && nc.homeReturnTabFor('position_roster', true) === 'League'
+    && nc.homeReturnTabFor('rank', true) === null && nc.homeReturnTabFor('trends', true) === null,
+    'A1f. unified: the position tile body arms League; every other tap (rank pages included) is unchanged',
+    `changed: ${changed.join(', ')}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -135,6 +148,116 @@ const NO_ARM = [
   store.armHomeReturn('position_roster');
   s.getState().noteTabFocus('League');
   assert(!visible(), 'A2l. the position tile body (D-269) arms no bar: no second Home control');
+
+  // D-276 unified mode, the same store.
+  s.getState().noteTabFocus('Home');
+  store.armHomeReturn('position_roster', false);
+  s.getState().noteTabFocus('League');
+  assert(!visible(), 'A2m. unified off: the position tile body still arms no bar (D-269 control instead)');
+  s.getState().noteTabFocus('Home');
+  store.armHomeReturn('position_roster', true);
+  s.getState().noteTabFocus('League');
+  assert(visible(), 'A2n. unified: position tile body → League rankings: the "‹ Home" bar shows');
+  s.getState().noteTabFocus('League');
+  assert(visible(), 'A2o. unified: it stays for the visit, whatever happens on the page (not only while the team is open)');
+  const seq0 = s.getState().returned.seq;
+  s.getState().requestReturn();
+  assert(s.getState().returned.seq === seq0 + 1 && s.getState().returned.tab === 'League',
+    'A2p. a "‹ Home" tap raises one new signal, naming the armed tab (League)');
+  s.getState().noteTabFocus('Home');
+  assert(!visible() && s.getState().tab === null && s.getState().returned.seq === seq0 + 1,
+    'A2q. landing on Home ends the visit; no second signal is raised by the tab change');
+  store.armHomeReturn('buy', true);
+  s.getState().noteTabFocus('League');
+  s.getState().requestReturn();
+  assert(s.getState().returned.seq === seq0 + 2 && s.getState().returned.tab === 'League',
+    'A2r. each tap is its own signal (seq grows), so a listener acts once per tap');
+  s.getState().noteTabFocus('Home');
+  store.armHomeReturn('position_roster', true);
+  s.getState().noteTabFocus('Matches');
+  assert(!visible() && s.getState().tab === null, 'A2s. unified: leaving League another way ends the visit');
+  s.getState().noteTabFocus('League');
+  assert(!visible(), 'A2t. unified: coming back to League on one\'s own shows no stray bar');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// A6 — D-276: the League rankings side of one Home control (the header
+//      control's show rule and the bar-tap close rule), executed, then the
+//      tap → close sequence driven through the real store with a listener
+//      shaped like LeagueSummaryScreen's (B9 pins the screen to it).
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const H = nc.rosterHeaderHomeVisible;
+  // Unified off: exactly D-269's rule, `isTabRoot && homeBackId != null && selectedId === homeBackId`.
+  let same = true;
+  for (const root of [true, false]) for (const arr of ['t1', null]) for (const sel of ['t1', 't2', null]) {
+    const d269 = root && arr != null && sel === arr;
+    if (H(root, arr, sel, false) !== d269) same = false;
+  }
+  assert(same, 'A6a. unified off: the header "Home" control follows D-269\'s rule exactly');
+  let none = true;
+  for (const root of [true, false]) for (const arr of ['t1', null]) for (const sel of ['t1', 't2', null]) {
+    if (H(root, arr, sel, true)) none = false;
+  }
+  assert(none, 'A6b. unified: the header "Home" control never shows (no second control, ever)');
+
+  const C = nc.rosterClosesOnHomeReturn;
+  const sig = (tab) => ({ seq: 1, tab });
+  assert(C(true, sig('League'), true, 't1', 't1') === true, 'A6c. unified, bar tapped on League, the arrival team still open: close it');
+  assert(C(true, sig('League'), true, 't1', 't2') === false, 'A6d. another team open now: left alone (no home_back)');
+  assert(C(true, sig('League'), true, 't1', null) === false, 'A6e. drill-in already closed ("All teams"): nothing to close, no event');
+  assert(C(true, sig('League'), true, null, 't1') === false, 'A6f. a team the user opened themselves (no arrival): left alone');
+  assert(C(true, sig('Trades'), true, 't1', 't1') === false, 'A6g. a tap armed for another tab: League does nothing');
+  assert(C(true, sig('League'), false, 't1', 't1') === false, 'A6h. the legacy root-stack League page never reacts');
+  assert(C(false, sig('League'), true, 't1', 't1') === false, 'A6i. unified off: the bar tap closes nothing (today\'s bar)');
+
+  // The sequence: tile arrival → drill-in open → "‹ Home" → exactly one
+  // league_team_closed{home_back}, closed BEFORE the navigate.
+  const zustand = require(path.join(MOBILE, 'node_modules/zustand'));
+  const store = load('src/state/homeReturn.ts', (r) => {
+    if (r === 'zustand') return zustand;
+    if (r === '../navigation/navContinuity') return nc;
+    throw new Error(`homeReturn.ts asked for ${r}`);
+  });
+  const s = store.useHomeReturn;
+  const log = [];
+  const run = (unified, { openOther = false } = {}) => {
+    log.length = 0;
+    const page = { arrival: null, selected: null, focus: null };
+    const closeTeam = (via) => {
+      // LeagueSummaryScreen's emitTeamClosed: no-op when nothing is focused.
+      if (page.focus) log.push(`league_team_closed:${via}`);
+      page.focus = null;
+      page.selected = null;
+    };
+    const unsub = unified
+      ? s.subscribe((state, prev) => {
+          if (state.returned.seq === prev.returned.seq) return;
+          if (nc.rosterClosesOnHomeReturn(unified, state.returned, true, page.arrival, page.selected)) closeTeam('home_back');
+        })
+      : () => {};
+    s.getState().noteTabFocus('Home');
+    store.armHomeReturn('position_roster', unified);
+    s.getState().noteTabFocus('League');
+    page.arrival = 't1'; page.selected = 't1'; page.focus = 't1';
+    if (openOther) { page.selected = 't2'; page.focus = 't2'; }
+    const barShown = nc.homeReturnVisible(s.getState(), s.getState().focusedTab, true);
+    if (barShown) {
+      s.getState().requestReturn();
+      log.push('navigate:Home');
+      s.getState().noteTabFocus('Home');
+    }
+    unsub();
+    return { barShown, header: nc.rosterHeaderHomeVisible(true, page.arrival, page.selected, unified) };
+  };
+  const on = run(true);
+  assert(on.barShown && log.join(' > ') === 'league_team_closed:home_back > navigate:Home',
+    'A6j. unified: "‹ Home" closes the arrival\'s drill-in with ONE home_back, then goes Home', log.join(' > '));
+  run(true, { openOther: true });
+  assert(log.join(' > ') === 'navigate:Home', 'A6k. unified, another team open: no home_back, just Home', log.join(' > '));
+  const off = run(false);
+  assert(!off.barShown && off.header === true && log.length === 0,
+    'A6l. unified off: no bar for the arrival, D-269\'s header control shows instead');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -207,12 +330,15 @@ const NO_ARM = [
 {
   const hub = src('src/components/home/HomeHub.tsx');
   assert(/const homeReturnOn = useFlag\(HOME_RETURN_FLAG\);/.test(hub)
-    && /const armReturn = \(tap: HomeTileTap\) => \{\s*if \(homeReturnOn\) armHomeReturn\(tap\);\s*\};/.test(hub),
-    'B1a. HomeHub arms only while `nav.home_return` is on');
+    && /const unifiedOn = useFlag\(HOME_RETURN_UNIFIED_FLAG\);/.test(hub)
+    && /const homeReturnUnified = homeReturnUnifiedOn\(homeReturnOn, unifiedOn\);/.test(hub)
+    && /const armReturn = \(tap: HomeTileTap\) => \{\s*if \(homeReturnOn\) armHomeReturn\(tap, homeReturnUnified\);\s*\};/.test(hub),
+    'B1a. HomeHub arms only while `nav.home_return` is on, telling the store whether unified mode is on');
   const armed = [...hub.matchAll(/armReturn\('([a-z_]+)'\)/g)].map((m) => m[1]);
-  assert(armed.length === Object.keys(ARMS).length && Object.keys(ARMS).every((t) => armed.includes(t)),
-    'B1b. every tab-crossing tile arms, once each', `armed: ${armed.join(', ')}`);
-  assert(armed.every((t) => nc.homeReturnTabFor(t) !== null), 'B1c. nothing arms a tap that has no tab');
+  const EXPECT_ARMED = [...Object.keys(ARMS), 'position_roster'];
+  assert(armed.length === EXPECT_ARMED.length && EXPECT_ARMED.every((t) => armed.includes(t)),
+    'B1b. every tab-crossing tile arms, once each (the position tile body too, D-276)', `armed: ${armed.join(', ')}`);
+  assert(armed.every((t) => nc.homeReturnTabFor(t, true) !== null), 'B1c. nothing arms a tap that has no tab (unified)');
   // Order inside each arming body: track → armReturn → navigate.
   const ordered = armed.every((t) => {
     const i = hub.indexOf(`armReturn('${t}')`);
@@ -229,7 +355,9 @@ const NO_ARM = [
     && /navigation\.navigate\('Rank', \{ screen: 'Trends' \}\);/.test(trendsTile) && !/armReturn/.test(trendsTile),
     'B1e. Rank players and Check trends are exactly as before (rank pages, no control)');
   const roster = (hub.match(/const onOpenRoster = [\s\S]*?\n  \};/) || [''])[0];
-  assert(roster && !/armReturn/.test(roster), 'B1f. the D-269 roster arrival arms no bar');
+  assert(roster && /\n    if \(homeReturnUnified\) armReturn\('position_roster'\);\n/.test(roster)
+    && (roster.match(/armReturn/g) || []).length === 1,
+    'B1f. the D-269 roster arrival arms the bar ONLY in unified mode (off: exactly as before, no arm call)');
 
   const tab = src('src/navigation/TabNav.tsx');
   const top = tab.indexOf('<TopBar />');
@@ -247,6 +375,36 @@ const NO_ARM = [
   assert(/testID="home-return\.back"/.test(hb) && /accessibilityLabel="Back to Home"/.test(hb)
     && /navigation\.navigate\('Main', \{ screen: 'Home' \}\)/.test(hb) && /<Text style=\{styles\.backText\}>Home<\/Text>/.test(hb),
     'B1j. "‹ Home" returns to the Home tab');
+  const iSig = hb.indexOf('useHomeReturn.getState().requestReturn();');
+  assert(iSig >= 0 && iSig < hb.indexOf("navigation.navigate('Main', { screen: 'Home' })")
+    && (hb.match(/requestReturn\(/g) || []).length === 1,
+    'B1k. the bar raises its tap signal once, BEFORE it navigates (so the page underneath still has focus)');
+  assert(!/League|closeTeam|home_back|LeagueSummary|selectedId/.test(hb),
+    'B1l. the bar holds no League rankings knowledge');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// B9 — D-276 call site in League rankings: the header control and the bar
+//      listener go through A6's helpers; either flag off ⇒ no listener.
+// ═══════════════════════════════════════════════════════════════════════
+{
+  const ls = src('src/screens/LeagueSummaryScreen.tsx');
+  assert(/const homeReturnUnified = homeReturnUnifiedOn\(\s*useFlag\(HOME_RETURN_FLAG\),\s*useFlag\(HOME_RETURN_UNIFIED_FLAG\),\s*\);/.test(ls),
+    'B9a. League rankings reads BOTH flags into one unified switch');
+  assert(/const showHomeBack = rosterHeaderHomeVisible\(isTabRoot, homeBackId, selectedId, homeReturnUnified\);/.test(ls),
+    'B9b. the header "Home" control shows through rosterHeaderHomeVisible (hidden in unified mode)');
+  const eff = (ls.match(/useEffect\(\(\) => \{\s*if \(!homeReturnUnified \|\| !isTabRoot\) return;[\s\S]*?\n  \}, \[[^\]]*\]\);/) || [''])[0];
+  assert(!!eff, 'B9c. the bar listener is only subscribed in unified mode, on the tab root');
+  assert(/return useHomeReturn\.subscribe\(\(state, prev\) => \{/.test(eff)
+    && /if \(state\.returned\.seq === prev\.returned\.seq\) return;/.test(eff),
+    'B9d. it subscribes (and unsubscribes by returning) and reacts only to a NEW tap signal');
+  assert(/if \(rosterClosesOnHomeReturn\(homeReturnUnified, state\.returned, isTabRoot, homeBackId, selectedId\)\) \{\s*closeTeam\('home_back'\);\s*\}/.test(eff)
+    && (eff.match(/closeTeam\(/g) || []).length === 1,
+    "B9e. the close goes through rosterClosesOnHomeReturn and the one exit path, closeTeam('home_back')");
+  assert(/\}, \[homeReturnUnified, isTabRoot, homeBackId, selectedId, closeTeam\]\);/.test(eff),
+    'B9f. it re-subscribes when the arrival or the open team changes (no stale ids)');
+  assert((ls.match(/closeTeam\('home_back'\)/g) || []).length === 2,
+    "B9g. 'home_back' has exactly two emitters: D-269's header control and the bar listener (never both shown)");
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -432,7 +590,7 @@ const NO_ARM = [
   const cfg = JSON.parse(readRoot('config/features.json'));
   const ffPy = readRoot('backend/feature_flags.py');
   const flags = read('src/state/useFeatureFlags.ts');
-  for (const f of ['nav.home_return', 'nav.continuity']) {
+  for (const f of ['nav.home_return', 'nav.continuity', 'nav.home_return_unified']) {
     assert(cfg[f] === true, `C1. config/features.json ships ${f} true`);
     assert(new RegExp(`\\n    "${f.replace('.', '\\.')}",\\n`).test(ffPy), `C2. ${f} registered in FLAG_KEYS (code default False)`);
     assert(flags.includes(`  '${f}': true,\n`), `C3. the client's compiled default for ${f} matches config`);
