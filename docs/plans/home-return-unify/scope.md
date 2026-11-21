@@ -3,7 +3,7 @@
 **Date:** 2026-11-19
 **Entry point:** direct ask (operator, through the main session): one "back to Home" control that looks and behaves the same everywhere, replacing the two kinds that exist today: D-275's "‹ Home" bar (`nav.home_return`) and D-269's header "Home" control in League rankings (`nav.home_position_roster`).
 **Builder:** builder subagent on `feat/home-return-unify` (D-276)
-**Operator sign-off on waivers:** NEEDED. One waiver (§1 (c)) and one carried-over waiver (§3, Android back) are listed for the operator; nothing here is signed off.
+**Operator sign-off on waivers:** GIVEN 2026-11-21. The operator answered "Yes, sign off" to the main session's question naming the analytics waiver (§1 (c)) and the missing feature-scope block for the D-277 bug fix shipped in the same PR (#708). The Android back item (§3) is carried over from D-269 and D-275, not a new waiver.
 
 ---
 
@@ -44,7 +44,7 @@ So in unified mode every Home tile that crosses tabs shows the same control: "�
 
 - [ ] (a) New events specced — none.
 - [x] **(b) Existing events cover it:** `home_tile_tapped {tile: 'position_roster', …}` (unchanged), `league_team_opened {via: 'home_tile'}` (unchanged), `league_team_closed {via: 'home_back'}` (same value, now emitted by the bar's tap in unified mode instead of the header control; exactly one of the two emitters exists per flag state), `screen_viewed` Home with `prev_screen` LeagueRankings.
-- [x] **(c) WAIVED, needs operator sign-off:** no way to tell, from `league_team_closed {via: 'home_back'}` alone, whether the tap was on the header control (flag off) or on the bar (unified). Rationale: the brief says keep the existing event and reason and add none; the flag state at the time separates the two. If the operator wants it split, the follow-up is a new `via` value registered in `analytics_taxonomy.py` in the same commit.
+- [x] **(c) WAIVED, operator sign-off 2026-11-21 ("Yes, sign off"):** no way to tell, from `league_team_closed {via: 'home_back'}` alone, whether the tap was on the header control (flag off) or on the bar (unified). Rationale: the brief says keep the existing event and reason and add none; the flag state at the time separates the two. If the operator wants it split, the follow-up is a new `via` value registered in `analytics_taxonomy.py` in the same commit.
 
 ## 2. Schema & flag scope
 

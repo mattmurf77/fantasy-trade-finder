@@ -18,3 +18,5 @@ Captured before anything is deleted. The removals run only after this file is on
 **Not in this sweep:** `fairness-formula` (`feat/fairness-formula` `1ac1b027` is not on `main`); `content-audit` and `context-audit` (unmerged, waiting on the operator's content decisions); every worktree registered under the old `Documents/Copied Claude` path (`git worktree prune` is not to be run); other sessions' branches (`claude/*`, `codex/*`); every branch with commits that are not on `main`; any worktree made for work started on or after 2026-11-19.
 
 **Recover:** `git branch <name> <sha>`; for a detached checkout `git worktree add --detach <path> <sha>`.
+
+**2026-11-21, sweep run (appended after this record reached `main` as `0f870e6c`, PR #707):** the three worktrees above were re-checked against their rows (head equal, ancestor of `origin/main`, `git status --porcelain` 0 lines) and removed with `git worktree remove` (no `--force`). The three named branches were deleted locally with `git branch -d` and on `origin` with `git push origin --delete`; `git ls-remote` shows none of them. Nothing else was deleted.
