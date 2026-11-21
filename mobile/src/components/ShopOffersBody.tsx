@@ -30,6 +30,7 @@ import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 import { useFlag } from '../state/useFeatureFlags';
+import { useEntitlements } from '../state/useEntitlements';
 import { getLeaguePreferences } from '../api/league';
 import {
   fetchAssetIdeas,
@@ -438,6 +439,15 @@ export default function ShopOffersBody({
   // defaults), and the suppression set + dismiss semantics apply to
   // widened tiles through the same `visibleByMode` filter as everything
   // else.
+  // Paid launch: a purchase or Restore while the gate notice shows sweeps
+  // again, so a new subscriber gets the ideas instead of See plans. A
+  // refetch, not routing (the notice's routing reads no entitlement).
+  const entitled = useEntitlements((s) => s.pro);
+  useEffect(() => {
+    if (entitled && ideasQuery.isError) void ideasQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entitled]);
+
   const widenKey = useMemo(
     () => [...offeredPositions].sort().join('+'),
     // eslint-disable-next-line react-hooks/exhaustive-deps

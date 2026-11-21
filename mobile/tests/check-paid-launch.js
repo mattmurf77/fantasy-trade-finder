@@ -334,6 +334,15 @@ check('4b. [shape] no locked-feature card (R28.8 #5): the notice is mounted only
   assert(/assetIdeasQuery\.isError \? gateNoticeFor/.test(host), 'panel input is behind isError');
 });
 
+check('7a. [shape] a purchase/Restore while a notice shows sweeps again (Shop and the panel refetch on pro), no routing read', () => {
+  const shop = strip(read('components/ShopOffersBody.tsx'));
+  assert(/const entitled = useEntitlements\(\(s\) => s\.pro\);\s*useEffect\(\(\) => \{\s*if \(entitled && ideasQuery\.isError\) void ideasQuery\.refetch\(\);/.test(shop),
+    'Shop refetches on pro');
+  const host = strip(read('screens/TradesScreen.tsx'));
+  assert(/if \(payEntitled && assetIdeasQuery\.isError\) void assetIdeasQuery\.refetch\(\);\s*\}, \[payEntitled\]\);/.test(host),
+    'TradesScreen refetches the panel on pro');
+});
+
 // ── Run ────────────────────────────────────────────────────────────────────
 (async () => {
   let failed = 0;

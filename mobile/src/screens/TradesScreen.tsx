@@ -5637,6 +5637,13 @@ export default function TradesScreen({ navigation, route }: any) {
     if (payEntitled) resumeDeckPages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payEntitled]);
+  // Paid launch: a purchase or Restore while the single-pin ideas panel
+  // shows its gate notice sweeps again, so the notice gives way to ideas
+  // instead of offering See plans to a subscriber. A refetch, not routing.
+  useEffect(() => {
+    if (payEntitled && assetIdeasQuery.isError) void assetIdeasQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payEntitled]);
   function handleDeckGateEndPress() {
     haptics.selection();
     if (deckGateEnd?.verify || sessionUnverified) {
