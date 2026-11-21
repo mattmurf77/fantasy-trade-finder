@@ -153,6 +153,7 @@
   "nav.home_hub": true,
   "nav.home_position_roster": true,
   "nav.home_return": true,
+  "nav.home_return_unified": true,
   "nav.continuity": true,
   "usage_trends.enabled": true,
   "ux.sheet_guard": true,

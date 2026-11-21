@@ -23,6 +23,7 @@ import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
 import { OUTLOOK_DISPLAY_NAME } from '../components/OutlookBiasReceipt';
 import { playoffOddsText, type PlayoffProof } from '../utils/playoffOdds';
+import { refreshAfterOutlookSave } from '../utils/outlookSaved';
 import { clearTeamReviewSave, noteTeamReviewSave } from '../state/teamReviewSaveBus';
 import {
   getTeamReview, type BeatId, type OutlookOption, type TeamReviewResponse,
@@ -233,7 +234,9 @@ export default function TeamReviewScreen() {
       // and depth beats used to leave TradesHome's 5-minute-stale copy (and
       // now the merged calculator's outlook row, which reads the same key)
       // showing the pre-review value to a user who backed out early.
-      qc.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
+      // The forecast read too: its outlook prompt is worked out from the
+      // saved outlook (utils/outlookSaved).
+      refreshAfterOutlookSave(qc, leagueId);
       // The later beats (partners above all) read this payload, which was
       // fetched before the save. Refetch it in the background: the cached
       // data stays on screen until the new payload lands, so the current

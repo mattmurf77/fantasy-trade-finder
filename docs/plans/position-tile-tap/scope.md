@@ -3,6 +3,7 @@
 **Date:** 2026-11-15
 **Entry point:** direct ask (operator): "I want to have the position tiles be clickable. When clicked, navigate users to the league summary page, filtered to their team's position that was clicked." Follow-ups the same day: the destination screenshot (own team drilled in, All, the one position chip, "Ranked by QB value only — chart reordered.", the user's QB rows on screen) and "Should still have a back button that goes back to the home page too."
 **Builder:** builder subagent on `feat/position-tile-tap` (D-269)
+**Amended 2026-11-19 (D-276, [home-return-unify](../home-return-unify/scope.md)):** with flags `nav.home_return` and `nav.home_return_unified` both on (both ship on), the header "Home" control described below is NOT drawn: the arrival arms the shared "‹ Home" bar under the top bar instead, which shows for the visit to League and, when tapped, closes this drill-in (same `home_back` exit) and returns Home. Everything below about the header control describes `nav.home_return_unified` OFF.
 **Operator sign-off on waivers:** one waiver is surfaced below (§3, Android hardware back); the main session raises it.
 
 ---
@@ -14,7 +15,7 @@ On the Home hub, tapping the BODY of a position tile (label, badge, rank, value,
 - basis Consensus, subset **All**, the position filter set to exactly that position (no Buy/Sell banner: this is not a split arrival);
 - the user's **own team drilled in**: the header shows "‹ All teams" and the team name, the chart caption reads "Ranked by QB value only — chart reordered." with the user's bar highlighted, and the roster panel lists the user's players at that position;
 - the page lands so those player rows are on screen with no scroll when the layout allows; otherwise it scrolls just enough that the roster ends on screen, never past the roster panel's top (its All / position controls and the position header stay visible);
-- a **"Home"** control in the header's right side for this arrival only. One tap closes the drill-in and returns to the Home tab as the user left it.
+- a **"Home"** control in the header's right side for this arrival only. One tap closes the drill-in and returns to the Home tab as the user left it. (With `nav.home_return_unified` on, D-276: the shared "‹ Home" bar instead, same result.)
 
 Buy, Sell and "See P ranking" do exactly what they did. With the flag off the tile is exactly as before.
 

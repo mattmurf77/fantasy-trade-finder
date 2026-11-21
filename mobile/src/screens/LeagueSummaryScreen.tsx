@@ -48,7 +48,16 @@ import { useFinderTargets } from '../state/useFinderTargets';
 import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import type { Player } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
-import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
+import {
+  CONTINUITY_FLAG,
+  HOME_RETURN_FLAG,
+  HOME_RETURN_UNIFIED_FLAG,
+  homeReturnUnifiedOn,
+  returnOptions,
+  rosterClosesOnHomeReturn,
+  rosterHeaderHomeVisible,
+} from '../navigation/navContinuity';
+import { useHomeReturn } from '../state/homeReturn';
 import { useOutlookStripExpanded } from '../state/outlookStrip';
 import { track } from '../api/events';
 import { relativeTime } from '../utils/relativeTime';
@@ -1470,11 +1479,33 @@ export default function LeagueSummaryScreen() {
   // D-269 — during a Home position tile arrival the header also carries a
   // "Home" control on the RIGHT (the left is this drill-in's own exit). One
   // tap closes the drill-in it opened and returns to the Home tab as it was.
-  const showHomeBack = isTabRoot && homeBackId != null && selectedId === homeBackId;
+  // D-276 unified mode (`nav.home_return` AND `nav.home_return_unified`):
+  // no header control; the arrival armed TabNav's "‹ Home" bar instead, and
+  // the bar's tap signal closes the same drill-in the same way (below).
+  const homeReturnUnified = homeReturnUnifiedOn(
+    useFlag(HOME_RETURN_FLAG),
+    useFlag(HOME_RETURN_UNIFIED_FLAG),
+  );
+  const showHomeBack = rosterHeaderHomeVisible(isTabRoot, homeBackId, selectedId, homeReturnUnified);
   const backToHome = React.useCallback(() => {
     closeTeam('home_back');
     navigation.navigate('Home');
   }, [closeTeam, navigation]);
+  // The bar's one-shot tap signal (state/homeReturn `requestReturn`). The
+  // listener runs synchronously inside the bar's onPress, BEFORE its
+  // navigate, so the drill-in closes while this page still has focus — the
+  // order D-269's backToHome uses. `closeTeam` emits `league_team_closed`
+  // via 'home_back' once (emitTeamClosed clears focusRef). Not subscribed
+  // at all unless unified, so either flag off is exactly as before.
+  useEffect(() => {
+    if (!homeReturnUnified || !isTabRoot) return;
+    return useHomeReturn.subscribe((state, prev) => {
+      if (state.returned.seq === prev.returned.seq) return;
+      if (rosterClosesOnHomeReturn(homeReturnUnified, state.returned, isTabRoot, homeBackId, selectedId)) {
+        closeTeam('home_back');
+      }
+    });
+  }, [homeReturnUnified, isTabRoot, homeBackId, selectedId, closeTeam]);
   useEffect(() => {
     if (!isTabRoot) return;
     if (focusedTeamName) {

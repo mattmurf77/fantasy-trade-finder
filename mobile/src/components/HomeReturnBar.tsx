@@ -17,8 +17,11 @@ import { HOME_RETURN_FLAG, homeReturnVisible } from '../navigation/navContinuity
 // any route (the tab bar, this control, another link) ends the visit.
 //
 // Same chevron-and-word treatment as the in-tab "‹ Back" (TabNav HeaderBack);
-// one tap returns to the Home tab as it was. Nothing is closed or popped on
-// the destination, so the page is as the user left it if they come back.
+// one tap returns to the Home tab as it was. The bar itself closes or pops
+// nothing on the destination. Before it navigates it raises the store's
+// one-shot `requestReturn` signal (D-276): with `nav.home_return_unified`
+// on, League rankings listens and closes the drill-in a position tile
+// arrival opened, as D-269's header control did. The bar knows no page.
 export default function HomeReturnBar() {
   const navigation = useNavigation<any>();
   const flagOn = useFlag(HOME_RETURN_FLAG);
@@ -31,7 +34,10 @@ export default function HomeReturnBar() {
         accessibilityRole="button"
         accessibilityLabel="Back to Home"
         hitSlop={space.md}
-        onPress={() => navigation.navigate('Main', { screen: 'Home' })}
+        onPress={() => {
+          useHomeReturn.getState().requestReturn();
+          navigation.navigate('Main', { screen: 'Home' });
+        }}
         style={({ pressed }) => [styles.back, pressed && { opacity: 0.6 }]}
       >
         <Icon name="chevron-left" size={16} color={chalk.base} />

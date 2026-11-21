@@ -413,8 +413,10 @@ FLAG_KEYS: tuple[str, ...] = (
     # position-tile-tap/scope.md, D-269) — tapping a Home hub position tile's
     # body opens League rankings filtered to that position with the user's
     # own team drilled in (their players at that position) and a header
-    # "Home" control back. Buy / Sell unchanged. Off = the tile exactly as
-    # before (no body tap). CLIENT-ONLY: no route reads this key.
+    # "Home" control back (with nav.home_return + nav.home_return_unified,
+    # D-276, the shared "‹ Home" bar instead). Buy / Sell unchanged. Off =
+    # the tile exactly as before (no body tap). CLIENT-ONLY: no route reads
+    # this key.
     "nav.home_position_roster",
     # Home return control (2026-11-17 operator ask, decision Q1 option (a) of
     # the navigation map, docs/plans/nav-continuity/scope.md, D-275) — a Home
@@ -424,6 +426,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # pages are left out (the 2026-08-16 one-exit ruling). Off = today's
     # plain tab switch. CLIENT-ONLY: no route reads this key.
     "nav.home_return",
+    # One Home control (2026-11-19 operator ask, docs/plans/home-return-unify/
+    # scope.md, D-276) — only together with nav.home_return: the position
+    # tile body (D-269's roster arrival) arms the same "‹ Home" control as
+    # the other tiles, and League rankings no longer draws its own header
+    # "Home" control; tapping "‹ Home" closes that arrival's drill-in
+    # (league_team_closed via home_back) and returns Home. Off = D-269's
+    # header control as before. CLIENT-ONLY: no route reads this key.
+    "nav.home_return_unified",
     # Navigation continuity fixes (same ask, R1-R4, R8, R9, R13 of the
     # navigation map, D-275) — the in-app league picker's Close and no
     # one-league auto-forward, returning to the tabs / pages already
