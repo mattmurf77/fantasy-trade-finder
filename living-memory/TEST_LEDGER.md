@@ -4,6 +4,7 @@
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green, including new `check-home-next-move.js` **48 passed** (executes `utils/homeNextMove` with the real list utils, renders `HomeNextMove`); `check-home-hub.js` and `check-nav-continuity.js` (150) gain `next_move`.
 - **Sabotages, red then restored (5):** composer takes `rows[0]` not the lowest rank (5 backend tests); block composed without the flag check (2); sell roster check always passes (B4-B6); the "‹ Home" arm dropped (F1, nav-continuity B1b); hand-off logged under Standings (E2, E3, E6, E7).
 - **Not verified:** anything on a device (D-056). Checklist: scope §9 (11 steps, flag-off included).
+- **Review revision (same day, coordinator):** two rules loosened. The sell needs only the suggested player still on the live roster (`roster_player_ids` dropped from the block). An unanswered draft-order question no longer blocks a sell (`draft_order_unanswered` removed); a `reverse_standings` / `lottery_or_other` answer still gives nothing (`no_direction`; no projected pick served), now pinned on the composer and the read. Re-run: `test_next_move*.py` 40 passed; the same 196 files **5,175 passed, 27 skipped, 0 failed**; tsc clean, testid-lint OK, all 195 `check-*.js` green (`check-home-next-move.js` 48, B5 now "other adds and drops still show"). Sabotages red then restored: the sell check ignoring the player (B6); the draft-order block put back (3 backend tests).
 
 ## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify`
 

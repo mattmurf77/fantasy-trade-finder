@@ -76,8 +76,7 @@ def test_sell_names_the_first_max_pf_row():
         "playoff_proof": {"playoff_clinched": False, "playoff_eliminated": False},
         "pick": {"now": "1.06", "after": "1.04"},
         "most_likely_pick": maxpf_row(1, "101")["most_likely_pick"],
-        "top3_probability": {"now": .20, "after": .31},
-        "roster_player_ids": ["101", "102", "103"]}
+        "top3_probability": {"now": .20, "after": .31}}
 
 
 def test_buy_names_the_first_target_row():
@@ -88,7 +87,7 @@ def test_buy_names_the_first_target_row():
         "rank": 1, "seller": {"roster_id": 4, "name": "Sellers FC"}, "captured_at": "2026-11-17T14:00:00Z",
         "playoff_probability": {"now": .55, "after": .63},
         "playoff_proof": {"playoff_clinched": False, "playoff_eliminated": False},
-        "pick": None, "most_likely_pick": None, "top3_probability": None, "roster_player_ids": None}
+        "pick": None, "most_likely_pick": None, "top3_probability": None}
 
 
 def test_the_shape_is_the_same_in_every_state():
@@ -117,7 +116,6 @@ def test_direction_gates(given, reason, direction_key):
     (maxpf(state="unavailable"), "no_moves"),
     (maxpf(pick_owner={"owns_own_pick": False, "owner_name": "Rivals"}), "pick_owned_elsewhere"),
     (maxpf(pick_owner=None), "pick_owned_elsewhere"),
-    (maxpf(draft_order={"rule": None, "set_at": None}), "draft_order_unanswered"),
     # Over 45% with no Rebuilding / Tanking outlook: the list starts behind "Show moves".
     (maxpf(baseline={"playoff_probability": .46, "playoff_clinched": False, "playoff_eliminated": False}), "collapsed"),
     (maxpf(baseline={"playoff_probability": .30, "playoff_clinched": True, "playoff_eliminated": False}), "settled"),
@@ -178,12 +176,13 @@ def test_never_names_a_player_the_list_would_not_show_first():
             continue
         seen += 1
         # The list's first row, its Find trades button (no Keep), passing,
-        # and nothing in front of the list (no owner gate, no question, open).
-        assert out["player"]["player_id"] == "101" and not keep and passes and owns and rule is not None
+        # and nothing in front of the list (no owner gate, not collapsed).
+        # The draft-order question shows above the rows and hides nothing.
+        assert out["player"]["player_id"] == "101" and not keep and passes and owns
         assert p <= .45 or outlook in ("rebuilder", "jets")
-    # One gate combination passes (no Keep, passing, answered, own pick):
+    # Two gate combinations pass (no Keep, passing, own pick; answered or not):
     # 20% and 45% with any outlook (8), 50% and 80% only when Rebuilding or Tanking (4).
-    assert seen == 12
+    assert seen == 24
 
 
 @pytest.fixture(scope="module")
@@ -212,12 +211,27 @@ def test_real_blocks(fixture_blocks):
     if first["passes_threshold"]:
         assert out["state"] == "ready" and out["action"] == "sell"
         assert out["player"]["player_id"] == first["player_id"] and out["pick"] == first["label"]
-        assert out["roster_player_ids"] == moves["roster_player_ids"] and out["player"]["player_id"] in out["roster_player_ids"]
+        assert out["player"]["player_id"] in moves["roster_player_ids"]
     else:
         assert (out["state"], out["reason"]) == ("none", "below_threshold")
-    # Unanswered question on the same forecast: nothing.
+    # Unanswered question: the list still shows its rows (the question sits
+    # above them), so the same sell is suggested.
     unanswered = maxpf_moves.compose("current", sell_saved, draft_order=None, saved_outlook="rebuilder", cuts=cuts)
-    assert next_move.compose(card, unanswered, None)["reason"] == "draft_order_unanswered"
+    assert next_move.compose(card, unanswered, None) == out
+    # Answered with a non-max-PF order: the list has no rows
+    # (draft_order_not_maxpf), the card does not offer the draft pick and
+    # serves no projected pick; nothing is suggested.
+    for rule in ("reverse_standings", "lottery_or_other"):
+        order = {"rule": rule, "set_at": "x"}
+        moves_np = maxpf_moves.compose("current", sell_saved, draft_order=order, saved_outlook="rebuilder", cuts=cuts)
+        card_np = team_direction.compose("current", sell_saved, saved_outlook="rebuilder", draft_order=order,
+                                         cuts=team_direction.settings(), max_pf_on=True, max_pf_block=moves_np)
+        assert moves_np["state"] == "draft_order_not_maxpf" and moves_np["rows"] == []
+        assert card_np["options"]["draft_pick"] == {"offered": False, "reason": "draft_order_not_maxpf"}
+        assert card_np["projected_pick"] is None and card_np["primary"] is None
+        assert next_move.compose(card_np, moves_np, None)["reason"] == "no_direction"
+        # Even if handed a draft-pick direction, a non-ready list gives nothing.
+        assert next_move.compose(direction("draft_pick"), moves_np, None)["reason"] == "no_moves"
     # Playoffs: the fixture's roster 7 (69%) with roster 3 selling by outlook.
     served = playoff_targets.compose("current", buy_saved, live_outlooks={3: "rebuilder"}, cuts=cuts)
     card = team_direction.compose("current", buy_saved, cuts=team_direction.settings(), targets_on=True,

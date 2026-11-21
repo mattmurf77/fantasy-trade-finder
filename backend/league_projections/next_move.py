@@ -11,12 +11,12 @@ network.
 
 The rule: never name a move the list it comes from would not show as its
 first row right now, with its "Find trades" button, and with nothing in
-front of it (the "Show moves" / "Show anyway" steps or the draft-order
-question). Where the first row is not usable the answer is "none" with a
+front of it (the "Show moves" / "Show anyway" steps; the draft-order
+question shows above the rows and hides nothing). Where the first row is not usable the answer is "none" with a
 reason, never the second row. The one check the server cannot make is the
 live roster (the forecast read never fetches rosters); the app makes it with
-the same live rosters the lists use, from what this block carries
-(`roster_player_ids` for a sell, `seller.roster_id` for a buy).
+the same live rosters the lists use: the player still on the viewer's
+roster (sell) or on `seller.roster_id`'s roster (buy).
 """
 from __future__ import annotations
 
@@ -28,8 +28,7 @@ VERSION = 1
 def _none(reason, direction=None):
     return {"version": VERSION, "state": "none", "reason": reason, "direction": direction, "action": None,
             "player": None, "rank": None, "seller": None, "captured_at": None, "playoff_probability": None,
-            "playoff_proof": None, "pick": None, "most_likely_pick": None, "top3_probability": None,
-            "roster_player_ids": None}
+            "playoff_proof": None, "pick": None, "most_likely_pick": None, "top3_probability": None}
 
 
 def _first(rows):
@@ -56,9 +55,6 @@ def _sell(block):
     # The owner gate: the list sits behind "Show anyway".
     if (block.get("pick_owner") or {}).get("owns_own_pick") is not True:
         return _none("pick_owned_elsewhere", "draft_pick")
-    # The draft-order question has not been answered for this league.
-    if (block.get("draft_order") or {}).get("rule") is None:
-        return _none("draft_order_unanswered", "draft_pick")
     # The list starts collapsed behind "Show moves" (the section's own
     # default-open rule, which is the card's lean): the card fell back to the
     # draft pick only because the playoffs are not offered.
@@ -79,8 +75,7 @@ def _sell(block):
             "playoff_probability": dict(row["playoff_probability"]), "playoff_proof": _proof(baseline),
             "pick": {"now": row["label"]["now"], "after": row["label"]["after"]},
             "most_likely_pick": row.get("most_likely_pick"),
-            "top3_probability": dict(row["top3_probability"]),
-            "roster_player_ids": [str(p) for p in block.get("roster_player_ids") or []]}
+            "top3_probability": dict(row["top3_probability"])}
 
 
 def _buy(block):

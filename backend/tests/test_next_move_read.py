@@ -12,8 +12,10 @@ real saved Max PF moves block (viewer roster 1, 88%). No network, no
 - test_ready_sell_on_the_read: a saved Rebuilding outlook and an answered
   draft order: the block is the composer over the three blocks the same read
   serves, a sell of the served list's first row, and nothing is saved.
-- test_gates_on_the_read: the draft-order question unanswered; the card's
-  fallback to the draft pick at 88% (collapsed list); the direction card off.
+- test_gates_on_the_read: the draft-order question unanswered (suggests);
+  answered reverse_standings / lottery_or_other (nothing: no rows, no pick);
+  the card's fallback to the draft pick at 88% (collapsed list); the
+  direction card off.
 - test_a_failure_is_read_failed: the forecast and the other blocks still served.
 - test_flag_registered_shipped_on_and_reaches_the_app, test_not_env_forced,
   test_client_compiled_default_matches_config,
@@ -88,7 +90,7 @@ def test_ready_sell_on_the_read(client, engine, monkeypatch):  # noqa: F811
     assert block["state"] == "ready" and block["action"] == "sell" and block["direction"] == "draft_pick"
     assert block["player"] == {k: first[k] for k in ("player_id", "name", "short_name", "position")}
     assert block["pick"] == first["label"] and block["playoff_probability"] == first["playoff_probability"]
-    assert block["roster_player_ids"] == body["max_pf_moves"]["roster_player_ids"]
+    assert "roster_player_ids" not in block and block["player"]["player_id"] in body["max_pf_moves"]["roster_player_ids"]
     # Nothing is saved: the stored run is unchanged and serves no block.
     assert "next_move" not in body["run"]["result"]
     with engine.connect() as conn:
@@ -101,9 +103,20 @@ def test_gates_on_the_read(client, engine, monkeypatch):  # noqa: F811
     flags(monkeypatch)
     seed(engine, saved_run())
     db.upsert_league_preference("account", "123", "rebuilder")
+    # The draft-order question unanswered: the list still shows its rows
+    # under the question, so the sell is suggested.
     block = latest(http).json["next_move"]
-    assert (block["state"], block["reason"], block["player"]) == ("none", "draft_order_unanswered", None)
-    answered(engine)
+    assert block["state"] == "ready" and block["action"] == "sell"
+    # Answered with a non-max-PF order: no rows, no draft-pick direction, no projected pick: nothing.
+    with engine.begin() as conn:
+        conn.execute(db.leagues_table.insert().values(sleeper_league_id="123", user_id="other", platform="sleeper"))
+    for rule in ("reverse_standings", "lottery_or_other"):
+        db.set_league_draft_order_rule("123", rule)
+        body = latest(http).json
+        assert body["max_pf_moves"]["state"] == "draft_order_not_maxpf"
+        assert body["team_direction"]["projected_pick"] is None and body["team_direction"]["primary"] is None
+        assert (body["next_move"]["state"], body["next_move"]["reason"]) == ("none", "no_direction")
+    db.set_league_draft_order_rule("123", "maxpf_lowest_first")
     # Contender at 88%: the card leads with the draft pick only because the
     # playoffs are not offered here; the list would start behind "Show moves".
     db.upsert_league_preference("account", "123", "contender")

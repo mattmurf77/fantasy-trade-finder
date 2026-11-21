@@ -5,8 +5,8 @@
 // figure arrive in the forecast read's `next_move` block; nothing here ranks,
 // classifies or computes. This module only decides whether to honour the
 // block (flag, version, shape), makes the ONE check the server cannot make —
-// the live roster, exactly as the lists make it (utils/maxPfMoves
-// `rosterChanged`, utils/playoffTargets `liveSeller`) — words the line with
+// the live roster, as the lists make it (utils/maxPfMoves `listedRows`,
+// utils/playoffTargets `liveSeller`): the player still on that roster — words the line with
 // the lists' formatters, and runs the tap through the list row's own
 // "Find trades" hand-off (same pins, same event, same destination).
 // No React, no I/O; tests/check-home-next-move.js transpiles and executes it.
@@ -45,22 +45,17 @@ export function honouredBlock(data: ProjectionView | undefined, flagOn: boolean)
   const p = b.player;
   if (!p || !isStr(p.player_id) || !isStr(p.name) || !isStr(p.short_name) || !isStr(p.position)) return null;
   if (!b.playoff_probability || !isProb(b.playoff_probability.now) || !isProb(b.playoff_probability.after)) return null;
-  if (b.action === 'sell' && !Array.isArray(b.roster_player_ids)) return null;
   if (b.action === 'buy' && (!b.seller || typeof b.seller.roster_id !== 'number' || !isStr(b.seller.name))) return null;
   return b;
 }
 
-/** Max PF moves' roster check (utils/maxPfMoves `rosterChanged`), made
- *  strict: the live roster must be loaded and the same set of players as the
- *  forecast's. Any change hides the sell, since the list then flags its
- *  figures as out of date. */
+/** Max PF moves' per-player roster check (utils/maxPfMoves `listedRows`
+ *  drops a row whose player left the live roster): the live roster is loaded
+ *  and the suggested player is still on it. Other adds and drops do not
+ *  matter (the buy check is the same rule: player still on that team). */
 export function sellRosterHolds(move: NextMove, liveIds: string[] | null | undefined): boolean {
-  if (!liveIds || !move.roster_player_ids || !move.player) return false;
-  const live = new Set(liveIds);
-  const saved = new Set(move.roster_player_ids);
-  if (live.size !== saved.size) return false;
-  for (const id of live) if (!saved.has(id)) return false;
-  return live.has(move.player.player_id);
+  if (!liveIds || !move.player) return false;
+  return liveIds.includes(move.player.player_id);
 }
 
 /** Playoff targets' check (utils/playoffTargets `liveSeller`): the player is

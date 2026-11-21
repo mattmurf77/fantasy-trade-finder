@@ -195,8 +195,6 @@ export interface NextMove {
   pick: {now: string | null; after: string | null} | null;
   most_likely_pick?: {now: MaxPfPickChance; after: MaxPfPickChance} | null;
   top3_probability: NowAfter | null;
-  /** Sell only: the forecast's roster, for the live-roster check. */
-  roster_player_ids: string[] | null;
 }
 export interface ProjectionView {
   state: string; reason: string | null; run: ProjectionRun | null; attempt: ProjectionRun | null;

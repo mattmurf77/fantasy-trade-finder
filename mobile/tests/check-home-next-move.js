@@ -6,7 +6,7 @@
 // utils/playoffTargets, utils/playoffOdds and the copy tables it runs), and
 // RENDERS the real components/home/HomeNextMove against host stubs:
 //   A. which block the row honours (flag, version, state, shape);
-//   B. a sell: the line, and the live-roster check (strict: any change hides it);
+//   B. a sell: the line, and the live-roster check (the player still on it);
 //   C. a buy: the line, the seller's live roster and owner;
 //   D. nothing: every `none` block, flag off, no rosters ⇒ no row at all;
 //   E. the tap is the list row's own "Find trades": same pins, same event,
@@ -69,7 +69,7 @@ function sell(patch = {}) {
     playoff_probability: { now: 0.30, after: 0.22 },
     playoff_proof: { playoff_clinched: false, playoff_eliminated: false },
     pick: { now: '1.06', after: '1.04' }, most_likely_pick: null,
-    top3_probability: { now: 0.20, after: 0.31 }, roster_player_ids: ['101', '102', '103'],
+    top3_probability: { now: 0.20, after: 0.31 },
   }, patch);
 }
 function buy(patch = {}) {
@@ -79,11 +79,11 @@ function buy(patch = {}) {
     rank: 1, seller: { roster_id: 4, name: 'Sellers FC' }, captured_at: '2026-11-17T14:00:00Z',
     playoff_probability: { now: 0.55, after: 0.63 },
     playoff_proof: { playoff_clinched: false, playoff_eliminated: false },
-    pick: null, most_likely_pick: null, top3_probability: null, roster_player_ids: null,
+    pick: null, most_likely_pick: null, top3_probability: null,
   }, patch);
 }
 const none = (reason, direction = null) => Object.assign(sell(), { state: 'none', reason, direction, action: null,
-  player: null, rank: null, playoff_probability: null, pick: null, top3_probability: null, roster_player_ids: null });
+  player: null, rank: null, playoff_probability: null, pick: null, top3_probability: null });
 const view = (b) => ({ state: 'current', next_move: b });
 const MINE = ['103', '101', '102'];
 const ROSTERS = [
@@ -102,7 +102,6 @@ const ROSTERS = [
   check(u.honouredBlock(view(sell({ action: 'hold' })), true) === null
     && u.honouredBlock(view(sell({ player: { player_id: '101', name: 'x', short_name: '', position: 'WR' } })), true) === null
     && u.honouredBlock(view(sell({ playoff_probability: { now: 0.3, after: 1.4 } })), true) === null
-    && u.honouredBlock(view(sell({ roster_player_ids: null })), true) === null
     && u.honouredBlock(view(buy({ seller: null })), true) === null,
     'A5. a block of a shape this build does not know: nothing');
   check(u.honouredBlock(view(sell()), true) !== null && u.honouredBlock(view(buy()), true) !== null, 'A6. ready blocks are honoured');
@@ -118,7 +117,9 @@ const ROSTERS = [
   check(v && v.accessibilityLabel === 'Next move. Sell R. Sato (WR): projected pick 1.06 → 1.04. Find trades for R. Sato.',
     'B3. one spoken label naming the tap', v && v.accessibilityLabel);
   check(u.nextMoveView(view(sell()), true, ROSTERS, null) === null, 'B4. the live roster not loaded: nothing (the check always runs)');
-  check(u.nextMoveView(view(sell()), true, ROSTERS, [...MINE, '104']) === null, 'B5. a player added since the forecast: nothing');
+  check(u.nextMoveView(view(sell()), true, ROSTERS, [...MINE, '104']) !== null
+    && u.nextMoveView(view(sell()), true, ROSTERS, ['101', '109']) !== null,
+    'B5. other adds and drops since the forecast: the row still shows (only the named player matters)');
   check(u.nextMoveView(view(sell()), true, ROSTERS, ['102', '103']) === null
     && u.nextMoveView(view(sell()), true, ROSTERS, ['102', '103', '109']) === null,
     'B6. the named player traded away (or swapped): nothing, never the next row');
