@@ -69,6 +69,7 @@ const ARMS = {
   outlook: 'Trades',
   review_outlook: 'Trades',
   find_trade: 'Trades',
+  next_move: 'Trades',              // Home's next move (D-278): Find a Trade, as find_trade
   overall_rank: 'League',
   buy: 'League',
   sell: 'League',

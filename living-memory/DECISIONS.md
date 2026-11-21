@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-278 — Home's next move: one player, one action, the first row of the list the card's direction opens, behind `league.next_move`
+
+**Date:** 2026-11-21 · **Who:** the operator's ask through the main session ("suggest 1 player to buy or sell that improves their team outlook driven priority the best"); built by a builder subagent on `feat/home-next-move`. Scope: `docs/plans/home-next-move/scope.md`.
+**Context:** Home's playoff card already says which way the team should go (`team_direction.primary`, which follows the saved outlook) and the two Improve pages list the moves; nothing on Home named a single move.
+**Decision:**
+- Server flag `league.next_move` (code default false, shipped true). The forecast read composes a `next_move` block from the three blocks it already serves: draft pick ⇒ SELL the first Max PF moves row; playoffs ⇒ BUY the first served Playoff targets row; else `none` with a reason. Pure, nothing saved, no job work.
+- It names a move only when that list would show it as its first row, with its Find trades button, with nothing in front of it: not for another team's pick, an unanswered draft-order question, a list collapsed behind "Show moves" (the card fell back to the draft pick), a Keep player, a first row under the threshold, or a settled playoff chance. It never skips to the second row; the read's own seller filter is the one way a saved rank 2 becomes first.
+- The live-roster check is the app's (the read never fetches rosters), made with the lists' rosters query: a sell needs the viewer's roster unchanged since the forecast (stricter than the list, which warns instead); a buy needs the player still on that team, with an owner.
+- The tap is the list row's own Find trades hand-off (same pins, `finder_target_pinned`, params), logged under Home, after `home_tile_tapped {tile: 'next_move'}` and the "‹ Home" arm for Trades.
+**Consequences:** no impression event, so the tap-through rate is not measurable (waiver awaiting operator sign-off). Kill: the flag false + reload.
+
 ## D-276 — One Home control: the position tile body uses the "‹ Home" bar too, behind `nav.home_return_unified`
 
 **Date:** 2026-11-19 · **Who:** the operator's ask through the main session ("ONE Home control that looks and behaves the same everywhere"); built by a builder subagent on `feat/home-return-unify`. Scope: `docs/plans/home-return-unify/scope.md`.

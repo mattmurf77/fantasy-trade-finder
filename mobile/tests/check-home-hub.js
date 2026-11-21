@@ -246,7 +246,9 @@ const handler = (name) => {
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
-    'position_roster', 'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry'];
+    'position_roster', 'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry',
+    // Home's next move (D-278): the row under the playoff card.
+    'next_move'];
   const WITH_POS = new Set(['buy', 'sell', 'position_ranking']);
   const WITH_SPLIT = new Set(['position_roster']);
   const re = /track\('home_tile_tapped', \{ ([^}]*) \}, 'Home'\);/g;
@@ -294,7 +296,7 @@ const handler = (name) => {
   assert(!/\btrack\('(?!home_tile_tapped')/.test(homeAll)
     && (homeAll.match(/\btrack\((?!'home_tile_tapped')/g) || []).length === 1
     && /track\(CARD_EVENTS\.shown, shownProps\(direction, sheetOn, !!pick\), screen\);/.test(homeAll),
-    '6e. the hub emits no other client event (screen_viewed / tab_selected stay where they are); the playoff card\'s one impression (direction_card_shown, D-270) is the only other');
+    '6e. the hub emits no other client event (screen_viewed / tab_selected stay where they are); the playoff card\'s one impression (direction_card_shown, D-270) is the only other (the next-move tap passes `track` to the list row\'s own hand-off, whose finder_target_pinned is pinned by check-home-next-move.js E)');
   assert(/function bandProp\(s: PositionSplit\): 'seller' \| 'buyer' \| 'mid'/.test(hub),
     '6f. `band` is typed to the closed seller | buyer | mid set');
 }

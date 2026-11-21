@@ -33,6 +33,9 @@ import StatusRow from './StatusRow';
 import PositionTile from './PositionTile';
 import TaskTile from './TaskTile';
 import HomePlayoffBanner from './HomePlayoffBanner';
+import HomeNextMove from './HomeNextMove';
+import { nextMoveTap, type NextMoveView } from '../../utils/homeNextMove';
+import { useFinderTargets } from '../../state/useFinderTargets';
 import { armHomeReturn } from '../../state/homeReturn';
 import {
   HOME_RETURN_FLAG,
@@ -202,6 +205,21 @@ export default function HomeHub() {
     track('home_tile_tapped', { tile: tap.tile, via: tap.via }, 'Home');
     const to = tapDestination(tap);
     if (to) navigation.navigate(to.route, 'params' in to ? to.params : undefined);
+  };
+  // The next-move row under the playoff card (flag `league.next_move`,
+  // D-278): the list row's own "Find trades" (utils/homeNextMove.nextMoveTap
+  // runs that row's hand-off, which pins the player and logs
+  // finder_target_pinned under Home), opened on the Trades tab, with the
+  // "‹ Home" bar armed for it like the "Find a trade" tile.
+  const onNextMove = (view: NextMoveView) => {
+    track('home_tile_tapped', { tile: 'next_move' }, 'Home');
+    armReturn('next_move');
+    nextMoveTap(view, {
+      setSide: (side, players) => useFinderTargets.getState().setSide(side, players),
+      track,
+      navigate: (p) => navigation.navigate(p.screen, p.params),
+      now: Date.now,
+    });
   };
   const onOverallRank = () => {
     track('home_tile_tapped', { tile: 'overall_rank' }, 'Home');
@@ -418,6 +436,9 @@ export default function HomeHub() {
             onReviewOutlook={onReviewOutlook}
             screen="Home"
             onDirectionTap={onDirectionTap} />
+          <HomeNextMove rosters={rostersQuery.data}
+            liveIds={findMyRoster(rostersQuery.data, user?.user_id ?? '')?.players ?? null}
+            onPress={onNextMove} />
           <View style={styles.rows}>
             <StatusRow
               testID="home.status.outlook"

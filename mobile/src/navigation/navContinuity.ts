@@ -27,7 +27,9 @@ export const HOME_RETURN_UNIFIED_FLAG = 'nav.home_return_unified';
 export type HomeReturnTab = 'Trades' | 'Matches' | 'League';
 
 /** Every Home hub tap that navigates (HomeHub.tsx). `direction` is the
- *  playoff card's half sheet rows; they open pushes, never a tab. */
+ *  playoff card's half sheet rows; they open pushes, never a tab.
+ *  `next_move` is the row under the playoff card (D-278): it opens Find a
+ *  Trade on the Trades tab, as the "Find a trade" tile does. */
 export type HomeTileTap =
   | 'outlook'
   | 'review_outlook'
@@ -44,7 +46,8 @@ export type HomeTileTap =
   | 'matches'
   | 'trends'
   | 'usage_rates'
-  | 'free_agents';
+  | 'free_agents'
+  | 'next_move';
 
 /**
  * Which tab a Home tap arms the control for, or null when it arms none:
@@ -66,6 +69,7 @@ export function homeReturnTabFor(tap: HomeTileTap, unified = false): HomeReturnT
     case 'outlook':
     case 'review_outlook':
     case 'find_trade':
+    case 'next_move':
       return 'Trades';
     case 'overall_rank':
     case 'buy':

@@ -170,6 +170,34 @@ export interface TeamDirection {
   primary: DirectionKey | null;
   options: Record<DirectionKey, DirectionOption>;
 }
+// ── Home's next move (flag `league.next_move`; scope
+// docs/plans/home-next-move/scope.md §3, D-278). Composed by the server on
+// the forecast read from `team_direction`, `max_pf_moves` and
+// `playoff_targets`: ONE player and ONE action, or `none` with a reason. The
+// app shows it as given (utils/homeNextMove.ts) and only adds the live-roster
+// check the two lists already make.
+export interface NextMovePlayer {player_id: string; name: string; short_name: string; position: string}
+export interface NextMove {
+  version: number;
+  state: 'ready' | 'none';
+  /** Null when ready. An open set; the app shows nothing for any of them. */
+  reason: string | null;
+  direction: DirectionKey | null;
+  action: 'buy' | 'sell' | null;
+  player: NextMovePlayer | null;
+  rank: number | null;
+  /** Buy only: the team he is on, as the targets block serves it. */
+  seller: {roster_id: number; name: string} | null;
+  captured_at: string | null;
+  playoff_probability: NowAfter | null;
+  playoff_proof: {playoff_clinched: boolean; playoff_eliminated: boolean} | null;
+  /** Sell only: the projected pick (D-257 label) now and after. */
+  pick: {now: string | null; after: string | null} | null;
+  most_likely_pick?: {now: MaxPfPickChance; after: MaxPfPickChance} | null;
+  top3_probability: NowAfter | null;
+  /** Sell only: the forecast's roster, for the live-roster check. */
+  roster_player_ids: string[] | null;
+}
 export interface ProjectionView {
   state: string; reason: string | null; run: ProjectionRun | null; attempt: ProjectionRun | null;
   next_attempt_not_before: string | null; cadence: 'weekly'; schedule_timezone: string;
@@ -185,6 +213,8 @@ export interface ProjectionView {
   playoff_targets?: PlayoffTargets;
   /** Absent while flag `league.direction_card` is off (or on an older server). */
   team_direction?: TeamDirection;
+  /** Absent while flag `league.next_move` is off (or on an older server). */
+  next_move?: NextMove;
 }
 export const getLeagueProjectionBatch = (leagueId: string) =>
   api.get<ProjectionView>(`/api/leagues/${encodeURIComponent(leagueId)}/projection-runs/latest`);

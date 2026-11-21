@@ -10,7 +10,7 @@ from flask import Response, jsonify, request
 
 from ..feature_flags import is_enabled
 from .. import database as db
-from . import batch, maxpf_moves, playoff_targets, recommendation, store, team_direction
+from . import batch, maxpf_moves, next_move, playoff_targets, recommendation, store, team_direction
 from .core import Unavailable, VERSION
 from .simulation import config
 
@@ -157,6 +157,18 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             log.warning("team_direction read failed: %s", type(exc).__name__)
             return team_direction.read_failed(max_pf_on, targets_on)
 
+    def next_move_block(result):
+        """The composed `next_move` block (flag `league.next_move`, scope
+        docs/plans/home-next-move/scope.md): one player and one action, read
+        from the three blocks this same read serves. Never raises: a failure
+        is `none` / `read_failed`."""
+        try:
+            return next_move.compose(result.get("team_direction"), result.get("max_pf_moves"),
+                                     result.get("playoff_targets"))
+        except Exception as exc:
+            log.warning("next_move read failed: %s", type(exc).__name__)
+            return next_move.read_failed()
+
     def load(sess, run_id, *, with_snapshot=False):
         if len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
             return None
@@ -234,6 +246,8 @@ def install(app, *, require_session, read_denial, write_denial, league_user_id, 
             result["playoff_targets"] = targets_block(uid, league_id, result, raw_saved)
         if is_enabled("league.direction_card"):
             result["team_direction"] = direction_block(uid, league_id, result, raw_saved)
+        if is_enabled("league.next_move"):
+            result["next_move"] = next_move_block(result)
         return jsonify({**result, "run": run, "attempt": attempt})
 
     @app.route("/api/leagues/<league_id>/draft-order-rule", methods=["POST"])
