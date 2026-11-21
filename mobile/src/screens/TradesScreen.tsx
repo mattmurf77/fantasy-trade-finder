@@ -170,6 +170,7 @@ import {
   type Layer2Code,
 } from '../api/declineReasons';
 import AssetIdeasPanel from '../components/AssetIdeasPanel';
+import { gateNoticeFor } from '../components/PaywallGateNotice';
 import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWindow';
 import {
   getLeaguePreferences,
@@ -8115,6 +8116,7 @@ export default function TradesScreen({ navigation, route }: any) {
     <AssetIdeasPanel
       data={assetIdeasQuery.data}
       loading={assetIdeasQuery.isFetching}
+      gated={assetIdeasQuery.isError ? gateNoticeFor(assetIdeasQuery.error, '/api/trades/asset-ideas') : null}
       pinnedName={singlePin!.player.name}
       direction={singlePin!.direction}
       // #317 — while the deck holds the slot the featured window is NOT on

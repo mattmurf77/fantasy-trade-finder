@@ -25,6 +25,7 @@ import {
 import { posColor } from '../theme/colors';
 import { Button, Icon, Text, TickLabel } from './chalkline';
 import PositionChip from './PositionChip';
+import PaywallGateNotice, { gateNoticeFor } from './PaywallGateNotice';
 import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
@@ -863,6 +864,17 @@ export default function ShopOffersBody({
         <View style={styles.loadingRow}>
           <ActivityIndicator color={chalk.dim} size="small" />
           <Text style={type.bodySm}>Sweeping rosters…</Text>
+        </View>
+      ) : ideasQuery.isError && gateNoticeFor(ideasQuery.error, '/api/trades/asset-ideas') ? (
+        // Paid launch: the sweep was refused by the paywall gate, not the
+        // network. The paywall already opened once; this says why the
+        // body is empty and offers the one way back (no Try again loop).
+        <View style={styles.empty}>
+          <PaywallGateNotice
+            testID="shop.gated"
+            notice={gateNoticeFor(ideasQuery.error, '/api/trades/asset-ideas')!}
+            onVerified={() => void ideasQuery.refetch()}
+          />
         </View>
       ) : ideasQuery.isError ? (
         <View style={styles.empty} testID="shop.error">
