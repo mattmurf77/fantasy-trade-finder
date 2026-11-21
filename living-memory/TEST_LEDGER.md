@@ -1,3 +1,11 @@
+## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move`
+
+- **Backend (local venv, Python 3.12, no network):** new `test_next_move.py` 30, `test_next_move_read.py` 9, `test_next_move_analytics.py` 2, all passed. With every test file touching `league_projections`, the forecast read, flags, config and the analytics taxonomy (196 files): **5,176 passed, 27 skipped, 0 failed**. Full suite: CI.
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green, including new `check-home-next-move.js` **48 passed** (executes `utils/homeNextMove` with the real list utils, renders `HomeNextMove`); `check-home-hub.js` and `check-nav-continuity.js` (150) gain `next_move`.
+- **Sabotages, red then restored (5):** composer takes `rows[0]` not the lowest rank (5 backend tests); block composed without the flag check (2); sell roster check always passes (B4-B6); the "‹ Home" arm dropped (F1, nav-continuity B1b); hand-off logged under Standings (E2, E3, E6, E7).
+- **Not verified:** anything on a device (D-056). Checklist: scope §9 (11 steps, flag-off included).
+- **Review revision (same day, coordinator):** two rules loosened. The sell needs only the suggested player still on the live roster (`roster_player_ids` dropped from the block). An unanswered draft-order question no longer blocks a sell (`draft_order_unanswered` removed); a `reverse_standings` / `lottery_or_other` answer still gives nothing (`no_direction`; no projected pick served), now pinned on the composer and the read. Re-run: `test_next_move*.py` 40 passed; the same 196 files **5,175 passed, 27 skipped, 0 failed**; tsc clean, testid-lint OK, all 195 `check-*.js` green (`check-home-next-move.js` 48, B5 now "other adds and drops still show"). Sabotages red then restored: the sell check ignoring the player (B6); the draft-order block put back (3 backend tests).
+
 ## 2026-11-21 — Release: one Home control and the outlook prompt fix live, TestFlight 1.22.0 (198)
 
 - **CI:** PR #708 all four jobs green on head `a2437e12` (the two builder branches merged locally, living-memory entries kept from both); merged as `52234774` (`--match-head-commit`). PR #707 (recovery ledger) green, merged as `0f870e6c`.

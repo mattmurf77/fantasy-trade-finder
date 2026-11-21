@@ -2134,6 +2134,12 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     #     "View projected standings"
     #   improve_playoffs | improve_pick              — a sheet row that opens
     #     an Improve page (D-270; the card's buttons, cells A/B, are deferred)
+    #   next_move                                    — Home's next-move row
+    #     under the playoff card (flag league.next_move, D-278, docs/plans/
+    #     home-next-move/scope.md): opens Find a Trade with that one player,
+    #     as the list row's "Find trades" does. No prop: whether it was a buy
+    #     or a sell rides the `finder_target_pinned` that follows (side
+    #     receive | give, screen Home).
     # `position` (QB|RB|WR|TE) and `band` (seller|buyer|mid — the USER's
     # band at that position) ride ONLY on buy / sell / position_ranking /
     # position_roster. `split` (shown | no_split | no_median — the tile's

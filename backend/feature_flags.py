@@ -86,6 +86,15 @@ FLAG_KEYS: tuple[str, ...] = (
     # instead of Standings, and the card has no button row. App-only: no
     # backend code reads it. Requires league.direction_card.
     "league.direction_view_sheet",
+    # Home's next move (docs/plans/home-next-move/scope.md, D-278): the
+    # forecast read gains a `next_move` block naming ONE player and ONE
+    # action for the card's direction: sell the first Max PF moves row
+    # (draft pick) or buy the first Playoff targets row (playoffs), composed
+    # on read from the blocks the same read serves; nothing saved, no job
+    # work. Home shows it under the playoff card; one tap opens Find a Trade
+    # as that row's "Find trades" does. Off = no block, Home as before.
+    # Requires league.direction_card.
+    "league.next_move",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.
