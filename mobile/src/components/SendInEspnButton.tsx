@@ -8,7 +8,7 @@ import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
-import { ApiError } from '../api/client';
+import { ApiError, gateSignalFor } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
 import { beginSend, getSendRecord, settleSend, subscribeSends, tradeSendKey } from '../api/sendRegistry';
 import {
@@ -195,7 +195,12 @@ export default function SendInEspnButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (isSendOutcomeUnknown(err)) {
+      if (gateSignalFor(err, '/api/trades/propose-espn')) {
+        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+        // this gated route) already opened the paywall or the VerifySheet in
+        // api/client. No second, contradictory alert on top of it. Null while
+        // monetize.paywall is off, so today's alerts are unchanged.
+      } else if (isSendOutcomeUnknown(err)) {
         // Timed out, no answer, or the server's espn_outcome_unknown: the
         // trade may be in ESPN. No Retry or Send-again here (api/sendOutcome.ts).
         Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('ESPN', code, detail), [
