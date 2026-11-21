@@ -156,18 +156,19 @@ export default function SendInMflButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (gateSignalFor(err, '/api/trades/propose-mfl')) {
-        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
-        // this gated route) already opened the paywall or the VerifySheet in
-        // api/client. No second, contradictory alert on top of it. Null while
-        // monetize.paywall is off, so today's alerts are unchanged.
-      } else if (isSendOutcomeUnknown(err)) {
+      if (isSendOutcomeUnknown(err)) {
         // Timed out, no answer, or the server's mfl_outcome_unknown: the
         // trade may be in MFL. No Retry or Send-again here (api/sendOutcome.ts).
         Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('MFL', code, detail), [
           { text: 'OK', style: 'cancel' },
           { text: 'Open MFL', onPress: openMfl },
         ]);
+      } else if (gateSignalFor(err, '/api/trades/propose-mfl')) {
+        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+        // this gated route) already opened the paywall or the VerifySheet in
+        // api/client. No second, contradictory alert on top of it. Null while
+        // monetize.paywall is off, so today's alerts are unchanged. (A gate
+        // answer is never an unknown outcome, so the branch above is first.)
       } else if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // — open the in-flow sign-in sheet; a successful sign-in resumes

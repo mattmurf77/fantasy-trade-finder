@@ -169,6 +169,7 @@
     "test:iphone-only": "node tests/check-iphone-only.js",
     "test:onboarding-flag-defaults": "node tests/check-onboarding-flag-defaults.js",
     "test:paywall-gate": "node tests/check-paywall-gate.js",
+    "test:paid-launch": "node tests/check-paid-launch.js",
     "test:send-timeout": "node tests/check-send-timeout.js",
     "test:send-registry": "node tests/check-send-registry.js",
     "test:signin-identity-labels": "node tests/check-signin-identity-labels.js",

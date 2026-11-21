@@ -195,18 +195,19 @@ export default function SendInEspnButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (gateSignalFor(err, '/api/trades/propose-espn')) {
-        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
-        // this gated route) already opened the paywall or the VerifySheet in
-        // api/client. No second, contradictory alert on top of it. Null while
-        // monetize.paywall is off, so today's alerts are unchanged.
-      } else if (isSendOutcomeUnknown(err)) {
+      if (isSendOutcomeUnknown(err)) {
         // Timed out, no answer, or the server's espn_outcome_unknown: the
         // trade may be in ESPN. No Retry or Send-again here (api/sendOutcome.ts).
         Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('ESPN', code, detail), [
           { text: 'OK', style: 'cancel' },
           { text: 'Open ESPN', onPress: openEspn },
         ]);
+      } else if (gateSignalFor(err, '/api/trades/propose-espn')) {
+        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+        // this gated route) already opened the paywall or the VerifySheet in
+        // api/client. No second, contradictory alert on top of it. Null while
+        // monetize.paywall is off, so today's alerts are unchanged. (A gate
+        // answer is never an unknown outcome, so the branch above is first.)
       } else if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // (the server drops a dead pair on a rejected pre-flight) — send
