@@ -18,18 +18,19 @@
 - **Code:** `backend/league_projections/next_move.py`, `api.py`; `components/home/HomeNextMove.tsx`, `utils/homeNextMove.ts` (+ copy), `HomeHub.tsx`, `navContinuity.ts`.
 - **Next:** main session review, push, merge; operator runs `docs/plans/home-next-move/scope.md` §9; the no-impression-event waiver needs sign-off.
 
-## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify` (not merged)
+## 2026-11-19 — One Home control (D-276), merged as `52234774` (PR #708), live, TestFlight 1.22.0 (198)
 
 - **What:** flag `nav.home_return_unified` (with `nav.home_return`): the Home position tile body arms the same "‹ Home" bar as the other tiles; League rankings no longer draws D-269's header "Home" control; tapping "‹ Home" closes that arrival's drill-in (`league_team_closed` via `home_back`, once) and returns Home. Rank pages unchanged. Either flag off = D-269 as before.
 - **Code:** `navigation/navContinuity.ts` (unified decisions), `state/homeReturn.ts` (one-shot tap signal), `HomeReturnBar.tsx`, `HomeHub.tsx`, `LeagueSummaryScreen.tsx`. Flag false in code, true in config + 3 fixtures + client defaults.
 - **Evidence:** `check-nav-continuity.js` 149, `check-position-tile-tap.js` 56, backend flag test. Checklist in the scope doc.
 - **Next:** main session review, push, merge; operator runs the scope doc checklist; analytics waiver needs sign-off.
-## 2026-11-19 — Home's "Consider <outlook>" prompt stayed after the outlook was saved: fixed (D-277), branch `fix/outlook-prompt-refresh`
+## 2026-11-19 — Home's "Consider <outlook>" prompt stayed after the outlook was saved: fixed (D-277), merged as `52234774` (PR #708), TestFlight 1.22.0 (198)
 
 - **Bug (operator):** Home's playoff card said "Consider Tanking · Review outlook"; after saving Tanking the prompt stayed. Cause confirmed: the server works out `differs` from the saved outlook at read time, but every outlook save invalidated only `['league-prefs', leagueId]`, never the cached `['league-projection-batch', userId, leagueId]` read, and Home stays mounted.
 - **Fix (no server change, no flag):** `utils/outlookSaved.refreshAfterOutlookSave` refreshes both keys; all five save sites use it (TradeDnaSheet, TeamReviewScreen `savePrefs`, TradeFinderHubScreen, TradesScreen ×2). `utils/homePlayoffBanner` compares the recommended outlook with the saved one once `['league-prefs']` has landed, so the prompt goes at once. Covers Home and League rankings (same component).
 - **TestFlight check:** (1) Home shows "Consider X"; tap Review outlook, save X, come back to Home: the prompt is gone, no pull-to-refresh. (2) Open League rankings: no prompt there either. (3) Change the outlook back to the old one: the prompt returns on Home.
 - **Not done:** web `league-projections.js` reads `rec.differs` per page load (no cache; not affected in the same way).
+- **Shipped 2026-11-21:** with D-276 in PR #708, merged on green CI as `52234774`; Render deploy live on that commit; `/api/feature-flags` serves `nav.home_return_unified` true. EAS build `df6f07f7-acef-4258-8a22-80217fcc6120`, 1.22.0 (198), submitted to App Store Connect. Operator signed off the D-276 analytics waiver and the missing scope block for this fix ("Yes, sign off", recorded in `docs/plans/home-return-unify/scope.md`). Release 197 sweep run the same day (3 worktrees, 3 branches; `docs/recovery/2026-11-19-release-197-sweep.md`). Nothing verified on a device.
 
 ## 2026-11-17 — Home tiles' "‹ Home" control and the navigation continuity fixes (D-275), merged as `59422d6f` (PR #705), live, TestFlight 1.22.0 (197)
 

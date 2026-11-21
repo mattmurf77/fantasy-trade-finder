@@ -6,6 +6,13 @@
 - **Not verified:** anything on a device (D-056). Checklist: scope §9 (11 steps, flag-off included).
 - **Review revision (same day, coordinator):** two rules loosened. The sell needs only the suggested player still on the live roster (`roster_player_ids` dropped from the block). An unanswered draft-order question no longer blocks a sell (`draft_order_unanswered` removed); a `reverse_standings` / `lottery_or_other` answer still gives nothing (`no_direction`; no projected pick served), now pinned on the composer and the read. Re-run: `test_next_move*.py` 40 passed; the same 196 files **5,175 passed, 27 skipped, 0 failed**; tsc clean, testid-lint OK, all 195 `check-*.js` green (`check-home-next-move.js` 48, B5 now "other adds and drops still show"). Sabotages red then restored: the sell check ignoring the player (B6); the draft-order block put back (3 backend tests).
 
+## 2026-11-21 — Release: one Home control and the outlook prompt fix live, TestFlight 1.22.0 (198)
+
+- **CI:** PR #708 all four jobs green on head `a2437e12` (the two builder branches merged locally, living-memory entries kept from both); merged as `52234774` (`--match-head-commit`). PR #707 (recovery ledger) green, merged as `0f870e6c`.
+- **Server, production:** Render deploy live on `52234774` (finished 2026-11-21T18:13Z). `GET /api/feature-flags` returns `nav.home_return` true and `nav.home_return_unified` true (the second absent while the previous deploy was still serving).
+- **App:** clean detached checkout of `52234774`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-nav-continuity.js` 149 passed, `check-home-playoff-banner.js` passed. EAS build `df6f07f7-acef-4258-8a22-80217fcc6120` FINISHED (confirmed with `build:list`), 1.22.0 (198); submission `13f98a44-d009-453e-a85a-a7c464d8c2a3` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklists: `docs/plans/home-return-unify/scope.md` (10 steps) and the D-277 CHANGELOG entry (3 steps) on build 198. The web outlook prompt was not checked.
+
 ## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify`
 
 - **App:** `npm ci`, `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK. `check-nav-continuity.js` **149 passed** (111 on main; new A1d-f, A2m-t, A6a-l, B1k-l, B9a-g, C for the new flag; B1a/b/c/f re-pinned). `check-position-tile-tap.js` **56 passed** (54 on main; 7a re-pinned to `rosterHeaderHomeVisible`, 7a2/7a3 execute it in both flag states). All **194** `check-*.js` green.
