@@ -1,3 +1,10 @@
+## 2026-11-21 — Paid launch: gap closes on the built paywall, branch `feat/paid-launch`
+
+- **Backend (local venv, Python 3.12, no network):** no backend file changed. Paywall suites (`test_paywall_gate_allowlist`, `_gate`, `_gate_unverified`, `_gate_hit`, `_preview`, `_config`): **658 passed**. Full suite (`pytest backend/tests`): **15,943 passed, 43 skipped, 0 failed in 24m25s**. The allowlist test confirms every Flask rule is classified and that the 32 gated rules are exactly the pinned set.
+- **App:** `node_modules` symlinked from the `release-198` worktree (same lockfile). `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green, including the new `check-paid-launch.js` **17 passed**. It EXECUTES `queueCalcTrade`, `retryUnlessGated` and `PaywallGateNotice` under a fake React; the Send catches, Shop, the ideas panel and the refetch-on-Pro effects are pinned [shape]. `check-send-timeout` (24) and `check-paywall-gate` (115) are unchanged and green.
+- **Sabotages, red then restored (9):** queue gate return dropped (2a, 2b); the retry predicate ignores 402 (5a); MFL, ESPN and Sleeper gate checks disabled (1a; Sleeper also 1b); the panel gate branch disabled (4a); the notice ignores unverified sessions (6c); the Shop gate branch disabled (4b); Shop's refetch-on-Pro removed (7a).
+- **Not verified:** anything on a device (D-056), and nothing against production. The device checklist is `docs/plans/monetization-launch/paid-launch/turn-on-runbook.md` §C (15 steps: purchase, trial, restore, lapse, refund, cross-device, unverified, demo, delete, kill). Enforcement stays dark in code.
+
 ## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move`
 
 - **Backend (local venv, Python 3.12, no network):** new `test_next_move.py` 30, `test_next_move_read.py` 9, `test_next_move_analytics.py` 2, all passed. With every test file touching `league_projections`, the forecast read, flags, config and the analytics taxonomy (196 files): **5,176 passed, 27 skipped, 0 failed**. Full suite: CI.
