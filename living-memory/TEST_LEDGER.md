@@ -1,3 +1,10 @@
+## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move`
+
+- **Backend (local venv, Python 3.12, no network):** new `test_next_move.py` 30, `test_next_move_read.py` 9, `test_next_move_analytics.py` 2, all passed. With every test file touching `league_projections`, the forecast read, flags, config and the analytics taxonomy (196 files): **5,176 passed, 27 skipped, 0 failed**. Full suite: CI.
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green, including new `check-home-next-move.js` **48 passed** (executes `utils/homeNextMove` with the real list utils, renders `HomeNextMove`); `check-home-hub.js` and `check-nav-continuity.js` (150) gain `next_move`.
+- **Sabotages, red then restored (5):** composer takes `rows[0]` not the lowest rank (5 backend tests); block composed without the flag check (2); sell roster check always passes (B4-B6); the "‹ Home" arm dropped (F1, nav-continuity B1b); hand-off logged under Standings (E2, E3, E6, E7).
+- **Not verified:** anything on a device (D-056). Checklist: scope §9 (11 steps, flag-off included).
+
 ## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify`
 
 - **App:** `npm ci`, `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK. `check-nav-continuity.js` **149 passed** (111 on main; new A1d-f, A2m-t, A6a-l, B1k-l, B9a-g, C for the new flag; B1a/b/c/f re-pinned). `check-position-tile-tap.js` **56 passed** (54 on main; 7a re-pinned to `rosterHeaderHomeVisible`, 7a2/7a3 execute it in both flag states). All **194** `check-*.js` green.

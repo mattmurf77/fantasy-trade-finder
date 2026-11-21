@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move` (not merged)
+
+- **What:** flag `league.next_move` (code false, shipped true). The forecast read gains a `next_move` block composed from `team_direction` / `max_pf_moves` / `playoff_targets`: draft pick ⇒ sell the first Max PF moves row, playoffs ⇒ buy the first Playoff targets row, else `none` with a reason (owner gate, draft-order question, collapsed list, Keep, under threshold, settled, forecast not usable). Never skips to the second row. Home shows one row under the playoff card; the app hides it when the live roster changed; a tap is the list row's own Find trades (screen Home), after `home_tile_tapped {tile: next_move}` and the "‹ Home" arm.
+- **Code:** `backend/league_projections/next_move.py`, `api.py`; `components/home/HomeNextMove.tsx`, `utils/homeNextMove.ts` (+ copy), `HomeHub.tsx`, `navContinuity.ts`.
+- **Next:** main session review, push, merge; operator runs `docs/plans/home-next-move/scope.md` §9; the no-impression-event waiver needs sign-off.
+
 ## 2026-11-19 — One Home control (D-276), branch `feat/home-return-unify` (not merged)
 
 - **What:** flag `nav.home_return_unified` (with `nav.home_return`): the Home position tile body arms the same "‹ Home" bar as the other tiles; League rankings no longer draws D-269's header "Home" control; tapping "‹ Home" closes that arrival's drill-in (`league_team_closed` via `home_back`, once) and returns Home. Rank pages unchanged. Either flag off = D-269 as before.
