@@ -17,8 +17,13 @@
 //       GET /api/trades/awaiting never shipped team/position (matches/all
 //       does), so the client adapter fell back. The server now ships the four
 //       arrays and the api normalizer carries them; the MatchesScreen adapter
-//       (`awaitingToTradeCardShape`) still has to READ them, which is left
-//       for that file's owner (see §4c, reported, not enforced).
+//       (`awaitingToTradeCardShape`) now READS them (§4c/4d, enforced).
+//   C5. Draft picks on Matches > Mutual and Awaiting tiles showed an "FLX"
+//       chip and team "FA": the payload position/team arrays come from the
+//       players table, so a pick gets "". The deck labels a pick PICK/PICK;
+//       utils/matchAssetLabel gives both Matches adapters the same label,
+//       recognising a pick by id as the server does (generic_pick_* or the
+//       row's `{league_id}_` prefix).
 //
 // What is pinned:
 //   1. TradesScreen never capitalizes an outlook enum; both outlook strings
@@ -30,10 +35,13 @@
 //      surfaces call it and neither keeps its own table or the underscore
 //      replace.
 //   4. The awaiting payload's team/position arrays exist on the server route
-//      and in the client normalizer.
+//      and in the client normalizer, and the Awaiting adapter reads them.
+//   5. utils/matchAssetLabel RUN under plain node: picks read PICK/PICK,
+//      players keep the server's position/team, an older server's missing
+//      arrays keep the FLX/"" fallback; both Matches adapters call it.
 //
-// HONEST LABEL (G-035): §1, §2, §4 prove presence of exact wirings in
-// source; §3 executes the real module.
+// HONEST LABEL (G-035): §1, §2, §4, §5b-e prove presence of exact wirings in
+// source; §3 and §5a execute the real modules.
 //
 // Run: node tests/check-deck-labels.js   (or npm run test:deck-labels)
 
@@ -143,13 +151,74 @@ const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$
       && /their_side_player_positions:\s*Array\.isArray\(raw\?\.my_receive_positions\)/.test(norm)
       && /my_side_player_teams:\s*Array\.isArray\(raw\?\.my_give_teams\)/.test(norm)
       && /their_side_player_teams:\s*Array\.isArray\(raw\?\.my_receive_teams\)/.test(norm));
-  // 4c — reported, not enforced: the adapter lives in MatchesScreen.tsx, owned
-  // by another branch at the time of writing.
-  const matches = read('src/screens/MatchesScreen.tsx');
-  const adapter = matches.slice(matches.indexOf('function awaitingToTradeCardShape('));
-  if (!/a\.my_side_player_positions\?\.\[i\]/.test(adapter)) {
-    notes.push('4c (not enforced): MatchesScreen.awaitingToTradeCardShape still ignores the awaiting positions/teams; the chips stay "FLX"/"FA" until it reads them.');
-  } else ok('4c. MatchesScreen.awaitingToTradeCardShape reads the awaiting positions');
+  // 4c — enforced since the MatchesScreen follow-up: the adapter READS the
+  // awaiting arrays (through matchAssetLabel, §5) instead of hard-coding the
+  // FLX / '' fallback.
+  const matches = strip(read('src/screens/MatchesScreen.tsx'));
+  const adapter = matches.slice(matches.indexOf('function awaitingToTradeCardShape('),
+    matches.indexOf('const styles = StyleSheet.create('));
+  check('4c. MatchesScreen.awaitingToTradeCardShape reads the awaiting positions/teams',
+    /a\.my_side_player_positions\?\.\[i\]/.test(adapter) && /a\.my_side_player_teams\?\.\[i\]/.test(adapter)
+      && /a\.their_side_player_positions\?\.\[i\]/.test(adapter) && /a\.their_side_player_teams\?\.\[i\]/.test(adapter));
+  check('4d. … and no longer hard-codes the FLX chip / empty team',
+    !/position:\s*POS_UNKNOWN,/.test(adapter) && !/team:\s*'',/.test(adapter));
+}
+
+// ── 5. Picks on Matches tiles read PICK / PICK, like the deck ─────────────
+{
+  const src = read('src/utils/matchAssetLabel.ts');
+  let m = null;
+  if (src) {
+    try {
+      const js = ts.transpileModule(src, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+      const mod = { exports: {} };
+      new Function('module', 'exports', 'require', js)(mod, mod.exports, (n) => {
+        throw new Error(`matchAssetLabel.ts gained a runtime import ("${n}")`);
+      });
+      m = mod.exports;
+    } catch (e) {
+      bad('5. matchAssetLabel.ts loads under plain node', String(e));
+    }
+  }
+  if (m) {
+    const f = m.matchAssetLabel;
+    const L = 'lg123';
+    const cases = [
+      // [id, league, pos, team, want]
+      ['lg123_2026_1_3', L, '', '', 'PICK/PICK'],          // owned pick, server sends ""
+      ['generic_pick_1_early', L, '', '', 'PICK/PICK'],    // generic rung
+      ['generic_pick_2_mid', undefined, '', '', 'PICK/PICK'],
+      ['4034', L, 'RB', 'SF', 'RB/SF'],                    // real player, new server
+      ['4034', L, undefined, undefined, 'FLX/'],           // older server: legacy fallback
+      ['SF', L, 'DEF', 'SF', 'DEF/SF'],                    // team DEF id is not a pick
+      ['other_2026_1_3', L, '', '', 'FLX/'],               // another league's prefix is not ours
+    ];
+    const wrong = cases.filter(([id, lg, pos, team, want]) => {
+      const r = f(id, lg, pos, team);
+      return `${r.position}/${r.team}` !== want;
+    }).map(([id, lg, pos, team, want]) => {
+      const r = f(id, lg, pos, team);
+      return `${id} → ${r.position}/${r.team} (want ${want})`;
+    });
+    check('5a. matchAssetLabel: picks read PICK/PICK, players keep server pos/team, legacy fallback FLX/""',
+      wrong.length === 0, wrong.join('; '));
+  }
+  const matches = strip(read('src/screens/MatchesScreen.tsx'));
+  check('5b. MatchesScreen imports matchAssetLabel',
+    /import \{ matchAssetLabel \} from '\.\.\/utils\/matchAssetLabel';/.test(matches));
+  const mutual = matches.slice(matches.indexOf('function matchToTradeCardShape('),
+    matches.indexOf('function awaitingToTradeCardShape('));
+  const awaiting = matches.slice(matches.indexOf('function awaitingToTradeCardShape('),
+    matches.indexOf('const styles = StyleSheet.create('));
+  const calls = (s) => (s.match(/matchAssetLabel\(/g) || []).length;
+  check('5c. the Mutual adapter labels both sides through matchAssetLabel', calls(mutual) === 2,
+    `found ${calls(mutual)} calls`);
+  check('5d. the Awaiting adapter labels both sides through matchAssetLabel', calls(awaiting) === 2,
+    `found ${calls(awaiting)} calls`);
+  check("5e. PlayerCard's pick test still keys on position 'PICK' (what the label feeds)",
+    /const isPick = String\(player\.position\) === 'PICK';/.test(strip(read('src/components/PlayerCard.tsx'))));
 }
 
 for (const p of passes) console.log(`  ✓ ${p}`);

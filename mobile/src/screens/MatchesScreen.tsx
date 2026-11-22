@@ -59,6 +59,7 @@ import { useFlag } from '../state/useFeatureFlags';
 import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
+import { matchAssetLabel } from '../utils/matchAssetLabel';
 import {
   filterVisible,
   countsByLeague,
@@ -2042,23 +2043,23 @@ function SegmentBtn({
 // names + teams + positions as parallel arrays — use those when present.
 // Falls back to ID-as-name / "FA" / "FLX" (legacy behavior, only happens
 // when the backend hasn't been redeployed with the enrichment yet).
+// matchAssetLabel labels a draft pick PICK / PICK, as the deck does (the
+// arrays carry "" for a pick).
 function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined) {
-  const POS_UNKNOWN = 'FLX' as any;
+  const leagueId = m.league_id || fallbackLeague || '';
   const give = m.my_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.my_side_player_names?.[i]     || id,
-    position: m.my_side_player_positions?.[i] || POS_UNKNOWN,
-    team:     m.my_side_player_teams?.[i]     || '',
+    name: m.my_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, m.my_side_player_positions?.[i], m.my_side_player_teams?.[i]),
   }));
   const recv = m.their_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.their_side_player_names?.[i]     || id,
-    position: m.their_side_player_positions?.[i] || POS_UNKNOWN,
-    team:     m.their_side_player_teams?.[i]     || '',
+    name: m.their_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, m.their_side_player_positions?.[i], m.their_side_player_teams?.[i]),
   }));
   return {
     trade_id:           m.match_id,
-    league_id:          m.league_id || fallbackLeague || '',
+    league_id:          leagueId,
     give_player_ids:    m.my_side_player_ids,
     receive_player_ids: m.their_side_player_ids,
     give_players:       give,
@@ -2078,23 +2079,23 @@ function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined
 // we don't pay for a second TradeCard variant. Match score is unknown for
 // historical likes (the in-memory card may not still be around), so we
 // show 100 to keep the strength bar consistent with mutual matches.
+// The awaiting route ships team/position arrays like matches/all; an older
+// server omits them and matchAssetLabel keeps the FLX / "FA" fallback.
 function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | undefined) {
-  const POS_UNKNOWN = 'FLX' as any;
+  const leagueId = a.league_id || fallbackLeague || '';
   const give = a.my_side_player_ids.map((id, i): Player => ({
     id,
-    name:     a.my_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name: a.my_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, a.my_side_player_positions?.[i], a.my_side_player_teams?.[i]),
   }));
   const recv = a.their_side_player_ids.map((id, i): Player => ({
     id,
-    name:     a.their_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name: a.their_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, a.their_side_player_positions?.[i], a.their_side_player_teams?.[i]),
   }));
   return {
     trade_id:           a.trade_id,
-    league_id:          a.league_id || fallbackLeague || '',
+    league_id:          leagueId,
     give_player_ids:    a.my_side_player_ids,
     receive_player_ids: a.their_side_player_ids,
     give_players:       give,
