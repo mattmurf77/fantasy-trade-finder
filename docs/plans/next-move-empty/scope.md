@@ -3,7 +3,7 @@
 **Date:** 2026-11-21
 **Entry point:** direct ask (operator, 2026-11-21, through the main session). Told that no row "is expected when the forecast has no clear move for that team", the operator said: "It should have content for the expected move too".
 **Builder:** builder subagent on `feat/next-move-empty` (D-279). Builds on [Home's next move](../home-next-move/scope.md) (D-278, build 199).
-**Operator sign-off on waivers:** NEEDED. The waivers, plainly:
+**Operator sign-off on waivers:** GIVEN 2026-11-22. The operator answered "Yes, sign off" to the main session's message listing the three waivers below, before the merge of PR #712. Recorded after the merge so the PR's checks did not restart. The waivers, plainly:
 1. No analytics event for the no-move row (§1 (c)): nothing records that it was shown, and it cannot be tapped.
 2. Two copy lines from the brief were reworded because, as written, they were false whenever they would show (§7 note): `keep` and the sell `below_threshold` line.
 3. A buy whose seller has no live owner (or whose team is gone from the live rosters) also gets "No move to suggest right now". The brief named only "the seller no longer holds him"; the app's existing buy check also needs a live owner, so a failed check of either part is treated the same.
@@ -54,7 +54,7 @@ Every other line is true as written (the two `settled` lines are defensive: a cl
 
 ## 1. Analytics scope
 
-- [x] **(c) WAIVED (operator sign-off NEEDED): no event for the no-move row.** It cannot be tapped, so there is no tap to log, and there is no impression event (as D-278's row, whose impression waiver was signed off). Whether a team saw "no move" cannot be counted. `direction_card_shown` still fires for the card. A `next_move_shown {state, reason}` event is a small follow-up if the operator wants it.
+- [x] **(c) WAIVED, operator sign-off 2026-11-22 ("Yes, sign off"): no event for the no-move row.** It cannot be tapped, so there is no tap to log, and there is no impression event (as D-278's row, whose impression waiver was signed off). Whether a team saw "no move" cannot be counted. `direction_card_shown` still fires for the card. A `next_move_shown {state, reason}` event is a small follow-up if the operator wants it.
 
 ## 2. Schema & flag scope
 
@@ -121,7 +121,7 @@ All user-facing; source `mobile/src/utils/homeNextMoveCopy.ts` `NEXT_MOVE_NONE_C
 | Item | Why |
 |---|---|
 | A tap or link on the no-move row | The ask is content, not an action; the card's "View ›" already opens both Improve pages |
-| An event for the no-move row | Waived (§1), sign-off needed |
+| An event for the no-move row | Waived (§1), signed off 2026-11-22 |
 | A line for `direction_off`, `unavailable`, `read_failed`, unknown reasons | The playoff card above already says why there is no forecast |
 | A version bump | Build 199 ignores none blocks, so the added proof cannot change it |
 | Any change to which reason the server gives, or to `ready` blocks | The brief |
