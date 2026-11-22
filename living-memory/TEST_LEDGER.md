@@ -1,3 +1,10 @@
+## 2026-11-22 — Deck polish from the Release sim pass (issues A–F), branch `fix/deck-match-moment-and-labels`
+
+- **App:** `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **199** `check-*.js` green. New guards `check-match-moment` (15, executes `utils/matchMoment`), `check-likes-you-card` (4), `check-deck-labels` (14, executes `utils/slotLabel`), `check-deck-flow-polish` (11). Re-pinned: `check-trade-first-card-events` 3i and `check-team-review` 20b (R1 `team_review` and the note drop now on every Finish); `check-win-now-recovery` harness gains a `standingsTable` stub.
+- **Fail on main:** the four new guards run against `origin/main`'s sources: 7, 3, 12 and 8 failures respectively.
+- **Backend:** new `test_liked_awaiting_after_match.py` (6). pytest is not installed on this machine and nothing was downloaded, so these ran under a no-download stand-in runner (fixture/monkeypatch/parametrize shim) with the sim-test venv's Flask/SQLAlchemy: new file 6 passed (main: 4 of the 5 route tests fail, the import of `matched_package_keys` fails); `test_pick_labels_in_matches` 16, `test_awaiting_dismiss` 14, `test_verified_reads` 6, `test_trade_match_flow` 23, `test_dismiss_match` 4, `test_shared_cache_threads` 3, all passed. Real pytest: CI.
+- **Not verified:** anything on a device (D-056); the MatchesScreen awaiting adapter still ignores the new team/position arrays (file owned by another branch).
+
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 
 - **Backend (local venv outside the repo, Python 3.12, no network):** `test_next_move*.py` **44 passed** (was 40: `settled` proof both sides, only `settled` carries it, the new flag's registry and app-only tests). Full `backend/tests`: **15,947 passed, 43 skipped, 0 failed**.
