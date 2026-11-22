@@ -19,9 +19,9 @@ New app flag **`league.next_move_empty`** (code default false, shipped true). Wi
 | `ready`, the live-roster check passes | the move, exactly as build 199 (D-278) |
 | `ready`, the live rosters loaded and the check fails (sell: the player is no longer on your roster; buy: he is no longer on that team, or that team has no live owner) | "No move to suggest right now" |
 | `ready`, the live rosters still loading or failed to load | nothing (as build 199) |
-| `none` / `keep` | "Hold: your top sale is a player you marked Keep" |
-| `none` / `below_threshold`, direction `draft_pick` | "Hold: your top sale does not move your projected pick enough" |
-| `none` / `below_threshold`, direction `playoffs` | "Hold: no single buy moves your playoff chance enough" |
+| `none` / `keep` | "No sale to suggest: your top sale is a player you marked Keep" |
+| `none` / `below_threshold`, direction `draft_pick` | "No sale to suggest: your top sale does not move your projected pick enough" |
+| `none` / `below_threshold`, direction `playoffs` | "No buy to suggest: no single buy moves your playoff chance enough" |
 | `none` / `settled`, `playoff_proof.playoff_clinched` | "Playoffs clinched: no move to suggest" |
 | `none` / `settled`, `playoff_proof.playoff_eliminated` | "Eliminated from the playoffs: no buy to suggest" |
 | `none` / `pick_owned_elsewhere` | "No sale to suggest: another team owns your first-round pick" |
@@ -45,8 +45,10 @@ The line is a lookup of what the block says (`reason`, `direction`, and for `set
 
 | Reason | Brief's line | Why it is false | Line built |
 |---|---|---|---|
-| `keep` | "Hold: no sale improves your projected pick" | The first row is a Keep player; rows below it can pass the threshold and show "Find trades" on Improve Draft Pick | "Hold: your top sale is a player you marked Keep" |
-| sell `below_threshold` | "Hold: no sale moves your projected pick enough" | Reached only on a `ready` block, which means some lower row does pass | "Hold: your top sale does not move your projected pick enough" |
+| `keep` | "Hold: no sale improves your projected pick" | The first row is a Keep player; rows below it can pass the threshold and show "Find trades" on Improve Draft Pick | "No sale to suggest: your top sale is a player you marked Keep" |
+| sell `below_threshold` | "Hold: no sale moves your projected pick enough" | Reached only on a `ready` block, which means some lower row does pass | "No sale to suggest: your top sale does not move your projected pick enough" |
+
+**Review revision (main session, 2026-11-21):** the builder's three threshold / Keep lines began "Hold:". Rows below a Keep player or a failing first row can still be usable sales, so "Hold" would be advice the forecast does not give. They now begin "No sale to suggest:" (`keep`, sell `below_threshold`) and "No buy to suggest:" (buy `below_threshold`), matching the pick-owner line.
 
 Every other line is true as written (the two `settled` lines are defensive: a clinched team's Max PF list is `no_miss` (`maxpf_moves.py` `compose`) and its targets list is `clinched` (`playoff_targets.py:327`), so `team_direction` offers neither direction and the answer is `no_direction`; an eliminated team gets the draft pick, a sell, if anything): `settled` sell is clinched only (`_sell`), `settled` buy is clinched or eliminated (`_buy`), and the proof says which; `pick_owned_elsewhere` is the configured round, which is 1 (`config/league_projections.json` `draft_round`); the catch-all is true for the rest. Note `pick_owned_elsewhere` is rare in practice: the card does not offer the draft pick when another team owns it, so this reason needs a block whose `owns_own_pick` is not `true` but not `false` either.
 
@@ -105,9 +107,9 @@ All user-facing; source `mobile/src/utils/homeNextMoveCopy.ts` `NEXT_MOVE_NONE_C
 
 | Id | String |
 |---|---|
-| `NM-NONE.keep` | Hold: your top sale is a player you marked Keep |
-| `NM-NONE.sell-threshold` | Hold: your top sale does not move your projected pick enough |
-| `NM-NONE.buy-threshold` | Hold: no single buy moves your playoff chance enough |
+| `NM-NONE.keep` | No sale to suggest: your top sale is a player you marked Keep |
+| `NM-NONE.sell-threshold` | No sale to suggest: your top sale does not move your projected pick enough |
+| `NM-NONE.buy-threshold` | No buy to suggest: no single buy moves your playoff chance enough |
 | `NM-NONE.clinched` | Playoffs clinched: no move to suggest |
 | `NM-NONE.eliminated` | Eliminated from the playoffs: no buy to suggest |
 | `NM-NONE.pick-elsewhere` | No sale to suggest: another team owns your first-round pick |
@@ -130,7 +132,7 @@ All user-facing; source `mobile/src/utils/homeNextMoveCopy.ts` `NEXT_MOVE_NONE_C
 Needs the app build with this change and the server deployed. A Sleeper league with a current forecast. Both flags on (shipped).
 
 1. A team with a suggested move: the row is exactly as build 199 ("Next move", the line, "Find trades ›"); a tap opens Find a Trade.
-2. Mark the suggested sell player Keep on Improve Draft Pick (Rebuilding outlook, own pick): the row now reads "Hold: your top sale is a player you marked Keep", with no "Find trades ›"; tapping it does nothing.
+2. Mark the suggested sell player Keep on Improve Draft Pick (Rebuilding outlook, own pick): the row now reads "No sale to suggest: your top sale is a player you marked Keep", with no "Find trades ›"; tapping it does nothing.
 3. A Contending team at over 45% whose card leads with the draft pick (the playoffs not offered): "No move to suggest right now".
 4. A clinched team: "No move to suggest right now" (the card offers neither direction, so the server says `no_direction`). The two `settled` lines are defensive and not expected on a device: a clinched team's Max PF list is `no_miss` and its targets list is `clinched`, so neither direction is offered, and an eliminated team is offered the draft pick (a sell), not a buy.
 5. Trade away the suggested sell player on Sleeper, pull to refresh Home: the row reads "No move to suggest right now" (not the next player).

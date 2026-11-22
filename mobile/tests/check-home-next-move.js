@@ -299,9 +299,9 @@ function deps(log) {
   const CLINCHED = { playoff_clinched: true, playoff_eliminated: false };
   const ELIMINATED = { playoff_clinched: false, playoff_eliminated: true };
   const cases = [
-    [noneB('keep', 'draft_pick'), 'Hold: your top sale is a player you marked Keep'],
-    [noneB('below_threshold', 'draft_pick'), 'Hold: your top sale does not move your projected pick enough'],
-    [noneB('below_threshold', 'playoffs'), 'Hold: no single buy moves your playoff chance enough'],
+    [noneB('keep', 'draft_pick'), 'No sale to suggest: your top sale is a player you marked Keep'],
+    [noneB('below_threshold', 'draft_pick'), 'No sale to suggest: your top sale does not move your projected pick enough'],
+    [noneB('below_threshold', 'playoffs'), 'No buy to suggest: no single buy moves your playoff chance enough'],
     [noneB('settled', 'draft_pick', CLINCHED), 'Playoffs clinched: no move to suggest'],
     [noneB('settled', 'playoffs', CLINCHED), 'Playoffs clinched: no move to suggest'],
     [noneB('settled', 'playoffs', ELIMINATED), 'Eliminated from the playoffs: no buy to suggest'],
@@ -375,13 +375,13 @@ function deps(log) {
   const t = renderE(view(noneB('keep', 'draft_pick')));
   const tNodes = nodes(t);
   check(t && t.type === 'View' && t.props.testID === 'home.next-move' && t.props.accessible === true
-    && t.props.accessibilityLabel === 'Next move. Hold: your top sale is a player you marked Keep.'
+    && t.props.accessibilityLabel === 'Next move. No sale to suggest: your top sale is a player you marked Keep.'
     && !('onPress' in t.props) && !('accessibilityRole' in t.props),
     'K1. the row keeps testID home.next-move, one spoken label, and is not a button (no onPress, no role)');
   check(tNodes.every((n) => n.type !== 'Pressable' && n.type !== 'RowAction' && !('onPress' in n.props)) && pressed.length === before,
     'K2. no action button, nothing tappable, so no navigation and no event');
   const lineNode = tNodes.find((n) => n.props.testID === 'home.next-move.none');
-  check(lineNode && words(lineNode).join('') === 'Hold: your top sale is a player you marked Keep' && words(t).includes('Next move')
+  check(lineNode && words(lineNode).join('') === 'No sale to suggest: your top sale is a player you marked Keep' && words(t).includes('Next move')
     && !tNodes.some((n) => n.props.testID === 'home.next-move.line'),
     'K3. the label "Next move" and the one line (testID home.next-move.none)');
   const ready = render(view(sell()));

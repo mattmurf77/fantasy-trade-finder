@@ -25,9 +25,9 @@ export type NextMoveCopyId = keyof typeof NEXT_MOVE_COPY;
 // tests/check-home-next-move.js compares this table with the D-279 scope's
 // table in both directions.
 export const NEXT_MOVE_NONE_COPY = {
-  'NM-NONE.keep': 'Hold: your top sale is a player you marked Keep',
-  'NM-NONE.sell-threshold': 'Hold: your top sale does not move your projected pick enough',
-  'NM-NONE.buy-threshold': 'Hold: no single buy moves your playoff chance enough',
+  'NM-NONE.keep': 'No sale to suggest: your top sale is a player you marked Keep',
+  'NM-NONE.sell-threshold': 'No sale to suggest: your top sale does not move your projected pick enough',
+  'NM-NONE.buy-threshold': 'No buy to suggest: no single buy moves your playoff chance enough',
   'NM-NONE.clinched': 'Playoffs clinched: no move to suggest',
   'NM-NONE.eliminated': 'Eliminated from the playoffs: no buy to suggest',
   'NM-NONE.pick-elsewhere': 'No sale to suggest: another team owns your first-round pick',

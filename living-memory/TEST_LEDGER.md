@@ -4,6 +4,7 @@
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green; `check-home-next-move.js` **76 passed** (was 48; J to M: every reason → line or hidden, failed live check, loading hidden, untappable row and a11y label, new flag off renders equal to the build 199 component from git `469c84ab` over 145 renders, copy table ↔ scope §7 both ways, flag mirrors).
 - **Sabotages, red then restored (5):** new flag ignored (H5, J3, J8, K10); loading rosters treated as a failed check (J9, K6); `settled` worded without the proof's eliminated case (J1); copy drift from the scope table (J1, J5, J7, K5, L1); `playoff_proof` dropped from the buy `settled` return (`test_settled_carries_the_proof_both_sides`).
 - **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9.
+- **Review revision (same day, coordinator):** the three lines that began "Hold:" now begin "No sale to suggest:" / "No buy to suggest:" (a lower row can still be a usable sale, so "Hold" was advice the forecast does not give). Copy table, scope strings table, check expectations and the flag comment changed together. Re-run: `check-home-next-move.js` green, `tsc --noEmit` clean, `test_next_move*.py` and the flag tests green.
 
 ## 2026-11-21 — Release: Home's next move live, TestFlight 1.22.0 (199)
 
