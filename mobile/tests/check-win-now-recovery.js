@@ -158,6 +158,7 @@ function mountWinNow(h) {
     '../state/useEntitlements': {useEntitlements: Object.assign(sel => sel({enforcing: false, pro: false}), {getState: () => ({enforcing: false, pro: false})})},
     '../state/usePaywallGate': {isUnverifiedSession: () => false, openPaywall: () => {}, openVerify: () => {}},
     '../utils/winNow': {seasonStale: () => false},
+    '../utils/standingsTable': {NO_FORECAST_LINE: 'Projections aren’t available for this league yet.'},
     '../theme/chalkline': {ink: {}, chalk: {}, ice: {}, space: {}, radii: {}, type: {}},
   };
   const screen = load('src/screens/WinNowScreen.tsx', name => { assert.ok(stubs[name], `unexpected screen import ${name}`); return stubs[name]; }, h.time);
