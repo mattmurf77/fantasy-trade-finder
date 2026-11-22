@@ -28139,6 +28139,8 @@ def get_awaiting_trades():
           partner_id, partner_name,
           my_give[], my_receive[],
           my_give_names[], my_receive_names[],
+          my_give_teams[], my_receive_teams[],
+          my_give_positions[], my_receive_positions[],
           liked_at,
         },
         ...
@@ -28168,6 +28170,11 @@ def get_awaiting_trades():
 
         league_name_by_id: dict[str, str] = {}
         player_name_by_id: dict[str, str] = {}
+        # Team + position, exactly as /api/trades/matches/all ships them: the
+        # Awaiting tile is rendered by the same adapter as a mutual match, and
+        # without these it fell back to a "FLX" chip and "FA" for every asset.
+        player_team_by_id: dict[str, str] = {}
+        player_pos_by_id:  dict[str, str] = {}
         with _engine.connect() as _conn:
             if league_ids:
                 lrows = _conn.execute(
@@ -28183,10 +28190,14 @@ def get_awaiting_trades():
                     _sa_select(
                         players_table.c.player_id,
                         players_table.c.full_name,
+                        players_table.c.team,
+                        players_table.c.position,
                     ).where(players_table.c.player_id.in_(all_pids))
                 ).fetchall()
                 for pr in prows:
                     player_name_by_id[pr.player_id] = pr.full_name or pr.player_id
+                    player_team_by_id[pr.player_id] = pr.team or ""
+                    player_pos_by_id[pr.player_id]  = pr.position or ""
 
         # B5 — the reported bug: a liked package containing a draft pick
         # showed the raw `{league}_{season}_{round}_{roster}` id on the
@@ -28219,6 +28230,10 @@ def get_awaiting_trades():
                 "league_name":      league_name_by_id.get(a["league_id"], ""),
                 "my_give_names":    [_name(pid) for pid in give_ids],
                 "my_receive_names": [_name(pid) for pid in receive_ids],
+                "my_give_teams":       [player_team_by_id.get(pid, "") for pid in give_ids],
+                "my_receive_teams":    [player_team_by_id.get(pid, "") for pid in receive_ids],
+                "my_give_positions":   [player_pos_by_id.get(pid, "")  for pid in give_ids],
+                "my_receive_positions":[player_pos_by_id.get(pid, "")  for pid in receive_ids],
                 **({"impression_id": imp_id} if imp_id else {}),
             })
         return jsonify(enriched)

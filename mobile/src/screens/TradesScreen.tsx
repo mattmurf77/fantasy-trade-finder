@@ -72,6 +72,7 @@ import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
   OUTLOOK_DISPLAY_NAME,
+  outlookDisplayName,
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, {
@@ -8777,9 +8778,7 @@ export default function TradesScreen({ navigation, route }: any) {
             <View style={{ flex: 1 }}>
               <TickLabel>Outlook</TickLabel>
               <Text style={styles.controlValue}>
-                {prefsQuery.data?.team_outlook
-                  ? cap(prefsQuery.data.team_outlook)
-                  : 'Not set'}
+                {outlookDisplayName(prefsQuery.data?.team_outlook) ?? 'Not set'}
               </Text>
             </View>
             <Button
@@ -9882,7 +9881,9 @@ export default function TradesScreen({ navigation, route }: any) {
         {outlookBannerShown && inferredOutlook ? (
           <View style={styles.inferredBanner}>
             <Text style={type.body}>
-              Your roster reads as {cap(inferredOutlook)}.
+              {/* The display table, never the enum: capitalizing the raw
+                  value printed "Not_sure" here (sim pass 2026-11-22). */}
+              Your roster reads as {outlookDisplayName(inferredOutlook) ?? 'Not sure'}.
             </Text>
             <View style={styles.inferredActions}>
               <Button
@@ -11486,10 +11487,6 @@ function SwipableTopCard({
       </Animated.View>
     </GestureDetector>
   );
-}
-
-function cap(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // #376/#394 — display names for the minimized "Outlook & filters" row.
