@@ -180,7 +180,8 @@ export interface NextMovePlayer {player_id: string; name: string; short_name: st
 export interface NextMove {
   version: number;
   state: 'ready' | 'none';
-  /** Null when ready. An open set; the app shows nothing for any of them. */
+  /** Null when ready. An open set; without `league.next_move_empty` the app shows
+   *  nothing for any of them, with it a line for the ones it knows (D-279). */
   reason: string | null;
   direction: DirectionKey | null;
   action: 'buy' | 'sell' | null;
@@ -190,6 +191,7 @@ export interface NextMove {
   seller: {roster_id: number; name: string} | null;
   captured_at: string | null;
   playoff_probability: NowAfter | null;
+  /** Ready: the block baseline's. None: set only on `settled` (D-279), else null. */
   playoff_proof: {playoff_clinched: boolean; playoff_eliminated: boolean} | null;
   /** Sell only: the projected pick (D-257 label) now and after. */
   pick: {now: string | null; after: string | null} | null;

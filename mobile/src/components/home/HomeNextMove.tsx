@@ -6,7 +6,7 @@ import { chalk, fonts, ink, radii, space, type } from '../../theme/chalkline';
 import { getLeagueProjectionBatch } from '../../api/leagueProjections';
 import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
-import { NEXT_MOVE_FLAG, nextMoveView, type NextMoveView } from '../../utils/homeNextMove';
+import { NEXT_MOVE_EMPTY_FLAG, NEXT_MOVE_FLAG, nextMoveEmptyView, nextMoveView, type NextMoveView } from '../../utils/homeNextMove';
 import type { LiveRoster } from '../../utils/playoffTargets';
 import { RowAction } from './StatusRow';
 
@@ -19,6 +19,11 @@ import { RowAction } from './StatusRow';
 // ['league-rosters', leagueId] query, passed in. Nothing to show ⇒ nothing
 // rendered (no placeholder, no error). HomeHub owns the tap (event, "‹ Home"
 // arm, navigation).
+//
+// With `league.next_move_empty` (D-279, docs/plans/next-move-empty/
+// scope.md) the same row also shows when there is no move: the label and one
+// line from utils/homeNextMove `nextMoveEmptyView`, no button, not tappable,
+// no event. That flag off ⇒ exactly the build 199 row.
 
 interface Props {
   rosters: LiveRoster[] | null | undefined;
@@ -39,8 +44,18 @@ export default function HomeNextMove({ rosters, liveIds, onPress }: Props) {
     && leagueId !== NO_LEAGUE_ID && platform === 'sleeper';
   const query = useQuery({ queryKey: ['league-projection-batch', userId, leagueId],
     queryFn: () => getLeagueProjectionBatch(leagueId!), enabled: available, staleTime: 60_000 });
+  const emptyOn = useFlag(NEXT_MOVE_EMPTY_FLAG);
   const view = available ? nextMoveView(query.data, flagOn, rosters, liveIds) : null;
-  if (!view) return null;
+  if (!view) {
+    const empty = available ? nextMoveEmptyView(query.data, flagOn, emptyOn, rosters, liveIds) : null;
+    if (!empty) return null;
+    return <View testID="home.next-move" accessible accessibilityLabel={empty.accessibilityLabel} style={styles.card}>
+      <View style={styles.text}>
+        <Text scale="dense" style={type.label}>{empty.label}</Text>
+        <Text testID="home.next-move.none" style={styles.line}>{empty.line}</Text>
+      </View>
+    </View>;
+  }
   return <Pressable testID="home.next-move" accessibilityRole="button" accessibilityLabel={view.accessibilityLabel}
     onPress={() => onPress(view)} style={({ pressed }) => [styles.card, pressed ? styles.pressed : null]}>
     <View style={styles.text}>

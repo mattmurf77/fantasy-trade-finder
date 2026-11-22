@@ -95,7 +95,7 @@ Served on `GET /api/leagues/<id>/projection-runs/latest` as `next_move` while th
 }
 ```
 
-When `state` is `none`, every field after `direction` is null.
+When `state` is `none`, every field after `direction` is null. (D-279, 2026-11-21: a `settled` answer now also carries `playoff_proof`; see [next-move-empty](../next-move-empty/scope.md) §3.)
 
 ## 4. Where it renders, and what a tap does
 

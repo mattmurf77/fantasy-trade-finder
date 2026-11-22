@@ -11,12 +11,14 @@
 // "Find trades" hand-off (same pins, same event, same destination).
 // No React, no I/O; tests/check-home-next-move.js transpiles and executes it.
 import type { MaxPfMoveRow, NextMove, PlayoffTargetRow, ProjectionView } from '../api/leagueProjections';
-import { NEXT_MOVE_COPY as C } from './homeNextMoveCopy';
+import { NEXT_MOVE_COPY as C, NEXT_MOVE_NONE_COPY as N, type NextMoveNoneCopyId } from './homeNextMoveCopy';
 import { fill, formatPct, handOffToFinder as sellHandOff } from './maxPfMoves';
 import { handOffToFinder as buyHandOff, liveSeller, type LiveRoster } from './playoffTargets';
 import { playoffOddsText } from './playoffOdds';
 
 export const NEXT_MOVE_FLAG = 'league.next_move';
+/** The no-move line (D-279, docs/plans/next-move-empty/scope.md). */
+export const NEXT_MOVE_EMPTY_FLAG = 'league.next_move_empty';
 export const NEXT_MOVE_VERSION = 1;
 /** `home_tile_tapped.tile` for the row (taxonomy: backend/analytics_taxonomy.py). */
 export const NEXT_MOVE_TILE = 'next_move' as const;
@@ -120,6 +122,77 @@ export function nextMoveView(
     accessibilityLabel: fill(C['NM-A11Y'], { line, short_name: move.player!.short_name }),
     move, opponentId,
   };
+}
+
+// ── No move (flag `league.next_move_empty`, D-279) ───────────────────────
+// docs/plans/next-move-empty/scope.md. The same row, one line, no button.
+// The line is a lookup of what the server sent (`reason`, `direction`, and
+// for `settled` its `playoff_proof`); nothing here re-derives a forecast
+// rule. Anything this build does not know stays hidden.
+export interface NextMoveEmptyView {
+  label: string;
+  line: string;
+  accessibilityLabel: string;
+}
+
+const NONE_LINES: Record<string, NextMoveNoneCopyId> = {
+  keep: 'NM-NONE.keep',
+  pick_owned_elsewhere: 'NM-NONE.pick-elsewhere',
+  no_moves: 'NM-NONE.none',
+  no_targets: 'NM-NONE.none',
+  collapsed: 'NM-NONE.none',
+  no_direction: 'NM-NONE.none',
+  not_offered: 'NM-NONE.none',
+};
+
+/** The copy id for a version-1 `none` block, or null to stay hidden
+ *  (`direction_off`, `unavailable`, `read_failed`, an unknown reason, or a
+ *  `settled` / `below_threshold` block without the field that words it). */
+export function noneLineId(data: ProjectionView | undefined): NextMoveNoneCopyId | null {
+  const b = data?.next_move;
+  if (!b || typeof b !== 'object' || b.version !== NEXT_MOVE_VERSION || b.state !== 'none' || !isStr(b.reason)) return null;
+  if (b.reason === 'below_threshold') {
+    return b.direction === 'draft_pick' ? 'NM-NONE.sell-threshold' : b.direction === 'playoffs' ? 'NM-NONE.buy-threshold' : null;
+  }
+  if (b.reason === 'settled') {
+    const proof = b.playoff_proof;
+    if (!proof || typeof proof !== 'object') return null;
+    if (proof.playoff_clinched === true && proof.playoff_eliminated !== true) return 'NM-NONE.clinched';
+    if (proof.playoff_eliminated === true && proof.playoff_clinched !== true) return 'NM-NONE.eliminated';
+    return null;
+  }
+  return Object.prototype.hasOwnProperty.call(NONE_LINES, b.reason) ? NONE_LINES[b.reason] : null;
+}
+
+/**
+ * The no-move row, or null. Only ever asked when `nextMoveView` gave
+ * nothing. Both flags on, then either a `none` block with a known line,
+ * or an honoured `ready` move whose live-roster check FAILED once the
+ * rosters loaded (sell: the viewer's live roster is known and the player is
+ * not on it; buy: the rosters are known and `buyOpponent` finds no live
+ * owner holding him) ⇒ "No move to suggest right now". Rosters still
+ * loading or failed to load (no data) ⇒ null, as before.
+ */
+export function nextMoveEmptyView(
+  data: ProjectionView | undefined,
+  flagOn: boolean,
+  emptyOn: boolean,
+  rosters: LiveRoster[] | null | undefined,
+  liveIds: string[] | null | undefined,
+): NextMoveEmptyView | null {
+  if (!flagOn || !emptyOn) return null;
+  let id = noneLineId(data);
+  if (!id) {
+    const move = honouredBlock(data, flagOn);
+    if (!move || nextMoveView(data, flagOn, rosters, liveIds)) return null;
+    const failed = move.action === 'sell'
+      ? !!rosters && !!liveIds && !sellRosterHolds(move, liveIds)
+      : !!rosters && !buyOpponent(move, rosters);
+    if (!failed) return null;
+    id = 'NM-NONE.none';
+  }
+  const line = N[id];
+  return { label: C['NM-LABEL'], line, accessibilityLabel: fill(N['NM-A11Y.none'], { line }) };
 }
 
 // ── The tap: the list row's own "Find trades" ──────────────────────────

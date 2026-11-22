@@ -25,10 +25,13 @@ from . import team_direction
 VERSION = 1
 
 
-def _none(reason, direction=None):
+def _none(reason, direction=None, playoff_proof=None):
+    """`playoff_proof` is set only on a `settled` answer (D-279), so the app
+    can say clinched or eliminated without deciding it; every other `none`
+    answer carries null there."""
     return {"version": VERSION, "state": "none", "reason": reason, "direction": direction, "action": None,
             "player": None, "rank": None, "seller": None, "captured_at": None, "playoff_probability": None,
-            "playoff_proof": None, "pick": None, "most_likely_pick": None, "top3_probability": None}
+            "playoff_proof": playoff_proof, "pick": None, "most_likely_pick": None, "top3_probability": None}
 
 
 def _first(rows):
@@ -62,7 +65,7 @@ def _sell(block):
     if probability is None or team_direction.lean(probability, block.get("saved_outlook")) != "draft_pick":
         return _none("collapsed", "draft_pick")
     if baseline.get("playoff_clinched"):
-        return _none("settled", "draft_pick")
+        return _none("settled", "draft_pick", _proof(baseline))
     row = _first(block.get("rows"))
     if row is None:
         return _none("no_moves", "draft_pick")
@@ -84,7 +87,7 @@ def _buy(block):
         return _none("no_targets", "playoffs")
     baseline = block.get("baseline") or {}
     if baseline.get("playoff_clinched") or baseline.get("playoff_eliminated"):
-        return _none("settled", "playoffs")
+        return _none("settled", "playoffs", _proof(baseline))
     row = _first(block.get("rows"))
     if row is None:
         return _none("no_targets", "playoffs")

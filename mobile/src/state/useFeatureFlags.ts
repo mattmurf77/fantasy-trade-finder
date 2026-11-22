@@ -144,6 +144,11 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // block, which a server with the flag off never sends; a server `false`
   // hides the row at the next revalidate.
   'league.next_move': true,
+  // `league.next_move_empty` (D-279, docs/plans/next-move-empty/scope.md):
+  // with `league.next_move`, the row also shows one line when the server's
+  // block has no move. Same value as config/features.json; a server `false`
+  // hides the no-move line at the next revalidate.
+  'league.next_move_empty': true,
   // `usage_trends.enabled`: Usage Trends (docs/plans/usage-trends/scope.md),
   // shipped ON (operator, 2026-10-10). Absent here, a fresh install's first
   // Home would lack the Usage Rates tile until a revalidate. A server

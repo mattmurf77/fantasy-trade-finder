@@ -8,6 +8,7 @@
   "league.direction_card": true,
   "league.direction_view_sheet": true,
   "league.next_move": true,
+  "league.next_move_empty": true,
   "trade.prepared_inventory": true,
   "trade.first_page_store": true,
   "trade.packed_evidence": true,
