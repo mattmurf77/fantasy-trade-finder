@@ -148,7 +148,7 @@ from .database import (
     # trade_block_service.py)
     load_trade_block,
     check_for_match, match_already_exists,
-    create_trade_match, load_matches,
+    create_trade_match, load_matches, matched_package_keys,
     load_awaiting_trades, load_matches_for_exclusion,
     retract_awaiting_likes,
     record_match_disposition,
@@ -27910,13 +27910,26 @@ def account_reset_rankings():
 @app.route("/api/trades/liked")
 @_gate_unverified_read
 def get_liked_trades():
-    """GET /api/trades/liked  →  trades the user has liked"""
+    """GET /api/trades/liked  →  trades the user has liked that are still
+    waiting on the other owner (a like that formed a match is left out)."""
     sess = _require_initialized_session()
     sess["last_active"] = time.time()
     trade_service = sess["trade_svc"]
     g_user_id     = sess["user_id"]
     g_players     = sess["players"]
     cards        = trade_service.get_liked_trades(user_id=g_user_id)
+    # The deck's "N liked trades awaiting their swipe" line is this list's
+    # length, and a like that completed a mutual match is waiting on nobody.
+    # Same rule as load_awaiting_trades. Best-effort: a failed read keeps
+    # the unfiltered list rather than failing the route.
+    try:
+        matched = matched_package_keys(g_user_id, {c.league_id for c in cards})
+        if matched:
+            cards = [c for c in cards
+                     if (c.league_id, frozenset(c.give_player_ids),
+                         frozenset(c.receive_player_ids)) not in matched]
+    except Exception as e:
+        log.warning("get_liked_trades: matched filter skipped: %s", e)
     players_dict = {p.id: p for p in g_players}
     return jsonify([trade_card_to_dict(c, players_dict) for c in cards])
 

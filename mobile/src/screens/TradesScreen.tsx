@@ -316,6 +316,12 @@ import {
   fairnessThresholdFor,
 } from '../api/tradePregen';
 import { navigationRef } from '../navigation/RootNav';
+import {
+  matchMomentFrom,
+  matchMomentLine,
+  MATCH_MOMENT_ACTION,
+  MATCH_MOMENT_HOLD_MS,
+} from '../utils/matchMoment';
 import NewPartnersBanner from '../components/NewPartnersBanner';
 // F4 session re-rank (flag deck.session_rerank): pure math lives in
 // utils/sessionRerank — this screen only owns the session state (refs) and
@@ -3007,6 +3013,30 @@ export default function TradesScreen({ navigation, route }: any) {
         // races the POST and reads a list that cannot contain this like.
         // No-op unless guide_v2 is on.
         v2OnLikeSwipeSuccess(res);
+        // The like completed a mutual match (the counterparty had already
+        // liked the mirror): say so, and offer the match itself through the
+        // Matches arrival a match push uses. The like-time "Liked" toast
+        // went up before the reply; this replaces it. The liked-trades
+        // refetch above no longer counts the matched like (server filters
+        // it), and Matches / Awaiting are refreshed for the arrival.
+        const moment = matchMomentFrom(res, vars.card.opponent_username);
+        if (moment) {
+          queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
+          queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
+          setToast({
+            msg: matchMomentLine(moment),
+            tone: 'success',
+            holdMs: MATCH_MOMENT_HOLD_MS,
+            action: {
+              label: MATCH_MOMENT_ACTION,
+              onPress: () => navigation.navigate('Matches', {
+                match_id: moment.matchId,
+                src: 'deck',
+                ts: Date.now(),
+              }),
+            },
+          });
+        }
       }
     },
     onError: (err, vars, ctx) => {
