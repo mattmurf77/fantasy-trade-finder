@@ -1,3 +1,10 @@
+## 2026-11-21 — Release: Home's next move live, TestFlight 1.22.0 (199)
+
+- **CI:** PR #710 all four jobs green on head `79ac6464`; merged as `4a49ea89` (`--match-head-commit`). PR #709 (release record 198) green, merged as `7199ebd4`.
+- **Server, production:** Render deploy live on `4a49ea89` (finished 2026-11-21T21:20Z). `GET /api/feature-flags` returns `league.next_move` true, with `league.direction_card`, `league.max_pf_moves` and `league.playoff_targets` true.
+- **App:** clean detached checkout of `4a49ea89`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 48 passed, `check-nav-continuity.js` 150 passed. EAS build `7ea41f8a-d7b3-437b-89c6-cb918825b6aa` FINISHED (confirmed with `build:list`), 1.22.0 (199); submission `f152cfc0-4c2c-41e7-86bf-98769274c72e` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/home-next-move/scope.md` §9 (11 steps) on build 199. The production forecast read was not called, so whether any real team is served a `ready` move today is not known.
+
 ## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move`
 
 - **Backend (local venv, Python 3.12, no network):** new `test_next_move.py` 30, `test_next_move_read.py` 9, `test_next_move_analytics.py` 2, all passed. With every test file touching `league_projections`, the forecast read, flags, config and the analytics taxonomy (196 files): **5,176 passed, 27 skipped, 0 failed**. Full suite: CI.
