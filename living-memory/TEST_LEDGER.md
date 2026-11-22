@@ -1,3 +1,10 @@
+## 2026-11-22 — Paid launch branch brought up to main, with the Matches crash and viewer fixes, branch `feat/paid-launch`
+
+- **What changed on the branch:** merged `origin/main` `dff07b9a` (conflicts in this file and `mobile/tests/README.md` only, both sides kept); cherry-picked `ff21e638` (Matches list keys, `check-list-slot-keys.js`) and `06e493c1` (FounderPageViewer and PlayerPickerModal safe-area insets, `check-modal-safe-area.js`) from `fix/matches-segment-crash-viewer-close`; corrected the guard name in the Matches comment.
+- **Backend:** not run locally. `git diff origin/main HEAD -- backend config web` is empty, and CI was green on `dff07b9a`; the PR's CI run is the check for this head.
+- **App (Node 20, the worktree's own `node_modules`):** `npx tsc --noEmit` exit 0; `scripts/testid-lint.sh` OK; all **198** `tests/check-*.js` files exit 0, including `check-paid-launch.js`, `check-list-slot-keys.js` and `check-modal-safe-area.js`.
+- **Not verified:** anything on a device (D-056); a release build; purchase, Restore and the turn-on runbook §C. `mobile/ios/Podfile.lock` and `project.pbxproj` are left uncommitted in the worktree: a local `pod install` adds RNPurchases, RevenueCat and PurchasesHybridCommon, which the committed lockfile has lacked on main since 2026-08-28, so whether the EAS build links them is confirmed only by the device purchase check.
+
 ## 2026-11-22 — Matches segment-switch crash + Founders' page viewer safe area, branch `fix/matches-segment-crash-viewer-close`
 
 - **App:** `node_modules` symlinked from the `paid-launch` worktree (lockfile identical to `origin/main`); `npx tsc --noEmit` clean (exit 0); `scripts/testid-lint.sh` OK; all **197** `check-*.js` green, including new `check-list-slot-keys.js` **9 passed** and `check-modal-safe-area.js` **7 passed**, and `check-founder-pages.js` **92 passed** (8e rewritten for the new shape, 8e2 added). No jest / react-test-renderer in this project, so neither fix is rendered: both guards are shape checks and say so (G-035).
