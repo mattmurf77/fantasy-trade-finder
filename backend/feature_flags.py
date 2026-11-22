@@ -95,6 +95,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # as that row's "Find trades" does. Off = no block, Home as before.
     # Requires league.direction_card.
     "league.next_move",
+    # Home's next move when there is none (docs/plans/next-move-empty/
+    # scope.md, D-279): with league.next_move on, the row also shows when the
+    # server's block says there is no move, as one line saying so (no
+    # button, not tappable). App-only: no backend code reads it. Off = the
+    # row shows only for a move, as before. Requires league.next_move.
+    "league.next_move_empty",
     # A league-mate with no saved outlook is assumed Rebuilding / Contending
     # from their playoff chance in the viewer's usable saved forecast
     # (backend/partner_outlook.py). Off = the roster read for everyone.

@@ -5,6 +5,21 @@
 - **Sabotages, red then restored (9):** queue gate return dropped (2a, 2b); the retry predicate ignores 402 (5a); MFL, ESPN and Sleeper gate checks disabled (1a; Sleeper also 1b); the panel gate branch disabled (4a); the notice ignores unverified sessions (6c); the Shop gate branch disabled (4b); Shop's refetch-on-Pro removed (7a).
 - **Not verified:** anything on a device (D-056), and nothing against production. The device checklist is `docs/plans/monetization-launch/paid-launch/turn-on-runbook.md` §C (15 steps: purchase, trial, restore, lapse, refund, cross-device, unverified, demo, delete, kill). Enforcement stays dark in code.
 
+## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
+
+- **Backend (local venv outside the repo, Python 3.12, no network):** `test_next_move*.py` **44 passed** (was 40: `settled` proof both sides, only `settled` carries it, the new flag's registry and app-only tests). Full `backend/tests`: **15,947 passed, 43 skipped, 0 failed**.
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green; `check-home-next-move.js` **76 passed** (was 48; J to M: every reason → line or hidden, failed live check, loading hidden, untappable row and a11y label, new flag off renders equal to the build 199 component from git `469c84ab` over 145 renders, copy table ↔ scope §7 both ways, flag mirrors).
+- **Sabotages, red then restored (5):** new flag ignored (H5, J3, J8, K10); loading rosters treated as a failed check (J9, K6); `settled` worded without the proof's eliminated case (J1); copy drift from the scope table (J1, J5, J7, K5, L1); `playoff_proof` dropped from the buy `settled` return (`test_settled_carries_the_proof_both_sides`).
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9.
+- **Review revision (same day, coordinator):** the three lines that began "Hold:" now begin "No sale to suggest:" / "No buy to suggest:" (a lower row can still be a usable sale, so "Hold" was advice the forecast does not give). Copy table, scope strings table, check expectations and the flag comment changed together. Re-run: `check-home-next-move.js` green, `tsc --noEmit` clean, `test_next_move*.py` and the flag tests green.
+
+## 2026-11-21 — Release: Home's next move live, TestFlight 1.22.0 (199)
+
+- **CI:** PR #710 all four jobs green on head `79ac6464`; merged as `4a49ea89` (`--match-head-commit`). PR #709 (release record 198) green, merged as `7199ebd4`.
+- **Server, production:** Render deploy live on `4a49ea89` (finished 2026-11-21T21:20Z). `GET /api/feature-flags` returns `league.next_move` true, with `league.direction_card`, `league.max_pf_moves` and `league.playoff_targets` true.
+- **App:** clean detached checkout of `4a49ea89`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 48 passed, `check-nav-continuity.js` 150 passed. EAS build `7ea41f8a-d7b3-437b-89c6-cb918825b6aa` FINISHED (confirmed with `build:list`), 1.22.0 (199); submission `f152cfc0-4c2c-41e7-86bf-98769274c72e` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/home-next-move/scope.md` §9 (11 steps) on build 199. The production forecast read was not called, so whether any real team is served a `ready` move today is not known.
+
 ## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move`
 
 - **Backend (local venv, Python 3.12, no network):** new `test_next_move.py` 30, `test_next_move_read.py` 9, `test_next_move_analytics.py` 2, all passed. With every test file touching `league_projections`, the forecast read, flags, config and the analytics taxonomy (196 files): **5,176 passed, 27 skipped, 0 failed**. Full suite: CI.

@@ -12,11 +12,18 @@
 ---
 
 
-## 2026-11-21 — Home's next move (D-278), branch `feat/home-next-move` (not merged)
+## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty` (not merged)
+
+- **What:** flag `league.next_move_empty` (code false, shipped true, app-only). With `league.next_move` on, Home's next-move row also shows when the block is `none`: "Next move" and one line from the reason (Keep, under threshold, clinched / eliminated, pick owned elsewhere, else "No move to suggest right now"), no button, no tap, no event; a ready move failing the loaded live-roster check reads "No move to suggest right now". Hidden for `direction_off`, `unavailable`, `read_failed`, unknown, and while rosters load. Server: `settled` none blocks carry `playoff_proof` (version 1).
+- **Code:** `next_move.py` (`_none` proof), `utils/homeNextMove.ts` (`noneLineId`, `nextMoveEmptyView`), `homeNextMoveCopy.ts` (`NEXT_MOVE_NONE_COPY`), `HomeNextMove.tsx`. Two brief lines reworded (scope §7 note).
+- **Next:** operator signs off the waivers (scope header) and runs scope §9; nothing verified on a device.
+
+## 2026-11-21 — Home's next move (D-278), merged as `4a49ea89` (PR #710), live, TestFlight 1.22.0 (199)
 
 - **What:** flag `league.next_move` (code false, shipped true). The forecast read gains a `next_move` block composed from `team_direction` / `max_pf_moves` / `playoff_targets`: draft pick ⇒ sell the first Max PF moves row, playoffs ⇒ buy the first Playoff targets row, else `none` with a reason (owner gate, collapsed list, Keep, under threshold, settled, forecast not usable). Never skips to the second row. Home shows one row under the playoff card; the app hides it when the named player left the live roster; a tap is the list row's own Find trades (screen Home), after `home_tile_tapped {tile: next_move}` and the "‹ Home" arm.
 - **Code:** `backend/league_projections/next_move.py`, `api.py`; `components/home/HomeNextMove.tsx`, `utils/homeNextMove.ts` (+ copy), `HomeHub.tsx`, `navContinuity.ts`.
-- **Next:** main session review, push, merge; operator runs `docs/plans/home-next-move/scope.md` §9; the no-impression-event waiver needs sign-off.
+- **Shipped 2026-11-21:** reviewed and revised by the main session (see TEST_LEDGER), merged on green CI as `4a49ea89`; Render deploy live on that commit; `/api/feature-flags` serves `league.next_move` true. EAS build `7ea41f8a-d7b3-437b-89c6-cb918825b6aa`, 1.22.0 (199), submitted to App Store Connect (submission `f152cfc0-4c2c-41e7-86bf-98769274c72e`). The no-impression-event waiver was signed off by the operator ("Yes, sign off", 2026-11-21) before the merge and is recorded in the scope doc.
+- **Next:** operator runs `docs/plans/home-next-move/scope.md` §9 (11 steps) on build 199. Nothing verified on a device.
 
 ## 2026-11-19 — One Home control (D-276), merged as `52234774` (PR #708), live, TestFlight 1.22.0 (198)
 

@@ -3,7 +3,7 @@
 **Date:** 2026-11-21
 **Entry point:** direct ask (operator, 2026-11-21, through the main session): "suggest 1 player to buy or sell that improves their team outlook driven priority the best (so either reduce max PF or increases playoff odds)", using "the playoff probability and Max PF moves and the currently set team outlook".
 **Builder:** builder subagent on `feat/home-next-move` (D-278)
-**Operator sign-off on waivers:** NEEDED. One analytics waiver (§1, no impression event) is listed for the operator; nothing here is signed off.
+**Operator sign-off on waivers:** GIVEN 2026-11-21. The operator answered "Yes, sign off" to the main session's question naming the one analytics waiver (§1 (c), no impression event), before the merge of PR #710. Recorded after the merge so the PR's checks did not restart.
 
 ---
 
@@ -63,7 +63,7 @@ When an app check fails the row shows nothing. It never shows the second row ins
   - `home_tile_tapped {tile: 'next_move'}`, screen Home, fired on the tap before anything else. `next_move` is a new value in the documented closed `tile` vocabulary (`backend/analytics_taxonomy.py`); no new prop, so the ingest allowlist is unchanged. It is counted apart from every other tile.
   - The hand-off that follows is the list row's own `finder_target_pinned` (sell: `side: give, source: maxpf_moves`; buy: `side: receive, source: playoff_targets`), with screen **Home** (the lists log it under Standings or the Improve page's route). Buy vs sell is read from it.
   - Questions answered: how often the suggestion is taken (taps), which action, and whether it led to a trade search (`finder_target_pinned` → the finder's own events).
-- [ ] **(c) WAIVED — needs operator sign-off: no impression event.** Nothing records that the row was shown, so a tap-through rate cannot be computed (taps are countable; the denominator is not). `direction_card_shown` fires for the card but does not say whether a move was shown. Adding a prop to it, or a new `next_move_shown` event, is a small follow-up if the operator wants the rate.
+- [x] **(c) WAIVED, operator sign-off 2026-11-21 ("Yes, sign off"): no impression event.** Nothing records that the row was shown, so a tap-through rate cannot be computed (taps are countable; the denominator is not). `direction_card_shown` fires for the card but does not say whether a move was shown. Adding a prop to it, or a new `next_move_shown` event, is a small follow-up if the operator wants the rate.
 
 ## 2. Schema & flag scope
 
@@ -95,7 +95,7 @@ Served on `GET /api/leagues/<id>/projection-runs/latest` as `next_move` while th
 }
 ```
 
-When `state` is `none`, every field after `direction` is null.
+When `state` is `none`, every field after `direction` is null. (D-279, 2026-11-21: a `settled` answer now also carries `playoff_proof`; see [next-move-empty](../next-move-empty/scope.md) §3.)
 
 ## 4. Where it renders, and what a tap does
 
@@ -155,7 +155,7 @@ A sell uses `NM-SELL.pick` when the projected pick changes, else `NM-SELL.top3` 
 | A web version | The web app has no Home playoff card and does not read `team_direction`, `max_pf_moves` or `playoff_targets`; it ignores the new key. Not affected |
 | The row on League rankings (the card's other host) | The ask is Home |
 | Falling to the second row when the first is not usable | The brief: only when the list itself would show it first (the read's seller filter is that case); otherwise nothing |
-| An impression event | Waived for sign-off (§1) |
+| An impression event | Waived, signed off 2026-11-21 (§1) |
 | A second link to the full list | The card's "View ›" already reaches both Improve pages through the half sheet |
 | A combined ("top 2 together") suggestion | One player, one action |
 | Any new computation, saved data or weekly-job work | Composed from what the read already serves |
