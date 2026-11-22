@@ -1600,7 +1600,13 @@ export default function MatchesScreen() {
             ) : null}
           </View>
         ) : (
+          // The Mutual and Awaiting lists sit in the same slot of this
+          // ternary. Without distinct keys React reuses one FlatList across
+          // a segment switch, and FlatList throws (a release-build crash)
+          // when onViewableItemsChanged goes from set to unset. The keys
+          // make each segment mount its own list. check-matches-list-keys.
           <FlatList
+            key="matches-mutual"
             ref={matchesListRef}
             contentContainerStyle={styles.list}
             data={visibleMatches}
@@ -1741,6 +1747,7 @@ export default function MatchesScreen() {
           </View>
         ) : (
           <FlatList
+            key="matches-awaiting"
             ref={awaitingListRef}
             contentContainerStyle={styles.list}
             data={visibleAwaiting}
