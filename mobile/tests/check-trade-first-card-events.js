@@ -187,10 +187,14 @@ console.log('check-trade-first-card-events:');
     r1Sources.every((v) => rowComment.includes(v)), r1Sources.filter((v) => !rowComment.includes(v)).join(', '));
   const team = stripComments(read('screens/TeamReviewScreen.tsx'));
   const finish = team.slice(team.indexOf('testID="team-review.finish"'), team.indexOf("nav.navigate('TradesHome')"));
-  check('3i. Team Review fires R1 `team_review` only when a partner is scoped, before the hand-off (whose auto-run claims it)',
-    /if \(scoped\) \{[\s\S]*?beginTradeSearch\(\{\s*source: 'team_review',[\s\S]*?searchType: 'pinned',[\s\S]*?\}\);\s*useFinderTargets\.getState\(\)\.setHandoff\(\{/.test(finish)
+  // 2026-11-22 (sim pass, issue E): "Find my trades" runs the search with or
+  // without a scoped partner (unscoped hands off like the landing's own Find a
+  // Trade), so it is a search-starting tap either way and R1 fires on every
+  // Finish. It used to fire only `if (scoped)`, because only then did a search run.
+  check('3i. Team Review fires R1 `team_review` on Finish, once, right before the hand-off (whose auto-run claims it)',
+    /beginTradeSearch\(\{\s*source: 'team_review',[\s\S]*?searchType: 'pinned',[\s\S]*?\}\);\s*useFinderTargets\.getState\(\)\.setHandoff\(\{/.test(finish)
       && (team.match(/beginTradeSearch\(/g) || []).length === 1
-      && finish.indexOf('beginTradeSearch(') > finish.indexOf('if (scoped) {'));
+      && !/if \(scoped\) \{[^}]*beginTradeSearch\(/.test(finish));
 }
 
 // ── 4. The request carries the tap's id ───────────────────────────────────
