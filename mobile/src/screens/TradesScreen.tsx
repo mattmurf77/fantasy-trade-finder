@@ -5945,6 +5945,29 @@ export default function TradesScreen({ navigation, route }: any) {
   // the send button, which lives below the fold on the deck; the overlay asks
   // for it by the screen name the deck beats declare (`screen: 'Trades'`).
   const guideScrollYRef = useRef(0);
+
+  // The deck ran out under the user's thumb: acting on the last card swaps
+  // the tall trade card (and its Like/Pass chrome) for the much shorter end
+  // state, and iOS leaves the scroll offset where it was, deep in empty
+  // space, so the user saw a blank screen until they scrolled up (sim pass
+  // 2026-11-22). When the fronted card goes away because the index moved
+  // past it, bring the deck slot (where the end state renders) back into
+  // view, but only when the user is below it. A new search empties the deck
+  // by resetting the index to 0, which this leaves alone.
+  const hadTopCardRef = useRef(false);
+  useEffect(() => {
+    const has = !!rawTopCard;
+    if (hadTopCardRef.current && !has && deckIdx > 0) {
+      requestAnimationFrame(() => {
+        const y = Math.max(deckCardY.current - space.md, 0);
+        if (guideScrollYRef.current > y) {
+          mainScrollRef.current?.scrollTo({ y, animated: true });
+        }
+      });
+    }
+    hadTopCardRef.current = has;
+  }, [rawTopCard, deckIdx]);
+
   useEffect(() => {
     registerGuideScroller('Trades', {
       scrollTo: (y, animated) => mainScrollRef.current?.scrollTo({ y, animated }),
