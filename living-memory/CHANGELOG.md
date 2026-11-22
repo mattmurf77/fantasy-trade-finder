@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, branch `fix/playoff-card-alignment`
+
+- **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.
+- **Fix (layout only, `league.direction_card` branch; the no-block row untouched):** the row is top-aligned (`figuresRow`). "View ›" sits in `viewColumn`, which mirrors a figure: same padding and gap, a hidden `type.label` spacer, then the 40pt control. "last saved" and "owned by" now sit under their value. No copy, flag, event or server change.
+- **Scope:** `docs/plans/playoff-card-alignment/scope.md` (no waivers; width arithmetic; 3-step TestFlight checklist). Not on a device. Not merged.
+
 ## 2026-11-21 — Home's next move when there is none (D-279), merged as `dff07b9a` (PR #712), live, TestFlight 1.22.0 (200)
 
 - **What:** flag `league.next_move_empty` (code false, shipped true, app-only). With `league.next_move` on, Home's next-move row also shows when the block is `none`: "Next move" and one line from the reason (Keep, under threshold, clinched / eliminated, pick owned elsewhere, else "No move to suggest right now"), no button, no tap, no event; a ready move failing the loaded live-roster check reads "No move to suggest right now". Hidden for `direction_off`, `unavailable`, `read_failed`, unknown, and while rosters load. Server: `settled` none blocks carry `playoff_proof` (version 1).
