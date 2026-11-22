@@ -10,6 +10,9 @@ run the composer over the real fixture blocks.
   no direction, a direction not offered.
 - test_sell_gates / test_buy_gates: every "suggest nothing" state, each with
   its reason; never the second row.
+- test_settled_carries_the_proof_both_sides / test_only_settled_carries_a_proof
+  (D-279): `settled` carries the baseline's playoff_proof; every other none
+  answer keeps it null.
 - test_never_names_a_player_the_list_would_not_show_first: over every
   combination of the gates, a ready answer is always the list's first row,
   with a Find trades button and nothing in front of it.
@@ -152,6 +155,47 @@ def test_sell_follows_the_saved_outlook():
 def test_buy_gates(block, reason):
     out = next_move.compose(direction("playoffs"), maxpf(), block)
     assert (out["state"], out["reason"], out["direction"], out["player"]) == ("none", reason, "playoffs", None)
+
+
+def test_settled_carries_the_proof_both_sides():
+    """D-279 (docs/plans/next-move-empty/scope.md): a `settled` answer carries
+    the baseline's `playoff_proof`, so the app can say clinched or eliminated
+    without deciding it. Every other field after `direction` stays null.
+    Sabotage: drop the proof from either `settled` return."""
+    clinched = {"playoff_probability": .30, "playoff_clinched": True, "playoff_eliminated": False}
+    out = next_move.compose(direction("draft_pick"), maxpf(baseline=clinched), targets())
+    assert (out["state"], out["reason"], out["direction"]) == ("none", "settled", "draft_pick")
+    assert out["playoff_proof"] == {"playoff_clinched": True, "playoff_eliminated": False}
+    for baseline, proof in (({"playoff_probability": .55, "playoff_clinched": True, "playoff_eliminated": False},
+                             {"playoff_clinched": True, "playoff_eliminated": False}),
+                            ({"playoff_probability": .55, "playoff_clinched": False, "playoff_eliminated": True},
+                             {"playoff_clinched": False, "playoff_eliminated": True})):
+        out = next_move.compose(direction("playoffs"), maxpf(), targets(baseline=baseline))
+        assert (out["state"], out["reason"], out["direction"]) == ("none", "settled", "playoffs")
+        assert out["playoff_proof"] == proof
+    for key in ("action", "player", "rank", "seller", "captured_at", "playoff_probability", "pick",
+                "most_likely_pick", "top3_probability"):
+        assert out[key] is None, key
+
+
+def test_only_settled_carries_a_proof():
+    """Every other `none` answer keeps `playoff_proof` null (build 199's shape)."""
+    answers = [next_move.compose(None), next_move.read_failed(), next_move.compose(direction(state="unavailable")),
+               next_move.compose(direction(primary=None)),
+               next_move.compose(direction("draft_pick", offered=("playoffs",)), maxpf()),
+               next_move.compose(direction("draft_pick"), None),
+               next_move.compose(direction("draft_pick"), maxpf(pick_owner=None)),
+               next_move.compose(direction("draft_pick"), maxpf(baseline={"playoff_probability": .8})),
+               next_move.compose(direction("draft_pick"), maxpf(rows=[maxpf_row(1, "101", keep=True)])),
+               next_move.compose(direction("draft_pick"), maxpf(rows=[maxpf_row(1, "101", passes_threshold=False)])),
+               next_move.compose(direction("playoffs"), None, None),
+               next_move.compose(direction("playoffs"), None, targets(rows=[])),
+               next_move.compose(direction("playoffs"), None,
+                                 targets(rows=[target_row(1, "201", passes_threshold=False)]))]
+    reasons = {a["reason"] for a in answers}
+    assert reasons == {"direction_off", "read_failed", "unavailable", "no_direction", "not_offered", "no_moves",
+                       "pick_owned_elsewhere", "collapsed", "keep", "below_threshold", "no_targets"}
+    assert all(a["state"] == "none" and a["playoff_proof"] is None for a in answers)
 
 
 def test_buy_takes_the_first_served_row_after_the_read_drops_a_team():

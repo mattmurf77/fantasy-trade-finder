@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-279 — Home's next move also says when there is no move, as one untappable line from the server's reason, behind `league.next_move_empty`
+
+**Date:** 2026-11-21 · **Who:** the operator through the main session ("It should have content for the expected move too"); built by a builder subagent on `feat/next-move-empty`. Scope: `docs/plans/next-move-empty/scope.md`.
+**Context:** D-278's row disappears whenever the server's `next_move` block is `none`, so Home says nothing when the forecast has no clear move.
+**Decision:**
+- App flag `league.next_move_empty` (code default false, shipped true; no backend reader). With `league.next_move` on, the same row shows "Next move" and one line for the `none` reasons the app knows, no button, no tap, no event. Hidden for `direction_off`, `unavailable`, `read_failed` and anything unknown: the playoff card above already says why.
+- The line is a lookup of what the server sent. For `settled` the server now puts the baseline's `playoff_proof` on the none block (additive; build 199 ignores none blocks, so `version` stays 1); no reason or `ready` block changes.
+- A `ready` move that fails the live-roster check once rosters have loaded reads "No move to suggest right now" (a failed buy check includes the seller having no live owner); while rosters load, still nothing.
+- Two lines of the brief were reworded because they were false whenever shown: `keep` ("your top sale is a player you marked Keep": lower rows may still be sales) and the sell `below_threshold` ("your top sale does not move your projected pick enough": the block is `ready` only when some lower row passes).
+**Consequences:** no event for the no-move row (waiver, sign-off needed). The `settled` and buy `below_threshold` lines are defensive: clinched or eliminated teams are offered no direction (`no_direction`), and a buy list whose first row fails has no passing row (`no_targets`). Kill: the flag false + reload.
+
 ## D-278 — Home's next move: one player, one action, the first row of the list the card's direction opens, behind `league.next_move`
 
 **Date:** 2026-11-21 · **Who:** the operator's ask through the main session ("suggest 1 player to buy or sell that improves their team outlook driven priority the best"); built by a builder subagent on `feat/home-next-move`. Scope: `docs/plans/home-next-move/scope.md`.

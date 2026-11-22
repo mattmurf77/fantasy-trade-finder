@@ -20,6 +20,10 @@ real saved Max PF moves block (viewer roster 1, 88%). No network, no
 - test_flag_registered_shipped_on_and_reaches_the_app, test_not_env_forced,
   test_client_compiled_default_matches_config,
   test_only_the_forecast_read_checks_the_flag.
+- test_empty_flag_registered_shipped_on_and_reaches_the_app,
+  test_empty_flag_is_app_only (D-279, docs/plans/next-move-empty/scope.md):
+  `league.next_move_empty`, the no-move line, registered off, shipped on,
+  mirrored, served to the app, read by no backend code.
 """
 from __future__ import annotations
 
@@ -181,3 +185,40 @@ def test_only_the_forecast_read_checks_the_flag():
     gates = sorted(str(p.relative_to(REPO)) for p in (REPO / "backend").rglob("*.py")
                    if "tests" not in p.parts and f'is_enabled("{FLAG}")' in p.read_text(encoding="utf-8"))
     assert gates == ["backend/league_projections/api.py"]
+
+
+EMPTY_FLAG = "league.next_move_empty"
+
+
+def test_empty_flag_registered_shipped_on_and_reaches_the_app():
+    assert EMPTY_FLAG in feature_flags.FLAG_KEYS and feature_flags.DEFAULT_FLAGS[EMPTY_FLAG] is False
+    features = json.loads((REPO / "config/features.json").read_text())
+    assert features[EMPTY_FLAG] is True and "D-279" in features["_comment_league_next_move_empty"]
+    # It only adds to the next-move row, which ships on too.
+    assert features[FLAG] is True
+    for name in FIXTURES:
+        fixture = json.loads((REPO / f"backend/tests/fixtures/flags/{name}.json").read_text())
+        assert fixture[EMPTY_FLAG] is True and fixture[FLAG] is True, name
+    import backend.server as server
+    server.app.config["TESTING"] = True
+    http = server.app.test_client()
+    old = feature_flags._flags_cache
+    try:
+        feature_flags._flags_cache = dict(feature_flags.DEFAULT_FLAGS)
+        assert http.get("/api/feature-flags").get_json()["flags"][EMPTY_FLAG] is False
+        feature_flags._flags_cache = {**feature_flags.DEFAULT_FLAGS, EMPTY_FLAG: True}
+        assert http.get("/api/feature-flags").get_json()["flags"][EMPTY_FLAG] is True
+    finally:
+        feature_flags._flags_cache = old
+    assert EMPTY_FLAG not in (REPO / "render.yaml").read_text()
+    src = (REPO / "mobile/src/state/useFeatureFlags.ts").read_text()
+    assert f"  '{EMPTY_FLAG}': true,\n" in src
+
+
+def test_empty_flag_is_app_only():
+    """No backend code reads it: the server's `settled` proof is served with
+    or without it (build 199 ignores none blocks)."""
+    readers = sorted(str(p.relative_to(REPO)) for p in (REPO / "backend").rglob("*.py")
+                     if "tests" not in p.parts and EMPTY_FLAG in p.read_text(encoding="utf-8")
+                     and p.name != "feature_flags.py")
+    assert readers == []

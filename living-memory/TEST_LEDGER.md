@@ -1,3 +1,10 @@
+## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
+
+- **Backend (local venv outside the repo, Python 3.12, no network):** `test_next_move*.py` **44 passed** (was 40: `settled` proof both sides, only `settled` carries it, the new flag's registry and app-only tests). Full `backend/tests`: **15,947 passed, 43 skipped, 0 failed**.
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green; `check-home-next-move.js` **76 passed** (was 48; J to M: every reason → line or hidden, failed live check, loading hidden, untappable row and a11y label, new flag off renders equal to the build 199 component from git `469c84ab` over 145 renders, copy table ↔ scope §7 both ways, flag mirrors).
+- **Sabotages, red then restored (5):** new flag ignored (H5, J3, J8, K10); loading rosters treated as a failed check (J9, K6); `settled` worded without the proof's eliminated case (J1); copy drift from the scope table (J1, J5, J7, K5, L1); `playoff_proof` dropped from the buy `settled` return (`test_settled_carries_the_proof_both_sides`).
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9.
+
 ## 2026-11-21 — Release: Home's next move live, TestFlight 1.22.0 (199)
 
 - **CI:** PR #710 all four jobs green on head `79ac6464`; merged as `4a49ea89` (`--match-head-commit`). PR #709 (release record 198) green, merged as `7199ebd4`.

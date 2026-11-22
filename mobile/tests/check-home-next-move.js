@@ -16,6 +16,13 @@
 //   G. the copy table equals the scope's §7 table, both directions;
 //   H. the component: renders the line, nothing when the util says nothing;
 //   I. the flag: shipped true, client default true, mirrored in fixtures.
+// D-279 (flag `league.next_move_empty`, docs/plans/next-move-empty/scope.md):
+//   J. every `none` reason → its line or hidden; the failed live-roster
+//      check; rosters loading stays hidden; either flag off ⇒ nothing;
+//   K. the component: the same row, one line, no button, not tappable, the
+//      a11y label; with the new flag off, every render equals build 199's;
+//   L. the no-move copy table equals the D-279 scope's table, both ways;
+//   M. the new flag: shipped true, client default true, mirrored.
 // No simulator, network or account write (D-056).
 //
 // Run: node tests/check-home-next-move.js
@@ -262,7 +269,7 @@ function deps(log) {
   const words = (n) => (Array.isArray(n) ? n.flatMap(words) : typeof n === 'string' ? [n] : n && typeof n === 'object' ? words(n.children) : []);
   const pressed = [];
   const render = (data, flags) => {
-    state.data = data; state.flags = Object.assign({ 'league.projections': true, 'league.next_move': true }, flags); state.queries = [];
+    state.data = data; state.flags = Object.assign({ 'league.projections': true, 'league.next_move': true, 'league.next_move_empty': false }, flags); state.queries = [];
     return component.default({ rosters: ROSTERS, liveIds: MINE, onPress: (v) => pressed.push(v) });
   };
   const tree = render(view(sell()));
@@ -282,6 +289,183 @@ function deps(log) {
   state.active.leagues = [{ league_id: 'league-a', platform: 'espn' }];
   check(render(view(sell())) === null, 'H8. a non-Sleeper league: nothing');
   state.active.leagues = [{ league_id: 'league-a', platform: 'sleeper' }];
+
+  // ═══ J. No move: the line for each `none` reason (D-279) ═══════════════
+  const NONE_LINE = 'No move to suggest right now';
+  // A none block as next_move.py serves it: playoff_proof only on `settled`.
+  const noneB = (reason, direction = null, proof = null) => ({ version: 1, state: 'none', reason, direction, action: null,
+    player: null, rank: null, seller: null, captured_at: null, playoff_probability: null, playoff_proof: proof,
+    pick: null, most_likely_pick: null, top3_probability: null });
+  const CLINCHED = { playoff_clinched: true, playoff_eliminated: false };
+  const ELIMINATED = { playoff_clinched: false, playoff_eliminated: true };
+  const cases = [
+    [noneB('keep', 'draft_pick'), 'Hold: your top sale is a player you marked Keep'],
+    [noneB('below_threshold', 'draft_pick'), 'Hold: your top sale does not move your projected pick enough'],
+    [noneB('below_threshold', 'playoffs'), 'Hold: no single buy moves your playoff chance enough'],
+    [noneB('settled', 'draft_pick', CLINCHED), 'Playoffs clinched: no move to suggest'],
+    [noneB('settled', 'playoffs', CLINCHED), 'Playoffs clinched: no move to suggest'],
+    [noneB('settled', 'playoffs', ELIMINATED), 'Eliminated from the playoffs: no buy to suggest'],
+    [noneB('pick_owned_elsewhere', 'draft_pick'), 'No sale to suggest: another team owns your first-round pick'],
+    [noneB('no_moves', 'draft_pick'), NONE_LINE],
+    [noneB('no_targets', 'playoffs'), NONE_LINE],
+    [noneB('collapsed', 'draft_pick'), NONE_LINE],
+    [noneB('no_direction'), NONE_LINE],
+    [noneB('not_offered', 'draft_pick'), NONE_LINE],
+    [noneB('not_offered', 'playoffs'), NONE_LINE],
+    // Hidden: the playoff card above already carries the state.
+    [noneB('direction_off'), null],
+    [noneB('unavailable'), null],
+    [noneB('read_failed'), null],
+    [noneB('draft_order_unanswered', 'draft_pick'), null],          // an unknown reason
+    [noneB('toString', 'draft_pick'), null],                        // not a lookup on the prototype
+    [noneB('settled', 'draft_pick'), null],                         // settled without the proof (an older server)
+    [noneB('settled', 'playoffs', { playoff_clinched: true, playoff_eliminated: true }), null],
+    [noneB('settled', 'playoffs', { playoff_clinched: false, playoff_eliminated: false }), null],
+    [noneB('below_threshold'), null],                               // no direction to word it
+    [Object.assign(noneB('keep', 'draft_pick'), { version: 2 }), null],
+    [Object.assign(noneB('keep', 'draft_pick'), { state: 'later' }), null],
+    [Object.assign(noneB(null, 'draft_pick')), null],
+  ];
+  const got = cases.map(([b]) => { const e = u.nextMoveEmptyView(view(b), true, true, ROSTERS, MINE); return e && e.line; });
+  const wrong = cases.filter(([b, want], i) => got[i] !== want).map(([b], i) => `${b.reason}/${b.direction}`);
+  check(wrong.length === 0, 'J1. every `none` reason gives its line, or stays hidden (direction_off, unavailable, read_failed, unknown reason, unknown shape or version)',
+    wrong.join(', '));
+  check(cases.every(([b]) => u.nextMoveView(view(b), true, ROSTERS, MINE) === null), 'J2. a none block never becomes a move (nextMoveView unchanged)');
+  check(cases.every(([b]) => u.nextMoveEmptyView(view(b), true, false, ROSTERS, MINE) === null
+    && u.nextMoveEmptyView(view(b), false, true, ROSTERS, MINE) === null),
+    'J3. either flag off: no line for any block');
+  check(u.nextMoveEmptyView(undefined, true, true, ROSTERS, MINE) === null && u.nextMoveEmptyView({ state: 'current' }, true, true, ROSTERS, MINE) === null,
+    'J4. no read, or no block: nothing');
+  const e = u.nextMoveEmptyView(view(noneB('no_moves', 'draft_pick')), true, true, ROSTERS, MINE);
+  check(e && e.label === 'Next move' && e.accessibilityLabel === 'Next move. No move to suggest right now.' && !('actionLabel' in e),
+    'J5. the label, the spoken label "Next move. {line}.", no action', e && e.accessibilityLabel);
+  check(u.nextMoveEmptyView(view(sell()), true, true, ROSTERS, MINE) === null
+    && u.nextMoveEmptyView(view(buy()), true, true, ROSTERS, MINE) === null,
+    'J6. a usable move: no no-move line (the move row shows)');
+  const failed = [
+    [view(sell()), ROSTERS, ['102', '103']],                                                    // sold / dropped
+    [view(buy()), [ROSTERS[0], { roster_id: 4, owner_id: 'owner4', players: ['205'] }], MINE],  // he left that team
+    [view(buy()), [ROSTERS[0], { roster_id: 4, owner_id: null, players: ['201'] }], MINE],     // no live owner
+    [view(buy()), [ROSTERS[0]], MINE],                                                         // that team is gone
+  ];
+  check(failed.every(([d, r, l]) => { const x = u.nextMoveEmptyView(d, true, true, r, l); return x && x.line === NONE_LINE; }),
+    'J7. a ready move failing the live-roster check once rosters loaded: "No move to suggest right now"');
+  check(failed.every(([d, r, l]) => u.nextMoveEmptyView(d, true, false, r, l) === null && u.nextMoveView(d, true, r, l) === null),
+    'J8. the same with the new flag off: nothing, as build 199');
+  check(u.nextMoveEmptyView(view(sell()), true, true, undefined, null) === null
+    && u.nextMoveEmptyView(view(sell()), true, true, ROSTERS, null) === null
+    && u.nextMoveEmptyView(view(buy()), true, true, undefined, MINE) === null
+    && u.nextMoveEmptyView(view(buy()), true, true, null, MINE) === null,
+    'J9. rosters still loading or failed (no data, or the viewer\'s roster not known): hidden, as before');
+  check(u.nextMoveEmptyView(view(sell({ version: 2 })), true, true, ROSTERS, ['102']) === null
+    && u.nextMoveEmptyView(view(buy({ seller: null })), true, true, [ROSTERS[0]], MINE) === null,
+    'J10. a ready block this build does not know: hidden, even when the rosters would fail it');
+  const noneCopy = Object.values(copy.NEXT_MOVE_NONE_COPY);
+  check(noneCopy.every((t) => !/[—–]/.test(t)), 'J11. no em or en dashes in the no-move copy');
+
+  // ═══ K. The component: same row, one line, no button (D-279) ═════════════
+  // Rosters passed explicitly when given (an explicit undefined is "loading", not the default).
+  const renderE = (data, flags, ...given) => {
+    const [rosters, liveIds] = given.length ? given : [ROSTERS, MINE];
+    state.data = data; state.flags = Object.assign({ 'league.projections': true, 'league.next_move': true, 'league.next_move_empty': true }, flags);
+    state.queries = [];
+    return component.default({ rosters, liveIds, onPress: (v) => pressed.push(v) });
+  };
+  const before = pressed.length;
+  const t = renderE(view(noneB('keep', 'draft_pick')));
+  const tNodes = nodes(t);
+  check(t && t.type === 'View' && t.props.testID === 'home.next-move' && t.props.accessible === true
+    && t.props.accessibilityLabel === 'Next move. Hold: your top sale is a player you marked Keep.'
+    && !('onPress' in t.props) && !('accessibilityRole' in t.props),
+    'K1. the row keeps testID home.next-move, one spoken label, and is not a button (no onPress, no role)');
+  check(tNodes.every((n) => n.type !== 'Pressable' && n.type !== 'RowAction' && !('onPress' in n.props)) && pressed.length === before,
+    'K2. no action button, nothing tappable, so no navigation and no event');
+  const lineNode = tNodes.find((n) => n.props.testID === 'home.next-move.none');
+  check(lineNode && words(lineNode).join('') === 'Hold: your top sale is a player you marked Keep' && words(t).includes('Next move')
+    && !tNodes.some((n) => n.props.testID === 'home.next-move.line'),
+    'K3. the label "Next move" and the one line (testID home.next-move.none)');
+  const ready = render(view(sell()));
+  check(t.props.style === ready.props.style({ pressed: false })[0] && same(nodes(t)[1].props.style, nodes(ready)[1].props.style),
+    'K4. the same card and text styles as the move row');
+  check(renderE(view(sell()), {}, ROSTERS, ['102', '103']) && nodes(renderE(view(sell()), {}, ROSTERS, ['102', '103']))
+    .some((n) => n.props.testID === 'home.next-move.none' && words(n).join('') === NONE_LINE),
+    'K5. a sell whose player left the live roster renders "No move to suggest right now"');
+  check(renderE(view(sell()), {}, undefined, null) === null && renderE(view(buy()), {}, undefined, null) === null,
+    'K6. rosters still loading: renders nothing');
+  check(['direction_off', 'unavailable', 'read_failed', 'mystery'].every((r) => renderE(view(noneB(r))) === null),
+    'K7. hidden reasons render nothing');
+  check(renderE(view(noneB('keep', 'draft_pick')), { 'league.next_move': false }) === null
+    && renderE(view(noneB('keep', 'draft_pick')), { 'league.projections': false }) === null,
+    'K8. league.next_move (or forecasts) off: nothing, whatever the new flag says');
+  state.active.leagues = [{ league_id: 'league-a', platform: 'espn' }];
+  check(renderE(view(noneB('keep', 'draft_pick'))) === null, 'K9. a non-Sleeper league: nothing');
+  state.active.leagues = [{ league_id: 'league-a', platform: 'sleeper' }];
+  // K10: the new flag off is build 199, byte for byte. Every block and roster
+  // state renders exactly what the build-199 component renders (loaded from
+  // git at 469c84ab when the history is there), and the query is the same.
+  const blocks = [...cases.map(([b]) => b), sell(), buy(), sell({ pick: { now: '1.06', after: '1.06' } }), undefined];
+  const rosterStates = [[ROSTERS, MINE], [ROSTERS, ['102', '103']], [undefined, null], [ROSTERS, null],
+    [[ROSTERS[0], { roster_id: 4, owner_id: null, players: ['201'] }], MINE]];
+  const ser = (x) => JSON.stringify(x, (k, v) => (typeof v === 'function' ? `fn:${v.length}` : v));
+  let base199 = null;
+  try {
+    const src = require('node:child_process').execFileSync('git', ['show', '469c84ab:mobile/src/components/home/HomeNextMove.tsx'],
+      { cwd: MOBILE, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const m199 = { exports: {} };
+    const out199 = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React } }).outputText;
+    vm.runInNewContext(out199, { exports: m199.exports, module: m199, require: (n) => modules[n], Date, Math, JSON, Number, String, Array, Object, Set });
+    base199 = m199.exports.default;
+  } catch (err) { base199 = null; }
+  let diffs = 0; let compared = 0;
+  for (const b of blocks) {
+    for (const [r, l] of rosterStates) {
+      const off = renderE(b === undefined ? undefined : view(b), { 'league.next_move_empty': false }, r, l);
+      const qOff = ser(state.queries);
+      const on = renderE(b === undefined ? undefined : view(b), {}, r, l);
+      // With a move, the new flag changes nothing; without one, off ⇒ nothing.
+      if (u.nextMoveView(b === undefined ? undefined : view(b), true, r, l)) { if (ser(off) !== ser(on)) diffs += 1; }
+      else if (off !== null) diffs += 1;
+      if (base199) {
+        state.data = b === undefined ? undefined : view(b); state.queries = [];
+        state.flags = { 'league.projections': true, 'league.next_move': true };
+        const old = base199({ rosters: r, liveIds: l, onPress: (v) => pressed.push(v) });
+        if (ser(old) !== ser(off) || ser(state.queries) !== qOff) diffs += 1;
+        compared += 1;
+      }
+    }
+  }
+  check(diffs === 0, `K10. new flag off: every render equals build 199's (${compared ? `${compared} renders compared with 469c84ab` : 'git history absent: compared with the move row only'})`,
+    `${diffs} differ`);
+  if (!base199) console.log('NOTE  K10 could not load the build-199 component from git; ran the in-tree comparison only');
+}
+
+// ═══ L. The no-move copy is the D-279 scope's table, both directions ═══════
+{
+  const scope = readRoot('docs/plans/next-move-empty/scope.md');
+  const section = scope.slice(scope.indexOf('## 7.'), scope.indexOf('## 8.'));
+  const rows = {};
+  for (const m of section.matchAll(/^\| `(NM-[A-Za-z0-9.-]+)` \| (.+?) \|$/gm)) rows[m[1]] = m[2].replace(/^"|"$/g, '');
+  const table = copy.NEXT_MOVE_NONE_COPY;
+  const missing = Object.keys(table).filter((k) => rows[k] !== table[k]);
+  const extra = Object.keys(rows).filter((k) => !(k in table));
+  check(Object.keys(table).length === 8 && missing.length === 0 && extra.length === 0,
+    'L1. every no-move string is in the D-279 scope\'s table verbatim, and nothing else is',
+    `differs: ${missing.join(', ') || '-'}; only in scope: ${extra.join(', ') || '-'}`);
+  check(!Object.keys(table).some((k) => k in copy.NEXT_MOVE_COPY), 'L2. build 199\'s table is untouched (no shared ids)');
+}
+
+// ═══ M. The new flag ═══════════════════════════════════════════════════════
+{
+  const cfg = JSON.parse(readRoot('config/features.json'));
+  check(u.NEXT_MOVE_EMPTY_FLAG === 'league.next_move_empty', 'M1. the flag key');
+  check(cfg['league.next_move_empty'] === true && /D-279/.test(cfg._comment_league_next_move_empty || '')
+    && /\n    "league\.next_move_empty",\n/.test(readRoot('backend/feature_flags.py')),
+    'M2. registered (code default False) and shipped true with its comment');
+  check(read('src/state/useFeatureFlags.ts').includes("  'league.next_move_empty': true,\n"), 'M3. the client\'s compiled default matches config');
+  check(['release', 'onboarding-v2', 'profiles-on'].every((fx) => JSON.parse(readRoot(`backend/tests/fixtures/flags/${fx}.json`))['league.next_move_empty'] === true),
+    'M4. mirrored in the three flag fixtures');
+  check(!/next_move_empty|nextMoveEmpty/.test(strip(read('src/components/home/HomeHub.tsx'))),
+    'M5. HomeHub unchanged: no new handler or event for the no-move row');
 }
 
 // ═══ I. The flag ═════════════════════════════════════════════════════════
