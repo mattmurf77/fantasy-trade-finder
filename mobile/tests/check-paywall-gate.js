@@ -2329,6 +2329,9 @@ function rcHarness({ stored = null } = {}) {
     '../observability/sentry': { setUser: () => {} },
     './queryClient': { queryClient: { invalidateQueries() {} }, seedLeagueSessionCaches() {} },
     './devicePageStore': { clearDevicePages: async () => {} },
+    // The account reset (sign-out / another account) — lazily required by
+    // useSession; its own behavior is check-signout-reset.js's.
+    './accountReset': { resetAccountState: async () => {} },
     '../utils/tradeInputChange': { noteTradeInputChange: () => {} },
     '../api/rankings': { getActiveScoringFormat: async () => null },
   });

@@ -128,6 +128,8 @@ function sessionHarness() {
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
     // 200 ms path C: sign-out / account switch clear the device-held trade pages.
     './devicePageStore': {clearDevicePages: async () => {}},
+    // The account reset on sign-out / another account (check-signout-reset.js owns its behavior).
+    './accountReset': {resetAccountState: async () => {}},
   };
   state = load('src/state/useSession.ts', name => {
     if (name === './leagueSession') return load('src/state/leagueSession.ts', dep => { assert.equal(dep, '../api/client'); return h.client; }, h.time);

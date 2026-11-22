@@ -1,3 +1,10 @@
+## 2026-11-22 — Sign-out leaves no account state (D-280), branch `fix/signout-clears-account-state`
+
+- **App:** `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green (195 on main + new `check-signout-reset.js` **19 passed**: executes `useSession` signOut / setUser / startDemoSession against a recording reset, and `state/accountReset` on the real QueryClient with the real `useEntitlements`, `teamReviewCompletion`, `rosterSetup`; pins the sign-out callers, the token clearers, the Verify row condition and the sign-out confirm). `check-paywall-gate.js` and `check-win-now-recovery.js` gain one deliberate `./accountReset` stub each (useSession's new lazy require).
+- **Fail on main:** the new guard run against `origin/main`'s `mobile/src` + `mobile/App.tsx` (git archive into a scratch dir): **3 passed, 16 failed**, exit 1. The three that pass there are the shape pins main already satisfies (every sign-out goes through `useSession.signOut`, nothing else clears the token, the 401 handler keeps the user).
+- **Sabotages, red then restored (4):** the hasToken-edge entitlement ask removed (2c); the Team review key back to device-wide (3a, 3b); signOut resetting before the token is cleared (1b); the reset not clearing the QueryClient (2a).
+- **Not verified:** anything on a device (D-056). Checklist: the D-280 entry (one step per reported item).
+
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 
 - **Backend (local venv outside the repo, Python 3.12, no network):** `test_next_move*.py` **44 passed** (was 40: `settled` proof both sides, only `settled` carries it, the new flag's registry and app-only tests). Full `backend/tests`: **15,947 passed, 43 skipped, 0 failed**.

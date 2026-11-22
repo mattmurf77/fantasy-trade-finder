@@ -112,8 +112,11 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
     // The route is session-authed; without a token the call can only 401 and
     // clear nothing useful, so skip it and keep whatever the cache said.
     if (!useSession.getState().hasToken) return;
+    // An answer for the account that has since left is not this account's.
+    const askedFor = useSession.getState().user?.user_id;
     try {
       const res = await getEntitlements();
+      if (useSession.getState().user?.user_id !== askedFor) return;
       // `=== true`: the server blanks every subscription field for an
       // unverified session (R28.9), and a blank reads as NOT entitled.
       const pro = res?.pro === true;
@@ -146,6 +149,18 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
     if (proActive && !get().pro) set({ pro: true, optimistic: true, loaded: true });
   },
 }));
+
+/** Account reset (state/accountReset.ts): the leaving account's answer is
+ *  dropped from memory and disk, and `loaded` goes false so surfaces that must
+ *  not guess (Settings › Subscription) render nothing until the next account's
+ *  own answer lands — the session subscriber in `initEntitlements` asks for it
+ *  as soon as that account holds a token. Never throws. */
+export function resetEntitlements(): void {
+  useEntitlements.setState({
+    pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false, loaded: false,
+  });
+  AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
+}
 
 let _listenerBound = false;
 let _verifyEdgeBound = false;
@@ -180,9 +195,20 @@ export function initEntitlements(): void {
   useSession.subscribe((s, prev) => {
     const was = prev.user?.user_id;
     if (!was || s.user?.user_id === was) return;
-    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false });
+    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false, loaded: false });
     AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
     void useEntitlements.getState().refresh();
+  });
+  // The ask above is skipped without a token — and a sign-out leaves none, so
+  // the null → B sign-in that follows used to keep the reset defaults until
+  // the next foreground refresh: a Pro account read "See plans" (2026-11-22).
+  // Ask the moment a session token appears while the answer is unknown
+  // (`loaded` false after resetEntitlements). Boot is not this edge: bootstrap
+  // has already set `hasToken` before initEntitlements subscribes.
+  useSession.subscribe((s, prev) => {
+    if (s.hasToken && !prev.hasToken && s.user && !useEntitlements.getState().loaded) {
+      void useEntitlements.getState().refresh();
+    }
   });
   // Attach the CustomerInfo listener the moment purchases become usable —
   // which is when the session working key first reaches `initPurchases`, at
