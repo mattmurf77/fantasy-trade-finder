@@ -1,3 +1,10 @@
+## 2026-11-22 — Release: Home's no-move line live, TestFlight 1.22.0 (200)
+
+- **CI:** PR #712 all four jobs green on head `270f3d86`; merged as `dff07b9a` (`--match-head-commit`). PR #711 (release record 199) green, merged as `469c84ab`.
+- **Server, production:** Render deploy live on `dff07b9a` (finished 2026-11-22T18:33Z). `GET /api/feature-flags` returns `league.next_move` true and `league.next_move_empty` true.
+- **App:** clean detached checkout of `dff07b9a`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 76 passed. EAS build `57df993c-1abb-4cdb-bf2f-0b7a1c1e2e91` FINISHED (confirmed with `build:list`), 1.22.0 (200); submission `695ddfca-f306-4b1c-9baf-911e8e03c144` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9 on build 200. The production forecast read was not called, so which reasons real teams are served is not known.
+
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 
 - **Backend (local venv outside the repo, Python 3.12, no network):** `test_next_move*.py` **44 passed** (was 40: `settled` proof both sides, only `settled` carries it, the new flag's registry and app-only tests). Full `backend/tests`: **15,947 passed, 43 skipped, 0 failed**.
