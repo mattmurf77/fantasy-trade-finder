@@ -1,3 +1,10 @@
+## 2026-11-22 — UI polish: FAB clearance, segment labels, product names, drill-in top, Undo toast, branch `fix/ui-polish-overlaps-and-names`
+
+- **App:** `node_modules` symlinked from the `paid-launch` worktree (lockfile identical to `origin/main`); `npx tsc --noEmit` clean (exit 0); `scripts/testid-lint.sh` OK; all **200** `check-*.js` green. New: `check-fab-clearance` 14, `check-segment-labels-fit` 7, `check-no-old-product-names` 5, `check-league-drill-in-top` 8 (executes `openTeam`), `check-toast-undo-window` 8 (executes `Toast` under a stub React). `check-team-review` 38 (check 2 narrowed to a FAB mount / default import).
+- **Backend (scratch venv, Python 3.12):** `test_account_data_rights.py` 23 passed (asserts `filename=fleeced-export.json`); full `backend/tests` **15,947 passed, 43 skipped, 0 failed**.
+- **Red on `origin/main` sources (git archive + the five new guards):** no-old-product-names 3 failed (20 copy hits, both export writers, server header); league-drill-in-top 3 failed (row, bar, refocus opens never scroll); toast-undo-window 4 failed (hold deps change on a host re-render, stale onDismiss, fading toast takes touches, flush leaves the Undo toast); segment-labels-fit 5 failed; fab-clearance 13 failed.
+- **Not verified:** anything on a device (D-056). Widths in `check-segment-labels-fit` are conservative estimates (G-035). Checklist: the branch's report (FAB on each named screen, Matches/League labels at 375pt, export filename, drill-in from a scrolled list, Dismiss › Undo within and after 5 s).
+
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
