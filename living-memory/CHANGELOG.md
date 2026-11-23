@@ -12,11 +12,19 @@
 ---
 
 
-## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty` (not merged)
+## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, merged as `df3bc0b4` (PR #714), TestFlight 1.22.0 (201)
+
+- **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.
+- **Fix (layout only, `league.direction_card` branch; the no-block row untouched):** the row is top-aligned (`figuresRow`). "View ›" sits in `viewColumn`, which mirrors a figure: same padding and gap, a hidden `type.label` spacer, then the 40pt control. "last saved" and "owned by" now sit under their value. No copy, flag, event or server change.
+- **Scope:** `docs/plans/playoff-card-alignment/scope.md` (no waivers; width arithmetic; 3-step TestFlight checklist). Not on a device.
+- **Shipped 2026-11-22:** merged on green CI as `df3bc0b4`. App-only, so Render made no deploy (`render.yaml` ignores `mobile/src/**`); production stays on `dff07b9a`. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b`, 1.22.0 (201), submitted (submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f`).
+
+## 2026-11-21 — Home's next move when there is none (D-279), merged as `dff07b9a` (PR #712), live, TestFlight 1.22.0 (200)
 
 - **What:** flag `league.next_move_empty` (code false, shipped true, app-only). With `league.next_move` on, Home's next-move row also shows when the block is `none`: "Next move" and one line from the reason (Keep, under threshold, clinched / eliminated, pick owned elsewhere, else "No move to suggest right now"), no button, no tap, no event; a ready move failing the loaded live-roster check reads "No move to suggest right now". Hidden for `direction_off`, `unavailable`, `read_failed`, unknown, and while rosters load. Server: `settled` none blocks carry `playoff_proof` (version 1).
 - **Code:** `next_move.py` (`_none` proof), `utils/homeNextMove.ts` (`noneLineId`, `nextMoveEmptyView`), `homeNextMoveCopy.ts` (`NEXT_MOVE_NONE_COPY`), `HomeNextMove.tsx`. Two brief lines reworded (scope §7 note).
-- **Next:** operator signs off the waivers (scope header) and runs scope §9; nothing verified on a device.
+- **Shipped 2026-11-22:** review revision by the main session (the "Hold:" lines now read "No sale / No buy to suggest:"), merged on green CI as `dff07b9a`; Render deploy live on that commit; `/api/feature-flags` serves `league.next_move_empty` true. EAS build `57df993c-1abb-4cdb-bf2f-0b7a1c1e2e91`, 1.22.0 (200), submitted (submission `695ddfca-f306-4b1c-9baf-911e8e03c144`). The three waivers were signed off by the operator ("Yes, sign off", 2026-11-22) before the merge.
+- **Next:** operator runs scope §9 on build 200. Nothing verified on a device.
 
 ## 2026-11-21 — Home's next move (D-278), merged as `4a49ea89` (PR #710), live, TestFlight 1.22.0 (199)
 

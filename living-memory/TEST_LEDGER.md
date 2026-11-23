@@ -18,6 +18,25 @@
 - **App:** `node_modules` symlinked from the `release-198` worktree (same lockfile). `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green, including the new `check-paid-launch.js` **17 passed**. It EXECUTES `queueCalcTrade`, `retryUnlessGated` and `PaywallGateNotice` under a fake React; the Send catches, Shop, the ideas panel and the refetch-on-Pro effects are pinned [shape]. `check-send-timeout` (24) and `check-paywall-gate` (115) are unchanged and green.
 - **Sabotages, red then restored (9):** queue gate return dropped (2a, 2b); the retry predicate ignores 402 (5a); MFL, ESPN and Sleeper gate checks disabled (1a; Sleeper also 1b); the panel gate branch disabled (4a); the notice ignores unverified sessions (6c); the Shop gate branch disabled (4b); Shop's refetch-on-Pro removed (7a).
 - **Not verified:** anything on a device (D-056), and nothing against production. The device checklist is `docs/plans/monetization-launch/paid-launch/turn-on-runbook.md` §C (15 steps: purchase, trial, restore, lapse, refund, cross-device, unverified, demo, delete, kill). Enforcement stays dark in code.
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
+
+## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
+
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
+- **Sabotage, red then restored (1):** `figuresRow` set back to `alignItems: 'center'` (the reported bug): M1 failed in all 4 states (90 passed, 4 failed); restored, 94 passed.
+- **Not verified:** anything on a device (D-056). The widths come from the bundled TTF advance widths, without kerning. Checklist: `docs/plans/playoff-card-alignment/scope.md` §6.
+
+## 2026-11-22 — Release: Home's no-move line live, TestFlight 1.22.0 (200)
+
+- **CI:** PR #712 all four jobs green on head `270f3d86`; merged as `dff07b9a` (`--match-head-commit`). PR #711 (release record 199) green, merged as `469c84ab`.
+- **Server, production:** Render deploy live on `dff07b9a` (finished 2026-11-22T18:33Z). `GET /api/feature-flags` returns `league.next_move` true and `league.next_move_empty` true.
+- **App:** clean detached checkout of `dff07b9a`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 76 passed. EAS build `57df993c-1abb-4cdb-bf2f-0b7a1c1e2e91` FINISHED (confirmed with `build:list`), 1.22.0 (200); submission `695ddfca-f306-4b1c-9baf-911e8e03c144` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9 on build 200. The production forecast read was not called, so which reasons real teams are served is not known.
 
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 

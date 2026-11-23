@@ -142,6 +142,67 @@ for (const [name, data, flags] of [
       && 20 + s(d).top + s(d).bottom >= 44, 'H3. every control keeps a 44pt target');
 }
 
+// ═══ M. One value line (TestFlight: "the percentage, pick, and view should
+// all sit on the same line"; docs/plans/playoff-card-alignment/scope.md) ════
+{
+  const flat = (st) => Object.assign({}, ...[].concat(st).flat(Infinity).filter((x) => x && typeof x === 'object'));
+  const kids = (n) => [].concat(n.children).flat(Infinity).filter((x) => x && typeof x === 'object');
+  const ids = (n) => kids(n).map((x) => x.props.testID);
+  const owned = { projected_pick: { label: '1.03', slot: 3, owns_own_pick: false, owner_name: 'Rivals FC' } };
+  for (const [name, tree] of [
+    ['current', mount(view(block()))],
+    ['current, owned by another team', mount(view(block(owned)))],
+    ['last saved', mount(view(block({ state: 'unavailable', reason: 'stale', band: null, primary: null }), 0.624, 'stale'))],
+    ['last saved, owned by another team', mount(view(block(Object.assign({ state: 'unavailable', reason: 'stale', band: null, primary: null }, owned)), 0.624, 'stale'))],
+  ]) {
+    const row = byId(tree, 'home.playoff.figures');
+    const figs = kids(row)[0];
+    const col = byId(tree, 'home.playoff.view.column');
+    const spacer = byId(tree, 'home.playoff.view.spacer');
+    const v = byId(tree, 'home.playoff.view');
+    const pLine = byId(tree, 'home.playoff.figure.playoff.line');
+    const kLine = byId(tree, 'home.playoff.pick.line');
+    const pFig = byId(tree, 'home.playoff.figure.playoff');
+    const kFig = byId(tree, 'home.playoff.pick');
+    // M1: not centred on the label + value block: the row is top-aligned and
+    // "View" sits in a column that mirrors a figure.
+    check(flat(row.props.style).alignItems === 'flex-start' && JSON.stringify(ids(row)) === '[null,"home.playoff.view.column"]'
+        && JSON.stringify(ids(col)) === '["home.playoff.view.spacer","home.playoff.view"]',
+      `M1. ${name}: the row is top-aligned and "View ›" ends it inside its own column, after a spacer`);
+    // M2: the column mirrors the figures' padding and a figure's gap, and the
+    // spacer is the figure label's own style and scale (so it grows with
+    // Dynamic Type), holds no words, and is hidden from accessibility.
+    const label = kids(pFig)[0];
+    check(flat(col.props.style).paddingVertical === flat(figs.props.style).paddingVertical
+        && flat(col.props.style).gap === flat(pFig.props.style).gap && flat(col.props.style).flexShrink === 0
+        && spacer.type === 'Text' && spacer.props.style === label.props.style && spacer.props.scale === label.props.scale
+        && /^\s*$/.test(words(spacer).join('')) && spacer.props['aria-hidden'] === true
+        && spacer.props.accessibilityElementsHidden === true && spacer.props.importantForAccessibility === 'no-hide-descendants',
+      `M2. ${name}: the View column mirrors a figure (padding, gap, a label-styled spacer hidden from accessibility)`);
+    // M3: one line height for all three: the pick line and the percentage line
+    // are the same style, and the View control matches its min height and centring.
+    check(pLine.props.style === kLine.props.style && flat(kLine.props.style).minHeight === 40
+        && flat(kLine.props.style).alignItems === 'center'
+        && flat(v.props.style).minHeight === flat(kLine.props.style).minHeight && flat(v.props.style).justifyContent === 'center',
+      `M3. ${name}: the percentage, the pick and "View ›" share one 40pt centred line`);
+    // M4: the lines hold the values only; "last saved" and "owned by" sit under them.
+    check(JSON.stringify(ids(pLine)) === '["home.playoff.details","home.playoff.explain"]'
+        && JSON.stringify(ids(kLine)) === '["home.playoff.pick.value"]' && words(pLine).concat(words(kLine)).every((w) => !/last saved|owned by/.test(w)),
+      `M4. ${name}: the value lines hold only the percentage + info and the pick; no note on the line`);
+    const pickKids = kids(kFig).slice(2).map((x) => words(x).join(''));
+    const stale = name.startsWith('last saved');
+    const ownerShown = name.includes('owned by');
+    check(JSON.stringify(pickKids) === JSON.stringify([...(stale ? ['last saved'] : []), ...(ownerShown ? ['owned by Rivals FC'] : [])])
+        && JSON.stringify(kids(pFig).slice(2).map((x) => words(x).join(''))) === JSON.stringify(stale ? ['last saved'] : []),
+      `M5. ${name}: the notes ("last saved", then "owned by") are under their value, outside the line`);
+  }
+  // M6: the no-block row is untouched: centred, no View column, no spacer.
+  const off = mount(view(block()), { 'league.direction_card': false });
+  const firstRow = off.children.flat().find((n) => n && n.type === 'View');
+  check(flat(firstRow.props.style).alignItems === 'center' && !byId(off, 'home.playoff.view.column') && !byId(off, 'home.playoff.view.spacer'),
+    'M6. flag off: today\'s single row, still centred, no spacer');
+}
+
 // ═══ I. The card decides nothing (spec §5.1) ═══════════════════════════════
 {
   check(!/0\.35|0\.65|0\.45|REBUILDING|probability\s*[<>]=?|[<>]=?\s*0?\.\d|band\s*[<>]|Math\.(round|floor|ceil)/.test(bannerSrc + utilSrc),
