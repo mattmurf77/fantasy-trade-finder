@@ -1746,6 +1746,11 @@ export default function LeagueSummaryScreen() {
     // from the first open rather than restarting.
     focusRef.current = { id, at: focusRef.current?.at ?? Date.now(), rank };
     setSelectedId(id);
+    // The drill-in renders in this same ScrollView, so it would inherit the
+    // list's offset and open with its team header and first players scrolled
+    // off. It opens at the top instead. The Home tile arrival lands itself
+    // (applyOwnLanding), so it is left alone.
+    if (via !== 'home_tile') scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
   const fmtKey = query.data?.scoring_format ?? '';

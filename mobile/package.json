@@ -200,7 +200,8 @@
     "test:founder-review": "node tests/check-founder-review.js",
     "test:founder-rule-waterfall": "node tests/check-founder-rule-waterfall.js",
     "test:founder-pages": "node tests/check-founder-pages.js",
-    "test:no-old-product-names": "node tests/check-no-old-product-names.js"
+    "test:no-old-product-names": "node tests/check-no-old-product-names.js",
+    "test:league-drill-in-top": "node tests/check-league-drill-in-top.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
