@@ -5,6 +5,18 @@
 - **Sabotages, red then restored (4):** the hasToken-edge entitlement ask removed (2c); the Team review key back to device-wide (3a, 3b); signOut resetting before the token is cleared (1b); the reset not clearing the QueryClient (2a).
 - **Not verified:** anything on a device (D-056). Checklist: the D-280 entry (one step per reported item).
 - **Follow-up, same day (fresh-install first sign-in never asked for entitlements):** `check-signout-reset.js` **25 passed** (new 6a ×3, 6b, 6c, 6d); on the previous head `b5e00e21` the same guard is **19 passed, 6 failed** (6a: 0 requests after a first sign-in in all three update orders; 6b: unknown treated as not enforcing; 6c: an empty boot marked loaded; 6d: an offline first sign-in marked loaded). `check-paywall-gate.js` 6g / 8i stubs gain `answerFor` / `loaded` deliberately. `tsc` clean, testid-lint OK, all 196 `check-*.js` green.
+## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
+
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
+- **Sabotage, red then restored (1):** `figuresRow` set back to `alignItems: 'center'` (the reported bug): M1 failed in all 4 states (90 passed, 4 failed); restored, 94 passed.
+- **Not verified:** anything on a device (D-056). The widths come from the bundled TTF advance widths, without kerning. Checklist: `docs/plans/playoff-card-alignment/scope.md` §6.
+
+## 2026-11-22 — Release: Home's no-move line live, TestFlight 1.22.0 (200)
+
+- **CI:** PR #712 all four jobs green on head `270f3d86`; merged as `dff07b9a` (`--match-head-commit`). PR #711 (release record 199) green, merged as `469c84ab`.
+- **Server, production:** Render deploy live on `dff07b9a` (finished 2026-11-22T18:33Z). `GET /api/feature-flags` returns `league.next_move` true and `league.next_move_empty` true.
+- **App:** clean detached checkout of `dff07b9a`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 76 passed. EAS build `57df993c-1abb-4cdb-bf2f-0b7a1c1e2e91` FINISHED (confirmed with `build:list`), 1.22.0 (200); submission `695ddfca-f306-4b1c-9baf-911e8e03c144` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9 on build 200. The production forecast read was not called, so which reasons real teams are served is not known.
 
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 
