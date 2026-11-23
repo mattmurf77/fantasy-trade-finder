@@ -1746,6 +1746,11 @@ export default function LeagueSummaryScreen() {
     // from the first open rather than restarting.
     focusRef.current = { id, at: focusRef.current?.at ?? Date.now(), rank };
     setSelectedId(id);
+    // The drill-in renders in this same ScrollView, so it would inherit the
+    // list's offset and open with its team header and first players scrolled
+    // off. It opens at the top instead. The Home tile arrival lands itself
+    // (applyOwnLanding), so it is left alone.
+    if (via !== 'home_tile') scrollRef.current?.scrollTo({ y: 0, animated: false });
   };
 
   const fmtKey = query.data?.scoring_format ?? '';
@@ -3103,7 +3108,7 @@ function coverageCaption(meta: OutlookMeta): string | null {
           ? 'defensive'
           : 'lineup';
   const noun = count === 1 ? 'slot' : 'slots';
-  return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} FTF can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
+  return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} Fleeced can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
 }
 
 // THE ORDER IS THE PRODUCT. Sort by projected seed ascending so the rows
@@ -3533,7 +3538,10 @@ const styles = StyleSheet.create({
   homeMain: { flex: 1, gap: 2 },
   homeSub: { color: chalk.dim },
 
-  basisRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.md },
+  // Content-sized chips. With both boards loaded and differing (#248) the
+  // labels grow to "Consensus sorts" / "My board sorts", and the three no
+  // longer fit one line at 375–402pt; they wrap rather than clip.
+  basisRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
   basisChip: {
     paddingHorizontal: space.md,
     paddingVertical: space.sm,

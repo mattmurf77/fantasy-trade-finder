@@ -460,7 +460,7 @@ export default function SettingsScreen({ navigation }: any) {
     setExporting(true);
     try {
       const archive = await exportAccountData();
-      const uri = `${FileSystem.cacheDirectory}fantasy-trade-finder-export.json`;
+      const uri = `${FileSystem.cacheDirectory}fleeced-export.json`;
       await FileSystem.writeAsStringAsync(uri, JSON.stringify(archive, null, 2));
       await Share.share({ url: uri });
     } catch (e: any) {
@@ -544,7 +544,7 @@ export default function SettingsScreen({ navigation }: any) {
     Alert.alert(
       'Disconnect ESPN account?',
       'This deletes the two ESPN sign-in cookies (espn_s2 and SWID) we ' +
-        'store. FTF will no longer be able to read private ESPN leagues or ' +
+        'store. Fleeced will no longer be able to read private ESPN leagues or ' +
         'send ESPN trades until you sign in again — and you can sign in as ' +
         'a different ESPN account right away. Imported leagues stay.',
       [
@@ -578,7 +578,7 @@ export default function SettingsScreen({ navigation }: any) {
   function confirmDisconnectMfl() {
     Alert.alert(
       'Disconnect MFL sign-in?',
-      'This deletes the MFL session cookie we store. FTF will no longer be ' +
+      'This deletes the MFL session cookie we store. Fleeced will no longer be ' +
         'able to send MFL trades or import private MFL leagues until you ' +
         'sign in again — as this or any other MFL account. Imported ' +
         'leagues stay.',
@@ -1097,7 +1097,7 @@ export default function SettingsScreen({ navigation }: any) {
             <Text style={styles.rowSub}>
               {sleeperLink.expired
                 ? 'Connection expired — disconnect to delete the stored token.'
-                : 'Connected — FTF can send trades you approve. Disconnecting deletes the stored token.'}
+                : 'Connected — Fleeced can send trades you approve. Disconnecting deletes the stored token.'}
             </Text>
           </View>
           {disconnecting ? (

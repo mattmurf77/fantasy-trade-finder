@@ -25,7 +25,7 @@ import {
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
 import ClaimSheet, { explainNoAdd, resolveAddPlatform } from '../components/ClaimSheet';
-import FeedbackFAB from '../components/FeedbackFAB';
+import FeedbackFAB, { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
 import { faMoveOpensSheet, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
@@ -378,7 +378,8 @@ const styles = StyleSheet.create({
 
   listContent: {
     paddingHorizontal: space.lg,
-    paddingBottom: space.xxl,
+    // The last row's Add scrolls clear of the feedback FAB.
+    paddingBottom: FEEDBACK_FAB_CLEARANCE,
     gap: space.sm,
   },
   explainer: {

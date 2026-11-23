@@ -38951,7 +38951,7 @@ def export_account_route():
     resp = jsonify(archive)
     # Hint clients (and browsers) that this is a download artifact.
     resp.headers["Content-Disposition"] = (
-        "attachment; filename=fantasy-trade-finder-export.json")
+        "attachment; filename=fleeced-export.json")
     return resp
 
 

@@ -75,9 +75,12 @@ const s = strip(screen);
   else ok('1. registered once, in the Trades stack');
 }
 
-// 2 — no local FeedbackFAB
+// 2 — no local FeedbackFAB. Importing the pinned-bar registry
+// (setPinnedBottomBarHeight / FEEDBACK_FAB_CLEARANCE, named imports) is the
+// documented way a tab screen with a pinned footer moves the ONE global FAB
+// (2026-11-22); mounting or default-importing the component is the bug.
 {
-  if (/FeedbackFAB/.test(s)) {
+  if (/<FeedbackFAB\b/.test(s) || /import\s+FeedbackFAB\b/.test(s)) {
     bad('2. no local FeedbackFAB',
       'TeamReviewScreen references FeedbackFAB. It is a TAB-STACK screen and is ' +
       'already covered by RootNav\'s global mount (#188). A second FAB is the ' +

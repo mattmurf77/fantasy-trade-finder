@@ -515,6 +515,10 @@ export default function MatchesScreen() {
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
+    // The undo window is over: its "Undo" toast goes with it, so it can never
+    // be tapped after the write is sent. (A new dismiss sets its own toast
+    // after this call; functional updates apply in order.)
+    setToast((t) => (t?.action?.label === 'Undo' ? null : t));
     if (p.kind === 'match') dismissMutation.mutate(p.id);
     else dismissAwaitingMutation.mutate(p.row);
   }
@@ -1409,15 +1413,19 @@ export default function MatchesScreen() {
       {/* Segment toggle. Two-pill control to flip between mutual matches
           (default) and one-sided likes waiting on the counterparty. */}
       <View style={styles.segmentRow}>
+        {/* One word each + the count: three segments must fit 375pt
+            without clipping (the subtitle above names each in full). */}
         <SegmentBtn
-          label="Mutual matches"
+          label="Mutual"
+          a11yName="Mutual matches"
           count={mutualPillCount}
           active={segment === 'mutual'}
           onPress={() => setSegment('mutual')}
           testID="matches.segment.mutual"
         />
         <SegmentBtn
-          label="Awaiting them"
+          label="Awaiting"
+          a11yName="Awaiting them"
           count={awaitingPillCount}
           active={segment === 'awaiting'}
           onPress={() => {
@@ -1433,7 +1441,8 @@ export default function MatchesScreen() {
             becomes a thing users are afraid to use. */}
         {standingOffersOn ? (
           <SegmentBtn
-            label="Standing offers"
+            label="Standing"
+            a11yName="Standing offers"
             count={standingPillCount}
             active={segment === 'standing'}
             onPress={() => setSegment('standing')}
@@ -1993,12 +2002,15 @@ export default function MatchesScreen() {
 
 function SegmentBtn({
   label,
+  a11yName,
   active,
   onPress,
   testID,
   count,
 }: {
   label: string;
+  // The full segment name VoiceOver reads; the visible label is shortened.
+  a11yName?: string;
   active: boolean;
   onPress: () => void;
   testID?: string;
@@ -2014,8 +2026,8 @@ function SegmentBtn({
       accessibilityState={{ selected: active }}
       accessibilityLabel={
         typeof count === 'number'
-          ? `${label}, ${count} ${count === 1 ? 'trade' : 'trades'}`
-          : label
+          ? `${a11yName ?? label}, ${count} ${count === 1 ? 'trade' : 'trades'}`
+          : a11yName ?? label
       }
       style={({ pressed }) => [
         styles.segmentBtn,
@@ -2148,6 +2160,7 @@ const styles = StyleSheet.create({
   segmentBtn: {
     flex: 1,
     height: 44,
+    paddingHorizontal: space.xs,
     alignItems: 'center',
     justifyContent: 'center',
     borderBottomWidth: 2,
