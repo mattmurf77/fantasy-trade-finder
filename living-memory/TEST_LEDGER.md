@@ -1,3 +1,9 @@
+## 2026-11-22 — Paywall copy names no cut feature, branch `fix/paywall-copy-cut-features`
+
+- **App:** `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green, including the new `check-monetization-cut-features.js` (2 passed) and `check-paywall-gate.js` (no "free" in the paid state still holds for the new lines).
+- **Red on `origin/main` `df3bc0b45`:** the new guard run over that commit's `mobile/src` fails s1 with six hits (`mon.lock.free` names Calibration, trends and the Draft Room; `mon.pay.b3` names ESPN; `mon.pay.b4` names Win Now and the shop window). Green on the branch.
+- **Not verified:** anything on a device (D-056). Checklist: open the paywall from Settings › See plans and from a send; the four bullets read "A trade deck that weighs your board and theirs" / "Matches when a leaguemate likes the same trade" / "Proposals sent to Sleeper or MFL" / "Trade ideas for a player you want to move", and the line under them reads "No subscription needed for ranking, tiers or rosters."
+
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
