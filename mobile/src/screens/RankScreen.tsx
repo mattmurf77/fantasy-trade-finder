@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
 import { startSpan } from '../observability/sentry';
@@ -897,7 +898,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
   scroll: {
     padding: space.lg,
-    paddingBottom: space.xxl,
+    // Confirm ranking / Skip scroll clear of the feedback FAB.
+    paddingBottom: FEEDBACK_FAB_CLEARANCE,
     gap: space.md,
   },
   flex1: { flex: 1 },

@@ -33,6 +33,7 @@ import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from '../component
 import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
 import Toast from '../components/Toast';
+import { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
@@ -1118,7 +1119,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
-  scroll: { padding: space.lg, gap: space.md, paddingBottom: space.xxl + space.lg },
+  // The builder's right (You receive) column scrolls clear of the feedback FAB.
+  scroll: { padding: space.lg, gap: space.md, paddingBottom: FEEDBACK_FAB_CLEARANCE },
   modeRow: {
     flexDirection: 'row',
     borderRadius: radii.sm,
