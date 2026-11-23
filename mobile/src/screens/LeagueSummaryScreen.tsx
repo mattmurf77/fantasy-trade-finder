@@ -3538,7 +3538,10 @@ const styles = StyleSheet.create({
   homeMain: { flex: 1, gap: 2 },
   homeSub: { color: chalk.dim },
 
-  basisRow: { flexDirection: 'row', gap: space.sm, marginBottom: space.md },
+  // Content-sized chips. With both boards loaded and differing (#248) the
+  // labels grow to "Consensus sorts" / "My board sorts", and the three no
+  // longer fit one line at 375–402pt; they wrap rather than clip.
+  basisRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginBottom: space.md },
   basisChip: {
     paddingHorizontal: space.md,
     paddingVertical: space.sm,

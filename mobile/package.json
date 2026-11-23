@@ -202,7 +202,8 @@
     "test:founder-pages": "node tests/check-founder-pages.js",
     "test:no-old-product-names": "node tests/check-no-old-product-names.js",
     "test:league-drill-in-top": "node tests/check-league-drill-in-top.js",
-    "test:toast-undo-window": "node tests/check-toast-undo-window.js"
+    "test:toast-undo-window": "node tests/check-toast-undo-window.js",
+    "test:segment-labels-fit": "node tests/check-segment-labels-fit.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",
