@@ -982,7 +982,8 @@ export async function getLikedTrades(): Promise<{ liked_count: number; trades: T
 // Backend (server.py: /api/trades/awaiting) returns:
 //   { trade_id, league_id, league_name?, partner_id, partner_name,
 //     my_give[], my_receive[], my_give_names?[], my_receive_names?[],
-//     liked_at }
+//     my_give_teams?[], my_receive_teams?[],
+//     my_give_positions?[], my_receive_positions?[], liked_at }
 // Frontend (shared/types#AwaitingTrade) uses the same vocabulary as
 // TradeMatch so the same tile component can render either.
 function normalizeAwaitingTrade(raw: any): AwaitingTrade {
@@ -994,6 +995,10 @@ function normalizeAwaitingTrade(raw: any): AwaitingTrade {
     their_side_player_ids:   Array.isArray(raw?.my_receive) ? raw.my_receive : [],
     my_side_player_names:    Array.isArray(raw?.my_give_names)    ? raw.my_give_names    : undefined,
     their_side_player_names: Array.isArray(raw?.my_receive_names) ? raw.my_receive_names : undefined,
+    my_side_player_teams:        Array.isArray(raw?.my_give_teams)        ? raw.my_give_teams        : undefined,
+    their_side_player_teams:     Array.isArray(raw?.my_receive_teams)     ? raw.my_receive_teams     : undefined,
+    my_side_player_positions:    Array.isArray(raw?.my_give_positions)    ? raw.my_give_positions    : undefined,
+    their_side_player_positions: Array.isArray(raw?.my_receive_positions) ? raw.my_receive_positions : undefined,
     counterparty_user_id:    String(raw?.partner_id ?? ''),
     counterparty_username:   String(raw?.partner_name ?? raw?.partner_id ?? ''),
     liked_at:                String(raw?.liked_at ?? ''),

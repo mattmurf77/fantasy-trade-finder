@@ -204,7 +204,12 @@
     "test:league-drill-in-top": "node tests/check-league-drill-in-top.js",
     "test:toast-undo-window": "node tests/check-toast-undo-window.js",
     "test:segment-labels-fit": "node tests/check-segment-labels-fit.js",
-    "test:fab-clearance": "node tests/check-fab-clearance.js"
+    "test:fab-clearance": "node tests/check-fab-clearance.js",
+    "test:match-moment": "node tests/check-match-moment.js",
+    "test:likes-you-card": "node tests/check-likes-you-card.js",
+    "test:deck-labels": "node tests/check-deck-labels.js",
+    "test:deck-flow-polish": "node tests/check-deck-flow-polish.js",
+    "test:signout-reset": "node tests/check-signout-reset.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

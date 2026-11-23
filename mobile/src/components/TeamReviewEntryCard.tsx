@@ -6,6 +6,7 @@ import ChalkText from './chalkline/Text';
 import { AnalystAvatar } from './analyst';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { useTeamReviewCompletion } from '../state/teamReviewCompletion';
+import { useSession } from '../state/useSession';
 
 // #357/#358/#359 — the Team Review entry on TradesHome.
 //
@@ -17,9 +18,12 @@ import { useTeamReviewCompletion } from '../state/teamReviewCompletion';
 // TradesHome has no other always-present surface to recover it from.
 //
 // Storage is a SPARSE record of collapsed league ids, so the blob only ever
-// names leagues the user actually collapsed.
+// names leagues the user actually collapsed. Per account (2026-11-22, as D-025
+// says "per-user"): `ftf_team_review_collapsed:<user_id>`, so another account
+// on this device in the same league starts with the full card.
 
 const KEY = 'ftf_team_review_collapsed';
+const collapsedKey = (userId: string | null | undefined) => (userId ? `${KEY}:${userId}` : KEY);
 
 // Operator, 2026-08-20: "track user completion of the experience. Once they've
 // gone through it, it should be minimized by default."
@@ -69,26 +73,31 @@ export default function TeamReviewEntryCard({
   // mounted beneath it minimizes the entry on the way back (#423).
   const hydrated = useTeamReviewCompletion((s) => s.hydrated);
   const completed = useTeamReviewCompletion((s) => !!s.byLeague[leagueId]);
+  const userId = useSession((s) => s.user?.user_id ?? null);
 
+  // Re-read whenever the store is not hydrated or the account changed — the
+  // account reset (state/accountReset.ts) un-hydrates it for the next account;
+  // hydrate() is a no-op when it already holds this account's map.
   useEffect(() => {
     void useTeamReviewCompletion.getState().hydrate();
-  }, []);
+  }, [hydrated, userId]);
 
   useEffect(() => {
     let dead = false;
-    readMap(KEY)
+    readMap(collapsedKey(userId))
       .then((collapsedMap) => { if (!dead) setCollapsed(!!collapsedMap[leagueId]); })
       .catch(() => { if (!dead) setCollapsed(false); });
     return () => { dead = true; };
-  }, [leagueId]);
+  }, [leagueId, userId]);
 
   const persist = (next: boolean) => {
     setCollapsed(next);
-    readMap(KEY)
+    const key = collapsedKey(userId);
+    readMap(key)
       .then((map) => {
         if (next) map[leagueId] = true;
         else delete map[leagueId];
-        return AsyncStorage.setItem(KEY, JSON.stringify(map));
+        return AsyncStorage.setItem(key, JSON.stringify(map));
       })
       .catch(() => { /* fire-and-forget; a quota failure is not fatal */ });
   };
