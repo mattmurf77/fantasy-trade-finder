@@ -166,11 +166,15 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
   // never hosts drag-lift — reorder surfaces (Tiers/ManualRanks) own their
   // own delayLongPress on DraggableFlatList rows.
   const commandLongPressMs = useFlag('ux.player_context_menu') ? 500 : 400;
-  const ageStr = player.age != null ? `${player.age} yo` : null;
+  // A PICK pseudo-asset rides the Player shape with age 0 and
+  // years_experience 0 (the deck payload's picks), which printed
+  // "PICK · 0 yo" on deck cards (sim pass 2026-11-22). A pick has neither.
+  const isPick = String(player.position) === 'PICK';
+  const ageStr = player.age != null && !isPick ? `${player.age} yo` : null;
   const teamStr = player.team || 'FA';
   const expStr =
-    player.years_experience != null
-      ? `${player.years_experience} yr${player.years_experience === 1 ? '' : 's'}`
+    player.years_experience != null && !isPick
+      ?`${player.years_experience} yr${player.years_experience === 1 ? '' : 's'}`
       : null;
   // #194 — PICK pseudo-assets ride the Player shape with years_experience 0,
   // which is "no experience", not "rookie season": never badge a pick RK.

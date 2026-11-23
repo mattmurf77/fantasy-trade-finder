@@ -25,6 +25,7 @@ import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AboutSection from './settings/sections/AboutSection';
+import { confirmSignOut } from './settings/sections/SignOutRow';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
 import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
@@ -1326,8 +1327,10 @@ export default function SettingsScreen({ navigation }: any) {
           ) : null}
           {/* SleeperConnect verification requires a Sleeper-keyed session
               (the JWT claim must match the session user) — hidden for
-              account-only users, whose Apple sign-in IS the verification. */}
-          {!user?.account_only ? (
+              account-only users, whose Apple sign-in IS the verification,
+              and once THIS session is verified (2026-11-22; same rule as
+              settings/sections/AccountIdentitySection.tsx). */}
+          {!user?.account_only && verification?.session_verified !== true ? (
             <Pressable
               accessibilityRole="button"
               onPress={() => navigateFromSettings('SleeperConnect')}
@@ -1385,10 +1388,10 @@ export default function SettingsScreen({ navigation }: any) {
       <View style={{ height: space.xxl }} />
       <Pressable
         accessibilityRole="button"
-        onPress={async () => {
+        onPress={() => confirmSignOut(async () => {
           await signOut();
           toSignIn();
-        }}
+        })}
         style={({ pressed }) => [styles.signOut, pressed && styles.rowPressed]}
       >
         <Text style={styles.signOutText}>Sign out</Text>

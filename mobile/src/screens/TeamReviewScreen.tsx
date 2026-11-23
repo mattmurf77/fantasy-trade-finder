@@ -398,32 +398,41 @@ export default function TeamReviewScreen() {
               // "Scoped to" row was decoration. The LLD (§4, writes table)
               // always specified the #330 handoff store for this; it was
               // simply never wired. Same contract LeagueSummaryScreen.tsx:1193
-              // uses, consumed one-shot on focus by TradesScreen.tsx:2382-2393
-              // — no new state layer, no new route, and nothing fires when the
-              // user never scoped anyone.
-              if (scoped) {
-                // The scoped search below builds a fresh deck under the saved
-                // preferences, so a "Preferences changed" nudge would be stale.
-                clearTeamReviewSave();
-                // R1 (time to suggestion; source `team_review`, granted Q-A):
-                // the scoped hand-off's auto-run is a search, so the tap
-                // begins it here — the deck's dispatch claims this id, as for
-                // League Summary. No partner ⇒ no search ⇒ no R1. `mode` is
-                // the deck this lands on: the hand-off sets no pins, so it
-                // reads whatever pins the finder already holds.
-                const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
-                const searchId = beginTradeSearch({
-                  source: 'team_review',
-                  mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
-                  searchType: 'pinned',
-                  screen: 'TeamReview',
-                });
-                useFinderTargets.getState().setHandoff({
-                  searchId,
-                  opponent: { userId: scoped.id, name: scoped.name },
-                  autoRun: true,
-                });
-              }
+              // uses, consumed one-shot on focus by TradesScreen (the
+              // finderHandoff effect), which under the results-push posture
+              // forwards it into the pushed TradeDeck.
+              //
+              // "Find my trades" runs the search with or without a partner
+              // (sim pass 2026-11-22): unscoped, it used to hand nothing over,
+              // so the user landed on the builder and had to find "Find a
+              // Trade" themselves. Unscoped now parks the same hand-off the
+              // landing's own Find a Trade produces with no partner chosen
+              // (`origin: 'calculator'`, `opponent: null`: the one origin the
+              // store allows a null opponent for), so both land on the same
+              // pushed results deck.
+              //
+              // The search below builds a fresh deck under the saved
+              // preferences, so a "Preferences changed" nudge would be stale.
+              clearTeamReviewSave();
+              // R1 (time to suggestion; source `team_review`, granted Q-A):
+              // the hand-off's auto-run is a search, so the tap begins it
+              // here — the deck's dispatch claims this id, as for League
+              // Summary. `mode` is the deck this lands on: the hand-off sets
+              // no pins, so it reads whatever pins the finder already holds.
+              const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
+              const searchId = beginTradeSearch({
+                source: 'team_review',
+                mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
+                searchType: 'pinned',
+                screen: 'TeamReview',
+              });
+              useFinderTargets.getState().setHandoff({
+                searchId,
+                autoRun: true,
+                ...(scoped
+                  ? { opponent: { userId: scoped.id, name: scoped.name } }
+                  : { opponent: null, origin: 'calculator' as const }),
+              });
               // Operator 2026-08-20 — completion is recorded so TradesHome
               // shows the minimized row from here on. Deliberately NOT awaited:
               // the write is local and the navigation must not wait on it, and

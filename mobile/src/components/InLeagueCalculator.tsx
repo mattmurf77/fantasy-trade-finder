@@ -33,6 +33,7 @@ import LeagueSwitcherSheet from './LeagueSwitcherSheet';
 import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from './ShareTradeImage';
 import { Badge, Button, Card, Icon, Text as ChalkText, TickLabel } from './chalkline';
 import { haptics } from '../utils/haptics';
+import { slotShortLabel } from '../utils/slotLabel';
 import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
@@ -1950,18 +1951,8 @@ function LeagueVerdict({
 // "—" chip; the net line totals the whole lineup. The container is a single
 // accessibility element voicing the server's one-sentence `note`, so screen
 // readers hear one clean read instead of a cell-by-cell table.
-const SLOT_SHORT: [string, string][] = [
-  ['SUPER_FLEX', 'SF'],
-  ['WRRB_FLEX', 'W/R'],
-  ['REC_FLEX', 'W/T'],
-];
-function slotShortLabel(slot: string): string {
-  // Numbered variants shorten too: SUPER_FLEX2 → SF2.
-  for (const [long, short] of SLOT_SHORT) {
-    if (slot.startsWith(long)) return short + slot.slice(long.length);
-  }
-  return slot;
-}
+// Slot names shorten through utils/slotLabel (SUPER_FLEX2 → SF2), the table
+// the deck card's impact block reads too.
 
 // #169 — "TE21" style label for TierBadge's posRank slot (position + this
 // player's 1-based positional rank). Undefined when the server didn't
