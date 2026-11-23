@@ -12,11 +12,12 @@
 ---
 
 
-## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, branch `fix/playoff-card-alignment`
+## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, merged as `df3bc0b4` (PR #714), TestFlight 1.22.0 (201)
 
 - **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.
 - **Fix (layout only, `league.direction_card` branch; the no-block row untouched):** the row is top-aligned (`figuresRow`). "View ›" sits in `viewColumn`, which mirrors a figure: same padding and gap, a hidden `type.label` spacer, then the 40pt control. "last saved" and "owned by" now sit under their value. No copy, flag, event or server change.
-- **Scope:** `docs/plans/playoff-card-alignment/scope.md` (no waivers; width arithmetic; 3-step TestFlight checklist). Not on a device. Not merged.
+- **Scope:** `docs/plans/playoff-card-alignment/scope.md` (no waivers; width arithmetic; 3-step TestFlight checklist). Not on a device.
+- **Shipped 2026-11-22:** merged on green CI as `df3bc0b4`. App-only, so Render made no deploy (`render.yaml` ignores `mobile/src/**`); production stays on `dff07b9a`. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b`, 1.22.0 (201), submitted (submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f`).
 
 ## 2026-11-21 — Home's next move when there is none (D-279), merged as `dff07b9a` (PR #712), live, TestFlight 1.22.0 (200)
 

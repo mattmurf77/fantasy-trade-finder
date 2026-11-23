@@ -4,6 +4,13 @@
 - **Fail on main:** the four new guards run against `origin/main`'s sources: 7, 3, 12 and 8 failures respectively.
 - **Backend:** new `test_liked_awaiting_after_match.py` (6). pytest is not installed on this machine and nothing was downloaded, so these ran under a no-download stand-in runner (fixture/monkeypatch/parametrize shim) with the sim-test venv's Flask/SQLAlchemy: new file 6 passed (main: 4 of the 5 route tests fail, the import of `matched_package_keys` fails); `test_pick_labels_in_matches` 16, `test_awaiting_dismiss` 14, `test_verified_reads` 6, `test_trade_match_flow` 23, `test_dismiss_match` 4, `test_shared_cache_threads` 3, all passed. Real pytest: CI.
 - **Not verified:** anything on a device (D-056); the MatchesScreen awaiting adapter still ignores the new team/position arrays (file owned by another branch).
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
+
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
