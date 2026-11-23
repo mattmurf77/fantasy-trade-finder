@@ -5,6 +5,13 @@
 - **Sabotages, red then restored (4):** the hasToken-edge entitlement ask removed (2c); the Team review key back to device-wide (3a, 3b); signOut resetting before the token is cleared (1b); the reset not clearing the QueryClient (2a).
 - **Not verified:** anything on a device (D-056). Checklist: the D-280 entry (one step per reported item).
 - **Follow-up, same day (fresh-install first sign-in never asked for entitlements):** `check-signout-reset.js` **25 passed** (new 6a ×3, 6b, 6c, 6d); on the previous head `b5e00e21` the same guard is **19 passed, 6 failed** (6a: 0 requests after a first sign-in in all three update orders; 6b: unknown treated as not enforcing; 6c: an empty boot marked loaded; 6d: an offline first sign-in marked loaded). `check-paywall-gate.js` 6g / 8i stubs gain `answerFor` / `loaded` deliberately. `tsc` clean, testid-lint OK, all 196 `check-*.js` green.
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
+
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
