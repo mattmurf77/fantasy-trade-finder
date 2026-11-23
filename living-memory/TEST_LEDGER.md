@@ -4,6 +4,12 @@
 - **Backend (scratch venv, Python 3.12):** `test_account_data_rights.py` 23 passed (asserts `filename=fleeced-export.json`); full `backend/tests` **15,947 passed, 43 skipped, 0 failed**.
 - **Red on `origin/main` sources (git archive + the five new guards):** no-old-product-names 3 failed (20 copy hits, both export writers, server header); league-drill-in-top 3 failed (row, bar, refocus opens never scroll); toast-undo-window 4 failed (hold deps change on a host re-render, stale onDismiss, fading toast takes touches, flush leaves the Undo toast); segment-labels-fit 5 failed; fab-clearance 13 failed.
 - **Not verified:** anything on a device (D-056). Widths in `check-segment-labels-fit` are conservative estimates (G-035). Checklist: the branch's report (FAB on each named screen, Matches/League labels at 375pt, export filename, drill-in from a scrolled list, Dismiss › Undo within and after 5 s).
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
 
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
