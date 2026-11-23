@@ -515,6 +515,10 @@ export default function MatchesScreen() {
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
+    // The undo window is over: its "Undo" toast goes with it, so it can never
+    // be tapped after the write is sent. (A new dismiss sets its own toast
+    // after this call; functional updates apply in order.)
+    setToast((t) => (t?.action?.label === 'Undo' ? null : t));
     if (p.kind === 'match') dismissMutation.mutate(p.id);
     else dismissAwaitingMutation.mutate(p.row);
   }
