@@ -557,7 +557,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     const names = (ids: string[]) =>
       ids.map((id) => activePlayerById[id]?.name ?? id).join(', ');
     const lines = [
-      `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+      `Trade idea (Fleeced Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
       `Side A: ${names(liveSendIds)}`,
       `Side B: ${names(liveReceiveIds)}`,
       // C2 (head-bizops): a share publishes no verdict, ratio or totals —
@@ -880,7 +880,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               })}
             </View>
             <Text style={styles.tendency}>
-              Live consensus values from the FTF engine — no league or login needed.
+              Live consensus values from the Fleeced engine. No league or login needed.
             </Text>
             {valuesQuery.isLoading ? (
               <Card>
@@ -1031,7 +1031,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 // Sleeper player ids, never pick ids.
                 hasPickAssets={false}
                 fallbackText={[
-                  `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+                  `Trade idea (Fleeced Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
                   `Side A: ${liveSendIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
                   `Side B: ${liveReceiveIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
                   SHARE_VALUE_LINE,

@@ -118,7 +118,7 @@ export default function MarketPulseStrip() {
         testID="league.market-pulse"
         onPress={() => setOpen(true)}
         accessibilityRole="button"
-        accessibilityLabel="Market pulse — top movers by FTF community value. See all movers"
+        accessibilityLabel="Market pulse — top movers by Fleeced community value. See all movers"
         // ~36pt visual (fold budget: the strip shares League home's
         // low-activity viewport with the progress module — #243 keeps the
         // module's end above the 658pt fold); hitSlop restores the 44pt
@@ -160,7 +160,7 @@ export default function MarketPulseStrip() {
           {/* Honest data framing per the mock — this is FTF's own consensus
               value trend, not an observed trade market. */}
           <Text scale="dense" style={styles.srcLine}>
-            FTF community value · {data?.window_days ?? 30}-day change
+            Fleeced community value · {data?.window_days ?? 30}-day change
           </Text>
           <ScrollView style={styles.sheetScroll}>
             <View style={styles.cols}>

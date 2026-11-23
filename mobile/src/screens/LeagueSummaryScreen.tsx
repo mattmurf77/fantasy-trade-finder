@@ -3103,7 +3103,7 @@ function coverageCaption(meta: OutlookMeta): string | null {
           ? 'defensive'
           : 'lineup';
   const noun = count === 1 ? 'slot' : 'slots';
-  return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} FTF can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
+  return `Based on your offensive starters. This league starts ${count} ${kind} ${noun} Fleeced can't price yet, so the projection reads QB/RB/WR/TE strength only.`;
 }
 
 // THE ORDER IS THE PRODUCT. Sort by projected seed ascending so the rows
