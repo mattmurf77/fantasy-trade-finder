@@ -316,6 +316,7 @@ import {
   fairnessThresholdFor,
 } from '../api/tradePregen';
 import { navigationRef } from '../navigation/RootNav';
+import { refreshMatchesLists } from '../state/matchesLists';
 import {
   matchMomentFrom,
   matchMomentLine,
@@ -2992,6 +2993,11 @@ export default function TradesScreen({ navigation, route }: any) {
         // only a reason response attests a verified durable decision row.
         commitLocalPass(vars.passAttempt);
       }
+      // Every acknowledged like changes Matches > Awaiting (or Mutual, on a
+      // match) and the liked count. Refresh them here, ahead of the
+      // screen-update guard: the caches are global, and a like that lands
+      // after the user left the deck must still reach Matches.
+      if (vars.decision === 'like') void refreshMatchesLists();
       if (!ctx || !actionCanUpdateScreen(ctx.action)) return;
       // #393 M2 (D4): the server acknowledged a like or pass: the offer's
       // first-opinion trigger (never the optimistic advance).
@@ -3004,9 +3010,7 @@ export default function TradesScreen({ navigation, route }: any) {
         matchIdByTradeRef.current.set(ctx.rawId, String(res.match_id));
       }
       if (vars.decision === 'like') {
-        // Liked-trades count is per-league (backend filters by session). Use a
-        // league-scoped key so switching leagues doesn't show a stale count.
-        queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+        // The liked count, Awaiting and Mutual were refreshed above.
         // N6.1 (PRD §5.3): first-like determination and the empty-awaiting
         // gate BOTH live here, on the swipe response. A like-time read lets
         // two rapid likes both see first-like true, and a like-time prefetch
@@ -3018,11 +3022,9 @@ export default function TradesScreen({ navigation, route }: any) {
         // Matches arrival a match push uses. The like-time "Liked" toast
         // went up before the reply; this replaces it. The liked-trades
         // refetch above no longer counts the matched like (server filters
-        // it), and Matches / Awaiting are refreshed for the arrival.
+        // it), and Matches / Awaiting were refreshed above for the arrival.
         const moment = matchMomentFrom(res, vars.card.opponent_username);
         if (moment) {
-          queryClient.invalidateQueries({ queryKey: ['matches', 'all'] });
-          queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
           setToast({
             msg: matchMomentLine(moment),
             tone: 'success',
@@ -11188,7 +11190,9 @@ export default function TradesScreen({ navigation, route }: any) {
           onClose={() => setStandingOfferPrompt(null)}
           onPosted={(offer) => {
             setStandingOfferPrompt(null);
-            queryClient.invalidateQueries({ queryKey: ['standing-offers', leagueId] });
+            // Prefix key: this league's list AND Matches' ['standing-offers',
+            // 'all'], which otherwise stays stale until a pull-to-refresh.
+            queryClient.invalidateQueries({ queryKey: ['standing-offers'] });
             // R-8 — the count comes from the POST RESPONSE (`team_count`),
             // not a client-side array length: the server is the authority
             // on what it actually stored. Sender's own count, on the

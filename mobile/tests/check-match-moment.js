@@ -21,13 +21,17 @@
 //      matchMomentFrom(res, ...) -> setToast with matchMomentLine and an
 //      action that navigates to 'Matches' with { match_id, src, ts } (the
 //      MatchesScreen arrival a match push uses: scroll + mark).
+//   4. Every path that writes or retracts a like (deck swipe, calculator ✓
+//      queue, presentation-v2 swipe, Awaiting dismiss) calls
+//      state/matchesLists.refreshMatchesLists, which is RUN here against a
+//      stub client; a posted standing offer refreshes Matches' list.
 //   3. The server leaves a matched like out of /api/trades/liked
 //      (matched_package_keys in the route). Behaviour is proven by
 //      backend/tests/test_liked_awaiting_after_match.py; this is the
 //      cross-client pin that the client's count source is the filtered one.
 //
-// HONEST LABEL (G-035): §2 and §3 prove presence of exact wirings, not
-// runtime behaviour; §1 executes the real module.
+// HONEST LABEL (G-035): §2, §3 and §4b-h prove presence of exact wirings, not
+// runtime behaviour; §1 and §4a execute the real modules.
 //
 // Run: node tests/check-match-moment.js   (or npm run test:match-moment)
 
@@ -117,9 +121,10 @@ function read(rel, base = ROOT) {
   check('2c. the moment is a toast with the match line and a Matches action',
     /setToast\(\{\s*msg: matchMomentLine\(moment\),[\s\S]*?action: \{\s*label: MATCH_MOMENT_ACTION,\s*onPress: \(\) => navigation\.navigate\('Matches', \{\s*match_id: moment\.matchId,\s*src: 'deck',\s*ts: Date\.now\(\),/.test(onSuccess),
     'expected setToast({ msg: matchMomentLine(moment), ..., action: { label: MATCH_MOMENT_ACTION, onPress: () => navigation.navigate(\'Matches\', { match_id, src, ts }) } })');
-  check('2d. Matches and Awaiting are refreshed for the arrival',
-    /invalidateQueries\(\{ queryKey: \['matches', 'all'\] \}\)/.test(onSuccess)
-      && /invalidateQueries\(\{ queryKey: \['awaiting-trades'\] \}\)/.test(onSuccess));
+  // Since §4 the refresh is the shared helper, run for EVERY like (a match
+  // is one case of it) — see 4a-4d.
+  check('2d. Matches and Awaiting are refreshed for the arrival (refreshMatchesLists on a like)',
+    /if \(vars\.decision === 'like'\) void refreshMatchesLists\(\);/.test(onSuccess));
   // The arrival contract on the receiving side (MatchesScreen is not edited
   // here; this only confirms the params it reads still exist).
   const matches = read('src/screens/MatchesScreen.tsx');
@@ -138,6 +143,73 @@ function read(rel, base = ROOT) {
       && /not in matched\]/.test(route));
   const db = read('backend/database.py', REPO);
   check('3b. database.matched_package_keys exists', /\ndef matched_package_keys\(user_id: str, league_ids\) -> set:/.test(db));
+}
+
+// ── 4. Every like / unlike path refreshes the Matches lists ───────────────
+// Sim pass 2026-11-22 (after §2): a deck like that did NOT complete a match
+// left Matches > Awaiting at its old count, across tab switches, until a
+// manual pull-to-refresh. Only the matched branch invalidated
+// ['awaiting-trades']; the queries stay mounted and nothing refetches them on
+// return (refetchOnWindowFocus: false). state/matchesLists.refreshMatchesLists
+// is the one helper; every path that writes or retracts a like calls it.
+{
+  const src = read('src/state/matchesLists.ts');
+  let m = null;
+  const calls = [];
+  if (src) {
+    try {
+      const js = ts.transpileModule(src, {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+      const mod = { exports: {} };
+      const fakeClient = { invalidateQueries: (o) => { calls.push(JSON.stringify(o.queryKey)); return Promise.resolve(); } };
+      new Function('module', 'exports', 'require', js)(mod, mod.exports, (n) => {
+        if (n === './queryClient') return { queryClient: fakeClient };
+        throw new Error(`matchesLists.ts gained a runtime import ("${n}")`);
+      });
+      m = mod.exports;
+    } catch (e) {
+      bad('4. matchesLists.ts loads under plain node', String(e));
+    }
+  }
+  if (m) {
+    const r = m.refreshMatchesLists();
+    const want = ['["awaiting-trades"]', '["liked-trades"]', '["matches","all"]'];
+    check('4a. refreshMatchesLists invalidates Awaiting, every league\'s liked count, and Mutual',
+      r && typeof r.then === 'function' && want.every((k) => calls.includes(k)) && calls.length === want.length,
+      `invalidated ${calls.join(', ')}`);
+  }
+  const imp = (s) => /import \{ refreshMatchesLists \} from '\.\.\/state\/matchesLists';/.test(s);
+
+  const t = read('src/screens/TradesScreen.tsx');
+  const start = t.indexOf('const swipeMutation = useMutation({');
+  const onSuccess = start >= 0 ? t.slice(t.indexOf('onSuccess:', start), t.indexOf('onError:', start)) : '';
+  const guard = onSuccess.indexOf('if (!ctx || !actionCanUpdateScreen(ctx.action)) return;');
+  const refresh = onSuccess.indexOf("if (vars.decision === 'like') void refreshMatchesLists();");
+  check('4b. deck swipe: EVERY acknowledged like refreshes the lists, not only a matched one',
+    imp(t) && refresh >= 0,
+    "expected `if (vars.decision === 'like') void refreshMatchesLists();` in swipeMutation.onSuccess");
+  check('4c. … before the screen-update guard, so a like that lands after the user left still refreshes',
+    refresh >= 0 && guard >= 0 && refresh < guard);
+  check('4d. … and the matched branch no longer carries its own partial invalidation',
+    !/invalidateQueries\(\{ queryKey: \['awaiting-trades'\] \}\)/.test(onSuccess));
+
+  const q = read('src/utils/queueCalcTrade.ts');
+  check('4e. calculator ✓ queue (both hosts): a queued like refreshes the lists',
+    imp(q) && /if \(queued\) \{(\s*\/\/[^\n]*)*\s*void refreshMatchesLists\(\);/.test(q));
+
+  const ps = read('src/hooks/usePresentationSignals.ts');
+  check('4f. presentation-v2 / Today\'s Trade likes refresh the lists once the swipe lands',
+    imp(ps) && /\.then\(\(\) => \{\s*if \(decision === 'like'\) void refreshMatchesLists\(\);\s*\}\)/.test(ps));
+
+  const ms = read('src/screens/MatchesScreen.tsx');
+  const dm = ms.slice(ms.indexOf('const dismissAwaitingMutation = useMutation({'));
+  const dmOk = dm.slice(dm.indexOf('onSuccess:'), dm.indexOf('\n  });'));
+  check('4g. Awaiting dismiss (retracts the like) also refreshes the liked count via the helper',
+    imp(ms) && /void refreshMatchesLists\(\);/.test(dmOk));
+
+  check('4h. a posted standing offer refreshes Matches\' standing-offer list too (prefix key)',
+    /onPosted=\{\(offer\) => \{\s*setStandingOfferPrompt\(null\);(\s*\/\/[^\n]*)*\s*queryClient\.invalidateQueries\(\{ queryKey: \['standing-offers'\] \}\);/.test(t));
 }
 
 for (const p of passes) console.log(`  ✓ ${p}`);

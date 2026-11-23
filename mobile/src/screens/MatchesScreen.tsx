@@ -60,6 +60,7 @@ import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
 import { matchAssetLabel } from '../utils/matchAssetLabel';
+import { refreshMatchesLists } from '../state/matchesLists';
 import {
   filterVisible,
   countsByLeague,
@@ -484,6 +485,10 @@ export default function MatchesScreen() {
       // #334 (R-2, B-1) — ordered unhide; see dismissMutation.onSuccess.
       await queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
       unhideKey(awaitingHiddenKey(row.league_id, row.trade_id));
+      // The dismiss retracted the like, so the deck's liked count (and
+      // Mutual, harmlessly) refresh too. Awaiting was awaited above for the
+      // ordered unhide; this repeat is a no-op refetch-wise.
+      void refreshMatchesLists();
     },
   });
 
