@@ -101,41 +101,50 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
   };
   // H-1 to H-7: two figures side by side (they wrap onto two lines at large
   // text sizes, H-10), the info toggle beside the percentage, "View ›" last.
-  const figures = direction ? <View style={styles.row} testID="home.playoff.figures">
+  // One value line: each figure is label / 40pt value line / notes, and the
+  // "View ›" column mirrors it (same top padding, a hidden label-height
+  // spacer, then its 40pt control), so the percentage, the info button, the
+  // pick and "View ›" share one centre at any text size. "last saved" and
+  // "owned by" sit under their value, never on the line: on the line, two
+  // "last saved" notes pushed the pair past a 375pt screen and the pick
+  // wrapped under the percentage at default text size.
+  const figures = direction ? <View style={[styles.row, styles.figuresRow]} testID="home.playoff.figures">
     <View style={styles.figures}>
       <View style={styles.figure} testID="home.playoff.figure.playoff">
         <Text scale="dense" style={type.label}>{C['SUM.playoff']}</Text>
-        <View style={styles.figureLine}>
-          {percent ? <>
-            <Pressable testID="home.playoff.details" accessibilityRole="link" hitSlop={LINK_SLOP}
-              accessibilityLabel={`${percent} playoff chance${view.current ? '' : ', last saved'}. View projected standings.`}
-              onPress={onDetails}>
-              <Text style={styles.link}>{percent}</Text>
-            </Pressable>
-            {view.current ? null : <Text style={styles.note}>last saved</Text>}
-          </> : <Text testID="home.playoff.status" style={styles.status}>{status}</Text>}
+        <View style={styles.figureLine} testID="home.playoff.figure.playoff.line">
+          {percent ? <Pressable testID="home.playoff.details" accessibilityRole="link" hitSlop={LINK_SLOP}
+            accessibilityLabel={`${percent} playoff chance${view.current ? '' : ', last saved'}. View projected standings.`}
+            onPress={onDetails}>
+            <Text style={styles.link}>{percent}</Text>
+          </Pressable> : <Text testID="home.playoff.status" style={styles.status}>{status}</Text>}
           <Pressable testID="home.playoff.explain" accessibilityRole="button" aria-expanded={open}
             accessibilityLabel="About playoff chance" hitSlop={INFO_SLOP}
             onPress={() => setOpen(value => !value)} style={styles.info}>
             <Icon name="info" size={16} color={chalk.base} />
           </Pressable>
         </View>
+        {percent && !view.current ? <Text style={styles.note}>last saved</Text> : null}
       </View>
       {pick ? <View style={styles.figure} testID="home.playoff.pick" accessible
         accessibilityLabel={`${C['SUM.pick']} ${pick.label}${pick.owner ? `, ${pick.owner}` : ''}${view.current ? '' : ', last saved'}`}>
         <Text scale="dense" style={type.label}>{C['SUM.pick']}</Text>
-        <View style={styles.figureLine}>
+        <View style={styles.figureLine} testID="home.playoff.pick.line">
           <Text testID="home.playoff.pick.value" style={styles.figureValue}>{pick.label}</Text>
-          {view.current ? null : <Text style={styles.note}>last saved</Text>}
         </View>
+        {view.current ? null : <Text style={styles.note}>last saved</Text>}
         {pick.owner ? <Text testID="home.playoff.pick.owner" style={styles.note}>{pick.owner}</Text> : null}
       </View> : null}
     </View>
-    <Pressable testID="home.playoff.view" accessibilityRole={opensSheet ? 'button' : 'link'}
-      accessibilityLabel={opensSheet ? K['SHEET.label'] : 'View full projections'}
-      hitSlop={VIEW_SLOP} onPress={onView} style={styles.view}>
-      <RowAction label="View" />
-    </Pressable>
+    <View style={styles.viewColumn} testID="home.playoff.view.column">
+      <Text scale="dense" style={type.label} testID="home.playoff.view.spacer" aria-hidden
+        accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{' '}</Text>
+      <Pressable testID="home.playoff.view" accessibilityRole={opensSheet ? 'button' : 'link'}
+        accessibilityLabel={opensSheet ? K['SHEET.label'] : 'View full projections'}
+        hitSlop={VIEW_SLOP} onPress={onView} style={styles.view}>
+        <RowAction label="View" />
+      </Pressable>
+    </View>
   </View> : null;
   return <View testID="home.playoff.banner" style={styles.banner}>
     {figures ?? <View style={styles.row}>
@@ -202,8 +211,13 @@ const styles = StyleSheet.create({
   view: { minHeight: 40, flexShrink: 0, justifyContent: 'center' },
   // Improve pages (D-270): the two figures. Each keeps a minimum width, so
   // at large text sizes the second wraps under the first (H-10).
+  // The figures row only: top-aligned, so "View ›" lines up with the value
+  // line instead of centring on label + value (+ notes).
+  figuresRow: { alignItems: 'flex-start' },
   figures: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', columnGap: space.lg, paddingVertical: space.xs },
   figure: { minWidth: 120, gap: 2 },
+  // Mirrors `figures` + `figure`: same padding and gap, a label-height spacer.
+  viewColumn: { flexShrink: 0, paddingVertical: space.xs, gap: 2 },
   figureLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: space.sm, minHeight: 40 },
   figureValue: { fontFamily: fonts.dataSemi, fontSize: 14, lineHeight: 20, fontVariant: ['tabular-nums'], color: chalk.base },
   explanation: { gap: space.xs, paddingHorizontal: space.md, paddingBottom: space.sm },

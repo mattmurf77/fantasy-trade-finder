@@ -4,6 +4,18 @@
 - **Fail on main:** the four new guards run against `origin/main`'s sources: 7, 3, 12 and 8 failures respectively.
 - **Backend:** new `test_liked_awaiting_after_match.py` (6). pytest is not installed on this machine and nothing was downloaded, so these ran under a no-download stand-in runner (fixture/monkeypatch/parametrize shim) with the sim-test venv's Flask/SQLAlchemy: new file 6 passed (main: 4 of the 5 route tests fail, the import of `matched_package_keys` fails); `test_pick_labels_in_matches` 16, `test_awaiting_dismiss` 14, `test_verified_reads` 6, `test_trade_match_flow` 23, `test_dismiss_match` 4, `test_shared_cache_threads` 3, all passed. Real pytest: CI.
 - **Not verified:** anything on a device (D-056); the MatchesScreen awaiting adapter still ignores the new team/position arrays (file owned by another branch).
+## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
+
+- **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
+- **Sabotage, red then restored (1):** `figuresRow` set back to `alignItems: 'center'` (the reported bug): M1 failed in all 4 states (90 passed, 4 failed); restored, 94 passed.
+- **Not verified:** anything on a device (D-056). The widths come from the bundled TTF advance widths, without kerning. Checklist: `docs/plans/playoff-card-alignment/scope.md` §6.
+
+## 2026-11-22 — Release: Home's no-move line live, TestFlight 1.22.0 (200)
+
+- **CI:** PR #712 all four jobs green on head `270f3d86`; merged as `dff07b9a` (`--match-head-commit`). PR #711 (release record 199) green, merged as `469c84ab`.
+- **Server, production:** Render deploy live on `dff07b9a` (finished 2026-11-22T18:33Z). `GET /api/feature-flags` returns `league.next_move` true and `league.next_move_empty` true.
+- **App:** clean detached checkout of `dff07b9a`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-home-next-move.js` 76 passed. EAS build `57df993c-1abb-4cdb-bf2f-0b7a1c1e2e91` FINISHED (confirmed with `build:list`), 1.22.0 (200); submission `695ddfca-f306-4b1c-9baf-911e8e03c144` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/next-move-empty/scope.md` §9 on build 200. The production forecast read was not called, so which reasons real teams are served is not known.
 
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 
