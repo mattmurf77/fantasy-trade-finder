@@ -203,7 +203,8 @@
     "test:match-moment": "node tests/check-match-moment.js",
     "test:likes-you-card": "node tests/check-likes-you-card.js",
     "test:deck-labels": "node tests/check-deck-labels.js",
-    "test:deck-flow-polish": "node tests/check-deck-flow-polish.js"
+    "test:deck-flow-polish": "node tests/check-deck-flow-polish.js",
+    "test:signout-reset": "node tests/check-signout-reset.js"
   },
   "dependencies": {
     "@expo-google-fonts/archivo": "^0.4.2",

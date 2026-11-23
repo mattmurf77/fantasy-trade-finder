@@ -61,9 +61,12 @@ export default function RosterSetupEntryCard({
   // alone, with the boards held 5 min so a TradesHome revisit is free.
   const sections = useSetupSections(!isDemo && record?.status === 'done', 5 * 60_000);
 
+  // Re-read whenever the store is not hydrated or the account changed — the
+  // account reset (state/accountReset.ts) un-hydrates it for the next account;
+  // hydrate() is a no-op when it already holds this account's records.
   useEffect(() => {
     void useRosterSetup.getState().hydrate();
-  }, []);
+  }, [hydrated, userId]);
 
   // ── Card ──────────────────────────────────────────────────────────────
   const ready = hydrated && !!record && roster.rostersReady && roster.picksSettled
