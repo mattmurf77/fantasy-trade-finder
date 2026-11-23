@@ -1,3 +1,10 @@
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
+
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
 - **App:** `npm ci`; `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **195** `check-*.js` green. `check-direction-card.js` **94 passed** (was 73). The new § M runs M1–M5 for each of current / owned / last saved / last saved + owned, plus M6. They pin: the top-aligned row; the View column mirroring a figure, with a label-styled spacer hidden from accessibility; one shared 40pt centred line for the percentage, the pick and View; notes only under the value; the no-block row unchanged.
