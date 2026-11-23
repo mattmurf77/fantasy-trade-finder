@@ -1,3 +1,10 @@
+## 2026-11-22 — Lifetime Pro for existing users at paid launch (operator decision), branch `feat/paid-launch`
+
+- **Backend (Python 3.12.16, pytest 9.2.0, SQLAlchemy 2.0.58, an existing local venv, no network):** new `backend/tests/test_grant_lifetime_pro_existing_users.py` **9 passed**; with `test_entitlements.py`, **61 passed**. The script's HTTP call goes through the real `POST /api/admin/entitlements/bulk-grant` via Flask's test client on a temporary SQLite file. Pinned: one grant per person (Sleeper-only, Apple-only `acct_*`, Sleeper linked to an account plus its legacy `acct_` users row); synthetic and orphan `acct_` ids skipped; dry run writes nothing; `--apply` writes perpetual `manual_grant` pro; a second `--apply` sends nothing; a user on perpetual pro is skipped; demo B excluded; an unresolvable `--exclude` refuses before any send; `--created-before`; a refused batch exits 1; no id on stdout.
+- **Sabotages, red then restored (4):** linked-account dedupe off (4 failed); the already-held skip dropped (6 failed); unresolvable excludes ignored (1 failed); excludes not applied (5 failed).
+- **Script run:** dry run on the local `data/trade_finder.db` only (refused without `--allow-local`; with it, 1 users row, synthetic, would grant 0). Nothing run against production; the full suite was not run (no backend module changed).
+- **Not verified:** the prod counts; the apply against Render. Runbook steps A6 and B5a in `docs/plans/monetization-launch/paid-launch/turn-on-runbook.md` hold the operator's check.
+
 ## 2026-11-22 — Paid launch branch brought up to main, with the Matches crash and viewer fixes, branch `feat/paid-launch`
 
 - **What changed on the branch:** merged `origin/main` `dff07b9a` (conflicts in this file and `mobile/tests/README.md` only, both sides kept); cherry-picked `ff21e638` (Matches list keys, `check-list-slot-keys.js`) and `06e493c1` (FounderPageViewer and PlayerPickerModal safe-area insets, `check-modal-safe-area.js`) from `fix/matches-segment-crash-viewer-close`; corrected the guard name in the Matches comment.
