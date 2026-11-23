@@ -4,6 +4,7 @@
 - **Fail on main:** the new guard run against `origin/main`'s `mobile/src` + `mobile/App.tsx` (git archive into a scratch dir): **3 passed, 16 failed**, exit 1. The three that pass there are the shape pins main already satisfies (every sign-out goes through `useSession.signOut`, nothing else clears the token, the 401 handler keeps the user).
 - **Sabotages, red then restored (4):** the hasToken-edge entitlement ask removed (2c); the Team review key back to device-wide (3a, 3b); signOut resetting before the token is cleared (1b); the reset not clearing the QueryClient (2a).
 - **Not verified:** anything on a device (D-056). Checklist: the D-280 entry (one step per reported item).
+- **Follow-up, same day (fresh-install first sign-in never asked for entitlements):** `check-signout-reset.js` **25 passed** (new 6a ×3, 6b, 6c, 6d); on the previous head `b5e00e21` the same guard is **19 passed, 6 failed** (6a: 0 requests after a first sign-in in all three update orders; 6b: unknown treated as not enforcing; 6c: an empty boot marked loaded; 6d: an offline first sign-in marked loaded). `check-paywall-gate.js` 6g / 8i stubs gain `answerFor` / `loaded` deliberately. `tsc` clean, testid-lint OK, all 196 `check-*.js` green.
 
 ## 2026-11-21 — Home's next move when there is none (D-279), branch `feat/next-move-empty`
 

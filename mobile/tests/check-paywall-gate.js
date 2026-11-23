@@ -992,7 +992,9 @@ check('6g. release-lead QA P3 [executed]: a user change resets useEntitlements (
   });
   ent.initEntitlements();
   await tick(); await tick();
-  const grant = { pro: true, founder: true, enforcing: true, expiresAt: '2027-01-01', optimistic: false };
+  // The held answer is A's (a cached answer records its user since 2026-11-22;
+  // an answer for no one or someone else is asked for — check-signout-reset.js 6).
+  const grant = { pro: true, founder: true, enforcing: true, expiresAt: '2027-01-01', optimistic: false, loaded: true, answerFor: 'A' };
   ent.useEntitlements.setState(grant);
   const f0 = fetches;
   sessionStore.setState({ user: { user_id: 'A' } });
@@ -1433,7 +1435,8 @@ check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enf
   let onVerified = null;
   const pre = extractFn('components/SendInSleeperButton.tsx', 'sendPreCheck', {
     useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': st.flag } }) },
-    useEntitlements: { getState: () => ({ enforcing: st.enforcing, pro: st.pro, refresh: async () => { st.refreshed += 1; } }) },
+    // `loaded`: this user's answer is held (the unknown case is check-signout-reset.js 6b).
+    useEntitlements: { getState: () => ({ loaded: true, enforcing: st.enforcing, pro: st.pro, refresh: async () => { st.refreshed += 1; } }) },
     isUnverifiedSession: () => st.unverified,
     openVerify: (o) => { opened.push('verify'); onVerified = o && o.onVerified; return Promise.resolve('dismissed'); },
     openPaywall: (p) => { opened.push(JSON.stringify(p)); },

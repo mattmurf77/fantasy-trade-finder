@@ -13,6 +13,10 @@
 //   4. "Verify account" sat under "Verified — your board and account actions
 //      are locked to you".
 //   5. Sign out happened on one tap with no confirmation.
+//   6. (follow-up) a FRESH INSTALL's first sign-in never asked for
+//      entitlements at all: boot's empty cache hydrate set `loaded`, so the
+//      token-edge ask was skipped; Pro read "See plans", and sendPreCheck read
+//      "not enforcing" and skipped the paywall.
 // The fix: one account reset (src/state/accountReset.ts) that every sign-out
 // path reaches through useSession.signOut, and that a sign-in as a different
 // account reaches through setUser / startDemoSession.
@@ -502,6 +506,131 @@ function resetHarness() {
     const legacy = strip(read('src/screens/SettingsScreen.tsx'));
     const block = between(legacy, 'const signOutBlock = (', '\n  );');
     assert(/onPress=\{\(\) => confirmSignOut\(async \(\) => \{\s*await signOut\(\);\s*toSignIn\(\);/.test(block), 'the hub-off Settings list signs out on a single tap');
+  });
+
+  // ═══ 6. Entitlements are asked for whenever a signed-in user's answer is not held ═══
+  // (follow-up, 2026-11-22: a FRESH INSTALL's first sign-in never asked —
+  // boot's cache hydrate marked the empty store loaded, and the only asks
+  // were the A → B branch, the token edge gated on !loaded, and foreground.)
+  function entHarness({ cache = null, session = { user: null, hasToken: false, verification: null }, answer = { pro: true, enforcing: true } } = {}) {
+    const storage = makeStorage(cache ? { 'ftf.entitlements.v1': JSON.stringify(cache) } : {});
+    const store = makeCreate()(() => ({ ...session }));
+    let fetches = 0;
+    let release = null;
+    let hold = false;
+    const ent = load('src/state/useEntitlements.ts', {
+      zustand: { create: makeCreate() },
+      '@react-native-async-storage/async-storage': storage,
+      '../api/billing': { getEntitlements: async () => {
+        fetches += 1;
+        if (hold) await new Promise((r) => { release = r; });
+        return typeof answer === 'function' ? answer() : answer;
+      } },
+      '../api/purchases': { currentIdentityUserId: () => null, hasProEntitlement: () => false, onCustomerInfoChange: () => () => {}, setOnPurchasesReady: () => {} },
+      './subscriptionSession': { customerInfoApplies: () => false },
+      './useSession': { useSession: store },
+    });
+    return { ent, store, storage, fetches: () => fetches, holdNext: () => { hold = true; }, release: () => { hold = false; release && release(); } };
+  }
+  const E = (h) => h.ent.useEntitlements.getState();
+
+  for (const [label, steps] of [
+    ['user, then token (Apple / typed sign-in: setUser, then setLeague)', [{ user: userB }, { hasToken: true }]],
+    ['token, then user (separate updates)', [{ hasToken: true }, { user: userB }]],
+    ['user and token in one update (demo / account-only)', [{ user: userB, hasToken: true }]],
+  ]) {
+    await check(`6a. [executed] fresh install, no token, no cache — first sign-in, ${label}: exactly one entitlement request, and a Pro answer reads Pro`, async () => {
+      const h = entHarness();
+      h.ent.initEntitlements();
+      await settle();
+      assert(h.fetches() === 0, `boot with no session asked ${h.fetches()} time(s)`);
+      const bootLoaded = E(h).loaded;
+      for (const st of steps) { h.store.setState(st); await settle(); }
+      h.store.setState({ leagues: [] }); await settle();          // later unrelated session updates
+      h.store.setState({ verification: { session_verified: true } }); await settle();
+      assert(h.fetches() === 1, `asked ${h.fetches()} time(s) after the sign-in (want exactly 1)`);
+      assert(E(h).pro === true && E(h).loaded === true && E(h).answerFor === 'B', `B reads pro=${E(h).pro} loaded=${E(h).loaded} answerFor=${E(h).answerFor}`);
+      assert(bootLoaded === false, 'boot with nothing to load marked the store loaded — "nothing" would read as an answer');
+    });
+  }
+
+  await check('6b. [executed] sendPreCheck while this user\'s answer is unknown: no "not enforcing" fall-through — it asks once, then re-runs the pre-check on the answer', async () => {
+    const src = read('src/components/SendInSleeperButton.tsx');
+    const sf = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.ES2019, true, ts.ScriptKind.TSX);
+    let node = null;
+    (function find(n) { if (ts.isFunctionDeclaration(n) && n.name && n.name.text === 'sendPreCheck') node = n; else ts.forEachChild(n, find); })(sf);
+    assert(node, 'sendPreCheck not found');
+    const js = ts.transpileModule(node.getText(sf).replace(/^export\s+/, ''), { compilerOptions: { target: ts.ScriptTarget.ES2019 } }).outputText;
+    const run = (st, after) => {
+      const opened = [];
+      let refreshed = 0;
+      const deps = {
+        useFeatureFlags: { getState: () => ({ flags: { 'monetize.paywall': true } }) },
+        useEntitlements: { getState: () => ({ ...st, refresh: async () => { refreshed += 1; Object.assign(st, after); } }) },
+        isUnverifiedSession: () => false,
+        openVerify: async () => 'dismissed',
+        openPaywall: (p) => { opened.push(p.kind); },
+      };
+      // eslint-disable-next-line no-new-func
+      const pre = new Function(...Object.keys(deps), `${js}\nreturn sendPreCheck;`)(...Object.values(deps));
+      return { pre, opened, refreshed: () => refreshed };
+    };
+    // unknown → enforcing, not Pro: the paywall, never "Connect Sleeper first"
+    let resumed = 0;
+    let r = run({ loaded: false, enforcing: false, pro: false }, { loaded: true, enforcing: true, pro: false });
+    assert(r.pre(() => { resumed += 1; }) === true, 'an unknown answer was treated as not enforcing: the send went straight on');
+    await settle();
+    assert(r.refreshed() === 1, `asked ${r.refreshed()} time(s)`);
+    assert(r.opened.join() === 'send' && resumed === 0, `opened=${r.opened.join()} resumed=${resumed}`);
+    // unknown → Pro: the tap resumes once
+    resumed = 0;
+    r = run({ loaded: false, enforcing: false, pro: false }, { loaded: true, enforcing: true, pro: true });
+    r.pre(() => { resumed += 1; }); await settle();
+    assert(resumed === 1 && r.opened.length === 0, `Pro: resumed=${resumed} opened=${r.opened.join()}`);
+    // still unknown after the one ask (offline): the send goes on, no second ask
+    resumed = 0;
+    r = run({ loaded: false, enforcing: false, pro: false }, {});
+    r.pre(() => { resumed += 1; }); await settle();
+    assert(resumed === 1 && r.refreshed() === 1, `offline: resumed=${resumed} asks=${r.refreshed()}`);
+  });
+
+  await check('6c. [executed] boot with a restored session asks exactly once — with this user\'s cache, with none, and with another user\'s cache (which is not shown as an answer)', async () => {
+    const restored = { user: userA, hasToken: true, verification: null };
+    const now = Date.now();
+    for (const [label, cache, loadedBeforeAnswer] of [
+      ['own cache', { pro: true, expiresAt: null, fetchedAt: now, userId: 'A' }, true],
+      ['pre-split cache (no userId)', { pro: true, expiresAt: null, fetchedAt: now }, true],
+      ['no cache', null, false],
+      ['another user\'s cache', { pro: true, expiresAt: null, fetchedAt: now, userId: 'Z' }, false],
+    ]) {
+      const h = entHarness({ cache, session: restored, answer: { pro: false, enforcing: true } });
+      h.holdNext();
+      h.ent.initEntitlements();
+      await settle();
+      assert(h.fetches() === 1, `${label}: boot asked ${h.fetches()} time(s) (want 1)`);
+      assert(E(h).loaded === loadedBeforeAnswer, `${label}: loaded=${E(h).loaded} before the answer (want ${loadedBeforeAnswer})`);
+      if (label === 'another user\'s cache') assert(E(h).pro === false, 'another user\'s cached Pro was shown');
+      h.release(); await settle();
+      h.store.setState({ leagues: [] }); await settle();
+      assert(h.fetches() === 1, `${label}: asked again on an unrelated update (${h.fetches()})`);
+      assert(E(h).loaded === true && E(h).pro === false, `${label}: the server's answer did not land`);
+    }
+  });
+
+  await check('6d. [executed] verification completing asks once more; sign-out then the same account again asks again; a failed ask is not an answer', async () => {
+    const h = entHarness({ session: { user: userB, hasToken: true, verification: { session_verified: false } }, answer: { pro: false, enforcing: true } });
+    h.ent.initEntitlements(); await settle();
+    assert(h.fetches() === 1, `boot asked ${h.fetches()}`);
+    h.store.setState({ verification: { session_verified: true } }); await settle();
+    assert(h.fetches() === 2, `verify edge: ${h.fetches()} (want 2)`);
+    h.store.setState({ user: null, hasToken: false }); await settle();
+    h.store.setState({ user: userB }); h.store.setState({ hasToken: true }); await settle();
+    assert(h.fetches() === 3, `B again after a sign-out: ${h.fetches()} (want 3)`);
+    // A failed ask for a new user leaves the answer unknown.
+    const f = entHarness({ answer: () => { throw new Error('offline'); } });
+    f.ent.initEntitlements(); await settle();
+    f.store.setState({ user: userB, hasToken: true }); await settle();
+    assert(f.fetches() === 1 && E(f).loaded === false, `offline first sign-in: asks=${f.fetches()} loaded=${E(f).loaded}`);
   });
 
   finished = true;
