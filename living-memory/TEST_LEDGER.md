@@ -3,6 +3,12 @@
 - **App:** `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green, including the new `check-monetization-cut-features.js` (2 passed) and `check-paywall-gate.js` (no "free" in the paid state still holds for the new lines).
 - **Red on `origin/main` `df3bc0b45`:** the new guard run over that commit's `mobile/src` fails s1 with six hits (`mon.lock.free` names Calibration, trends and the Draft Room; `mon.pay.b3` names ESPN; `mon.pay.b4` names Win Now and the shop window). Green on the branch.
 - **Not verified:** anything on a device (D-056). Checklist: open the paywall from Settings › See plans and from a send; the four bullets read "A trade deck that weighs your board and theirs" / "Matches when a leaguemate likes the same trade" / "Proposals sent to Sleeper or MFL" / "Trade ideas for a player you want to move", and the line under them reads "No subscription needed for ranking, tiers or rosters."
+## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
+
+- **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.
+- **Server, production:** no deploy, as expected: the change is under `mobile/src/**` and docs, which `render.yaml`'s build filter ignores. Latest deploy still live on `dff07b9a`.
+- **App:** clean detached checkout of `df3bc0b4`, `npm ci`, `tsc --noEmit` clean, `test:easignore` ok, `check-direction-card.js` 94 passed, `check-home-playoff-banner.js` passed. EAS build `69c80dad-801b-4efe-9318-6d57fcd89b0b` FINISHED (confirmed with `build:list`), 1.22.0 (201); submission `58eebe54-7b1a-47b2-8646-de6fd5a2da2f` uploaded to App Store Connect. Apple's processing and tester availability not checked.
+- **Not verified:** anything on a device (D-056). Checklist: `docs/plans/playoff-card-alignment/scope.md` §6 on build 201.
 
 ## 2026-11-22 — Home playoff card one value line, branch `fix/playoff-card-alignment`
 
