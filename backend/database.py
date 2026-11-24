@@ -867,6 +867,26 @@ manager_profiles_table = Table("manager_profiles", metadata,
 )
 Index("ix_manager_profiles_league", manager_profiles_table.c.league_id)
 
+# manager_profile_suppressions (Q-040, D-282): the Sleeper league identities of
+# deleted accounts whose manager profile must never be rebuilt. A league-mate's
+# sync rebuilds every owner's profile from public league history, so deleting
+# the row alone (accounts._delete_user_data) would not keep a deleted person's
+# profile deleted. One row per id, inserted in the deletion's own transaction,
+# so a committed deletion always has its suppression and a rolled-back one has
+# none. Unlike deletion_scrub_jobs, which keeps the deleted ids only until its
+# scrub finishes, this is kept for good: it is the minimal record needed to
+# honour the deletion itself, and it holds no id. `id_hmac` is a keyed hash
+# (manager_profile_suppression_hash: HMAC-SHA256 under the server secret
+# EXPERIMENT_SALT_KEY), so the table alone cannot say whose it is or test a
+# guessed id; no league, name or other column is kept. Deleted when the same
+# Sleeper user verifies a new account (accounts.mark_user_verified): they
+# have accepted the policy that discloses profiles. Never exported (its
+# subject is gone) and never logged.
+manager_profile_suppressions_table = Table("manager_profile_suppressions", metadata,
+    Column("id_hmac",    String, primary_key=True),   # hex HMAC-SHA256 of the owner id
+    Column("created_at", String, nullable=False),     # ISO UTC
+)
+
 # Latest ELO snapshot for each player as ranked by each user in each league.
 # Replaced atomically (delete + insert) every time a user submits their rankings.
 # This is what lets leaguemates see each other's actual valuations.
@@ -11516,6 +11536,59 @@ def load_manager_trade_counts(league_id: str) -> dict[str, int]:
             select(t.c.owner_id, t.c.n_trades).where(t.c.league_id == league_id)
         ).fetchall()
     return {str(owner_id): int(n) for owner_id, n in rows}
+
+
+# Domain-separates these hashes from every other HMAC under the same key
+# (_layer_salt hashes bare layer names, which never contain a NUL).
+_PROFILE_SUPPRESSION_DOMAIN = b"manager_profile_suppression\x00"
+
+
+def manager_profile_suppression_hash(owner_id: str) -> str:
+    """Keyed hash of a Sleeper league identity for manager_profile_suppressions.
+
+    **Prod:** HMAC-SHA256 under EXPERIMENT_SALT_KEY, the server's existing HMAC
+    master secret (set on Render, never in the database, immutable once
+    experiments run, G-019): a database copy alone can't confirm a guessed id.
+    **Dev/test:** the env is unset, so a fixed key, like _layer_salt's
+    fallback. Changing the key orphans every stored entry, so suppressed
+    profiles would be rebuilt."""
+    key = os.environ.get("EXPERIMENT_SALT_KEY") or "ftf-dev-profile-suppression"
+    return hmac.new(key.encode(), _PROFILE_SUPPRESSION_DOMAIN + str(owner_id).encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def suppress_manager_profiles(conn, owner_ids) -> int:
+    """Record a suppression for each id, in the caller's transaction (account
+    deletion's). Idempotent; returns the number of new entries."""
+    t = manager_profile_suppressions_table
+    hashes = {manager_profile_suppression_hash(i) for i in owner_ids}
+    if not hashes:
+        return 0
+    have = set(conn.execute(select(t.c.id_hmac).where(t.c.id_hmac.in_(sorted(hashes)))).scalars())
+    new = sorted(hashes - have)
+    if new:
+        now = _now()
+        conn.execute(insert(t), [{"id_hmac": h, "created_at": now} for h in new])
+    return len(new)
+
+
+def clear_manager_profile_suppression(conn, owner_id: str) -> int:
+    """Delete one id's suppression, in the caller's transaction. Returns rows
+    deleted (0 or 1)."""
+    t = manager_profile_suppressions_table
+    return conn.execute(delete(t).where(
+        t.c.id_hmac == manager_profile_suppression_hash(owner_id))).rowcount or 0
+
+
+def load_manager_profile_suppressions(owner_ids) -> set[str]:
+    """The subset of `owner_ids` whose profile is suppressed. One query."""
+    by_hash = {manager_profile_suppression_hash(i): str(i) for i in owner_ids}
+    if not by_hash:
+        return set()
+    t = manager_profile_suppressions_table
+    with engine.connect() as conn:
+        found = conn.execute(select(t.c.id_hmac).where(t.c.id_hmac.in_(list(by_hash)))).scalars()
+        return {by_hash[h] for h in found}
 
 
 def set_league_scoring(league_id: str, scoring_format: str) -> None:
