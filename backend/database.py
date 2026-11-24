@@ -3368,12 +3368,11 @@ league_passes_table = Table("league_passes", metadata,
     Column("origin",           String,  nullable=False),  # 'purchase' | 'comp'
     Column("buyer_user_id",    String),                   # working key; NULL for comp
     Column("buyer_account_id", String),
-    Column("product_id",       String),                   # ftf_league_annual[_t1|_t2]; NULL for comp
+    Column("product_id",       String),                   # ftf_league_annual; NULL for comp
     Column("league_id",        String,  nullable=False),  # leagues.sleeper_league_id (platform-native)
     Column("platform",         String,  nullable=False),  # 'sleeper' | 'espn' | 'mfl'
     Column("status",           String,  nullable=False, server_default="active"),
                                                           # active | released | ended
-    Column("tier",             Integer),                  # 0 | 1 | 2 at first bind
     Column("comp_expires_at",  String),                   # ISO UTC; comp only
     Column("show_buyer",       Integer, nullable=False, server_default="0"),
     Column("bound_at",         String,  nullable=False),
@@ -3402,9 +3401,7 @@ league_pass_intents_table = Table("league_pass_intents", metadata,
     Column("user_id",           String,  nullable=False),
     Column("league_id",         String,  nullable=False),
     Column("platform",          String,  nullable=False),
-    Column("tier",              Integer, nullable=False),   # 0 | 1 | 2
     Column("product_id",        String,  nullable=False),   # the product offered
-    Column("paid_annual_count", Integer, nullable=False),   # the snapshot behind the tier
     Column("created_at",        String,  nullable=False),
     Column("expires_at",        String,  nullable=False),
     Column("consumed_at",       String),

@@ -44065,18 +44065,16 @@ def _paywall_tips_enabled() -> bool:
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
 
 # League pass block (league-pass lld §6.2, §7): fallback copy like the prices
-# above (StoreKit's localized price is authoritative). Product and offer ids
-# are a cross-client contract (docs/cross-client-invariants.md § Paywall
-# config). Served only to a client sending caps=league_pass.
+# above (StoreKit's localized price is authoritative). The product id is a
+# cross-client contract (docs/cross-client-invariants.md § Paywall config).
+# Its one-month free trial is the App Store introductory offer; the client
+# reads it from the store, so it is not described here. Served only to a
+# client sending caps=league_pass.
 _PAYWALL_LEAGUE_PASS = {
     "offering": "league",
     "renews_at_price": "$99.99",
     "products": [
-        {"product_id": "ftf_league_annual", "tier": 0, "display_price": "$99.99"},
-        {"product_id": "ftf_league_annual_t1", "tier": 1, "display_price": "$84.99",
-         "promo_offer_id": "league_t1_y1"},
-        {"product_id": "ftf_league_annual_t2", "tier": 2, "display_price": "$69.99",
-         "promo_offer_id": "league_t2_y1"},
+        {"product_id": "ftf_league_annual", "display_price": "$99.99"},
     ],
 }
 
@@ -44250,8 +44248,8 @@ def _league_pass_body_league():
 @app.route("/api/league-pass/intent", methods=["POST"])
 @_gate_unverified_write
 def league_pass_intent():
-    """{league_id} → {intent_id, product_id, tier, teams, expires_at}: the
-    league a member chose before the purchase sheet, and its quote."""
+    """{league_id} → {intent_id, product_id, teams, expires_at}: the league
+    a member chose before the purchase sheet."""
     off = _league_pass_off()
     if off:
         return off

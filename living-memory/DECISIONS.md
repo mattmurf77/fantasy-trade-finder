@@ -29,6 +29,10 @@
 - A Sleeper co-owner rides the roster owner's seat: covered when the owner is, listed in `league_passes` for the session's active league, not counted in `covered_count` and not capped beyond the owners' seats. So the cap in Consequences bounds stored members, not every covered account. PRD R7 calls the allowance a co-owner allowance; on Sleeper it is not used by co-owners. That wording is the operator's to settle.
 - Seats are ordered by `users.created_at`, then user id, so a re-sync cannot change who holds one. `league_pass_coverage_used` holds its once-per-day rule across processes with one indexed read.
 
+**Added 2026-11-24, operator ("Free month replaces discount"; trial chaining: "No limit"):**
+- One product, `ftf_league_annual`, $99.99 a year, with a one-month free trial as its App Store introductory offer. The year-one discount tiers (`ftf_league_annual_t1` $84.99, `_t2` $69.99), their promotional offers (`league_t1_y1`, `league_t2_y1`) and the paid-annual-leaguemate count that chose a tier are removed, with the `tier` columns and `tier_mismatch` refusal. No in-app purchase key is needed.
+- No per-league limit on trials. A buyer in the trial covers the league exactly like a paying buyer; a cancelled trial ends coverage at its end through the normal expiry path. Members chaining trials in one league is a risk the operator accepted; it is measured, not blocked.
+
 ## D-280 — Sign-out and a sign-in as another account run one account reset; Team review "done" and roster setup are stored per account
 
 **Date:** 2026-11-22 · **Who:** the operator's report from a Release simulator build with two accounts on one device; fixed on `fix/signout-clears-account-state`.

@@ -16,8 +16,8 @@ The buyer holds ordinary account-level pro through the projector; a covered
 member holds no row, so their `pro` stays false and coverage is a separate,
 league-keyed answer (`covers`).
 
-A leaf like entitlements.py: never imports `server`. `paywall_gate` is
-imported lazily (it will call `covers`, so a module-level import would cycle).
+A leaf like entitlements.py: never imports `server` or `paywall_gate`
+(paywall_gate imports this module to call `covers`).
 Write paths refuse with `Refused(reason)`; routes turn it into a 409.
 
 Release can be limited to an allow-list of league ids in the env var
@@ -47,10 +47,10 @@ FLAG = "monetize.league_pass"
 SOURCE = "league_pass_iap"
 PRODUCT_PREFIX = "ftf_league_"
 ALLOWLIST_ENV = "LEAGUE_PASS_LEAGUE_ALLOWLIST"
-TIERS = ((0, "ftf_league_annual"), (1, "ftf_league_annual_t1"), (2, "ftf_league_annual_t2"))
-_PRODUCT_TIER = {product: tier for tier, product in TIERS}
-# Only this, paid, production-lane and in a NORMAL period, counts toward the tier.
-_PAID_ANNUAL = "ftf_pro_annual"
+# The one league product: $99.99 a year, with a one-month free trial as its
+# App Store introductory offer (D-281 addendum 2026-11-24). A buyer in the
+# trial holds a live league_pass_iap row exactly like a paying one.
+PRODUCT_ID = "ftf_league_annual"
 # The owner of events no one person caused (comp binds, deletion releases).
 _SYSTEM_USER = "system:league_pass"
 
@@ -98,18 +98,6 @@ def _knob(key: str) -> float:
 def _allowed(league_id: str) -> bool:
     ids = {x.strip() for x in os.environ.get(ALLOWLIST_ENV, "").split(",") if x.strip()}
     return not ids or league_id in ids
-
-
-def _product_tier(product_id: str | None) -> int:
-    """An unknown ftf_league_* product reads as full price (tier 0)."""
-    return _PRODUCT_TIER.get((product_id or "").lower(), 0)
-
-
-def tier_for(count: int) -> int:
-    """Paid annual leaguemates → tier: 0 → 0, 1–2 → 1, 3+ → 2."""
-    if count >= 3:
-        return 2
-    return 1 if count >= 1 else 0
 
 
 def _aliases(conn, user_id: str) -> set[str]:
@@ -368,29 +356,6 @@ def _buyer_display(row) -> str | None:
 # §3.3 Quote and intent
 # ---------------------------------------------------------------------------
 
-def paid_annual_leaguemates(buyer_user_id: str, league_id: str, platform: str) -> int:
-    """Members other than the buyer holding a live pro row with
-    source='apple_iap', product_id='ftf_pro_annual', in the production lane,
-    whose ledger shows a NORMAL period (R11). Trials, intro-only periods,
-    comps, promo grants, monthly and sandbox rows never count."""
-    from . import paywall_gate   # lazy: paywall_gate imports this module (lld §4.1)
-    allowance = _allowance()
-    with db.engine.begin() as conn:
-        buyer = _aliases(conn, buyer_user_id)
-        candidates = []
-        for member in _covered_ids(conn, league_id, platform, allowance):
-            if member in buyer:
-                continue
-            rows = [dict(r._mapping) for r in entitlements._active_rows(conn, member)
-                    if r.entitlement == "pro" and r.source == "apple_iap"
-                    and r.product_id == _PAID_ANNUAL
-                    and not (r.granted_by or "").startswith(entitlements.SANDBOX_GRANT_PREFIX)]
-            if rows:
-                candidates.append(rows)
-    return sum(1 for rows in candidates
-               if any("NORMAL" in paywall_gate._period_types([r]) for r in rows))
-
-
 def _refund_blocked(user_id: str) -> bool:
     """R36: an account that had a pass refunded can't buy another without
     operator action (the operator revokes or edits the refunded row)."""
@@ -399,10 +364,9 @@ def _refund_blocked(user_id: str) -> bool:
 
 
 def create_intent(user_id: str, league_id: str) -> dict:
-    """Record the league a member chose before the purchase sheet and quote
-    its tier. Refuses, in order: not_member, league_not_allowed,
-    already_covered, already_buyer, refund_blocked. Returns
-    {intent_id, product_id, tier, teams, expires_at}."""
+    """Record the league a member chose before the purchase sheet. Refuses,
+    in order: not_member, league_not_allowed, already_covered, already_buyer,
+    refund_blocked. Returns {intent_id, product_id, teams, expires_at}."""
     with db.engine.begin() as conn:
         platform = _platform(conn, league_id)
         if platform is None or not _is_member(conn, user_id, league_id, platform):
@@ -418,22 +382,18 @@ def create_intent(user_id: str, league_id: str) -> dict:
             raise Refused("already_buyer")
     if _refund_blocked(user_id):
         raise Refused("refund_blocked")
-    count = paid_annual_leaguemates(user_id, league_id, platform)
-    tier = tier_for(count)
-    product_id = TIERS[tier][1]
     now = _now()
     expires_at = (now + timedelta(minutes=_knob("league_pass_intent_ttl_minutes"))).isoformat()
     with db.engine.begin() as conn:
         teams = _team_count(conn, league_id)
         intent_id = conn.execute(insert(db.league_pass_intents_table).values(
-            user_id=user_id, league_id=league_id, platform=platform, tier=tier,
-            product_id=product_id, paid_annual_count=count,
-            created_at=now.isoformat(), expires_at=expires_at,
+            user_id=user_id, league_id=league_id, platform=platform,
+            product_id=PRODUCT_ID, created_at=now.isoformat(), expires_at=expires_at,
         )).inserted_primary_key[0]
     _emit(user_id, "league_pass_quote_viewed",
-          {"tier": tier, "platform": platform, "teams": teams}, league_id)
-    return {"intent_id": intent_id, "product_id": product_id, "tier": tier,
-            "teams": teams, "expires_at": expires_at}
+          {"platform": platform, "teams": teams}, league_id)
+    return {"intent_id": intent_id, "product_id": PRODUCT_ID, "teams": teams,
+            "expires_at": expires_at}
 
 
 # ---------------------------------------------------------------------------
@@ -455,18 +415,14 @@ def _insert_pass(conn, **values):
 
 
 def _bind(user_id: str, league_id: str, platform: str, product_id: str, *,
-          tier_cap: int, via: str, intent_id: int | None = None,
+          via: str, intent_id: int | None = None,
           event_id: str | None = None) -> dict:
-    """lld §3.4 steps 3–5: membership, no live pass on the league, the
-    product's tier within `tier_cap` (R20), then insert (and consume the
-    intent) in one transaction."""
+    """lld §3.4 steps 3–5: membership, no live pass on the league, then
+    insert (and consume the intent) in one transaction."""
     with db.engine.begin() as conn:
         if not _is_member(conn, user_id, league_id, platform):
             raise Refused("not_member")
     _drop_dead(league_id)
-    tier = _product_tier(product_id)
-    if tier > tier_cap:
-        raise Refused("tier_mismatch")
     try:
         with db.engine.begin() as conn:
             if _active_pass(conn, league_id) is not None:
@@ -474,7 +430,7 @@ def _bind(user_id: str, league_id: str, platform: str, product_id: str, *,
             row = _insert_pass(
                 conn, origin="purchase", buyer_user_id=user_id,
                 buyer_account_id=entitlements._account_for_user(conn, user_id),
-                product_id=product_id, league_id=league_id, platform=platform, tier=tier)
+                product_id=product_id, league_id=league_id, platform=platform)
             if intent_id is not None:
                 conn.execute(update(db.league_pass_intents_table)
                              .where(db.league_pass_intents_table.c.id == intent_id)
@@ -483,19 +439,21 @@ def _bind(user_id: str, league_id: str, platform: str, product_id: str, *,
         # The partial unique indexes: another bind won the league or buyer.
         raise Refused("already_covered")
     _emit(user_id, "league_pass_bound",
-          {"origin": "purchase", "tier": tier, "platform": platform, "via": via}, league_id)
+          {"origin": "purchase", "platform": platform, "via": via}, league_id)
     return _pass_dict(row)
 
 
 def on_billing_event(user_id: str, product_id: str, event_type: str, event_id: str) -> None:
     """After the projector, for ftf_league_* products, while the flag is on.
 
-    Activating: if the buyer already has an active pass (a renewal), nothing.
-    Else bind from their newest unconsumed, unexpired intent. No intent, or a
+    Activating: if the buyer already has an active pass (a renewal, or a
+    free trial converting to paid), nothing. Else bind from their newest unconsumed, unexpired intent. No intent, or a
     failed re-check, leaves the pass unbound (logged); the buyer keeps pro.
     Deactivating (expiry, refund): once the buyer has no live league row
     left, their pass is ended (reporting state; coverage already followed
-    the row)."""
+    the row). A free trial's INITIAL_PURCHASE (period_type TRIAL) binds like
+    any other: the projector ignores period_type, and there is no limit on
+    trials per league (D-281 addendum 2026-11-24)."""
     if not is_enabled(FLAG) or not (product_id or "").lower().startswith(PRODUCT_PREFIX):
         return
     with db.engine.begin() as conn:
@@ -521,7 +479,7 @@ def on_billing_event(user_id: str, product_id: str, event_type: str, event_id: s
         return
     try:
         _bind(user_id, intent.league_id, intent.platform, product_id,
-              tier_cap=intent.tier, via="webhook", intent_id=intent.id, event_id=event_id)
+              via="webhook", intent_id=intent.id, event_id=event_id)
     except Refused as e:
         log.warning("LEAGUE-PASS-UNBOUND user=%s reason=%s event_id=%s",
                     user_id, e.reason, event_id)
@@ -529,9 +487,8 @@ def on_billing_event(user_id: str, product_id: str, event_type: str, event_id: s
 
 def bind(user_id: str, league_id: str) -> dict:
     """The manual path (R19) for a buyer whose pass is unbound: the same
-    checks as the webhook bind, with a tier computed for the league now.
-    Refuses: no_purchase, already_buyer, not_member, league_not_allowed,
-    already_covered, tier_mismatch."""
+    checks as the webhook bind. Refuses: no_purchase, already_buyer,
+    not_member, league_not_allowed, already_covered."""
     with db.engine.begin() as conn:
         buyer = _buyer_row(conn, user_id)
         ids = _aliases(conn, user_id)
@@ -546,9 +503,7 @@ def bind(user_id: str, league_id: str) -> dict:
         raise Refused("not_member")
     if not _allowed(league_id):
         raise Refused("league_not_allowed")
-    tier_cap = tier_for(paid_annual_leaguemates(user_id, league_id, platform))
-    return _bind(user_id, league_id, platform, buyer.product_id,
-                 tier_cap=tier_cap, via="manual")
+    return _bind(user_id, league_id, platform, buyer.product_id, via="manual")
 
 
 def _cooldown_anchor(conn, ids: set[str]) -> str | None:
@@ -567,8 +522,7 @@ def _cooldown_anchor(conn, ids: set[str]) -> str | None:
 
 def repoint(user_id: str, league_id: str) -> dict:
     """Move the buyer's live pass to another league they are in, once per
-    league_pass_repoint_cooldown_days (R21). The tier is not re-checked.
-    Release and insert are one transaction. Refuses: no_pass, cooldown
+    league_pass_repoint_cooldown_days (R21). Release and insert are one transaction. Refuses: no_pass, cooldown
     (detail can_repoint_at), not_member, league_not_allowed, already_covered."""
     with db.engine.begin() as conn:
         ids = _aliases(conn, user_id)
@@ -595,7 +549,7 @@ def repoint(user_id: str, league_id: str) -> dict:
     except IntegrityError:
         raise Refused("already_covered")
     _emit(current.buyer_user_id, "league_pass_bound",
-          {"origin": "purchase", "tier": row.tier, "platform": platform, "via": "repoint"},
+          {"origin": "purchase", "platform": platform, "via": "repoint"},
           league_id)
     return _pass_dict(row)
 
@@ -614,7 +568,7 @@ def _move(conn, current, league_id: str, platform: str, reason: str):
     return _insert_pass(
         conn, origin=current.origin, buyer_user_id=current.buyer_user_id,
         buyer_account_id=current.buyer_account_id, product_id=current.product_id,
-        league_id=league_id, platform=platform, tier=current.tier,
+        league_id=league_id, platform=platform,
         comp_expires_at=current.comp_expires_at, show_buyer=current.show_buyer,
         note=current.note, bound_at=now)
 
@@ -642,8 +596,7 @@ def follow_rollover(new_league_id: str, previous_league_id: str | None) -> bool:
     except (IntegrityError, Refused):
         return False
     _emit(current.buyer_user_id, "league_pass_bound",
-          {"origin": current.origin, "tier": row.tier, "platform": "sleeper",
-           "via": "rollover"}, new_league_id)
+          {"origin": current.origin, "platform": "sleeper", "via": "rollover"}, new_league_id)
     return True
 
 
@@ -694,7 +647,7 @@ def comp(league_id: str, days: int, note: str | None) -> dict:
     except IntegrityError:
         raise Refused("already_covered")
     _emit(None, "league_pass_bound",
-          {"origin": "comp", "tier": None, "platform": platform, "via": "comp"}, league_id)
+          {"origin": "comp", "platform": platform, "via": "comp"}, league_id)
     return _pass_dict(row)
 
 
@@ -739,7 +692,7 @@ def _will_renew(conn, row) -> bool:
 
 def buyer_view(user_id: str) -> dict:
     """GET /api/league-pass: the caller's own pass, as its buyer.
-    {pass: {league_id, platform, tier, covered_until, will_renew,
+    {pass: {league_id, platform, covered_until, will_renew,
     covered_count, can_repoint_at, show_buyer} | None, unbound}. `unbound`:
     the caller holds a live league product but no live pass (R19).
     covered_count counts covered members other than the buyer (R27).
@@ -760,7 +713,7 @@ def buyer_view(user_id: str) -> dict:
         will_renew = paying is not None and _will_renew(conn, paying)
     ready = (datetime.fromisoformat(anchor) + timedelta(days=cooldown)) if anchor else None
     return {"pass": {"league_id": current.league_id, "platform": current.platform,
-                     "tier": current.tier, "covered_until": until, "will_renew": will_renew,
+                     "covered_until": until, "will_renew": will_renew,
                      "covered_count": len(covered),
                      "can_repoint_at": ready.isoformat() if ready and ready > _now() else None,
                      "show_buyer": bool(current.show_buyer)},
@@ -802,7 +755,7 @@ def list_passes(*, league_id: str | None = None, user_id: str | None = None) -> 
 def release_for_deletion(conn, user_ids, account_ids) -> dict[str, int]:
     """Account deletion (lld §2.4, R38), inside accounts' deletion
     transaction: the buyer's active pass is released ('deleted') and every
-    pass row they bought loses its buyer ids. The league, dates and tier stay
+    pass row they bought loses its buyer ids. The league and dates stay
     as a non-personal record. Intents go with accounts._ADDITIONAL_PRIVATE_TABLES."""
     t = db.league_passes_table
     mine = t.c.buyer_user_id.in_(user_ids) | t.c.buyer_account_id.in_(account_ids)

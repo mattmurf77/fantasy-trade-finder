@@ -550,8 +550,6 @@ def test_billing_issue_grace_never_shortens(eng):
     ("ftf_rookie_pass_2026", "season_pass_iap"),
     # League pass (league-pass lld §5): every ftf_league_* product.
     ("ftf_league_annual", "league_pass_iap"),
-    ("ftf_league_annual_t1", "league_pass_iap"),
-    ("ftf_league_annual_t2", "league_pass_iap"),
     ("ftf_pro_monthly", "apple_iap"),
     ("pro_annual_3499", "apple_iap"),
 ])
@@ -572,9 +570,9 @@ def test_league_product_projects_buyer_pro_and_a_bind_failure_never_fails_the_we
         raise RuntimeError("bind failed")
 
     with patch.object(lp, "on_billing_event", boom):
-        r = _ingest(_rc_event("lp1", "INITIAL_PURCHASE", product="ftf_league_annual_t1"))
+        r = _ingest(_rc_event("lp1", "INITIAL_PURCHASE", product="ftf_league_annual"))
     assert r == {"stored": True, "projected": True, "duplicate": False}
-    assert calls == [(USER, "ftf_league_annual_t1", "INITIAL_PURCHASE", "lp1")]
+    assert calls == [(USER, "ftf_league_annual", "INITIAL_PURCHASE", "lp1")]
     ent = entl.get_entitlements(USER)
     assert ent["pro"] is True and ent["sources"] == ["league_pass_iap"]
 

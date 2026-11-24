@@ -40,7 +40,7 @@ none, and more ranked managers per league.
 **Non-goals**
 
 - Collecting or splitting league dues in the app.
-- A monthly pass, a free trial on the pass, or a lifetime pass.
+- A monthly pass or a lifetime pass.
 - More than one covered league per buyer (a later phase).
 - Android or web purchase (a later phase). Coverage itself applies on every client the
   gate applies to.
@@ -81,24 +81,17 @@ none, and more ranked managers per league.
 
 ### 4.2 Product and price
 
-- **R10.** Three auto-renewable annual products in the "Fleeced Pro" group, all ranked
-  above the individual plans and all renewing at $99.99:
-
-  | Leaguemates on a paid annual individual plan | Product | Year one |
-  |---|---|---|
-  | 0 | `ftf_league_annual` | $99.99 |
-  | 1–2 | `ftf_league_annual_t1` | $84.99 |
-  | 3 or more | `ftf_league_annual_t2` | $69.99 |
-
-- **R11.** The count in R10 is other verified members of the chosen league with an
-  active, paid `ftf_pro_annual` subscription. Trials, comps, promo grants, monthly plans
-  and sandbox purchases do not count.
-- **R12.** The buyer is shown one version only: the one the chosen league qualifies for.
-- **R13.** The year-one price is delivered in the normal purchase sheet: by the
-  product's introductory offer for a buyer who has never subscribed, and by a
-  promotional offer at the same price otherwise. No codes.
-- **R14.** No free trial and no monthly plan.
-- **R15.** The plan row shows the year-one price and the renewal price together.
+- **R10.** One auto-renewable annual product, `ftf_league_annual`, in the "Fleeced Pro"
+  group, ranked above the individual plans, at $99.99 a year.
+- **R11.** Withdrawn 2026-11-24 (the year-one discount tiers were dropped; plan D3).
+- **R12.** Withdrawn 2026-11-24 (one product, so nothing to choose between).
+- **R13.** A one-month free trial, delivered as the product's App Store introductory
+  offer in the normal purchase sheet. Eligibility is Apple's (one introductory offer per
+  person per group). No codes, no promotional offers.
+- **R14.** No monthly plan. No server limit on trials per league: a buyer in the trial
+  covers the league like a paying buyer, and trial chaining is accepted (operator,
+  2026-11-24).
+- **R15.** The plan row shows the trial and the renewal price together.
 
 ### 4.3 Purchase and binding
 
@@ -110,8 +103,7 @@ none, and more ranked managers per league.
   even if the app closed during the purchase.
 - **R19.** A purchase with no usable choice on record leaves the buyer with Pro and an
   unbound pass. The app asks the buyer to choose a league.
-- **R20.** A discounted version cannot be bound, the first time, to a league that
-  qualifies for a higher price than the one paid.
+- **R20.** Withdrawn 2026-11-24 (there are no discounted versions to check at bind).
 - **R21.** The buyer can move the pass to another of their leagues once per 30 days.
   Coverage moves at once.
 - **R22.** When a Sleeper league rolls over to a new season, the pass follows it without
@@ -138,7 +130,8 @@ none, and more ranked managers per league.
 - **R31.** Turning auto-renew off changes nothing until expiry.
 - **R32.** No notice is sent about a pass ending. Covered members see the end date in
   Settings (R25), and the buyer sees how many leaguemates are covered (R27).
-- **R33.** Coverage ends within one webhook cycle of expiry or refund.
+- **R33.** Coverage ends within one webhook cycle of expiry or refund, including the
+  end of a free trial that was cancelled.
 - **R34.** Coverage continues through Apple's billing grace period.
 - **R35.** A former covered member keeps their eligibility for the free deck preview and
   the individual free month.
@@ -171,7 +164,8 @@ none, and more ranked managers per league.
 - Matches and sends per league per week.
 - Individual subscriptions cancelled within 30 days of becoming covered.
 - Individual or pass purchases by covered members in their other leagues.
-- Share of passes at each price tier, and renewal at $99.99 by tier.
+- Share of passes started in the free trial, trial-to-paid conversion, and passes per
+  league that end in trial (trial chaining).
 - Refund rate, and renewal at 12 months.
 
 **Guardrail**
@@ -188,7 +182,7 @@ reuse the existing `paywall_purchase_*` events with the new product ids.
 |---|---|---|
 | 0 | After the paid launch: comp 10 to 20 leagues with the existing bulk-grant route, against matched controls, for four weeks. No build. | Covered leagues show a lift in matches, sends or new joins. If not, stop. |
 | 1 | Server side, dark. Comp passes bound through the admin route. | League-scoped coverage is correct for real users on all three platforms. |
-| 2 | Legal copy, the three products and their offers, the client, a store build, App Review. | Approved build with the flag off. |
+| 2 | Legal copy, the product and its free-trial introductory offer, the client, a store build, App Review. | Approved build with the flag off. |
 | 3 | Flag on for an allow-list of leagues, then everyone. | Metrics in §5 hold for four weeks. |
 | 4 | Add-ons for more leagues; Android and web purchase; an extension of the individual plan for members who were already paying. | Separate decisions. |
 
@@ -196,18 +190,18 @@ reuse the existing `paywall_purchase_*` events with the new product ids.
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| Covered members cancel individual plans | Lower revenue from the best leagues | First-year-only discount; the guardrail metric; phase 0 baseline |
+| Covered members cancel individual plans | Lower revenue from the best leagues | The guardrail metric; phase 0 baseline |
 | A gated route acts on a different league than the gate resolved | A member gets Pro outside the covered league | A pinned resolver per gated rule, and a handler check (LLD §4) |
 | The buyer stops paying | Up to eleven people lose access at once | The end date shows in Settings; preview and free month stay available |
 | Refund after heavy use | Free league-wide Pro for a season | Coverage ends at once; no repurchase |
 | App Review rejects the model | Delay | Demo league and two accounts in the notes; clear plan-row disclosure |
-| A discounted price reveals that leaguemates subscribe | Legal exposure | A legal ruling before any copy is written |
+| Members chain free trials in one league | Free league-wide Pro month after month | Accepted with no server limit (operator, 2026-11-24); measured |
 | The launch binary shows the pass as a plain plan row | A purchase with no league | Separate RevenueCat offering; the config block is served only to clients that ask for it |
 
 ## 8. Open questions
 
-1. **Price.** Is $99.99 right, and are $84.99 and $69.99 the right first-year prices?
-   Phase 0 does not answer this; a price test in phase 3 would.
+1. **Price.** Is $99.99 right? Phase 0 does not answer this; a price test in phase 3
+   would.
 2. **Naming.** "League pass" is a working name. The App Store display name and the
    in-app name need a marketing and legal call.
 3. **Commissioner-only buying.** Any member can buy in this draft. Should a
@@ -217,4 +211,4 @@ reuse the existing `paywall_purchase_*` events with the new product ids.
 5. **Members who were already paying.** Should they get anything when their league is
    covered? The plan defers this to phase 4.
 6. **Re-point limit.** Is once per 30 days right?
-7. **Legal rulings.** The two disclosures in plan §10.
+7. **Legal ruling.** The covered-state disclosure in plan §10.

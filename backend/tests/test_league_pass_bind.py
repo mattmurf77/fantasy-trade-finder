@@ -3,14 +3,18 @@
 
 Covers:
   * the webhook binds from the buyer's newest usable intent (R18) and
-    consumes it; no intent, an expired one, a cheaper product than the
-    snapshot (R20) or the flag off leave the pass unbound while the buyer
-    keeps pro; a renewal changes nothing;
+    consumes it; no intent, an expired one or the flag off leave the pass
+    unbound while the buyer keeps pro; a renewal changes nothing;
+  * the quote: the one product, ftf_league_annual, and
+    league_pass_quote_viewed {platform, teams};
+  * the one-month free trial (D-281 addendum 2026-11-24): a trial purchase
+    binds and covers members like a paid one, converting changes nothing,
+    and a cancelled trial's expiry ends coverage; no per-league trial limit;
   * create_intent refusals in order (not_member, league_not_allowed,
     already_covered, already_buyer, refund_blocked);
   * one active pass per league and per buyer (R23), including two buyers
     racing for one league (§10: the first bind wins);
-  * the manual bind (R19) with a fresh tier (tier_mismatch);
+  * the manual bind (R19);
   * the re-point cooldown (R21); a Sleeper rollover moves the pass without
     using it (R22) and needs the buyer in the new league;
   * TRANSFER re-keys the pass to a member, else releases it;
@@ -77,28 +81,20 @@ def _active(eng):
     return [p for p in w.passes(eng) if p["status"] == "active"]
 
 
-def _paid_mates(eng, n, league=L):
-    with eng.begin() as conn:
-        for i in range(n):
-            uid = f"paid_{league}_{i}"
-            w.member(conn, league, uid)
-            w.ent_row(conn, uid, product="ftf_pro_annual", source="apple_iap", period="NORMAL")
-
-
 # ── webhook bind ────────────────────────────────────────────────────────────
 
 def test_the_webhook_binds_from_the_intent_and_consumes_it(eng):
     quote = lp.create_intent(BUYER, L)
     _rc("buy1", "INITIAL_PURCHASE", product=quote["product_id"])
     [p] = _active(eng)
-    assert (p["origin"], p["buyer_user_id"], p["league_id"], p["platform"], p["tier"]) == (
-        "purchase", BUYER, L, "sleeper", 0)
+    assert (p["origin"], p["buyer_user_id"], p["league_id"], p["platform"]) == (
+        "purchase", BUYER, L, "sleeper")
     assert p["product_id"] == "ftf_league_annual"
     with eng.connect() as conn:
         intent = conn.execute(select(db_module.league_pass_intents_table)).fetchone()
     assert intent.consumed_event_id == "buy1" and intent.consumed_at == p["bound_at"]
     assert w.events(eng, "league_pass_bound") == [
-        (BUYER, {"origin": "purchase", "tier": 0, "platform": "sleeper", "via": "webhook"}, L)]
+        (BUYER, {"origin": "purchase", "platform": "sleeper", "via": "webhook"}, L)]
     assert lp.covers(MATE, L).role == "member"
     # A renewal changes nothing (lld §3.4 step 1).
     _rc("buy2", "RENEWAL", product=quote["product_id"])
@@ -128,23 +124,82 @@ def test_the_newest_usable_intent_counts(eng):
     assert [p["league_id"] for p in _active(eng)] == [L2]
 
 
-def test_a_cheaper_product_than_the_snapshot_is_not_bound(eng, caplog):
-    """R20: the quote was full price (no paid leaguemates); a t2 purchase
-    cannot bind there."""
-    assert lp.create_intent(BUYER, L)["tier"] == 0
-    with caplog.at_level(logging.WARNING, logger="backend.league_pass"):
-        _rc("buy1", "INITIAL_PURCHASE", product="ftf_league_annual_t2")
-    assert w.passes(eng) == []
-    assert "reason=tier_mismatch" in caplog.text
-    assert entl.get_entitlements(BUYER)["pro"] is True
+def test_the_quote_is_the_one_product(eng):
+    """A paid annual leaguemate changes nothing: there are no price tiers."""
+    with eng.begin() as conn:
+        w.member(conn, L, "paid_mate")
+        w.ent_row(conn, "paid_mate", product="ftf_pro_annual", source="apple_iap",
+                  period="NORMAL")
+    quote = lp.create_intent(BUYER, L)
+    assert set(quote) == {"intent_id", "product_id", "teams", "expires_at"}
+    assert (quote["product_id"], quote["teams"]) == ("ftf_league_annual", 12)
+    with eng.connect() as conn:
+        intent = conn.execute(select(db_module.league_pass_intents_table)).fetchone()
+    assert (intent.product_id, intent.league_id, intent.platform) == (
+        "ftf_league_annual", L, "sleeper")
+    assert w.events(eng, "league_pass_quote_viewed") == [
+        (BUYER, {"platform": "sleeper", "teams": 12}, L)]
 
 
-def test_a_dearer_product_than_the_snapshot_binds(eng):
-    _paid_mates(eng, 3)
-    assert lp.create_intent(BUYER, L)["tier"] == 2
-    _rc("buy1", "INITIAL_PURCHASE", product="ftf_league_annual_t1")
+# ── the one-month free trial ────────────────────────────────────────────────
+
+def _trial(eid, user=BUYER, days=30):
+    return _rc(eid, "INITIAL_PURCHASE", user=user, period_type="TRIAL",
+               expiration_at_ms=_ms(days))
+
+
+def test_a_trial_purchase_binds_and_covers_members(eng):
+    lp.create_intent(BUYER, L)
+    assert _trial("trial1")["projected"] is True
     [p] = _active(eng)
-    assert p["tier"] == 1
+    assert (p["buyer_user_id"], p["league_id"], p["product_id"]) == (
+        BUYER, L, "ftf_league_annual")
+    ents = entl.get_entitlements(BUYER)
+    assert ents["pro"] is True and ents["sources"] == ["league_pass_iap"]
+    cov = lp.covers(MATE, L)
+    assert cov.role == "member" and cov.covered_until < w.iso(31)
+    assert lp.covers(BUYER, L).role == "buyer"
+    # Converting to paid is a RENEWAL: the same pass, a later expiry.
+    _rc("conv1", "RENEWAL", period_type="NORMAL")
+    assert [x["id"] for x in _active(eng)] == [p["id"]]
+    assert lp.covers(MATE, L).covered_until > w.iso(300)
+
+
+def test_a_cancelled_trial_ends_coverage_at_expiry(eng):
+    lp.create_intent(BUYER, L)
+    _trial("trial1")
+    _rc("cancel1", "CANCELLATION", period_type="TRIAL")   # auto-renew off: no-op
+    assert lp.covers(MATE, L) is not None
+    assert lp.buyer_view(BUYER)["pass"]["will_renew"] is False
+    _rc("exp1", "EXPIRATION", period_type="TRIAL")
+    assert lp.covers(MATE, L) is None and lp.covers(BUYER, L) is None
+    [p] = w.passes(eng)
+    assert (p["status"], p["release_reason"]) == ("ended", "ended")
+    assert w.events(eng, "league_pass_ended") == [(BUYER, {"reason": "ended"}, L)]
+    assert entl.get_entitlements(BUYER)["pro"] is False
+
+
+def test_a_lapsed_trial_stops_covering_before_its_expiration_event(eng):
+    """The row's expires_at is read-time truth: coverage ends at the trial's
+    end even if EXPIRATION is late."""
+    lp.create_intent(BUYER, L)
+    _trial("trial1")
+    with eng.begin() as conn:
+        conn.execute(db_module.entitlements_table.update().values(expires_at=w.iso(-0.01)))
+    assert lp.covers(MATE, L) is None
+
+
+def test_trials_chain_with_no_limit(eng):
+    """Operator 2026-11-24: no server limit on trials per league. After one
+    member's trial expires, another member's trial binds the same league."""
+    lp.create_intent(BUYER, L)
+    _trial("trial1")
+    _rc("exp1", "EXPIRATION", period_type="TRIAL")
+    lp.create_intent(MATE, L)
+    _trial("trial2", user=MATE)
+    [p] = _active(eng)
+    assert (p["buyer_user_id"], p["league_id"]) == (MATE, L)
+    assert lp.covers(BUYER, L).role == "member"
 
 
 def test_flag_off_projects_pro_but_never_binds(eng, flag):
@@ -222,7 +277,7 @@ def test_a_lapsed_pass_never_blocks_its_league(eng):
     with eng.begin() as conn:
         w.ent_row(conn, BUYER, expires_days=-1)
         old = w.pass_row(conn, L, buyer=BUYER)
-    assert lp.create_intent(MATE, L)["tier"] == 0
+    assert lp.create_intent(MATE, L)["product_id"] == "ftf_league_annual"
     assert [p["release_reason"] for p in w.passes(eng) if p["id"] == old] == ["ended"]
 
 
@@ -251,18 +306,9 @@ def test_manual_bind_for_an_unbound_pass(eng):
     assert _refused(lp.bind, BUYER, L) == "no_purchase"
     _rc("buy1", "INITIAL_PURCHASE")                    # no intent → unbound
     p = lp.bind(BUYER, L)
-    assert (p["league_id"], p["status"], p["tier"]) == (L, "active", 0)
+    assert (p["league_id"], p["status"]) == (L, "active")
     assert w.events(eng, "league_pass_bound")[-1][1]["via"] == "manual"
     assert _refused(lp.bind, BUYER, L2) == "already_buyer"
-
-
-def test_manual_bind_recomputes_the_tier(eng):
-    """§10: a discounted product bought with no intent; a league that no
-    longer qualifies is refused with tier_mismatch."""
-    _rc("buy1", "INITIAL_PURCHASE", product="ftf_league_annual_t2")
-    assert _refused(lp.bind, BUYER, L) == "tier_mismatch"
-    _paid_mates(eng, 3, league=L2)
-    assert lp.bind(BUYER, L2)["tier"] == 2
 
 
 # ── re-point and rollover ───────────────────────────────────────────────────
@@ -396,7 +442,7 @@ def test_comp_and_end(eng):
     assert _refused(lp.comp, L, 0, None) == "bad_days"
     assert _refused(lp.comp, "no_such_league", 7, None) == "unknown_league"
     p = lp.comp(L, 7, "beta league")
-    assert (p["origin"], p["buyer_user_id"], p["note"], p["tier"]) == ("comp", None, "beta league", None)
+    assert (p["origin"], p["buyer_user_id"], p["note"]) == ("comp", None, "beta league")
     assert lp.covers(MATE, L).covered_until == p["comp_expires_at"]
     assert _refused(lp.comp, L, 7, None) == "already_covered"
     assert _refused(lp.create_intent, BUYER, L) == "already_covered"
