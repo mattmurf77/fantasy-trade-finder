@@ -1,3 +1,10 @@
+## 2026-11-24 — Manager-profile suppression after account deletion (D-280, Q-040), branch `fix/q040-profile-suppression`
+
+- **Backend (venv in the worktree, Python 3.12.16, no network):** new `test_manager_profile_suppression.py` **7 passed**. With `test_manager_profiles`, `test_account_deletion_coverage`, `test_session_init_deleted_mid_daemon` (`_GUARDED_WRITERS`, unchanged), `test_test_profile`, `test_purge_entry_users`, `test_receipts_append_only`, `test_partner_activity`, `test_deletion_scrub`, `test_accounts`, `test_verified_sessions`, `test_seed_ui_test_db`: **520 passed**. Full `backend/tests` (`-n auto`): **15,954 passed, 43 skipped, 0 failed** (15,947 + the 7 new).
+- **Web:** `qa/web/check_web_structure.py` **265/265** after the privacy sentence (the legal-pinned "League data" sentence is unchanged and still verbatim).
+- **Sabotages, red then restored (9):** capture filter dropped (league-mate capture, re-signup); deletion insert dropped (4 tests); raw id stored instead of the hash (no-raw-id, keyed); hash ignores `EXPERIMENT_SALT_KEY` (keyed); re-signup clear dropped (re-signup); clear on every `mark_user_verified` call (no-users-row / already-verified); clear on `upsert_user`'s username-only INSERT (re-signup: the unverified row cleared it); suppression committed in its own transaction before the deletion's (rollback); `_KEPT_WITH_REASON` entry removed (export/registration). Restored: 7 passed.
+- **Not verified:** Postgres (SQLite only; the code is dialect-neutral Core). No device check needed (backend + one policy sentence).
+
 ## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
 
 - **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.

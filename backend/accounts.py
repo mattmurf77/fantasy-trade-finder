@@ -518,13 +518,24 @@ def get_account_for_user(sleeper_user_id: str) -> dict | None:
 
 
 def mark_user_verified(sleeper_user_id: str, via: str) -> None:
-    """Persist the verified marker on the users row (P1/P2 shared columns)."""
+    """Persist the verified marker on the users row (P1/P2 shared columns).
+
+    The first verification of a users row is the moment a person who has
+    proven control of this id opens their account (a username alone never
+    verifies, and account deletion removes the row, marker included). Only
+    then is a deleted account's profile suppression cleared (Q-040, D-280):
+    they have accepted the policy that discloses manager profiles. Later
+    re-verifications, and calls with no users row, clear nothing."""
     with db.engine.begin() as conn:
+        prior = conn.execute(select(db.users_table.c.verified_via).where(
+            db.users_table.c.sleeper_user_id == sleeper_user_id)).fetchone()
         conn.execute(
             update(db.users_table)
             .where(db.users_table.c.sleeper_user_id == sleeper_user_id)
             .values(verified_at=_now_iso(), verified_via=via)
         )
+        if prior is not None and prior.verified_via is None:
+            db.clear_manager_profile_suppression(conn, sleeper_user_id)
 
 
 def get_user_verified_via(sleeper_user_id: str) -> str | None:
@@ -811,6 +822,10 @@ _KEPT_WITH_REASON = {
     # (deletion_scrub.enqueue below; legal R28.20 (ii), (ix)). Not the
     # person's data to export: they're gone.
     "deletion_scrub_jobs": "the deletion scrub's job, deleted when it finishes",
+    # Q-040 (D-280): keyed hashes of deleted owners' Sleeper ids, written by
+    # the deletion below so a league-mate's sync never rebuilds their profile.
+    # Holds no id; its subject is gone, so never exported.
+    "manager_profile_suppressions": "the deletion's own profile suppression, kept to honour it",
 }
 
 # Team overhaul (BUILD-CONTRACT §4) keys its owner as `account_user_id`, and
@@ -1354,6 +1369,15 @@ def _delete_user_data(sleeper_user_id: str,
         profiles = db.manager_profiles_table
         res = conn.execute(delete(profiles).where(profiles.c.owner_id.in_(user_ids)))
         counts["manager_profiles_deleted"] = res.rowcount or 0
+        # Q-040 (D-280): a league-mate's next sync would rebuild that profile
+        # from public league history, so the deletion also suppresses it for
+        # good: a keyed hash of each id that can be a roster owner (minted
+        # account / entry keys never are), no id, league or name. This is a
+        # minimal list kept only to honour the deletion: unlike
+        # deletion_scrub_jobs, which keeps the ids until its scrub finishes,
+        # it can never name the person. Cleared if they verify a new account.
+        counts["manager_profile_suppressions_added"] = db.suppress_manager_profiles(
+            conn, [u for u in user_ids if not (u.startswith("entry:") or is_account_user_id(u))])
         referrals = db.referrals_table
         # NULL the invitee first; per-row sender tombstones avoid collisions
         # in the unique sender/invitee index after several account deletions.

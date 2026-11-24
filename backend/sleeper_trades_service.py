@@ -30,6 +30,7 @@ from datetime import date, datetime, timezone
 from .database import (
     has_manager_profile_capture,
     has_sleeper_trades,
+    load_manager_profile_suppressions,
     load_sleeper_trades,
     load_sleeper_waiver_moves,
     record_sleeper_trades,
@@ -255,8 +256,9 @@ def capture_manager_profiles(league_id: str, *, rosters: list,
     """Rebuild one league's manager_profiles from everything stored for it
     (sleeper_trades + sleeper_waiver_moves). No network: the rosters and
     league meta are the caller's already-fetched payloads, players come
-    from our own table. Returns rows written (0 = nothing to attribute,
-    previous rows kept)."""
+    from our own table. Owners on the deletion suppression list
+    (manager_profile_suppressions) get no row. Returns rows written (0 =
+    nothing to attribute, previous rows kept)."""
     from .manager_profiles import build_league_profiles
     trades = [json.loads(r["raw"])
               for r in load_sleeper_trades(league_id, limit=100_000)]
@@ -272,4 +274,8 @@ def capture_manager_profiles(league_id: str, *, rosters: list,
     rows = build_league_profiles(
         league_id, trades=trades, moves=moves, rosters=rosters,
         players=players, league_meta=league_meta, now=now)
+    # Q-040 (D-280): no row for an owner who deleted their account. One read
+    # for the league's owners; the builder stays a pure leaf.
+    suppressed = load_manager_profile_suppressions(r["owner_id"] for r in rows)
+    rows = [r for r in rows if r["owner_id"] not in suppressed]
     return replace_manager_profiles(league_id, rows, live_user=live_user)

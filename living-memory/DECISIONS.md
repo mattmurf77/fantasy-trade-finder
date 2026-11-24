@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-280 — Manager profiles: disclose them on the privacy page, and suppress a deleted account's profile with a keyed hash (Q-040 (a) + (b))
+
+**Date:** 2026-11-24 · **Who:** the operator's decision on Q-040 through the main session; built by a builder subagent on `fix/q040-profile-suppression`. Scope: `docs/plans/manager-profiles/scope-q040-suppression.md`.
+**Context:** `market.manager_profiles` is on (#635). Each league sync rebuilds a profile for every roster owner from public league history, so a deleted account's profile came back on any league-mate's next sync, and the privacy page did not mention the profiles.
+**Decision:**
+- (a) `web/privacy.html` §1 "League data" gains one sentence: we build a summary of each manager's trading and waiver habits from public league history to improve trade suggestions, including for leaguemates without an account, and stop for anyone who deletes their account.
+- (b) Account deletion writes `manager_profile_suppressions` rows (keyed hash + `created_at`, nothing else) for each resolved id that can be a roster owner, in the deletion's own transaction. `sleeper_trades_service.capture_manager_profiles` loads the suppressed subset of the league's owners (one query) and drops those rows before `replace_manager_profiles`; `manager_profiles.py` stays a pure leaf, and the writer's lock structure is untouched.
+- The hash is HMAC-SHA256 under `EXPERIMENT_SALT_KEY`, domain-separated. Reused, not a new secret: it is the server's existing HMAC master key, set in production, kept out of the database, and already immutable once experiments run (G-019). `SLEEPER_TOKEN_KEY` was rejected: it is a credential-encryption key whose rotation is a plausible incident response, and rotating it would silently orphan the list. Unset (dev/test) → a fixed key, like `_layer_salt`.
+- Cleared on the first verification of the same id's new `users` row (`accounts.mark_user_verified`): a proven new account that has accepted the policy. A username-only sign-in, which anyone can make, clears nothing.
+- Not (c), profiling only managers with an account: profiling league-mates who never signed up is the point of the feature: most suggestions go to league-mates who never ranked with us. The disclosure plus the deletion suppression is the mitigation.
+**Consequences:** the list is kept indefinitely, unlike `deletion_scrub_jobs`; it is the minimal record needed to honour the deletion and names no one. Changing `EXPERIMENT_SALT_KEY` would now also orphan it. Residual race: a league-mate capture already past its suppression read when a deletion commits can write that profile once more; the league's next capture removes it. The policy's effective date was not changed, and the new sentence did not go through legal-lead.
+
 ## D-279 — Home's next move also says when there is no move, as one untappable line from the server's reason, behind `league.next_move_empty`
 
 **Date:** 2026-11-21 · **Who:** the operator through the main session ("It should have content for the expected move too"); built by a builder subagent on `feat/next-move-empty`. Scope: `docs/plans/next-move-empty/scope.md`.
