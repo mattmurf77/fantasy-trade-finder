@@ -6844,7 +6844,7 @@ export default function TradesScreen({ navigation, route }: any) {
       const res = await Share.share({
         message:
           `Trade idea for our league: I send ${give}, get ${recv} from ` +
-          `@${c.opponent_username}. Found on Fantasy Trade Finder — ` +
+          `@${c.opponent_username}. Found on Fleeced — ` +
           url,
       });
       if (res.action !== Share.dismissedAction) {

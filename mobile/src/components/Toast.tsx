@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, StyleSheet, Text, Pressable, View } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -73,14 +73,26 @@ export default function Toast({
     }
   }, [visible, message]);
 
+  // The hold timer must start when THIS toast shows, not on every parent
+  // render. Every host passes an inline `onDismiss={() => setToast(null)}`,
+  // so with `onDismiss` in the effect's deps each re-render of the host
+  // cleared and restarted the hold: a busy screen (Matches refetching after
+  // a dismiss) kept an "Undo" toast up past its 5 s undo window, and a tap on
+  // that Undo did nothing because the write had already gone out. The latest
+  // callback is read through a ref; the hold restarts only for a new show,
+  // a new message or a new action.
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  const fireDismiss = () => onDismissRef.current?.();
+
   useEffect(() => {
     if (visible) {
       opacity.value = withTiming(1, { duration: 180 });
       translateY.value = reduceMotion ? 0 : withTiming(0, { duration: 220 });
-      if (effectiveHoldMs > 0 && onDismiss) {
+      if (effectiveHoldMs > 0 && onDismissRef.current) {
         const t = setTimeout(() => {
           opacity.value = withTiming(0, { duration: 220 }, (finished) => {
-            if (finished && onDismiss) runOnJS(onDismiss)();
+            if (finished) runOnJS(fireDismiss)();
           });
           if (!reduceMotion) {
             translateY.value = withTiming(-20, { duration: 220 });
@@ -92,7 +104,9 @@ export default function Toast({
       opacity.value = withTiming(0, { duration: 180 });
       translateY.value = reduceMotion ? -20 : withTiming(-20, { duration: 180 });
     }
-  }, [visible, effectiveHoldMs, onDismiss, opacity, translateY, reduceMotion]);
+    // fireDismiss reads the ref; it is deliberately not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, message, action, effectiveHoldMs, opacity, translateY, reduceMotion]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -103,7 +117,9 @@ export default function Toast({
 
   return (
     <Animated.View
-      pointerEvents="box-none"
+      // Fading out = gone: its action (Undo) must not fire after the host
+      // hid the toast.
+      pointerEvents={visible ? 'box-none' : 'none'}
       style={[styles.wrap, { top: topOffset ?? space.xxl }, animatedStyle]}
     >
       <Pressable

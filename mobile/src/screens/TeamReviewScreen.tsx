@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 
 import ChalkText from '../components/chalkline/Text';
 import Badge from '../components/chalkline/Badge';
@@ -21,6 +21,7 @@ import {
 } from '../api/league';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
+import { FEEDBACK_FAB_CLEARANCE, setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { OUTLOOK_DISPLAY_NAME } from '../components/OutlookBiasReceipt';
 import { playoffOddsText, type PlayoffProof } from '../utils/playoffOdds';
 import { refreshAfterOutlookSave } from '../utils/outlookSaved';
@@ -192,6 +193,17 @@ export default function TeamReviewScreen() {
 
   const beat = beats[step];
 
+  // The pinned Next / Confirm / Find my trades footer reports its height to
+  // the feedback FAB, which then rides above it instead of covering the
+  // button's right edge (the Tiers / Quick Set pattern). Focused only, and
+  // only while the footer is on screen (it is absent while loading).
+  const isFocused = useIsFocused();
+  const [footerH, setFooterH] = useState(0);
+  useEffect(() => {
+    setPinnedBottomBarHeight('team_review', isFocused && beat ? footerH : 0);
+  }, [isFocused, beat, footerH]);
+  useEffect(() => () => setPinnedBottomBarHeight('team_review', 0), []);
+
   // #423 — COMPLETION = reaching the `plan` beat (operator ruling 2026-09-08):
   // the beat is the standing summary of everything set, so a user who reads it
   // has "gone through it" whether they leave by "Find my trades", the back
@@ -340,7 +352,10 @@ export default function TeamReviewScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View
+        style={styles.footer}
+        onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+      >
         {beat === 'window' ? (
           <Pressable
             testID="team-review.action.outlook_set"
@@ -1461,7 +1476,8 @@ const styles = StyleSheet.create({
   tick: { flex: 1, height: 2, backgroundColor: ink.ink3, borderRadius: radii.xs },
   tickOn: { backgroundColor: ice.base },
   tickDone: { backgroundColor: ink.lineStrongA11y },
-  body: { padding: space.lg, gap: space.md, paddingBottom: space.xxl },
+  // The FAB rides just above the footer, over the end of this scroll.
+  body: { padding: space.lg, gap: space.md, paddingBottom: FEEDBACK_FAB_CLEARANCE },
 
   bubbleRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
   bubble: {

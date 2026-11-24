@@ -380,7 +380,7 @@ export default function EspnConnectScreen() {
         <View style={styles.bannerTopRow}>
           <Text style={[type.bodySm, styles.bannerTopText]}>
             {sendMode
-              ? 'Sign in to ESPN below to connect your account so FTF can ' +
+              ? 'Sign in to ESPN below to connect your account so Fleeced can ' +
                 'send trades for you. We never see your password — once ' +
                 'you’re in, we read the two sign-in cookies ESPN issues ' +
                 '(espn_s2 and SWID).'
