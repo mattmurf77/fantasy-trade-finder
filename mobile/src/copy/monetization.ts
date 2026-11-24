@@ -123,6 +123,77 @@ export const MON = {
   'mon.verify.apple_only.title': 'A new sign-in is needed',
   'mon.verify.apple_only.body':
     "Use Sign in with Apple to subscribe. It's a new sign-in: reconnect your league in Settings, and nothing from this session carries over.",
+
+  // ── League pass (flag `monetize.league_pass`, dark; D-281) ────────────────
+  // PLACEHOLDER COPY, PENDING LEGAL REVIEW (prd §8 q7, plan §10): plain and
+  // accurate, but not legal's wording. Replace the block from legal's file
+  // before the flag turns on. No price is written here: every price comes from
+  // StoreKit or the server's `league_pass` config and fills `{…}` slots.
+  'mon.lp.title': 'League pass',
+  'mon.lp.entry': 'Paying for your whole league? See the league pass',
+  'mon.lp.entry_a11y': 'See the league pass',
+  'mon.lp.close_a11y': 'Close',
+  'mon.lp.other_league': 'Your league pass covers {league_name} only. It does not cover this league.',
+  'mon.lp.other_league.unnamed': 'Your league pass covers one of your other leagues only. It does not cover this league.',
+  'mon.lp.pick.title': 'Choose a league',
+  'mon.lp.pick.body':
+    'One pass covers everyone in the league you choose, in that league. You get a subscription in all your leagues.',
+  'mon.lp.pick.empty': "You don't have a team in any league yet.",
+  'mon.lp.quote.teams': '{teams} teams',
+  'mon.lp.quote.price': '{year_one} for the first year, then {renewal} a year',
+  'mon.lp.quote.price_same': '{price} a year',
+  'mon.lp.disclosure':
+    'League pass for {league_name}: {year_one} for the first year, charged to your Apple ID when you confirm, then {renewal} a year. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
+  'mon.lp.disclosure_same':
+    'League pass for {league_name}: {price} a year, charged to your Apple ID when you confirm. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
+  'mon.lp.full_price.title': "The first-year discount isn't available right now",
+  'mon.lp.full_price.body': 'If you continue, you pay the full price, {price} a year. Continue at that price, or cancel.',
+  'mon.lp.full_price.continue': 'Continue at full price',
+  'mon.lp.buy': 'Buy league pass',
+  'mon.lp.cancel': 'Cancel',
+  'mon.lp.change_league': 'Choose another league',
+  'mon.lp.unavailable': "Purchases aren't available on this build yet.",
+  'mon.lp.confirming': 'Confirming your league pass…',
+  'mon.lp.done': 'Your league pass covers {league_name}.',
+  'mon.lp.done.unnamed': 'Your league pass is active.',
+  'mon.lp.done.close': 'Done',
+  'mon.lp.pending':
+    'Your purchase went through. Attaching it to your league can take a few minutes. Check Settings › Subscription.',
+  'mon.lp.unbound.title': 'Choose a league for your pass',
+  'mon.lp.unbound.body': "Your purchase went through, but it isn't attached to a league yet. Choose the league it covers.",
+  'mon.lp.refused.not_member': "You don't have a team in that league, so you can't buy a pass for it.",
+  'mon.lp.refused.league_not_allowed': "League passes aren't available for that league yet.",
+  'mon.lp.refused.already_covered': 'That league already has a league pass.',
+  'mon.lp.refused.already_buyer': 'You already have a league pass. You can move it to another league in Settings.',
+  'mon.lp.refused.refund_blocked': `A league pass on this account was refunded, so another one can't be bought here. Questions: ${SUPPORT_EMAIL}`,
+  'mon.lp.refused.tier_mismatch':
+    'That league qualifies for a higher price than the pass you bought, so the pass can\'t cover it. Choose another league.',
+  'mon.lp.refused.no_purchase': 'No league pass purchase was found for this account.',
+  'mon.lp.refused.no_pass': "You don't have an active league pass.",
+  'mon.lp.refused.cooldown': 'You can move your pass again on {date}.',
+  'mon.lp.refused.generic': 'Something went wrong. Try again.',
+  // Settings › Subscription and the manage view
+  'mon.lp.member.line': 'Your league pass covers {league_name} through {date}.',
+  'mon.lp.member.by': 'Paid for by {buyer}.',
+  'mon.lp.member.leaguemate': 'a leaguemate',
+  'mon.lp.buyer.line': 'League pass: {league_name}',
+  'mon.lp.buyer.renews': 'Renews {date}',
+  'mon.lp.buyer.through': "Covered through {date}. It won't renew.",
+  'mon.lp.buyer.count_one': '1 leaguemate covered',
+  'mon.lp.buyer.count': '{count} leaguemates covered',
+  'mon.lp.manage': 'Manage league pass',
+  'mon.lp.unbound.row': 'Choose a league for your league pass',
+  'mon.lp.move': 'Move the pass to another league',
+  'mon.lp.move.after': 'You can move it again on {date}.',
+  'mon.lp.move.title': 'Move your league pass to {league_name}?',
+  'mon.lp.move.body': 'Everyone in {league_name} is covered from now on, and the league it covers now is not.',
+  'mon.lp.move.confirm': 'Move pass',
+  'mon.lp.show_name': 'Show my name to the league',
+  'mon.lp.show_name.hint': 'Off: covered leaguemates see "a leaguemate".',
+  'mon.lp.unknown_league': 'Your league',
+  // R29: the one-time notice to an individual subscriber
+  'mon.lp.notice': "{league_name} is now covered by a leaguemate's league pass. Your own subscription hasn't changed.",
+  'mon.lp.notice.dismiss_a11y': 'Dismiss',
 } as const;
 
 export type MonKey = keyof typeof MON;

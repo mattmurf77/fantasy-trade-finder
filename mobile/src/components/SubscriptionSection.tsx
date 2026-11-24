@@ -20,6 +20,7 @@ import { useFlag } from '../state/useFeatureFlags';
 import { openPaywall, openVerify } from '../state/usePaywallGate';
 import { useSession } from '../state/useSession';
 import { customerInfoApplies, subscriptionSessionState } from '../state/subscriptionSession';
+import { LeaguePassSettingsRows } from './LeaguePassRows';
 import {
   FOUNDER_PRICE,
   FOUNDER_TAG,
@@ -222,6 +223,9 @@ function VerifiedRows() {
           onPress={() => void openPaywall({ source: 'settings' })}
         />
         {restoreRows}
+        {/* League pass (D-281): a covered member's league and date (R25).
+            Self-gated on monetize.league_pass; reads memory only. */}
+        <LeaguePassSettingsRows />
       </>
     );
   }
@@ -230,6 +234,10 @@ function VerifiedRows() {
     <>
       {/* B8: the status block waits for update 1. */}
       {STATUS_ROWS_AT_LAUNCH ? <MemberStatus active={active} founder={founder} /> : null}
+      {/* League pass (D-281): the buyer's league + Manage (R27, R28), an
+          unbound pass's choose-a-league row (R19), and any league a pass
+          covers. Self-gated on monetize.league_pass; reads memory only. */}
+      <LeaguePassSettingsRows />
       <ManageSubscriptionLink />
       {restoreRows}
     </>

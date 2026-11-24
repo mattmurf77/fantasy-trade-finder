@@ -13,6 +13,8 @@
 // Nothing this module returns is derived from a device receipt.
 
 import { api } from './client';
+import { useFeatureFlags } from '../state/useFeatureFlags';
+import { paywallConfigPath } from '../utils/leaguePass';
 
 /** GET /api/me/entitlements. `enforcing` is the server's enforce predicate
  *  (the same one the 402 gate uses), so a client can tell "you are not Pro"
@@ -29,6 +31,22 @@ export interface EntitlementsResponse {
   enforcing?: boolean;
   /** Founding GMs member (S1, #465). Absent on an older server ⇒ false. */
   founder?: boolean;
+  /** League pass (lld §6.1): every live pass covering the caller. Present
+   *  ONLY while `monetize.league_pass` is on server-side; `[]` for an
+   *  unverified session. `pro` keeps its meaning: a covered member's `pro`
+   *  stays false. */
+  league_passes?: LeaguePassEntry[];
+}
+
+/** One live pass covering the caller (`GET /api/me/entitlements`). */
+export interface LeaguePassEntry {
+  league_id: string;
+  platform: string;
+  role: 'buyer' | 'member';
+  /** ISO UTC; coverage runs to here. */
+  covered_until: string;
+  /** The buyer's display name only when they opted in (R28), else null. */
+  buyer_display: string | null;
 }
 
 /** One purchasable plan as the SERVER describes it. `display_price` is the
@@ -79,6 +97,27 @@ export interface PaywallConfig {
   dismissible?: boolean;
   /** Tip-jar consumables (support-the-platform; no entitlement). */
   tips?: PaywallTip[];
+  /** League pass (lld §6.2): served only while `monetize.league_pass` is on
+   *  AND the request carried `caps=league_pass`. Display FALLBACK copy, like
+   *  `products`: StoreKit's localized prices win. */
+  league_pass?: LeaguePassConfig;
+}
+
+/** The `league_pass` block of the paywall config. */
+export interface LeaguePassConfig {
+  /** The RevenueCat offering holding the three products ('league'). */
+  offering: string;
+  renews_at_price: string;
+  products: LeaguePassProduct[];
+}
+
+export interface LeaguePassProduct {
+  product_id: string;          // ftf_league_annual[_t1|_t2] — cross-client-invariants
+  tier: number;                // 0 | 1 | 2
+  display_price: string;       // year-one price, fallback copy
+  /** App Store promotional offer id for a buyer who can't take the intro
+   *  offer (tiers 1 and 2 only). */
+  promo_offer_id?: string;
 }
 
 export function getEntitlements(): Promise<EntitlementsResponse> {
@@ -87,11 +126,69 @@ export function getEntitlements(): Promise<EntitlementsResponse> {
 
 /** `platform` filters DISPLAY only (which SKUs a store can actually sell).
  *  iOS is the shipping client; the param is explicit so the web and extension
- *  paywalls can reuse the same route without the server guessing. */
+ *  paywalls can reuse the same route without the server guessing.
+ *  `caps=league_pass` is added ONLY while the client's `monetize.league_pass`
+ *  is on (utils/leaguePass.paywallConfigPath), so a flag-off request is
+ *  byte-identical to the launch binary's. */
 export function getPaywallConfig(
   platform: 'ios' | 'web' | 'extension' = 'ios',
 ): Promise<PaywallConfig> {
-  return api.get<PaywallConfig>(`/api/paywall/config?platform=${platform}`);
+  const leaguePassOn = useFeatureFlags.getState().flags['monetize.league_pass'] === true;
+  return api.get<PaywallConfig>(paywallConfigPath(platform, leaguePassOn));
+}
+
+// ── League pass (lld §6; flag `monetize.league_pass`, dark) ─────────────────
+// Every route 404s with the flag off, needs a verified session, and answers
+// a refusal as 409 `{error: reason, ...detail}` (utils/leaguePass.refusalReason
+// reads it). 409 is an expected answer, so it stays out of api_request_failed.
+
+const LP_QUIET = { quietStatuses: [409] as const };
+
+/** `POST /api/league-pass/intent`: the league chosen before the purchase
+ *  sheet, and its quote. */
+export interface LeaguePassIntent {
+  intent_id: number;
+  product_id: string;
+  tier: number;
+  teams: number | null;
+  expires_at: string;
+}
+
+/** `GET /api/league-pass`: the caller's own pass, as its buyer. */
+export interface LeaguePassView {
+  pass: {
+    league_id: string;
+    platform: string;
+    tier: number | null;
+    covered_until: string;
+    will_renew: boolean;
+    covered_count: number;
+    /** Null when a move is allowed now. */
+    can_repoint_at: string | null;
+    show_buyer: boolean;
+  } | null;
+  /** Holds a live league product but no live pass: choose a league (R19). */
+  unbound: boolean;
+}
+
+export function createLeaguePassIntent(leagueId: string): Promise<LeaguePassIntent> {
+  return api.post<LeaguePassIntent>('/api/league-pass/intent', { league_id: leagueId }, LP_QUIET);
+}
+
+export function getLeaguePass(): Promise<LeaguePassView> {
+  return api.get<LeaguePassView>('/api/league-pass');
+}
+
+export function bindLeaguePass(leagueId: string): Promise<LeaguePassView> {
+  return api.post<LeaguePassView>('/api/league-pass/bind', { league_id: leagueId }, LP_QUIET);
+}
+
+export function repointLeaguePass(leagueId: string): Promise<LeaguePassView> {
+  return api.post<LeaguePassView>('/api/league-pass/repoint', { league_id: leagueId }, LP_QUIET);
+}
+
+export function setLeaguePassShowBuyer(show: boolean): Promise<LeaguePassView> {
+  return api.put<LeaguePassView>('/api/league-pass/settings', { show_buyer: show }, LP_QUIET);
 }
 
 /** One tip-jar consumable. Display metadata ONLY — a tip grants nothing

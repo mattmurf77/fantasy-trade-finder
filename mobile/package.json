@@ -170,6 +170,7 @@
     "test:onboarding-flag-defaults": "node tests/check-onboarding-flag-defaults.js",
     "test:paywall-gate": "node tests/check-paywall-gate.js",
     "test:monetization-cut-features": "node tests/check-monetization-cut-features.js",
+    "test:league-pass": "node tests/check-league-pass.js",
     "test:send-timeout": "node tests/check-send-timeout.js",
     "test:send-registry": "node tests/check-send-registry.js",
     "test:signin-identity-labels": "node tests/check-signin-identity-labels.js",

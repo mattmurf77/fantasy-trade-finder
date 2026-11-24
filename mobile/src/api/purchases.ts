@@ -27,12 +27,21 @@
 import type {
   CustomerInfo,
   MakePurchaseResult,
+  PurchasesOffering,
   PurchasesOfferings,
   PurchasesPackage,
+  PurchasesPromotionalOffer,
   PurchasesStoreProduct,
 } from 'react-native-purchases';
 
-export type { CustomerInfo, PurchasesOfferings, PurchasesPackage, PurchasesStoreProduct };
+export type {
+  CustomerInfo,
+  PurchasesOffering,
+  PurchasesOfferings,
+  PurchasesPackage,
+  PurchasesPromotionalOffer,
+  PurchasesStoreProduct,
+};
 
 /** Static side of the SDK's default export, as a type only — `import type`
  *  is erased at compile time, so this costs no runtime require. */
@@ -421,6 +430,78 @@ export async function checkIntroEligibility(
     // Unknown is not eligible.
   }
   return out;
+}
+
+// ── League pass (lld §7, §8; flag `monetize.league_pass`, dark) ─────────────
+// The three `ftf_league_annual*` products live in their OWN RevenueCat
+// offering ('league', from the config's `league_pass.offering`), never the
+// default one: PaywallScreen renders every configured product that matches a
+// package in `current`, and a launch binary must never show a pass as a plan
+// row. Same two rules as above: every export no-ops without the SDK, and the
+// purchase waits on the identity-ready gate.
+
+/** The league pass offering, or null (no SDK, a failed fetch, or no such
+ *  offering configured). Never throws. */
+export async function getLeagueOffering(offeringId: string): Promise<PurchasesOffering | null> {
+  const P = sdk();
+  if (!P || !_configured || !offeringId) return null;
+  try {
+    const all = await P.getOfferings();
+    return all?.all?.[offeringId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** True only when StoreKit confirms this Apple ID can take the product's
+ *  INTRODUCTORY price and the product has one (the pass's year-one price on
+ *  tiers 1 and 2). Unknown, an error, no SDK or no intro → false, and the
+ *  caller takes the promotional-offer route. Never throws. */
+export async function checkIntroPriceEligible(product: PurchasesStoreProduct): Promise<boolean> {
+  const P = sdk();
+  if (!P || !_configured || !product?.introPrice) return false;
+  try {
+    const res = await P.checkTrialOrIntroductoryPriceEligibility([product.identifier]);
+    return res?.[product.identifier]?.status === INTRO_ELIGIBLE_STATUS;
+  } catch {
+    return false;
+  }
+}
+
+/** The SIGNED promotional offer `offerId` on `product`, with its localized
+ *  price, or null: no SDK, RevenueCat's identity isn't `sessionUserId` (the
+ *  signature binds the offer to the app user), the product carries no such
+ *  discount, or signing failed. iOS only; never throws. The caller must not
+ *  show the discounted price unless this returned an offer. */
+export async function getPromoOffer(
+  product: PurchasesStoreProduct,
+  offerId: string | null | undefined,
+  sessionUserId: string,
+): Promise<{ offer: PurchasesPromotionalOffer; priceString: string } | null> {
+  const P = sdk();
+  if (!P || !_configured || !offerId || !isIdentityReady(sessionUserId)) return null;
+  try {
+    const discount = (product?.discounts ?? []).find((d) => d.identifier === offerId);
+    if (!discount) return null;
+    const offer = await P.getPromotionalOffer(product, discount);
+    return offer ? { offer, priceString: discount.priceString } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `purchasePackage` with a signed promotional offer. Same contract: null when
+ *  purchases are unavailable; a StoreKit failure THROWS (narrow with
+ *  isUserCancelled); waits on the identity-ready gate (D12). */
+export async function purchaseDiscountedPackage(
+  pkg: PurchasesPackage,
+  offer: PurchasesPromotionalOffer,
+  sessionUserId: string,
+): Promise<MakePurchaseResult | null> {
+  const P = sdk();
+  if (!P || !_configured) return null;
+  await _assertIdentity(P, sessionUserId);
+  return P.purchaseDiscountedPackage(pkg, offer);
 }
 
 // ── Tip jar (consumables) ───────────────────────────────────────────────────

@@ -1462,9 +1462,11 @@ check('8i. D16 GRANTED [executed]: the Send pre-check — dark unless flag + enf
 check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — the router and the MFL/ESPN twins it renders (their confirm is reached through their own tap) — and a verify resumes with `proceed`, the whole unchanged tap (hand-off, link check, the confirm alert), never a propose', () => {
   const IDLE = "state !== 'idle'";
   const IDLE_NOT_SENDING = "state !== 'idle' \\|\\| sendState === 'in_flight' \\|\\| sendState === 'sent'";
-  const tap = (call, deps, guard = IDLE) => new RegExp(`const onPress = useCallback\\(\\(\\) => \\{\\s*if \\(${guard}\\) return;\\s*if \\(${call}\\(\\(\\) => \\{ void proceed\\(\\); \\}\\)\\) return;\\s*void proceed\\(\\);\\s*\\}, \\[${deps}\\]\\);`);
+  // League pass (D-281): every Send tap passes the league it acts on, so a
+  // live pass for that league counts (sendPreCheck's `leagueId`).
+  const tap = (call, deps, guard = IDLE) => new RegExp(`const onPress = useCallback\\(\\(\\) => \\{\\s*if \\(${guard}\\) return;\\s*if \\(${call}\\(\\(\\) => \\{ void proceed\\(\\); \\}, leagueId\\)\\) return;\\s*void proceed\\(\\);\\s*\\}, \\[${deps}\\]\\);`);
   const router = strip(read('components/SendInSleeperButton.tsx'));
-  assert(tap('sendPreCheck', 'state, proceed').test(router), 'router: the pre-check, then proceed');
+  assert(tap('sendPreCheck', 'state, proceed, leagueId').test(router), 'router: the pre-check, then proceed');
   eq((router.match(/sendPreCheck=\{sendPreCheck\}/g) || []).length, 2, 'the router hands it to both twins');
   const fnSrc = router.slice(router.indexOf('export function sendPreCheck('), router.indexOf('interface Props'));
   assert(!/propose|doPropose|Alert/.test(fnSrc), 'the pre-check itself never sends or confirms');
@@ -1479,7 +1481,7 @@ check('8j. D16 GRANTED [shape]: the pre-check runs first on every Send tap — t
     if (twins[rel]) {
       // Main's send registry (#539): the twins' tap also refuses while this
       // trade is in flight or sent.
-      assert(tap('sendPreCheck\\?\\.', 'state, sendState, sendPreCheck, proceed', IDLE_NOT_SENDING).test(s), `${rel}: the pre-check, then proceed (never straight to confirmSend)`);
+      assert(tap('sendPreCheck\\?\\.', 'state, sendState, sendPreCheck, proceed, leagueId', IDLE_NOT_SENDING).test(s), `${rel}: the pre-check, then proceed (never straight to confirmSend)`);
       assert(twins[rel].test(s), `${rel}: proceed is the whole unchanged tap (hand-off, link check, sign-in)`);
       assert(!/from '\.\/SendInSleeperButton'/.test(s), `${rel}: takes it as a prop (no import cycle)`);
     }
@@ -2579,6 +2581,9 @@ function mountPaywall({ state, rcId, ready = false, ctl = { rcId, ready }, plan 
     },
     // #495 M3: the Founding GMs welcome, never reached from these cases.
     './FounderWelcomeScreen': { claimFounderWelcome: async () => false, clubWindowOpen: () => false },
+    // League pass (D-281): the R26 line and the R30 entry are child
+    // components (self-gated on monetize.league_pass), inert here.
+    '../components/LeaguePassRows': { LeaguePassOtherLeagueLine: 'LeaguePassOtherLeagueLine', LeaguePassPaywallEntry: 'LeaguePassPaywallEntry' },
     '../api/events': { track: (name, props) => { events.push([name, props]); } },
     '../copy/monetization': copy,
   };

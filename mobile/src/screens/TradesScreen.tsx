@@ -205,6 +205,8 @@ import {
 import { useInterruptSlot, useMutedDuringTour, useInterruptCoordinator } from '../state/useInterruptCoordinator';
 // #393 M2 — the paywall's deck pieces (the offer trigger, the preview end card).
 import { useEntitlements } from '../state/useEntitlements';
+import { useProForLeague } from '../state/useLeaguePass';
+import LeaguePassCoveredNotice from '../components/LeaguePassCoveredNotice';
 import {
   hydrateOfferShown,
   offerTriggerOpen,
@@ -5556,7 +5558,11 @@ export default function TradesScreen({ navigation, route }: any) {
   //    entitlement. A purchase (entitled) or a verify resumes the pages.
   const paywallOn = useFlag('monetize.paywall');
   const payEnforcing = useEntitlements((s) => s.enforcing);
-  const payEntitled = useEntitlements((s) => s.pro);
+  // League pass (D-281): entitled here = Pro, or a live pass covering this
+  // league (`proForLeague`; exactly `pro` while `monetize.league_pass` is
+  // off). The deck acts on the session's active league, the league the
+  // server's gate resolves for these routes (LEAGUE_RESOLVERS `active`).
+  const payEntitled = useProForLeague(leagueId);
   // Demo counts as unverified on every subscription surface (head-eng
   // 2026-10-29, demo strict): no offer trigger, and the end card's button is
   // Continue → the VerifySheet. One predicate (state/subscriptionSession).
@@ -8626,6 +8632,13 @@ export default function TradesScreen({ navigation, route }: any) {
             userId={userId}
             leagueId={leagueId}
           />
+        ) : null}
+
+        {/* League pass R29 (D-281): an individual subscriber is told once
+            per league that a leaguemate's pass now covers it. Self-gated on
+            `monetize.league_pass`; renders nothing otherwise. */}
+        {!firstRun && leagueId && userId ? (
+          <LeaguePassCoveredNotice userId={userId} leagueId={leagueId} />
         ) : null}
 
         {/* Cold-start invite nudge — no league-mate has ranked yet, so the

@@ -70,7 +70,7 @@ interface Props {
   surface: SendSurface;
   /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
    *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
-  sendPreCheck?: (resume: () => void) => boolean;
+  sendPreCheck?: (resume: () => void, leagueId?: string) => boolean;
 }
 
 // The pre-send checks only. Sending / sent live in api/sendRegistry.ts.
@@ -333,9 +333,9 @@ export default function SendInMflButton({
   // here too; after a verify it resumes with `proceed`, not straight to the confirm.
   const onPress = useCallback(() => {
     if (state !== 'idle' || sendState === 'in_flight' || sendState === 'sent') return;
-    if (sendPreCheck?.(() => { void proceed(); })) return;
+    if (sendPreCheck?.(() => { void proceed(); }, leagueId)) return;
     void proceed();
-  }, [state, sendState, sendPreCheck, proceed]);
+  }, [state, sendState, sendPreCheck, proceed, leagueId]);
 
   if (!enabled) return null;
 
