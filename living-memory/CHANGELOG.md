@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-24 — Website outlook prompt refreshes after an outlook save (D-277 parity), branch `fix/web-outlook-prompt-refresh`, not merged
+
+- **What:** on the website's League Summary, "NN% playoff chance · Consider <Outlook>" stayed after that outlook was saved in the overlay, until the page was left and reopened. Same cause as the app's D-277: `outlook_recommendation.differs` is computed against the saved outlook when the projected standings are read, and no web save re-read them.
+- **Fix:** both web writers of `team_outlook` (`saveOutlookWithPositions`, `skipPositionalPrefs` in `web/js/app.js`) call `window.loadLeagueProjectionBatch()` on the success path. No server, flag, copy or app change; behind the existing `league.projection_outlook`.
+- **Guard:** `qa/web/check_web_structure.py` HYG-outlook-save-refreshes-projections (web-structure CI job). Not seen in a browser.
+
 ## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, merged as `df3bc0b4` (PR #714), TestFlight 1.22.0 (201)
 
 - **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.

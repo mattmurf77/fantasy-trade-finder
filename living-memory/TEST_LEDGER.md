@@ -1,3 +1,7 @@
+## 2026-11-24 — Website outlook prompt refresh (D-277 parity), branch `fix/web-outlook-prompt-refresh`
+- **Web:** `node --check web/js/app.js` OK; `python3 qa/web/check_web_structure.py` **266/266** (new HYG-outlook-save-refreshes-projections: 2 outlook save paths); `node qa/web/check_trade_search.cjs` passed; `python3 -m unittest discover -s scripts/qa -p test_instant_trade_report.py` OK (4 skipped).
+- **Red without the fix:** with `web/js/app.js` reverted to `origin/main` `fa37a979c`, the checker exits 1, 265/266, naming `app.js:saveOutlookWithPositions, app.js:skipPositionalPrefs`.
+- **Not verified:** not seen in a browser; no server started. Checklist: on League Summary with a "Consider <Outlook>" prompt showing, press Review outlook, save that outlook (both Save and Skip for now); the prompt is gone without leaving the page.
 ## 2026-11-22 — Paywall copy names no cut feature, branch `fix/paywall-copy-cut-features`
 - **App:** `npx tsc --noEmit` clean; `scripts/testid-lint.sh` OK; all **196** `check-*.js` green, including the new `check-monetization-cut-features.js` (2 passed) and `check-paywall-gate.js` (no "free" in the paid state still holds for the new lines).
 - **Red on `origin/main` `df3bc0b45`:** the new guard run over that commit's `mobile/src` fails s1 with six hits (`mon.lock.free` names Calibration, trends and the Draft Room; `mon.pay.b3` names ESPN; `mon.pay.b4` names Win Now and the shop window). Green on the branch.
