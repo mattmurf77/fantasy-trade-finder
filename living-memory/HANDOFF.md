@@ -11,6 +11,7 @@
 - [Current State 2026-11-09](#current-state-2026-11-09)
 - [Shipped 2026-11-10: offer learnings and fast deck, on in production](#shipped-2026-11-10-offer-learnings-and-fast-deck-on-in-production)
 - [2026-11-11: projection model v5 and the outlook suggestion](#2026-11-11-projection-model-v5-and-the-outlook-suggestion)
+- [2026-11-24: league pass, server side, built dark](#2026-11-24-league-pass-server-side-built-dark)
 
 ---
 
@@ -70,3 +71,28 @@
 - `coverage.estimated` is true on every production run; it cannot gate anything. Use `coverage.estimate_status`.
 - Sleeper's stored projections for past weeks are stamped after the games. They are not pregame snapshots.
 - Team Review sends `team_outlook` whenever it saves positions. Any new value placed in `window.inferred` must not reach that backfill (`backfillOutlook`).
+
+## 2026-11-24: league pass, server side, built dark
+
+**Where I stopped**
+- Branch `feat/league-pass-server` (worktree `.claude/worktrees/league-pass`), pushed at `df06cf06` plus the commit carrying this note. No PR is open. Nothing is merged or deployed.
+- Built: `backend/league_pass.py`, the `league_passes` and `league_pass_intents` tables, `leagues.previous_league_id`, billing source `league_pass_iap`, a league resolver for each of the 32 gated rules, `/api/league-pass/*` and three operator routes. All of it is behind `monetize.league_pass`, which is off. Design and scope: `docs/plans/monetization/league-pass/` (plan, PRD, HLD, LLD, scope).
+- The operator signed off the one scope waiver (no mobile evidence this phase) on 2026-11-24.
+- Operator decisions already made: hybrid coverage; year-one buyer discount by tier; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
+
+**In flight**
+- The branch was cut from `cb260ca4`. `main` has moved 34 commits since. A merge conflicts in `living-memory/DECISIONS.md` and `living-memory/TEST_LEDGER.md`; the code files merge automatically.
+- The decision record is numbered D-280 on the branch, and `main` has since used D-280 for another decision. Renumber it at the merge, in DECISIONS.md and wherever the docs and tests cite it.
+
+**Not verified**
+- CI on the pushed sha. Locally: 16,098 passed, 43 skipped, 0 failed, before `main` moved. The suite has not been re-run against the new `main`.
+- Postgres. The suite runs on SQLite; the two partial unique indexes on `league_passes` are the part to check.
+- RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence, intro-offer eligibility and a promotional offer on an upgrade.
+- Flag-off identity is tested by comparing responses and SQL with and without a pass row, not against the old code.
+
+**Don't repeat**
+- Importing `backend.server` outside pytest runs the platform-bindings backfill against the local dev database. Use the test fixtures.
+- New tables and flags trip five guardrail registries: the binding-table writer count, purge discovery (`NOT_USER_KEYS`), the two seeded flag fixtures, and the test-profile reset scope (`NOT_KEYED`). Run the full suite, not only the new tests.
+- The allow-list is the environment variable `LEAGUE_PASS_LEAGUE_ALLOWLIST`, not a `model_config` key: that table holds numbers only.
+- The worktree has its own `.venv` (Python 3.12), excluded through `.git/info/exclude`.
+- Known gaps, left on purpose: a session that switches league between the gate and an overhaul or Win Now handler can pass the league-match check; swipe and pass-reason have no per-card league check; Sleeper co-owners are covered at the gate only, so they do not see the pass in their entitlements and cannot buy one.

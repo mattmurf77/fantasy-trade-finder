@@ -10,6 +10,7 @@
 
 ## Table of Contents
 - [Priority Queue](#priority-queue)
+- [2026-11-24 — League pass: merge the server branch, comp-pass test, then store products, legal copy and the client](#2026-11-24--league-pass-merge-the-server-branch-comp-pass-test-then-store-products-legal-copy-and-the-client)
 - [2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets ON (D-271): TestFlight 195, then the checklists](#2026-11-15--improve-pages-home-playoff-card-half-sheet-and-playoff-targets-on-d-271-testflight-195-then-the-checklists)
 - [2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag](#2026-11-14--playoff-targets-d-264-operator-choices-merge-testflight-checklist-then-the-flag)
 - [2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups](#2026-11-12--max-pf-moves-d-258-backtest-gate-then-the-follow-ups)
@@ -75,6 +76,20 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 6. Address the separate board-history deletion race and wider private deck export filtering; scrub/reader merges do not prove these complete.
 7. Review actual daily-tick deployment/health and remaining TestFlight checklists; historical outage reports below do not establish current production state.
 
+
+## 2026-11-24 — League pass: merge the server branch, comp-pass test, then store products, legal copy and the client
+
+The server side is built dark on `feat/league-pass-server` (`monetize.league_pass` off); see [HANDOFF](HANDOFF.md) and `docs/plans/monetization/league-pass/`. Not queued above the seven active items. In order:
+
+1. **Bring the branch up to `main` and open the PR.** Resolve the two living-memory conflicts, renumber the decision record (D-280 is taken on `main`), re-run the full backend suite, push. *Why now:* `main` is 34 commits ahead and nothing else can start until this merges.
+2. **Check the two partial unique indexes on Postgres** (`uq_league_passes_active_league`, `uq_league_passes_active_buyer`) before the merge reaches production. *Why now:* the suite only runs on SQLite.
+3. **Comp-pass test with real leagues** (PRD R39): comp one or two leagues through `POST /api/admin/league-pass/comp` and read `league_pass_coverage_used`. The operator routes work with the flag off, but coverage needs the flag on for those leagues, so set `LEAGUE_PASS_LEAGUE_ALLOWLIST` first. *Why now:* it shows whether covered members use Pro before any purchase screen is built.
+4. **App Store Connect and RevenueCat** (operator): products `ftf_league_annual`, `ftf_league_annual_t1`, `ftf_league_annual_t2`, the year-one intro and promotional offers, offering `league`, and the in-app purchase key for signed offers.
+5. **Legal rulings on the two disclosures**, then the copy. *Why now:* the client cannot finish without the copy.
+6. **Client (phase 2):** entitlement state with `proForLeague`, the league pass screen, the paywall entry, the Settings block. It carries the mobile evidence waived in phase 1.
+7. **In the first sandbox purchases, check** the refund event shape, the upgrade event sequence, and whether a promotional offer applies on an upgrade from the individual plan. If it does not, existing subscribers pay $99.99 in year one.
+
+Deferred: closing the session-switch race inside the overhaul and Win Now modules; a per-card league check on swipe and pass-reason; listing the pass for Sleeper co-owners.
 
 ## 2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets ON (D-271): TestFlight 195, then the checklists
 

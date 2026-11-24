@@ -3,8 +3,8 @@
 **Date:** 2026-11-22
 **Entry point:** direct ask (operator: "Build server now")
 **Builder:** Opus builder subagents; the main session reviews and merges
-**Operator sign-off on waivers:** pending. One waiver, in §3: no mobile evidence,
-because this phase ships no client change.
+**Operator sign-off on waivers:** signed off by the operator, 2026-11-24. One waiver,
+in §3: no mobile evidence, because this phase ships no client change.
 
 Design: [prd.md](prd.md), [hld.md](hld.md), [lld.md](lld.md). This scope covers the
 server only: schema, `backend/league_pass.py`, the gate, the routes and the operator
