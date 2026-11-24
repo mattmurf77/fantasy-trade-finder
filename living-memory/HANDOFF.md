@@ -75,23 +75,26 @@
 ## 2026-11-24: league pass, server side, built dark
 
 **Where I stopped**
-- Branch `feat/league-pass-server` (worktree `.claude/worktrees/league-pass`), pushed at `df06cf06` plus the commit carrying this note. No PR is open. Nothing is merged or deployed.
-- Built: `backend/league_pass.py`, the `league_passes` and `league_pass_intents` tables, `leagues.previous_league_id`, billing source `league_pass_iap`, a league resolver for each of the 32 gated rules, `/api/league-pass/*` and three operator routes. All of it is behind `monetize.league_pass`, which is off. Design and scope: `docs/plans/monetization/league-pass/` (plan, PRD, HLD, LLD, scope).
-- The operator signed off the one scope waiver (no mobile evidence this phase) on 2026-11-24.
+- Server: branch `feat/league-pass-server` (worktree `.claude/worktrees/league-pass`), pushed, level with `main` as of 2026-11-24. Client: branch `feat/league-pass-client` (worktree `.claude/worktrees/league-pass-client`), stacked on the server branch, pushed. No PR is open for either. Nothing is merged or deployed.
+- Everything is behind `monetize.league_pass`, which is off. Design and scope: `docs/plans/monetization/league-pass/` (plan, PRD, HLD, LLD, `scope.md`, `scope-client.md`, `evidence-client.md`). Decision record: D-281, with a 2026-11-24 addendum.
+- The operator signed off the server scope waiver (no mobile evidence in phase 1) on 2026-11-24. The client scope has no waiver: its TestFlight checklist is required and not run.
+- An independent black-box test pass on the server found three defects; all are fixed and its re-run found none open. Report: `data/review/sim-test-league-pass-2026-11-24/REPORT.md` in the main checkout.
 - Operator decisions already made: hybrid coverage; year-one buyer discount by tier; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
 
 **In flight**
-- `main` was merged into the branch on 2026-11-24. The decision record is D-281: it was D-280 while the branch was being built, and `main` used that number first.
+- Nothing in code. `main` moves fast enough that the server branch conflicts again in `living-memory/DECISIONS.md` and `TEST_LEDGER.md` within hours; both are append-only, keep both sides.
+- The client's Shop offers check is not converted: its entitlement read lives on `feat/paid-launch`, which the client branch does not include. `check-league-pass.js` 7a fails as soon as that file reads `useEntitlements` without `useProForLeague`.
 
 **Not verified**
-- CI on the pushed sha. Locally: 16,098 passed, 43 skipped, 0 failed, before `main` moved. The suite has not been re-run against the new `main`.
-- Postgres. The suite runs on SQLite; the two partial unique indexes on `league_passes` are the part to check.
+- CI on either branch (no PR). Locally: backend 16,144 passed, 43 skipped, 0 failed; mobile `tsc` clean, testid-lint OK, 207 of 207 check suites.
+- Anything on a device. All `mon.lp.*` copy is placeholder, pending legal.
+- Postgres. The suite runs on SQLite; check the two partial unique indexes on `league_passes` and the `coalesce(users.created_at, '')` seat ordering.
 - RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence, intro-offer eligibility and a promotional offer on an upgrade.
-- Flag-off identity is tested by comparing responses and SQL with and without a pass row, not against the old code.
 
 **Don't repeat**
 - Importing `backend.server` outside pytest runs the platform-bindings backfill against the local dev database. Use the test fixtures.
 - New tables and flags trip five guardrail registries: the binding-table writer count, purge discovery (`NOT_USER_KEYS`), the two seeded flag fixtures, and the test-profile reset scope (`NOT_KEYED`). Run the full suite, not only the new tests.
-- The allow-list is the environment variable `LEAGUE_PASS_LEAGUE_ALLOWLIST`, not a `model_config` key: that table holds numbers only.
-- The worktree has its own `.venv` (Python 3.12), excluded through `.git/info/exclude`.
-- Known gaps, left on purpose: a session that switches league between the gate and an overhaul or Win Now handler can pass the league-match check; swipe and pass-reason have no per-card league check; Sleeper co-owners are covered at the gate only, so they do not see the pass in their entitlements and cannot buy one.
+- The allow-list is the environment variable `LEAGUE_PASS_LEAGUE_ALLOWLIST`, not a `model_config` key: that table holds numbers only. Unset means no restriction.
+- The server worktree has its own `.venv` (Python 3.12); the client worktree's `mobile/node_modules` is a symlink to the `paid-launch` worktree's. Both are excluded through `.git/info/exclude`.
+- A Sleeper co-owner rides the roster owner's seat: covered when the owner is, not counted and not capped. PRD R7 still calls the allowance a co-owner allowance; the wording is the operator's to settle.
+- On a session with no league, a covered member gets 409 `session_not_initialized` from the gate hook even on a route whose own flag is off, where a Pro user gets that route's 404.

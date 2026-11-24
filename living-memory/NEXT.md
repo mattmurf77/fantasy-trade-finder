@@ -79,17 +79,17 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 
 ## 2026-11-24 — League pass: merge the server branch, comp-pass test, then store products, legal copy and the client
 
-The server side is built dark on `feat/league-pass-server` (`monetize.league_pass` off); see [HANDOFF](HANDOFF.md) and `docs/plans/monetization/league-pass/`. Not queued above the seven active items. In order:
+Server and client are both built dark (`monetize.league_pass` off) on `feat/league-pass-server` and `feat/league-pass-client`; see [HANDOFF](HANDOFF.md) and `docs/plans/monetization/league-pass/`. Not queued above the seven active items. In order:
 
-1. **Open the PR and merge it.** `main` was merged in on 2026-11-24 and the decision record is now D-281. *Why now:* nothing else can start until this merges, and `main` moves fast enough to conflict again in the living-memory files.
-2. **Check the two partial unique indexes on Postgres** (`uq_league_passes_active_league`, `uq_league_passes_active_buyer`) before the merge reaches production. *Why now:* the suite only runs on SQLite.
-3. **Comp-pass test with real leagues** (PRD R39): comp one or two leagues through `POST /api/admin/league-pass/comp` and read `league_pass_coverage_used`. The operator routes work with the flag off, but coverage needs the flag on for those leagues, so set `LEAGUE_PASS_LEAGUE_ALLOWLIST` first. *Why now:* it shows whether covered members use Pro before any purchase screen is built.
-4. **App Store Connect and RevenueCat** (operator): products `ftf_league_annual`, `ftf_league_annual_t1`, `ftf_league_annual_t2`, the year-one intro and promotional offers, offering `league`, and the in-app purchase key for signed offers.
-5. **Legal rulings on the two disclosures**, then the copy. *Why now:* the client cannot finish without the copy.
-6. **Client (phase 2):** entitlement state with `proForLeague`, the league pass screen, the paywall entry, the Settings block. It carries the mobile evidence waived in phase 1.
-7. **In the first sandbox purchases, check** the refund event shape, the upgrade event sequence, and whether a promotional offer applies on an upgrade from the individual plan. If it does not, existing subscribers pay $99.99 in year one.
+1. **Open the server PR and merge it** (operator's go-ahead). *Why now:* the client branch is stacked on it, and `main` conflicts with it again within hours in the living-memory files.
+2. **Check Postgres before the merge reaches production:** the two partial unique indexes (`uq_league_passes_active_league`, `uq_league_passes_active_buyer`) and the seat ordering. *Why now:* the suite only runs on SQLite.
+3. **Comp-pass test with real leagues** (PRD R39): turn the flag on with `LEAGUE_PASS_LEAGUE_ALLOWLIST` naming one or two leagues, comp them through `POST /api/admin/league-pass/comp`, and read `league_pass_coverage_used`. *Why now:* it shows whether covered members use Pro before any purchase is possible. The released app has no league pass code, so it still locks by account Pro on the device; this test reads server use only until a build carries the client.
+4. **App Store Connect and RevenueCat** (operator): products `ftf_league_annual`, `ftf_league_annual_t1`, `ftf_league_annual_t2`, the year-one introductory and promotional offers, offering `league`, and the in-app purchase key for signed offers.
+5. **Legal rulings on the two disclosures**, then replace the placeholder `mon.lp.*` copy.
+6. **Decide the client's base** (operator): it must be combined with `feat/paid-launch` before a build, and Shop offers converted to `useProForLeague` there. Then the client PR, a TestFlight build, and the 24-step checklist in `evidence-client.md`.
+7. **In the first sandbox purchases, check** the refund event shape, the upgrade event sequence, and whether a promotional offer applies on an upgrade from the individual plan. If it does not, existing subscribers pay $99.99 in year one; the screen already says so before the purchase.
 
-Deferred: closing the session-switch race inside the overhaul and Win Now modules; a per-card league check on swipe and pass-reason; listing the pass for Sleeper co-owners.
+Deferred: PRD R7 wording for Sleeper co-owners; a league name on `GET /api/league-pass`; Settings wording for a buyer who left their league; swipe's `impression_id` may name the user's own impression from another league (affects every user, not a pass bypass).
 
 ## 2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets ON (D-271): TestFlight 195, then the checklists
 
