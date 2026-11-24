@@ -20,6 +20,27 @@ interface Props {
   aboveTabBar?: boolean;
 }
 
+// ── Footprint: what a screen reserves so its content can clear the FAB ──
+// The button is FAB_SIZE square, right:16, and sits FAB_BOTTOM_TABS above the
+// device's bottom inset (the RootNav mount, over the tab bar) or
+// FAB_BOTTOM_STACK above it (root-stack pushes, no tab bar).
+const FAB_SIZE = 52;
+const FAB_BOTTOM_TABS = 64;
+const FAB_BOTTOM_STACK = 16;
+const FAB_GAP = 8;
+/** Bottom padding for a screen's scroll content so its last row (and any
+ *  button in it) can scroll clear of the FAB: the FAB's top edge above the
+ *  bottom of the content area, plus an 8pt gap.
+ *  - Root-stack push, content ending at the bottom inset (SafeAreaView
+ *    edges=['bottom']): 16 + 52 + 8 = 76.
+ *  - Tab screen, content ending at the 49pt UIKit tab bar:
+ *    64 + 52 − 49 + 8 = 75.
+ *  One value covers both. When the screen reports a pinned bar below the
+ *  content (setPinnedBottomBarHeight), the FAB rises by that bar, so this
+ *  still measures from the bar's top edge; content that scrolls UNDER an
+ *  absolutely positioned bar pads `barHeight + FEEDBACK_FAB_CLEARANCE`. */
+export const FEEDBACK_FAB_CLEARANCE = FAB_BOTTOM_STACK + FAB_SIZE + FAB_GAP;
+
 // ── Pinned-bottom-bar registry (teardown S3 PRD-01, flag `ux.touch_polish`) ──
 // Screens with a pinned bottom action bar (Tiers save bar, Quick set /
 // Quick rank footers) report the bar's occupied height here so the FAB can
@@ -135,7 +156,7 @@ export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props)
           // Sit above the bottom tab bar (~ 52pt) + safe area inset, plus
           // any pinned bottom bar the focused screen reported (flag-gated).
           // Root-stack pushes have no tab bar → smaller offset (#188).
-          { bottom: insets.bottom + (aboveTabBar ? 64 : 16) + extraOffset },
+          { bottom: insets.bottom + (aboveTabBar ? FAB_BOTTOM_TABS : FAB_BOTTOM_STACK) + extraOffset },
         ]}
       >
         <Pressable
@@ -174,8 +195,8 @@ const styles = StyleSheet.create({
     // bottom set dynamically with safe area inset
   },
   fab: {
-    width: 52,
-    height: 52,
+    width: FAB_SIZE,
+    height: FAB_SIZE,
     borderRadius: radii.md,
     backgroundColor: ink.ink2,
     borderWidth: 1,

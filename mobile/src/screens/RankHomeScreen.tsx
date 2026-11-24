@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 
 import { Icon, TickLabel } from '../components/chalkline';
 import RankImportSheet from '../components/RankImportSheet';
@@ -407,7 +408,8 @@ export default function RankHomeScreen({ navigation, route }: any) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
-  body: { padding: space.lg, gap: space.md },
+  // The footer line scrolls clear of the feedback FAB.
+  body: { padding: space.lg, gap: space.md, paddingBottom: FEEDBACK_FAB_CLEARANCE },
 
   // v3 heading row — heading left, import entry right, baseline-aligned.
   // The heading never wraps internally; if the pair can't share the row,

@@ -108,6 +108,7 @@ const queueMod = load('utils/queueCalcTrade.ts', {
     },
   },
   './haptics': { haptics: { success() {}, warning() {} } },
+  '../state/matchesLists': { refreshMatchesLists: async () => {} },
 });
 const queueArgs = {
   leagueId: 'L1', opponent: { userId: 'u2', name: 'bob' }, giveIds: ['1'], receiveIds: ['2'], screen: 'Trades',
@@ -297,7 +298,7 @@ check('1b. [shape] the Sleeper button still returns to idle before the gate chec
 
 check('1c. [shape] the send pre-check still runs first on the tap (unchanged)', () => {
   const src = strip(read('components/SendInSleeperButton.tsx'));
-  assert(/export function sendPreCheck\(resume: \(\) => void\): boolean/.test(src), 'sendPreCheck');
+  assert(/export function sendPreCheck\(resume: \(\) => void(, afterAsk = false)?\): boolean/.test(src), 'sendPreCheck');
   for (const f of ['components/SendInMflButton.tsx', 'components/SendInEspnButton.tsx']) {
     assert(/preCheck\??\.?\(/.test(strip(read(f))) || /sendPreCheck/.test(strip(read(f))), `${f}: pre-check call`);
   }

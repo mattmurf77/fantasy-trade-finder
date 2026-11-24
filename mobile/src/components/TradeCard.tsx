@@ -307,6 +307,15 @@ function TradeCardComp({
   const note = consensusNote(data.fairness);
   // v2: the counterparty already liked the mirror of this trade.
   const likesYou = data.likesYou === true;
+  // A "They're interested" card that the server SYNTHESIZED from the
+  // counterparty's like (server.py `_inject_likes_you_cards_impl`) is stamped
+  // basis 'consensus' with mismatch_score 0: it was never generated from two
+  // boards. Read literally, that rendered "This league-mate hasn't ranked
+  // players yet" and "Match strength 0" under the badge, while the match it
+  // forms shows strength 100 (sim pass 2026-11-22). Their like IS their
+  // preference, so neither the unranked framing nor a strength the server
+  // never computed belongs on it: the badge and the value bar carry the card.
+  const likesYouMirror = likesYou && isConsensus;
   // v2 sweetener — resolve the flagged player from whichever side it's
   // on. Resolution failure (id not in the arrays) just hides the line.
   const sweetenerSide = data.sweetener?.side;
@@ -886,7 +895,7 @@ function TradeCardComp({
           below already shows direction and magnitude via favors/gap, so
           prose about value would restate it. utils/consensusNote.ts carries
           the reasoning; check-consensus-balance-claim.js pins it. */}
-      {isConsensus && (
+      {isConsensus && !likesYouMirror && (
         <View style={styles.consensusNote} testID="trade-card.consensus-note">
           <Text style={type.label}>{note.label}</Text>
           <Text style={type.bodySm} testID="trade-card.consensus-note.body">
@@ -899,7 +908,7 @@ function TradeCardComp({
           player swap it's stale, so edited cards hide it and lean on the
           re-priced value bar below. #276 — `compact` (existing prop) trims
           its internal gap; the meter itself is unchanged. */}
-      {!data.edited && !hideMatchStrength && (
+      {!data.edited && !hideMatchStrength && !likesYouMirror && (
         <StrengthBar value={matchPct} label="Match strength" compact />
       )}
 

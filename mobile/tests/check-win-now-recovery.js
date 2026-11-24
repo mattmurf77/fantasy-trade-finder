@@ -128,6 +128,8 @@ function sessionHarness() {
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
     // 200 ms path C: sign-out / account switch clear the device-held trade pages.
     './devicePageStore': {clearDevicePages: async () => {}},
+    // The account reset on sign-out / another account (check-signout-reset.js owns its behavior).
+    './accountReset': {resetAccountState: async () => {}},
   };
   state = load('src/state/useSession.ts', name => {
     if (name === './leagueSession') return load('src/state/leagueSession.ts', dep => { assert.equal(dep, '../api/client'); return h.client; }, h.time);
@@ -158,6 +160,7 @@ function mountWinNow(h) {
     '../state/useEntitlements': {useEntitlements: Object.assign(sel => sel({enforcing: false, pro: false}), {getState: () => ({enforcing: false, pro: false})})},
     '../state/usePaywallGate': {isUnverifiedSession: () => false, openPaywall: () => {}, openVerify: () => {}},
     '../utils/winNow': {seasonStale: () => false},
+    '../utils/standingsTable': {NO_FORECAST_LINE: 'Projections aren’t available for this league yet.'},
     '../theme/chalkline': {ink: {}, chalk: {}, ice: {}, space: {}, radii: {}, type: {}},
   };
   const screen = load('src/screens/WinNowScreen.tsx', name => { assert.ok(stubs[name], `unexpected screen import ${name}`); return stubs[name]; }, h.time);

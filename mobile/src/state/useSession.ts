@@ -314,6 +314,17 @@ export function refreshAfterLeagueChange(): void {
   queryClient.invalidateQueries({ queryKey: ['tiers-status'] });
 }
 
+/** The account reset (state/accountReset.ts): drops the leaving account's
+ *  query cache, entitlement answer and per-account device state. Lazy require:
+ *  that module reaches stores which import this one. Called at the end of
+ *  signOut (after the token is gone) and when a different account replaces
+ *  the current one (setUser, startDemoSession). */
+function resetAccountState(): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { resetAccountState: reset } = require('./accountReset') as typeof import('./accountReset');
+  return reset();
+}
+
 export const useSession = create<SessionState>((set, get) => ({
   user: null,
   league: null,
@@ -471,6 +482,10 @@ export const useSession = create<SessionState>((set, get) => ({
       noteTradeInputChange('after_account_switch');
       void clearDevicePages();
     }
+    // Another account replaces this one with no sign-out between (an expiry
+    // then someone else's sign-in, the link-Sleeper re-key): nothing of the
+    // previous account's survives in the caches or per-account stores.
+    if (previous && previous.user_id !== u?.user_id) void resetAccountState();
     // A different user_id (an expiry then someone else's sign-in, or the
     // link-Sleeper re-key) starts from unknown verification: the previous
     // user's answer never carries over. Every writer runs after this.
@@ -705,6 +720,7 @@ export const useSession = create<SessionState>((set, get) => ({
     // 200 ms path C (onboarding-eng A1): a demo bypasses setUser, so a demo
     // started while another account is still in the store (SignIn after an
     // expiry that kept the user) drops that account's device-held trade pages.
+    if (get().user && get().user!.user_id !== demoUser.user_id) void resetAccountState();
     const previous = get().user;
     if (previous && previous.user_id !== demoUser.user_id) void clearDevicePages();
     set({
@@ -805,6 +821,11 @@ export const useSession = create<SessionState>((set, get) => ({
       // 200 ms path C — the device-held trade pages belong to this account.
       clearDevicePages(),
     ]);
+    if (generation !== leagueSessions.currentGeneration() || get().user) return;
+    // The account reset runs AFTER the token is gone, so a query an
+    // on-screen observer refetched during the awaits above cannot carry the
+    // leaving account's answer into the next account's cache.
+    await resetAccountState();
     if (generation !== leagueSessions.currentGeneration() || get().user) return;
     _inviteTs = 0;
     set({

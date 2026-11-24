@@ -59,6 +59,8 @@ import { useFlag } from '../state/useFeatureFlags';
 import { CONTINUITY_FLAG, returnOptions } from '../navigation/navContinuity';
 import { registerScrollToTop } from '../navigation/scrollToTop';
 import { relativeTime } from '../utils/relativeTime';
+import { matchAssetLabel } from '../utils/matchAssetLabel';
+import { refreshMatchesLists } from '../state/matchesLists';
 import {
   filterVisible,
   countsByLeague,
@@ -483,6 +485,10 @@ export default function MatchesScreen() {
       // #334 (R-2, B-1) — ordered unhide; see dismissMutation.onSuccess.
       await queryClient.invalidateQueries({ queryKey: ['awaiting-trades'] });
       unhideKey(awaitingHiddenKey(row.league_id, row.trade_id));
+      // The dismiss retracted the like, so the deck's liked count (and
+      // Mutual, harmlessly) refresh too. Awaiting was awaited above for the
+      // ordered unhide; this repeat is a no-op refetch-wise.
+      void refreshMatchesLists();
     },
   });
 
@@ -515,6 +521,10 @@ export default function MatchesScreen() {
     if (!p) return;
     pendingDismissRef.current = null;
     clearTimeout(p.timer);
+    // The undo window is over: its "Undo" toast goes with it, so it can never
+    // be tapped after the write is sent. (A new dismiss sets its own toast
+    // after this call; functional updates apply in order.)
+    setToast((t) => (t?.action?.label === 'Undo' ? null : t));
     if (p.kind === 'match') dismissMutation.mutate(p.id);
     else dismissAwaitingMutation.mutate(p.row);
   }
@@ -1409,15 +1419,19 @@ export default function MatchesScreen() {
       {/* Segment toggle. Two-pill control to flip between mutual matches
           (default) and one-sided likes waiting on the counterparty. */}
       <View style={styles.segmentRow}>
+        {/* One word each + the count: three segments must fit 375pt
+            without clipping (the subtitle above names each in full). */}
         <SegmentBtn
-          label="Mutual matches"
+          label="Mutual"
+          a11yName="Mutual matches"
           count={mutualPillCount}
           active={segment === 'mutual'}
           onPress={() => setSegment('mutual')}
           testID="matches.segment.mutual"
         />
         <SegmentBtn
-          label="Awaiting them"
+          label="Awaiting"
+          a11yName="Awaiting them"
           count={awaitingPillCount}
           active={segment === 'awaiting'}
           onPress={() => {
@@ -1433,7 +1447,8 @@ export default function MatchesScreen() {
             becomes a thing users are afraid to use. */}
         {standingOffersOn ? (
           <SegmentBtn
-            label="Standing offers"
+            label="Standing"
+            a11yName="Standing offers"
             count={standingPillCount}
             active={segment === 'standing'}
             onPress={() => setSegment('standing')}
@@ -2000,12 +2015,15 @@ export default function MatchesScreen() {
 
 function SegmentBtn({
   label,
+  a11yName,
   active,
   onPress,
   testID,
   count,
 }: {
   label: string;
+  // The full segment name VoiceOver reads; the visible label is shortened.
+  a11yName?: string;
   active: boolean;
   onPress: () => void;
   testID?: string;
@@ -2021,8 +2039,8 @@ function SegmentBtn({
       accessibilityState={{ selected: active }}
       accessibilityLabel={
         typeof count === 'number'
-          ? `${label}, ${count} ${count === 1 ? 'trade' : 'trades'}`
-          : label
+          ? `${a11yName ?? label}, ${count} ${count === 1 ? 'trade' : 'trades'}`
+          : a11yName ?? label
       }
       style={({ pressed }) => [
         styles.segmentBtn,
@@ -2049,23 +2067,23 @@ function SegmentBtn({
 // names + teams + positions as parallel arrays — use those when present.
 // Falls back to ID-as-name / "FA" / "FLX" (legacy behavior, only happens
 // when the backend hasn't been redeployed with the enrichment yet).
+// matchAssetLabel labels a draft pick PICK / PICK, as the deck does (the
+// arrays carry "" for a pick).
 function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined) {
-  const POS_UNKNOWN = 'FLX' as any;
+  const leagueId = m.league_id || fallbackLeague || '';
   const give = m.my_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.my_side_player_names?.[i]     || id,
-    position: m.my_side_player_positions?.[i] || POS_UNKNOWN,
-    team:     m.my_side_player_teams?.[i]     || '',
+    name: m.my_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, m.my_side_player_positions?.[i], m.my_side_player_teams?.[i]),
   }));
   const recv = m.their_side_player_ids.map((id, i): Player => ({
     id,
-    name:     m.their_side_player_names?.[i]     || id,
-    position: m.their_side_player_positions?.[i] || POS_UNKNOWN,
-    team:     m.their_side_player_teams?.[i]     || '',
+    name: m.their_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, m.their_side_player_positions?.[i], m.their_side_player_teams?.[i]),
   }));
   return {
     trade_id:           m.match_id,
-    league_id:          m.league_id || fallbackLeague || '',
+    league_id:          leagueId,
     give_player_ids:    m.my_side_player_ids,
     receive_player_ids: m.their_side_player_ids,
     give_players:       give,
@@ -2085,23 +2103,23 @@ function matchToTradeCardShape(m: TradeMatch, fallbackLeague: string | undefined
 // we don't pay for a second TradeCard variant. Match score is unknown for
 // historical likes (the in-memory card may not still be around), so we
 // show 100 to keep the strength bar consistent with mutual matches.
+// The awaiting route ships team/position arrays like matches/all; an older
+// server omits them and matchAssetLabel keeps the FLX / "FA" fallback.
 function awaitingToTradeCardShape(a: AwaitingTrade, fallbackLeague: string | undefined) {
-  const POS_UNKNOWN = 'FLX' as any;
+  const leagueId = a.league_id || fallbackLeague || '';
   const give = a.my_side_player_ids.map((id, i): Player => ({
     id,
-    name:     a.my_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name: a.my_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, a.my_side_player_positions?.[i], a.my_side_player_teams?.[i]),
   }));
   const recv = a.their_side_player_ids.map((id, i): Player => ({
     id,
-    name:     a.their_side_player_names?.[i] || id,
-    position: POS_UNKNOWN,
-    team:     '',
+    name: a.their_side_player_names?.[i] || id,
+    ...matchAssetLabel(id, leagueId, a.their_side_player_positions?.[i], a.their_side_player_teams?.[i]),
   }));
   return {
     trade_id:           a.trade_id,
-    league_id:          a.league_id || fallbackLeague || '',
+    league_id:          leagueId,
     give_player_ids:    a.my_side_player_ids,
     receive_player_ids: a.their_side_player_ids,
     give_players:       give,
@@ -2155,6 +2173,7 @@ const styles = StyleSheet.create({
   segmentBtn: {
     flex: 1,
     height: 44,
+    paddingHorizontal: space.xs,
     alignItems: 'center',
     justifyContent: 'center',
     borderBottomWidth: 2,

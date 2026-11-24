@@ -2,6 +2,7 @@ import { gateSignalFor } from '../api/client';
 import { track } from '../api/events';
 import { queueTradeForOpponent, type CalcQueueReason, type SwipeSignal } from '../api/trades';
 import { haptics } from './haptics';
+import { refreshMatchesLists } from '../state/matchesLists';
 
 // ── The ✓ cell's queue call (D-152), owned in ONE place (D-158, Wave B0) ──
 //
@@ -94,6 +95,8 @@ export async function queueCalcTrade(args: {
     args.screen,
   );
   if (queued) {
+    // The queue wrote a `like` row: it is in Matches > Awaiting now.
+    void refreshMatchesLists();
     haptics.success();
     return {
       queued: true,

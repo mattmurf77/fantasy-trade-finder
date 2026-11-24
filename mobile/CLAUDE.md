@@ -95,6 +95,7 @@ Every new user-facing screen shows the feedback FAB.
 - **Root-stack pushes render their own**: `<FeedbackFAB activeScreen="<RouteName>" aboveTabBar={false} />`. Live examples: `FreeAgentsScreen`, `LeagueSummaryScreen`, `DraftRoomScreen`, `MockDraftScreen`, `PickAssignmentScreen`, `RecordPicksScreen`, `PremiumRankingsBrowserScreen`.
 - `DraftRoomScreen` is dual-registered; the tab copy is passed `initialParams {inTabs:true}`, which suppresses its local FAB because RootNav already covers it.
 - Exceptions: modals/sheets and onboarding flows. Screens with a pinned bottom bar call `setPinnedBottomBarHeight` (exported from `FeedbackFAB`) instead of mounting a second FAB — `TiersScreen`, `QuickSetTiersScreen`, `QuickRankScreen` do this.
+- Scroll content reserves the FAB's footprint: pad the content's bottom by `FEEDBACK_FAB_CLEARANCE` (exported from `FeedbackFAB`, 76pt), or by bar height + `FEEDBACK_FAB_CLEARANCE` when content scrolls under an absolute pinned bar, so the last row and any button in it can scroll clear. Pinned by `tests/check-fab-clearance.js`.
 
 ### Evidence for a change (D-056, 2026-08-15)
 

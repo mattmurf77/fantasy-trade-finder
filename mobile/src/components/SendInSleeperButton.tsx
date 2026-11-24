@@ -69,8 +69,20 @@ import { GUIDE_RECEIPTS } from './analystScript';
  *    "Send this trade?" confirm). Nothing is ever sent without the user's tap
  *    on that confirm (D16 a).
  *  - Verified and not entitled: the paywall's send variant. */
-export function sendPreCheck(resume: () => void): boolean {
+export function sendPreCheck(resume: () => void, afterAsk = false): boolean {
   if (!useFeatureFlags.getState().flags['monetize.paywall']) return false;
+  // Unknown is not "not enforcing" (2026-11-22): when this user's answer has
+  // not arrived, ask once and run the pre-check again on the answer (the
+  // unverified branch below does the same after a verify). Still unknown
+  // after that ask (offline, no token): the send goes on and the server's
+  // 402 stays the backstop.
+  if (!useEntitlements.getState().loaded) {
+    if (afterAsk) return false;
+    void useEntitlements.getState().refresh().then(() => {
+      if (!sendPreCheck(resume, true)) resume();
+    });
+    return true;
+  }
   if (!useEntitlements.getState().enforcing) return false;
   if (isUnverifiedSession()) {
     void openVerify({

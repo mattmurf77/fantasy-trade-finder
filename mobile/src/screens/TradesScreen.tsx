@@ -72,6 +72,7 @@ import OutlookSheet from '../components/OutlookSheet';
 import TradeFinderModeBar from '../components/TradeFinderModeBar';
 import OutlookBiasReceipt, {
   OUTLOOK_DISPLAY_NAME,
+  outlookDisplayName,
   outlookReceiptCovers,
 } from '../components/OutlookBiasReceipt';
 import TradeDnaSheet, {
@@ -316,6 +317,13 @@ import {
   fairnessThresholdFor,
 } from '../api/tradePregen';
 import { navigationRef } from '../navigation/RootNav';
+import { refreshMatchesLists } from '../state/matchesLists';
+import {
+  matchMomentFrom,
+  matchMomentLine,
+  MATCH_MOMENT_ACTION,
+  MATCH_MOMENT_HOLD_MS,
+} from '../utils/matchMoment';
 import NewPartnersBanner from '../components/NewPartnersBanner';
 // F4 session re-rank (flag deck.session_rerank): pure math lives in
 // utils/sessionRerank — this screen only owns the session state (refs) and
@@ -2986,6 +2994,11 @@ export default function TradesScreen({ navigation, route }: any) {
         // only a reason response attests a verified durable decision row.
         commitLocalPass(vars.passAttempt);
       }
+      // Every acknowledged like changes Matches > Awaiting (or Mutual, on a
+      // match) and the liked count. Refresh them here, ahead of the
+      // screen-update guard: the caches are global, and a like that lands
+      // after the user left the deck must still reach Matches.
+      if (vars.decision === 'like') void refreshMatchesLists();
       if (!ctx || !actionCanUpdateScreen(ctx.action)) return;
       // #393 M2 (D4): the server acknowledged a like or pass: the offer's
       // first-opinion trigger (never the optimistic advance).
@@ -2998,15 +3011,35 @@ export default function TradesScreen({ navigation, route }: any) {
         matchIdByTradeRef.current.set(ctx.rawId, String(res.match_id));
       }
       if (vars.decision === 'like') {
-        // Liked-trades count is per-league (backend filters by session). Use a
-        // league-scoped key so switching leagues doesn't show a stale count.
-        queryClient.invalidateQueries({ queryKey: ['liked-trades', leagueId] });
+        // The liked count, Awaiting and Mutual were refreshed above.
         // N6.1 (PRD §5.3): first-like determination and the empty-awaiting
         // gate BOTH live here, on the swipe response. A like-time read lets
         // two rapid likes both see first-like true, and a like-time prefetch
         // races the POST and reads a list that cannot contain this like.
         // No-op unless guide_v2 is on.
         v2OnLikeSwipeSuccess(res);
+        // The like completed a mutual match (the counterparty had already
+        // liked the mirror): say so, and offer the match itself through the
+        // Matches arrival a match push uses. The like-time "Liked" toast
+        // went up before the reply; this replaces it. The liked-trades
+        // refetch above no longer counts the matched like (server filters
+        // it), and Matches / Awaiting were refreshed above for the arrival.
+        const moment = matchMomentFrom(res, vars.card.opponent_username);
+        if (moment) {
+          setToast({
+            msg: matchMomentLine(moment),
+            tone: 'success',
+            holdMs: MATCH_MOMENT_HOLD_MS,
+            action: {
+              label: MATCH_MOMENT_ACTION,
+              onPress: () => navigation.navigate('Matches', {
+                match_id: moment.matchId,
+                src: 'deck',
+                ts: Date.now(),
+              }),
+            },
+          });
+        }
       }
     },
     onError: (err, vars, ctx) => {
@@ -5922,6 +5955,29 @@ export default function TradesScreen({ navigation, route }: any) {
   // the send button, which lives below the fold on the deck; the overlay asks
   // for it by the screen name the deck beats declare (`screen: 'Trades'`).
   const guideScrollYRef = useRef(0);
+
+  // The deck ran out under the user's thumb: acting on the last card swaps
+  // the tall trade card (and its Like/Pass chrome) for the much shorter end
+  // state, and iOS leaves the scroll offset where it was, deep in empty
+  // space, so the user saw a blank screen until they scrolled up (sim pass
+  // 2026-11-22). When the fronted card goes away because the index moved
+  // past it, bring the deck slot (where the end state renders) back into
+  // view, but only when the user is below it. A new search empties the deck
+  // by resetting the index to 0, which this leaves alone.
+  const hadTopCardRef = useRef(false);
+  useEffect(() => {
+    const has = !!rawTopCard;
+    if (hadTopCardRef.current && !has && deckIdx > 0) {
+      requestAnimationFrame(() => {
+        const y = Math.max(deckCardY.current - space.md, 0);
+        if (guideScrollYRef.current > y) {
+          mainScrollRef.current?.scrollTo({ y, animated: true });
+        }
+      });
+    }
+    hadTopCardRef.current = has;
+  }, [rawTopCard, deckIdx]);
+
   useEffect(() => {
     registerGuideScroller('Trades', {
       scrollTo: (y, animated) => mainScrollRef.current?.scrollTo({ y, animated }),
@@ -6796,7 +6852,7 @@ export default function TradesScreen({ navigation, route }: any) {
       const res = await Share.share({
         message:
           `Trade idea for our league: I send ${give}, get ${recv} from ` +
-          `@${c.opponent_username}. Found on Fantasy Trade Finder — ` +
+          `@${c.opponent_username}. Found on Fleeced — ` +
           url,
       });
       if (res.action !== Share.dismissedAction) {
@@ -8786,9 +8842,7 @@ export default function TradesScreen({ navigation, route }: any) {
             <View style={{ flex: 1 }}>
               <TickLabel>Outlook</TickLabel>
               <Text style={styles.controlValue}>
-                {prefsQuery.data?.team_outlook
-                  ? cap(prefsQuery.data.team_outlook)
-                  : 'Not set'}
+                {outlookDisplayName(prefsQuery.data?.team_outlook) ?? 'Not set'}
               </Text>
             </View>
             <Button
@@ -9891,7 +9945,9 @@ export default function TradesScreen({ navigation, route }: any) {
         {outlookBannerShown && inferredOutlook ? (
           <View style={styles.inferredBanner}>
             <Text style={type.body}>
-              Your roster reads as {cap(inferredOutlook)}.
+              {/* The display table, never the enum: capitalizing the raw
+                  value printed "Not_sure" here (sim pass 2026-11-22). */}
+              Your roster reads as {outlookDisplayName(inferredOutlook) ?? 'Not sure'}.
             </Text>
             <View style={styles.inferredActions}>
               <Button
@@ -11143,7 +11199,9 @@ export default function TradesScreen({ navigation, route }: any) {
           onClose={() => setStandingOfferPrompt(null)}
           onPosted={(offer) => {
             setStandingOfferPrompt(null);
-            queryClient.invalidateQueries({ queryKey: ['standing-offers', leagueId] });
+            // Prefix key: this league's list AND Matches' ['standing-offers',
+            // 'all'], which otherwise stays stale until a pull-to-refresh.
+            queryClient.invalidateQueries({ queryKey: ['standing-offers'] });
             // R-8 — the count comes from the POST RESPONSE (`team_count`),
             // not a client-side array length: the server is the authority
             // on what it actually stored. Sender's own count, on the
@@ -11495,10 +11553,6 @@ function SwipableTopCard({
       </Animated.View>
     </GestureDetector>
   );
-}
-
-function cap(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 // #376/#394 — display names for the minimized "Outlook & filters" row.
