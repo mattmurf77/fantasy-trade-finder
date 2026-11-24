@@ -79,17 +79,18 @@
 - Everything is behind `monetize.league_pass`, which is off. Design and scope: `docs/plans/monetization/league-pass/` (plan, PRD, HLD, LLD, `scope.md`, `scope-client.md`, `evidence-client.md`). Decision record: D-281, with a 2026-11-24 addendum.
 - The operator signed off the server scope waiver (no mobile evidence in phase 1) on 2026-11-24. The client scope has no waiver: its TestFlight checklist is required and not run.
 - An independent black-box test pass on the server found three defects; all are fixed and its re-run found none open. Report: `data/review/sim-test-league-pass-2026-11-24/REPORT.md` in the main checkout.
-- Operator decisions already made: hybrid coverage; year-one buyer discount by tier; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
+- Operator decisions already made: hybrid coverage; one product `ftf_league_annual` ($99.99/year) with a one-month free trial, the year-one discount tiers dropped (2026-11-24, D-281 addendum); no server limit on trials per league; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
 
 **In flight**
-- Nothing in code. `main` moves fast enough that the server branch conflicts again in `living-memory/DECISIONS.md` and `TEST_LEDGER.md` within hours; both are append-only, keep both sides.
+- The 2026-11-24 change from discount tiers to one product with a free trial is in the server working tree, uncommitted, pending review: tiers, promo offer ids, the leaguemate count and the `tier` columns removed; trial coverage tested. The client branch is being changed to the same contract in parallel.
+- `main` moves fast enough that the server branch conflicts again in `living-memory/DECISIONS.md` and `TEST_LEDGER.md` within hours; both are append-only, keep both sides.
 - The client's Shop offers check is not converted: its entitlement read lives on `feat/paid-launch`, which the client branch does not include. `check-league-pass.js` 7a fails as soon as that file reads `useEntitlements` without `useProForLeague`.
 
 **Not verified**
 - CI on either branch (no PR). Locally: backend 16,144 passed, 43 skipped, 0 failed; mobile `tsc` clean, testid-lint OK, 207 of 207 check suites.
 - Anything on a device. All `mon.lp.*` copy is placeholder, pending legal.
 - Postgres. The suite runs on SQLite; check the two partial unique indexes on `league_passes` and the `coalesce(users.created_at, '')` seat ordering.
-- RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence, intro-offer eligibility and a promotional offer on an upgrade.
+- RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence and intro-offer (free-trial) eligibility.
 
 **Don't repeat**
 - Importing `backend.server` outside pytest runs the platform-bindings backfill against the local dev database. Use the test fixtures.

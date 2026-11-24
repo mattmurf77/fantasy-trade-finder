@@ -2277,11 +2277,10 @@ League pass bindings ([design](plans/monetization/league-pass/lld.md) §2.1, 202
 | `origin` | str, not null | `purchase` \| `comp` |
 | `buyer_user_id` | str | Working key of the buyer; NULL for a comp and after the buyer's account deletion. Partial unique index `uq_league_passes_active_buyer` (one active row per buyer) |
 | `buyer_account_id` | str | `accounts.account_id` when known; NULL as above |
-| `product_id` | str | `ftf_league_annual` \| `_t1` \| `_t2`; NULL for a comp |
+| `product_id` | str | `ftf_league_annual`; NULL for a comp |
 | `league_id` | str, not null | Platform-native league id (`leagues.sleeper_league_id`). Partial unique index `uq_league_passes_active_league` (one active row per league) |
 | `platform` | str, not null | `sleeper` \| `espn` \| `mfl` |
 | `status` | str, not null | `active` (default) \| `released` \| `ended` |
-| `tier` | int | 0 \| 1 \| 2, the product's tier at bind; NULL for a comp |
 | `comp_expires_at` | str | ISO UTC; comp only |
 | `show_buyer` | int, not null | 1 = the buyer opted in to being named to covered members (default 0) |
 | `bound_at` | str, not null | ISO UTC; the re-point cooldown reads the buyer's latest non-rollover `bound_at` |
@@ -2298,8 +2297,7 @@ The league a member chose before the purchase sheet (lld §2.2). The billing web
 | `id` | int PK | autoincrement |
 | `user_id` | str, not null | Working key of the would-be buyer |
 | `league_id` / `platform` | str, not null | The chosen league |
-| `tier` / `product_id` | int / str, not null | The quote: tier 0–2 and the product offered for it |
-| `paid_annual_count` | int, not null | Paid annual leaguemates at quote time, the snapshot behind the tier |
+| `product_id` | str, not null | The product offered (`ftf_league_annual`) |
 | `created_at` / `expires_at` | str, not null | ISO UTC |
 | `consumed_at` / `consumed_event_id` | str | Set when a billing event binds from it |
 

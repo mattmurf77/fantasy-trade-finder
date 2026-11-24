@@ -126,8 +126,8 @@ def test_intent_quotes_the_league(client):
     r = _req(client, "POST", "/api/league-pass/intent", body={"league_id": L})
     assert r.status_code == 200
     body = r.get_json()
-    assert (body["product_id"], body["tier"], body["teams"]) == ("ftf_league_annual", 0, 12)
-    assert set(body) == {"intent_id", "product_id", "tier", "teams", "expires_at"}
+    assert (body["product_id"], body["teams"]) == ("ftf_league_annual", 12)
+    assert set(body) == {"intent_id", "product_id", "teams", "expires_at"}
 
 
 def test_intent_refusals(client, eng):
@@ -160,7 +160,8 @@ def test_buyer_view_bound(client, eng):
     view = _req(client, "GET", "/api/league-pass").get_json()
     p = view["pass"]
     assert view["unbound"] is False
-    assert (p["league_id"], p["platform"], p["tier"], p["covered_count"]) == (L, "sleeper", 0, 1)
+    assert (p["league_id"], p["platform"], p["covered_count"]) == (L, "sleeper", 1)
+    assert "tier" not in p
     assert p["will_renew"] is True and p["show_buyer"] is False
     assert p["can_repoint_at"] > w.iso(28)
     with eng.begin() as conn:
@@ -308,10 +309,9 @@ def test_a_co_owner_cannot_quote_a_pass(client, eng):
 
 def test_paywall_config_league_pass_block(client, flag):
     block = _req(client, "GET", "/api/paywall/config?caps=league_pass").get_json()["league_pass"]
-    assert block["offering"] == "league" and block["renews_at_price"] == "$99.99"
-    assert [(p["product_id"], p["tier"], p.get("promo_offer_id")) for p in block["products"]] == [
-        ("ftf_league_annual", 0, None), ("ftf_league_annual_t1", 1, "league_t1_y1"),
-        ("ftf_league_annual_t2", 2, "league_t2_y1")]
+    assert block == {"offering": "league", "renews_at_price": "$99.99",
+                     "products": [{"product_id": "ftf_league_annual",
+                                   "display_price": "$99.99"}]}
     assert "league_pass" in _req(client, "GET",
                                  "/api/paywall/config?caps=x,league_pass").get_json()
     no_caps = _req(client, "GET", "/api/paywall/config").get_json()

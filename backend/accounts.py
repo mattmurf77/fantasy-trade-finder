@@ -1047,7 +1047,7 @@ def _delete_user_data(sleeper_user_id: str,
             counts[name + "_deleted"] = res.rowcount or 0
         # League pass (lld §2.4, R38): the buyer's active pass is released and
         # their pass rows lose the buyer ids (league_passes_table keeps the
-        # league, dates and tier, a non-personal record).
+        # league and dates, a non-personal record).
         from . import league_pass
         counts.update(league_pass.release_for_deletion(conn, user_ids, acct_ids))
 

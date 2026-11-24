@@ -18,8 +18,8 @@ routes. The client, the store products and the legal copy are phase 2.
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `league_pass_quote_viewed` | `tier`, `platform`, `teams` | An intent is created | server |
-  | `league_pass_bound` | `origin`, `tier`, `platform`, `via` | A pass row is inserted | server |
+  | `league_pass_quote_viewed` | `platform`, `teams` | An intent is created | server |
+  | `league_pass_bound` | `origin`, `platform`, `via` | A pass row is inserted | server |
   | `league_pass_ended` | `reason` | A pass stops being live | server |
   | `league_pass_coverage_used` | `family` | A gated request is allowed by a pass; first per user, league and day | server |
 
@@ -44,7 +44,7 @@ routes. The client, the store products and the legal copy are phase 2.
 ## 3. Evidence scope
 
 - [x] **Unit tests:** `test_league_pass_coverage.py`, `test_league_pass_bind.py`,
-      `test_league_pass_tiers.py`, `test_paywall_league_resolvers.py`,
+      `test_paywall_league_resolvers.py`,
       `test_paywall_gate_pass.py`; updates to `test_paywall_gate_allowlist.py` and
       `test_entitlements.py` (LLD §11).
 - [x] **Structural guard, TestFlight checklist — WAIVED because:** backend-only and

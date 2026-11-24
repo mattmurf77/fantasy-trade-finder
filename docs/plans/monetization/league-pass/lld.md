@@ -52,12 +52,11 @@ league_passes_table = Table("league_passes", metadata,
     Column("origin",           String,  nullable=False),  # 'purchase' | 'comp'
     Column("buyer_user_id",    String),                   # working key; NULL for comp
     Column("buyer_account_id", String),
-    Column("product_id",       String),                   # ftf_league_annual[_t1|_t2]; NULL for comp
+    Column("product_id",       String),                   # ftf_league_annual; NULL for comp
     Column("league_id",        String,  nullable=False),  # leagues.sleeper_league_id (platform-native)
     Column("platform",         String,  nullable=False),  # 'sleeper' | 'espn' | 'mfl'
     Column("status",           String,  nullable=False, server_default="active"),
                                                           # active | released | ended
-    Column("tier",             Integer),                  # 0 | 1 | 2 at first bind
     Column("comp_expires_at",  String),                   # ISO UTC; comp only
     Column("show_buyer",       Integer, nullable=False, server_default="0"),
     Column("bound_at",         String,  nullable=False),
@@ -88,9 +87,7 @@ league_pass_intents_table = Table("league_pass_intents", metadata,
     Column("user_id",           String,  nullable=False),
     Column("league_id",         String,  nullable=False),
     Column("platform",          String,  nullable=False),
-    Column("tier",              Integer, nullable=False),   # 0 | 1 | 2
     Column("product_id",        String,  nullable=False),   # the product offered
-    Column("paid_annual_count", Integer, nullable=False),   # the snapshot behind the tier
     Column("created_at",        String,  nullable=False),
     Column("expires_at",        String,  nullable=False),
     Column("consumed_at",       String),
@@ -194,25 +191,19 @@ league), a pass that does not cover `user_id` is tried under `league_user_id`
 ### 3.3 Quote and intent
 
 ```python
-def paid_annual_leaguemates(buyer_user_id: str, league_id: str, platform: str) -> int
-```
+PRODUCT_ID = "ftf_league_annual"
 
-Counts members other than the buyer who hold an active `pro` row with
-`source='apple_iap'`, `product_id='ftf_pro_annual'`, in the production lane
-(`granted_by` not prefixed `sandbox:`), whose ledger shows a `NORMAL` period. It reuses
-`paywall_gate._period_types` for the last test (R11).
-
-```python
-TIERS = ((0, "ftf_league_annual"), (1, "ftf_league_annual_t1"), (2, "ftf_league_annual_t2"))
-
-def tier_for(count: int) -> int          # 0 → 0, 1–2 → 1, 3+ → 2
 def create_intent(user_id: str, league_id: str) -> dict
 ```
+
+One product, so there is no quote to compute (the year-one discount tiers and the
+leaguemate count behind them were dropped on 2026-11-24, plan D3).
 
 Write paths refuse by raising `Refused(reason, **detail)`; a route answers
 `409 {"error": reason, **detail}`. `create_intent` refuses, in this order: `not_member`,
 `league_not_allowed`, `already_covered`, `already_buyer`, `refund_blocked`. Otherwise it
-inserts the intent and returns `{intent_id, product_id, tier, teams, expires_at}`.
+inserts the intent and returns `{intent_id, product_id, teams, expires_at}`, with
+`product_id` always `ftf_league_annual`.
 
 ### 3.4 Bind, re-point, rollover
 
@@ -226,22 +217,23 @@ def end(pass_id: int, reason: str) -> bool
 ```
 
 **`on_billing_event`** runs after the projector, for `ftf_league_*` products only, and
-only while the flag is on. On an activating event:
+only while the flag is on. A free trial's `INITIAL_PURCHASE` (`period_type` `TRIAL`) is
+an activating event like any other: the projector ignores `period_type`, writes the
+buyer's `league_pass_iap` row with the trial's end as `expires_at`, and the bind runs.
+There is no limit on trials per league. On an activating event:
 
-1. If the buyer already has an active pass, return. A renewal changes nothing here.
+1. If the buyer already has an active pass, return. A renewal, including the trial
+   converting to paid, changes nothing here.
 2. Take the buyer's newest usable intent. If there is none, return: the pass is unbound.
 3. Re-check `is_member` and that the league has no active pass.
-4. Tier check: the intent's `tier` must be at least the purchased product's tier. A
-   cheaper product than the snapshot allows is not bound (R20).
-5. Insert the row; mark the intent consumed with the event id.
+4. Insert the row; mark the intent consumed with the event id.
 
-A failure at steps 3 or 4 leaves the pass unbound and logs
+A failure at step 3 leaves the pass unbound and logs
 `LEAGUE-PASS-UNBOUND user=… reason=…`. The buyer keeps Pro either way.
 
-**`bind`** applies steps 3 to 5 with a fresh tier computed for the league now.
+**`bind`** applies steps 3 and 4.
 
-**`repoint`** checks the cooldown, membership and that the target has no pass. It does
-not re-check the tier (plan §9). It releases and inserts in one transaction.
+**`repoint`** checks the cooldown, membership and that the target has no pass. It releases and inserts in one transaction.
 
 **`follow_rollover`** is called by league sync. It moves the pass when the previous
 league has one and the buyer is a member of the new league.
@@ -403,8 +395,8 @@ Every rule below gets a row in `paywall_gate.ROUTES`.
 
 | Method and rule | Auth | Class | Body / result |
 |---|---|---|---|
-| `POST /api/league-pass/intent` | Verified session | `FREE` | `{league_id}` → `{intent_id, product_id, tier, teams, expires_at}` or `409 {"error": reason}` |
-| `GET /api/league-pass` | Verified session | `FREE` | `{pass: {league_id, platform, tier, covered_until, will_renew, covered_count, can_repoint_at, show_buyer} \| null, unbound}` |
+| `POST /api/league-pass/intent` | Verified session | `FREE` | `{league_id}` → `{intent_id, product_id, teams, expires_at}` or `409 {"error": reason}` |
+| `GET /api/league-pass` | Verified session | `FREE` | `{pass: {league_id, platform, covered_until, will_renew, covered_count, can_repoint_at, show_buyer} \| null, unbound}` |
 | `POST /api/league-pass/bind` | Verified session | `FREE` | `{league_id}`; for an unbound pass → the `GET` view |
 | `POST /api/league-pass/repoint` | Verified session | `FREE` | `{league_id}` → the `GET` view, or `409 {"error": "cooldown", "can_repoint_at"}` |
 | `PUT`, `POST /api/league-pass/settings` | Verified session | `FREE` | `{show_buyer: bool}` → the `GET` view (`league_pass.set_show_buyer`) |
@@ -445,35 +437,35 @@ binary sends no `caps`, so it never receives it.
   "offering": "league",
   "renews_at_price": "$99.99",
   "products": [
-    {"product_id": "ftf_league_annual",    "tier": 0, "display_price": "$99.99"},
-    {"product_id": "ftf_league_annual_t1", "tier": 1, "display_price": "$84.99",
-     "promo_offer_id": "league_t1_y1"},
-    {"product_id": "ftf_league_annual_t2", "tier": 2, "display_price": "$69.99",
-     "promo_offer_id": "league_t2_y1"}
+    {"product_id": "ftf_league_annual", "display_price": "$99.99"}
   ]
 }
 ```
+
+The free trial is not described here: the client reads the introductory offer from the
+store.
 
 The existing `products` list is untouched. The strings and ids are a cross-client
 contract (`docs/cross-client-invariants.md` § Paywall config).
 
 ## 7. Store and RevenueCat setup
 
-**App Store Connect**, group "Fleeced Pro". All three products share one level, above
-the individual plans. Family Sharing and multiseat stay off.
+**App Store Connect**, group "Fleeced Pro". One product, at one level above the
+individual plans. Family Sharing and multiseat stay off.
 
 | Product | Standard price | Introductory offer | Promotional offer |
 |---|---|---|---|
-| `ftf_league_annual` | $99.99 / year | None | None |
-| `ftf_league_annual_t1` | $99.99 / year | Pay up front, 1 year, $84.99 | `league_t1_y1`: pay up front, 1 year, $84.99 |
-| `ftf_league_annual_t2` | $99.99 / year | Pay up front, 1 year, $69.99 | `league_t2_y1`: pay up front, 1 year, $69.99 |
+| `ftf_league_annual` | $99.99 / year | Free trial, 1 month | None |
+
+Introductory eligibility is Apple's: one per person per subscription group, so a buyer
+who used the individual plan's free month pays from day one.
 
 **RevenueCat**
 
-- Attach all three to the `pro` entitlement.
-- Put them in a new offering `league`. Keep them out of the default offering:
+- Attach it to the `pro` entitlement.
+- Put it in a new offering `league`. Keep it out of the default offering:
   `PaywallScreen.tsx:290` renders every configured product that matches a package.
-- Upload the in-app purchase key so the SDK can sign promotional offers.
+- No in-app purchase key is needed (no promotional offers).
 - The webhook and its secret are unchanged.
 
 ## 8. Mobile changes
@@ -483,7 +475,7 @@ All in `mobile/src/`. JavaScript only; no new native module.
 | File | Change |
 |---|---|
 | `api/billing.ts` | `EntitlementsResponse.league_passes`; `PaywallConfig.league_pass`; `getPaywallConfig` sends `caps=league_pass`; functions for the `/api/league-pass/*` routes |
-| `api/purchases.ts` | A wrapper for a promotional-offer purchase (get the signed offer, then purchase with it), behind the same fail-safe and identity-ready rules as `purchasePackage`; `getOfferings` access to the `league` offering |
+| `api/purchases.ts` | `getOfferings` access to the `league` offering; the purchase is the existing `purchasePackage` |
 | `state/useEntitlements.ts` | Store `leaguePasses`; add `proForLeague(leagueId)`: `pro` or a live pass for that league |
 | `screens/TradesScreen.tsx:5527` | Read `proForLeague(activeLeagueId)` in place of `pro` |
 | `screens/WinNowScreen.tsx:101` | The same |
@@ -498,12 +490,10 @@ All in `mobile/src/`. JavaScript only; no new native module.
 
 **Purchase path in `LeaguePassScreen`**
 
-1. `createIntent(leagueId)` returns the product for the league's tier.
-2. Tier 0: `purchasePackage`.
-3. Tier 1 or 2: `checkIntroEligibility(product)`. Eligible → `purchasePackage`, and the
-   introductory price applies. Not eligible → the promotional-offer wrapper with the
-   config's `promo_offer_id`.
-4. After the purchase, refresh entitlements until `league_passes` shows the buyer's
+1. `createIntent(leagueId)` returns `ftf_league_annual`.
+2. `purchasePackage` on the `league` offering's package. Apple applies the free month
+   when the buyer is eligible; the screen shows it from the store's product.
+3. After the purchase, refresh entitlements until `league_passes` shows the buyer's
    pass, or fall back to the choose-a-league state.
 
 The routing rule in `usePaywallGate.ts` is not touched: it still reads no entitlement
@@ -515,8 +505,8 @@ New events, pending the taxonomy review (`backend/analytics_taxonomy.py`):
 
 | Event | When | Props |
 |---|---|---|
-| `league_pass_quote_viewed` | An intent is created | `tier`, `platform`, `teams` |
-| `league_pass_bound` | A pass row is inserted | `origin`, `tier`, `platform`, `via` (webhook, manual, repoint, rollover) |
+| `league_pass_quote_viewed` | An intent is created | `platform`, `teams` |
+| `league_pass_bound` | A pass row is inserted | `origin`, `platform`, `via` (webhook, manual, repoint, rollover, comp) |
 | `league_pass_ended` | A pass stops being live | `reason` |
 | `league_pass_coverage_used` | A gated request is allowed by a pass | `family`; first per user, league and day, like `record_gate_hit` |
 
@@ -530,8 +520,9 @@ product ids. `entitlement_granted` already fires for the buyer's row.
 | Two members buy for the same league at once | The first bind wins. The second buyer's pass is unbound; the app asks them to choose another league. |
 | The app closes during purchase | The webhook binds from the intent (R18). |
 | The intent expired before the webhook | Unbound; manual bind. |
-| A member cancelled their annual plan between the quote and the purchase | The intent's snapshot stands. |
-| A discounted product bought with no intent | Manual bind recomputes the tier; a league that no longer qualifies is refused with `tier_mismatch`. |
+| The buyer starts the free trial | Binds and covers like a paid purchase. Converting to paid is a renewal: nothing changes. |
+| The buyer cancels the trial | Coverage runs to the trial's end, then ends with the row (`expires_at` is read-time truth; the `EXPIRATION` event ends the pass row). |
+| Members chain trials in one league | Allowed, no server limit (operator, 2026-11-24). Each needs the member's own intro eligibility. |
 | The buyer upgrades from an individual plan | Apple prorates. The old row expires through its own events. Event shape to confirm (§13). |
 | The buyer downgrades to an individual plan | Takes effect at renewal. The pass ends when the league row expires. |
 | A covered member also buys an individual plan | Allowed. Both apply. |
@@ -553,11 +544,10 @@ product ids. `entitlement_granted` already fires for the buyer's row.
 - `test_league_pass_coverage.py`: each of the four conditions in §3.2 alone turns
   coverage off; expiry, refund and grace follow the buyer's row; the seat cap; the
   allow-list; comp expiry; Sleeper, ESPN and MFL membership.
-- `test_league_pass_bind.py`: the webhook binds from an intent; no intent → unbound; a
-  cheaper product than the snapshot → unbound; one pass per league and per buyer; the
+- `test_league_pass_bind.py`: the webhook binds from an intent; no intent → unbound; the
+  quote is the one product; a free-trial purchase binds and covers, and a cancelled
+  trial's expiry ends coverage; trials chain; one pass per league and per buyer; the
   cooldown; rollover does not use the cooldown; transfer.
-- `test_league_pass_tiers.py`: only paid annual production rows count; trial, monthly,
-  comp, promo and sandbox rows do not; the buyer does not count themselves.
 - `test_paywall_league_resolvers.py`: every `GATED` rule in `ROUTES` has a resolver; each
   resolver returns the league its handler acts on; an unresolvable league is not covered;
   a resolver exception is not covered.
@@ -575,8 +565,9 @@ renders nothing new. Sabotage each check red, then restore, as the paid-launch s
 
 **Sandbox, on device**
 
-1. A never-subscribed buyer, tier 1: the introductory price shows and is charged.
-2. A current individual subscriber, tier 1: the promotional offer applies on upgrade.
+1. A never-subscribed buyer: the free month shows, nothing is charged, and the league is
+   covered during the trial.
+2. A buyer who used the individual free month: the full price shows and is charged.
 3. A second account in the league is covered; the same account in another league gets
    the paywall.
 4. Expiry (accelerated sandbox renewal): coverage ends for the second account.
@@ -590,7 +581,7 @@ renders nothing new. Sabotage each check red, then restore, as the paid-launch s
 | `docs/api-reference.md` | The new routes; the two changed responses |
 | `docs/data-dictionary.md` | The two tables; `leagues.previous_league_id`; the new source |
 | `docs/config-reference.md` | The flag, the three knobs and env `LEAGUE_PASS_LEAGUE_ALLOWLIST` |
-| `docs/cross-client-invariants.md` | Product ids, offer ids, the `league_pass` config block, `league_passes` |
+| `docs/cross-client-invariants.md` | The product id, the `league_pass` config block, `league_passes` |
 | `docs/glossary.md` | League pass, covered member, buyer, re-point |
 | `docs/runbook.md` | Comp, list and end a pass; the unbound-pass support case |
 | `docs/plans/monetization/README.md` | A league-pass row |
@@ -612,12 +603,6 @@ Nothing is open. The design proceeds on these answers.
 4. **Upgrade events.** The event sequence for an upgrade from `ftf_pro_annual` to a
    league product, and that the old row ends cleanly. Read from the first sandbox
    upgrade in phase 2.
-1. **Promotional offer on an upgrade.** Not verified, by decision. The design assumes a
-   current subscriber can take one on a different product in the group. The first
-   sandbox upgrade in phase 2 shows whether that holds. If it does not, the client
-   falls back to the standard price: an existing subscriber pays $99.99, and the tiers
-   then reach only buyers who have never subscribed.
-
 **Closed**
 
 2. **Unproven team links.** Accepted as is. A public ESPN league and an MFL league
@@ -625,8 +610,8 @@ Nothing is open. The design proceeds on these answers.
    (`espn_link`, `mfl_link`), so someone outside a covered league could be covered, up
    to the seat cap. Coverage does not require a proven link. Covered accounts per
    league are measured.
-5. **Introductory eligibility.** Not verified, by decision. The client asks the SDK for
-   eligibility at purchase time and picks the offer route from the answer.
+5. **Introductory eligibility.** Not verified, by decision. Apple applies the free month
+   at purchase when the buyer is eligible; there is no other offer route.
 6. **Win Now resolvers.** Traced. All four rules act on the session's active league and
    refuse any other (§4.2).
 7. **`GET /api/overhauls`.** Traced. It returns the one active overhaul for the

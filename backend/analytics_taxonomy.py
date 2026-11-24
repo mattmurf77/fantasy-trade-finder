@@ -1159,10 +1159,10 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # analytics_queries in this same commit). Props, closed sets and counts
     # only, never ids or prices:
     #   league_pass_quote_viewed  — an intent is created (league_pass.
-    #     create_intent). tier (0 | 1 | 2), platform (sleeper | espn | mfl),
-    #     teams (int count). league_id rides the envelope column.
+    #     create_intent). platform (sleeper | espn | mfl), teams (int
+    #     count). league_id rides the envelope column.
     #   league_pass_bound         — a league_passes row is inserted. origin
-    #     (purchase | comp), tier (0 | 1 | 2 | null for comp), platform, via
+    #     (purchase | comp), platform, via
     #     (webhook | manual | repoint | rollover | comp).
     #   league_pass_ended         — a pass stops being live. reason
     #     (ended | refund | deleted | admin).

@@ -94,16 +94,15 @@ and the client.
 client                         server                              RevenueCat / Apple
   │ POST /api/league-pass/intent {league_id}
   │ ─────────────────────────▶ member? league uncovered? buyer free?
-  │                            count paid annual leaguemates → tier
   │                            INSERT league_pass_intents
-  │ ◀───────────────────────── {intent_id, product_id, tier, teams}
+  │ ◀───────────────────────── {intent_id, product_id, teams}
   │
-  │ intro eligible? ── yes ──▶ purchase(product)            ───────────▶ sheet
-  │                 └─ no  ──▶ getPromotionalOffer → purchase(product, offer)
+  │ purchase(ftf_league_annual)  (free month if intro-eligible) ▶ sheet
   │                                                          ◀────────── webhook
-  │                            projector: buyer row (pro, league_pass_iap)
+  │                            projector: buyer row (pro, league_pass_iap),
+  │                              trial or paid alike
   │                            league_pass.on_billing_event:
-  │                              open intent? still valid? tier allowed?
+  │                              open intent? still valid? member? uncovered?
   │                              INSERT league_passes (active)
   │ GET /api/me/entitlements
   │ ─────────────────────────▶ pro: true, league_passes: [{role: buyer, …}]
@@ -203,9 +202,9 @@ itself stays on the existing rule: `monetize.entitlements` ∧ `monetize.paywall
 - **`server.py`.** The hook resolves the league. New thin routes. Every new rule gets a
   row in `ROUTES`, or `test_paywall_gate_allowlist.py` fails.
 - **League sync.** Stores `previous_league_id`; calls the rollover follow.
-- **RevenueCat.** Three products attached to the `pro` entitlement, in a separate
-  offering named `league`. An in-app purchase key uploaded so the SDK can sign
-  promotional offers.
+- **RevenueCat.** One product, `ftf_league_annual`, attached to the `pro` entitlement,
+  in a separate offering named `league`. No in-app purchase key is needed: there are no
+  promotional offers to sign.
 - **Account deletion.** Releases the buyer's pass and scrubs the two new tables.
 - **Analytics.** New events go through the taxonomy review, which is a bright-line
   surface.
@@ -218,10 +217,10 @@ paid launch live ──▶ phase 0 comp experiment (existing bulk-grant route)
                          ▼
       ┌── server: tables, covers(), resolvers, hook, tests ──▶ admin comp passes
       │
-      ├── legal: rulings on the two disclosures ──▶ copy
+      ├── legal: ruling on the covered-state disclosure ──▶ copy
       │
-      ├── App Store Connect: 3 products, 2 intro offers, 2 promo offers
-      │        └─▶ RevenueCat: offering, IAP key
+      ├── App Store Connect: 1 product, a 1-month free-trial intro offer
+      │        └─▶ RevenueCat: offering `league`
       │
       └── client: state, screen, pre-checks, Settings ──▶ store build ──▶ App Review
                                                                 │
@@ -230,7 +229,7 @@ paid launch live ──▶ phase 0 comp experiment (existing bulk-grant route)
 
 Blocking order:
 
-1. The legal rulings come before any copy, and copy comes before the client can finish.
+1. The legal ruling comes before any copy, and copy comes before the client can finish.
 2. The server lands before the client, because the client is tested against comp passes.
 3. The unverified RevenueCat items (plan §15) are settled in sandbox before the webhook
    bind is written.
@@ -245,6 +244,7 @@ Blocking order:
 | **Reusing `growth.group_unlock`** | That flag names a different idea: a free 14-day unlock when eight members activate. Overloading it would confuse both. |
 | **Non-renewing season pass** | Allows several leagues per buyer, but has no renewal revenue and no upgrade path from the individual plan. The projector also refuses a grant with no expiry. |
 | **Permanent price tiers** | The lower price would renew for ever, after the leaguemates who earned it may have cancelled. |
+| **Year-one discount tiers** ($84.99 / $69.99 in year one when 1–2 / 3+ leaguemates held a paid annual plan; intro plus promotional offers) | Built, then dropped by the operator on 2026-11-24 for a one-month free trial on a single product. The tiers needed three products, four offers, an IAP key and leaguemate counting, and the discounted price revealed that leaguemates subscribe. |
 | **Offer codes** | The purchase leaves the app's flow, codes are transferable, and a code inventory has to be kept. Dropped by the operator. |
 | **Cash rebates** | Paying people outside the App Store brings payment, tax and fraud handling, and risks reading as getting around in-app purchase. |
 | **Binding through RevenueCat subscriber attributes** | They are set by the client, so the league would be client-asserted. |

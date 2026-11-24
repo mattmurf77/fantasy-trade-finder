@@ -72,12 +72,12 @@ def ent_row(conn, uid, *, product="ftf_league_annual", source="league_pass_iap",
 
 
 def pass_row(conn, league_id, *, buyer=None, origin="purchase", platform="sleeper",
-             product="ftf_league_annual", tier=0, comp_days=None, status="active",
+             product="ftf_league_annual", comp_days=None, status="active",
              bound_days=-1.0, show_buyer=0):
     now = iso()
     return conn.execute(insert(db.league_passes_table).values(
         origin=origin, buyer_user_id=buyer, product_id=product if origin == "purchase" else None,
-        league_id=league_id, platform=platform, status=status, tier=tier,
+        league_id=league_id, platform=platform, status=status,
         comp_expires_at=None if comp_days is None else iso(comp_days), show_buyer=show_buyer,
         bound_at=iso(bound_days), created_at=now, updated_at=now,
     )).inserted_primary_key[0]
