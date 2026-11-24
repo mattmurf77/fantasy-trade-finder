@@ -105,19 +105,18 @@ export interface PaywallConfig {
 
 /** The `league_pass` block of the paywall config. */
 export interface LeaguePassConfig {
-  /** The RevenueCat offering holding the three products ('league'). */
+  /** The RevenueCat offering holding the one product ('league'). */
   offering: string;
+  /** The yearly price, fallback copy ("$99.99"). */
   renews_at_price: string;
   products: LeaguePassProduct[];
 }
 
+/** The one league product. Its one-month free trial is the App Store
+ *  introductory offer, read from StoreKit, never from this config. */
 export interface LeaguePassProduct {
-  product_id: string;          // ftf_league_annual[_t1|_t2] — cross-client-invariants
-  tier: number;                // 0 | 1 | 2
-  display_price: string;       // year-one price, fallback copy
-  /** App Store promotional offer id for a buyer who can't take the intro
-   *  offer (tiers 1 and 2 only). */
-  promo_offer_id?: string;
+  product_id: string;          // ftf_league_annual — cross-client-invariants
+  display_price: string;       // the yearly price, fallback copy
 }
 
 export function getEntitlements(): Promise<EntitlementsResponse> {
@@ -148,10 +147,9 @@ const LP_QUIET = { quietStatuses: [409] as const };
  *  sheet, and its quote. */
 export interface LeaguePassIntent {
   intent_id: number;
+  /** Always `ftf_league_annual`. */
   product_id: string;
-  tier: number;
   teams: number | null;
-  expires_at: string;
 }
 
 /** `GET /api/league-pass`: the caller's own pass, as its buyer. */
@@ -159,7 +157,6 @@ export interface LeaguePassView {
   pass: {
     league_id: string;
     platform: string;
-    tier: number | null;
     covered_until: string;
     will_renew: boolean;
     covered_count: number;

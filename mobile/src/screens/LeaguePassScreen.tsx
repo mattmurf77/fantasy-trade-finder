@@ -20,20 +20,17 @@ import {
   type LeaguePassView,
 } from '../api/billing';
 import {
-  checkIntroPriceEligible,
+  checkIntroEligibility,
   currentIdentityUserId,
   getLeagueOffering,
-  getPromoOffer,
   hasProEntitlement,
   isPaymentPending,
   isUserCancelled,
-  purchaseDiscountedPackage,
   purchasePackage,
   PurchaseIdentityError,
   purchasesReady,
   whenIdentityReady,
   type PurchasesPackage,
-  type PurchasesPromotionalOffer,
 } from '../api/purchases';
 import { track } from '../api/events';
 import { useEntitlements } from '../state/useEntitlements';
@@ -52,7 +49,6 @@ import {
   fill,
   leagueNameFor,
   passDate,
-  purchaseCallFor,
   purchasePlan,
   refusalCopyKey,
   refusalReason,
@@ -75,25 +71,26 @@ import {
 //                                on record (R19) → `POST /bind`.
 //   - neither                  → BUY: choose a league (the session's leagues,
 //                                the ones with a team of the user's) → `POST
-//                                /intent` → the ONE version the league
-//                                qualifies for, year-one and renewal prices
-//                                together, and the team count (R12, R15) →
-//                                Apple's sheet → refresh the entitlements until
-//                                the buyer's pass shows, else the choose-a-
-//                                league state.
+//                                /intent` → the one product
+//                                (`ftf_league_annual`), its yearly price, the
+//                                free month when confirmed, and the team count
+//                                (R12, R15) → Apple's sheet → refresh the
+//                                entitlements until the buyer's pass shows,
+//                                else the choose-a-league state.
 //
-// NEVER ONE PRICE SHOWN AND ANOTHER CHARGED. The prices on screen come from
-// utils/leaguePass.purchasePlan, which is resolved BEFORE the button shows:
-//   tier 0 → the list price (purchasePackage);
-//   tier 1/2, intro-eligible → the introductory price (purchasePackage; Apple
-//     applies the intro);
-//   tier 1/2, otherwise → the SIGNED promotional offer, priced from the
-//     offer itself (purchaseDiscountedPackage with that exact offer);
-//   no offer could be signed → the FULL price, said plainly, with Continue at
-//     full price or Cancel. A 'promo' path without its offer never falls back
-//     to a plain purchase.
+// THE FREE MONTH ONLY WHEN STOREKIT CONFIRMS IT (operator 2026-11-24, "Free
+// month replaces discount"; the individual paywall's rule, R28.8 #1). The
+// purchase is always a plain `purchasePackage`; Apple applies the product's
+// introductory offer (one free month) to an eligible buyer by itself.
+// Eligibility is per subscription group, so a buyer who used the individual
+// plan's free month is not eligible. `checkIntroEligibility` (ELIGIBLE and an
+// intro of exactly one free month) decides the copy, resolved through
+// utils/leaguePass.purchasePlan BEFORE the button shows: confirmed → "1 month
+// free, then <price> a year", the trial disclosure and "Start 1-month trial";
+// not eligible, unknown or an error → "<price> a year", the paid disclosure
+// and "Buy league pass", with no "free" anywhere.
 // Every price is StoreKit's (or, with no StoreKit, the server config's display
-// strings, when nothing can be bought). No price is written in this file.
+// string, when nothing can be bought). No price is written in this file.
 //
 // Analytics: the existing paywall_purchase_initiated / _completed / _failed,
 // with the league product ids and the `source` that opened this screen (the
@@ -102,7 +99,7 @@ import {
 type Step =
   | { kind: 'idle' }
   | { kind: 'quote'; leagueId: string; intent: LeaguePassIntent; plan: PurchasePlan;
-      pkg: PurchasesPackage | null; promo: PurchasesPromotionalOffer | null }
+      pkg: PurchasesPackage | null }
   | { kind: 'confirming'; leagueId: string }
   | { kind: 'done'; leagueId: string | null }
   | { kind: 'pending' };
@@ -216,27 +213,15 @@ export default function LeaguePassScreen({ navigation, route }: any) {
       const offering = await getLeagueOffering(lp.offering);
       const pkg = offering?.availablePackages.find((x) => x.product?.identifier === intent.product_id) ?? null;
       const sp = pkg?.product ?? null;
-      let introEligible = false;
-      let promo: { offer: PurchasesPromotionalOffer; priceString: string } | null = null;
-      if (sp && intent.tier > 0) {
-        introEligible = await checkIntroPriceEligible(sp);
-        if (!introEligible) {
-          // The signature binds the offer to RevenueCat's user: wait for it.
-          await customerInfoAppliesNow();
-          promo = await getPromoOffer(sp, product?.promo_offer_id, userId);
-        }
-      }
+      // The individual paywall's rule: only a confirmed ONE free month for
+      // this Apple ID; unknown or an error is the paid copy.
+      const freeMonthConfirmed = sp ? (await checkIntroEligibility([sp]))[sp.identifier] === true : false;
       const plan = purchasePlan({
-        tier: intent.tier,
-        storeAvailable: !!sp,
-        introEligible,
-        standardPrice: sp?.priceString ?? null,
-        introPrice: sp?.introPrice?.priceString ?? null,
-        promoPrice: promo?.priceString ?? null,
-        configYearOne: product?.display_price ?? null,
-        configRenewal: lp.renews_at_price ?? null,
+        storePrice: sp?.priceString ?? null,
+        freeMonthConfirmed,
+        configPrice: product?.display_price ?? lp.renews_at_price ?? null,
       });
-      if (alive.current) setStep({ kind: 'quote', leagueId, intent, plan, pkg, promo: promo?.offer ?? null });
+      if (alive.current) setStep({ kind: 'quote', leagueId, intent, plan, pkg });
     } catch (err) {
       if (alive.current) setLine(refusalLine(err));
     } finally {
@@ -273,7 +258,7 @@ export default function LeaguePassScreen({ navigation, route }: any) {
 
   const buy = async () => {
     if (step.kind !== 'quote' || busy || !userId) return;
-    const { plan, pkg, promo, intent, leagueId } = step;
+    const { plan, pkg, intent, leagueId } = step;
     const productId = intent.product_id;
     setLine(null);
     track('paywall_purchase_initiated', { product_id: productId, source });
@@ -285,15 +270,8 @@ export default function LeaguePassScreen({ navigation, route }: any) {
     setBusy(true);
     try {
       if (!(await customerInfoAppliesNow())) throw new PurchaseIdentityError();
-      let result;
-      if (purchaseCallFor(plan.path) === 'discounted') {
-        // The promotional price is on screen only with its signed offer in
-        // hand; without it this throws rather than charge the list price.
-        if (!promo) throw new Error('promo_offer_missing');
-        result = await purchaseDiscountedPackage(pkg, promo, userId);
-      } else {
-        result = await purchasePackage(pkg, userId);
-      }
+      // A plain package purchase; Apple applies the free month when eligible.
+      const result = await purchasePackage(pkg, userId);
       if (!result) {
         setLine(MON['mon.lp.unavailable']);
         track('paywall_purchase_failed', { product_id: productId, user_cancelled: false });
@@ -506,13 +484,13 @@ export default function LeaguePassScreen({ navigation, route }: any) {
   } else if (step.kind === 'quote') {
     const { plan, intent, leagueId } = step;
     const leagueName = nameOf(leagueId);
-    const same = !plan.yearOne || plan.yearOne === plan.renewal;
-    const priceLine = same
-      ? fill(MON['mon.lp.quote.price_same'], { price: plan.renewal ?? '' })
-      : fill(MON['mon.lp.quote.price'], { year_one: plan.yearOne ?? '', renewal: plan.renewal ?? '' });
-    const disclosure = same
-      ? fill(MON['mon.lp.disclosure_same'], { league_name: leagueName, price: plan.renewal ?? '' })
-      : fill(MON['mon.lp.disclosure'], { league_name: leagueName, year_one: plan.yearOne ?? '', renewal: plan.renewal ?? '' });
+    const price = plan.price ?? '';
+    const priceLine = plan.freeMonth
+      ? fill(MON['mon.lp.quote.trial'], { price })
+      : fill(MON['mon.lp.quote.paid'], { price });
+    const disclosure = plan.freeMonth
+      ? fill(MON['mon.lp.disclosure.trial'], { league_name: leagueName, price })
+      : fill(MON['mon.lp.disclosure.paid'], { league_name: leagueName, price });
     body = (
       <View style={styles.section} testID="league-pass.quote">
         <ChalkText variant="heading">{leagueName}</ChalkText>
@@ -521,40 +499,25 @@ export default function LeaguePassScreen({ navigation, route }: any) {
             {fill(MON['mon.lp.quote.teams'], { teams: intent.teams })}
           </ChalkText>
         ) : null}
-        {/* R12 / R15: one version, year one and renewal side by side. */}
+        {/* R12 / R15: the yearly price, with the free month only when
+            StoreKit confirmed it (plan.freeMonth). */}
         <ChalkText variant="dataLg" testID="league-pass.quote.price">{priceLine}</ChalkText>
-        {plan.fullPriceNotice ? (
-          <View style={styles.notice} testID="league-pass.full-price">
-            <ChalkText variant="title">{MON['mon.lp.full_price.title']}</ChalkText>
-            <ChalkText variant="bodySm">{fill(MON['mon.lp.full_price.body'], { price: plan.renewal ?? '' })}</ChalkText>
-          </View>
-        ) : null}
         <ChalkText variant="bodySm" style={styles.dim} testID="league-pass.disclosure">{disclosure}</ChalkText>
         {lineSlot}
         <Button
           testID="league-pass.buy"
-          label={plan.fullPriceNotice ? MON['mon.lp.full_price.continue'] : MON['mon.lp.buy']}
+          label={plan.freeMonth ? MON['mon.lp.buy.trial'] : MON['mon.lp.buy']}
           onPress={() => void buy()}
           loading={busy}
           disabled={busy}
         />
-        {plan.fullPriceNotice ? (
-          <Button
-            testID="league-pass.full-price-cancel"
-            label={MON['mon.lp.cancel']}
-            variant="ghost"
-            onPress={() => { setLine(null); setStep({ kind: 'idle' }); }}
-            disabled={busy}
-          />
-        ) : (
-          <Button
-            testID="league-pass.change-league"
-            label={MON['mon.lp.change_league']}
-            variant="ghost"
-            onPress={() => { setLine(null); setStep({ kind: 'idle' }); }}
-            disabled={busy}
-          />
-        )}
+        <Button
+          testID="league-pass.change-league"
+          label={MON['mon.lp.change_league']}
+          variant="ghost"
+          onPress={() => { setLine(null); setStep({ kind: 'idle' }); }}
+          disabled={busy}
+        />
         {legalLinks}
       </View>
     );
@@ -616,14 +579,6 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: ink.line,
-  },
-  notice: {
-    gap: space.xs,
-    padding: space.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    backgroundColor: ink.ink1,
   },
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' },
   linkHit: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.xs },

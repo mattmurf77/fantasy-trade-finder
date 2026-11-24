@@ -8,9 +8,8 @@
 //
 // What lives here:
 //   - coverage: `livePassFor`, `proForLeague`, `coveredElsewhere`;
-//   - the purchase path for a quoted tier (`purchasePathFor`, `purchasePlan`,
-//     `purchaseCallFor`), which is what keeps the price on screen equal to
-//     the price charged;
+//   - the quote (`purchasePlan`): the price on screen and whether the free
+//     month may be promised (only when StoreKit confirmed it);
 //   - the 409 refusal reason → copy key table (`refusalCopyKey`);
 //   - the one-time "your league is now covered" notice (R29): its storage key
 //     and when it is due;
@@ -94,87 +93,43 @@ export function memberPasses<T extends LeaguePassEntryLike>(
   return (passes ?? []).filter((p) => p && p.role === 'member' && ms(p.covered_until) > nowMs);
 }
 
-// ── The purchase path (lld §8 "Purchase path in LeaguePassScreen") ──────────
+// ── The quote (lld §8; operator 2026-11-24, "Free month replaces discount") ──
 //
-//   tier 0                         → 'standard'  (purchasePackage, list price)
-//   tier 1/2, intro-eligible       → 'intro'     (purchasePackage; Apple applies
-//                                                  the introductory price)
-//   tier 1/2, not eligible, a
-//     signed promotional offer     → 'promo'     (purchaseDiscountedPackage)
-//   tier 1/2, neither              → 'full_price' (purchasePackage at the FULL
-//                                                  price, only after the user
-//                                                  chose it on a screen that
-//                                                  says so)
-
-export type LeaguePurchasePath = 'standard' | 'intro' | 'promo' | 'full_price';
-
-export function purchasePathFor(tier: number, introEligible: boolean, promoAvailable: boolean): LeaguePurchasePath {
-  if (!(tier > 0)) return 'standard';
-  if (introEligible) return 'intro';
-  if (promoAvailable) return 'promo';
-  return 'full_price';
-}
-
-/** Which SDK call a path makes. Only 'promo' uses the signed offer. */
-export function purchaseCallFor(path: LeaguePurchasePath): 'package' | 'discounted' {
-  return path === 'promo' ? 'discounted' : 'package';
-}
+// ONE product, `ftf_league_annual`, bought as a plain package purchase. Its
+// App Store introductory offer is a one-month free trial, which Apple applies
+// by itself to an eligible buyer. Eligibility is per subscription group, so
+// someone who already took the individual plan's free month is not eligible.
+// The screen promises the free month ONLY when StoreKit confirmed it for this
+// Apple ID (api/purchases.checkIntroEligibility, the individual paywall's own
+// rule: ELIGIBLE and an intro of exactly one free month). Unknown, loading,
+// an error or no StoreKit all read as no free month: the paid copy.
 
 export interface PurchasePlanInput {
-  tier: number;
-  /** A StoreKit package exists for the quoted product. */
-  storeAvailable: boolean;
-  introEligible: boolean;
-  /** StoreKit's localized list price (what renews), when known. */
-  standardPrice: string | null;
-  /** StoreKit's localized introductory price, when the product has one. */
-  introPrice: string | null;
-  /** The signed promotional offer's localized price, when one was obtained. */
-  promoPrice: string | null;
-  /** Server config fallbacks (`league_pass.products[].display_price` for the
-   *  tier and `league_pass.renews_at_price`). Display only. */
-  configYearOne: string | null;
-  configRenewal: string | null;
+  /** StoreKit's localized list price (what is charged / renews), when a
+   *  package for the product loaded. */
+  storePrice: string | null;
+  /** StoreKit confirmed this Apple ID's one free month for the product. */
+  freeMonthConfirmed: boolean;
+  /** The server config's display price (`league_pass.products[].display_price`,
+   *  else `renews_at_price`). Display only, when StoreKit has no package. */
+  configPrice: string | null;
 }
 
 export interface PurchasePlan {
-  path: LeaguePurchasePath;
-  /** What the first year costs on THIS path. */
-  yearOne: string | null;
-  /** What it renews at. */
-  renewal: string | null;
+  /** The yearly price shown (and charged, or charged after the free month). */
+  price: string | null;
+  /** Show the free month: StoreKit confirmed it AND a purchase can run. */
+  freeMonth: boolean;
   /** True when a purchase can run at all (a StoreKit package exists). */
   canBuy: boolean;
-  /** The discount could not be obtained: the screen must say the price is the
-   *  full price and let the user continue or cancel. */
-  fullPriceNotice: boolean;
 }
 
-/** The ONE place the screen's prices come from. The year-one price shown is
- *  the price of the path that will run: the intro price only on 'intro', the
- *  promotional price only on 'promo', and the full price on 'standard' and
- *  'full_price'. A discount price is never shown for a path that charges the
- *  full price. Without StoreKit nothing can be bought, and the server's
- *  display strings stand in (they are the same prices, unlocalized). */
+/** The ONE place the screen's price and free-month state come from. Without
+ *  StoreKit nothing can be bought, the server's display string stands in, and
+ *  no free month is promised. */
 export function purchasePlan(i: PurchasePlanInput): PurchasePlan {
-  if (!i.storeAvailable || !i.standardPrice) {
-    return {
-      path: purchasePathFor(i.tier, false, false),
-      yearOne: i.configYearOne,
-      renewal: i.configRenewal,
-      canBuy: false,
-      fullPriceNotice: false,
-    };
-  }
-  const path = purchasePathFor(i.tier, i.introEligible && !!i.introPrice, !!i.promoPrice);
-  const yearOne = path === 'intro' ? i.introPrice : path === 'promo' ? i.promoPrice : i.standardPrice;
-  return {
-    path,
-    yearOne,
-    renewal: i.standardPrice,
-    canBuy: true,
-    fullPriceNotice: path === 'full_price',
-  };
+  if (!i.storePrice) return { price: i.configPrice, freeMonth: false, canBuy: false };
+  return { price: i.storePrice, freeMonth: i.freeMonthConfirmed === true, canBuy: true };
 }
 
 // ── Refusals (lld §3.3/§3.4; api-reference § League pass: 409 {error}) ──────
@@ -187,7 +142,6 @@ export const REFUSAL_COPY_KEY = {
   already_covered: 'mon.lp.refused.already_covered',
   already_buyer: 'mon.lp.refused.already_buyer',
   refund_blocked: 'mon.lp.refused.refund_blocked',
-  tier_mismatch: 'mon.lp.refused.tier_mismatch',
   no_purchase: 'mon.lp.refused.no_purchase',
   no_pass: 'mon.lp.refused.no_pass',
   cooldown: 'mon.lp.refused.cooldown',

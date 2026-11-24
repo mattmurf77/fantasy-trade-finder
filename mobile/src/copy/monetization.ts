@@ -140,15 +140,17 @@ export const MON = {
     'One pass covers everyone in the league you choose, in that league. You get a subscription in all your leagues.',
   'mon.lp.pick.empty': "You don't have a team in any league yet.",
   'mon.lp.quote.teams': '{teams} teams',
-  'mon.lp.quote.price': '{year_one} for the first year, then {renewal} a year',
-  'mon.lp.quote.price_same': '{price} a year',
-  'mon.lp.disclosure':
-    'League pass for {league_name}: {year_one} for the first year, charged to your Apple ID when you confirm, then {renewal} a year. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
-  'mon.lp.disclosure_same':
+  // The quote. The `.trial` keys (the only mon.lp lines that say "free") render
+  // ONLY when StoreKit confirmed this Apple ID's one free month on the product
+  // (the individual paywall's rule, R28.8 #1); unknown or not eligible gets
+  // the `.paid` keys. Same disclosure pattern as `mon.pay.disc.trial/.paid`.
+  'mon.lp.quote.trial': '1 month free, then {price} a year',
+  'mon.lp.quote.paid': '{price} a year',
+  'mon.lp.disclosure.trial':
+    'League pass for {league_name}: 1 month free, then {price} a year. Payment is charged to your Apple ID when the free month ends. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the free month or the current period ends.',
+  'mon.lp.disclosure.paid':
     'League pass for {league_name}: {price} a year, charged to your Apple ID when you confirm. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
-  'mon.lp.full_price.title': "The first-year discount isn't available right now",
-  'mon.lp.full_price.body': 'If you continue, you pay the full price, {price} a year. Continue at that price, or cancel.',
-  'mon.lp.full_price.continue': 'Continue at full price',
+  'mon.lp.buy.trial': 'Start 1-month trial',
   'mon.lp.buy': 'Buy league pass',
   'mon.lp.cancel': 'Cancel',
   'mon.lp.change_league': 'Choose another league',
@@ -166,8 +168,6 @@ export const MON = {
   'mon.lp.refused.already_covered': 'That league already has a league pass.',
   'mon.lp.refused.already_buyer': 'You already have a league pass. You can move it to another league in Settings.',
   'mon.lp.refused.refund_blocked': `A league pass on this account was refunded, so another one can't be bought here. Questions: ${SUPPORT_EMAIL}`,
-  'mon.lp.refused.tier_mismatch':
-    'That league qualifies for a higher price than the pass you bought, so the pass can\'t cover it. Choose another league.',
   'mon.lp.refused.no_purchase': 'No league pass purchase was found for this account.',
   'mon.lp.refused.no_pass': "You don't have an active league pass.",
   'mon.lp.refused.cooldown': 'You can move your pass again on {date}.',

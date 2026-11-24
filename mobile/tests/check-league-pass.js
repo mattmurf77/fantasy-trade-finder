@@ -11,22 +11,22 @@
 //     pass covers (or worse, a pass for league A unlocks league B in the UI);
 //   - an expired `covered_until` still read as coverage;
 //   - the sign-out reset leaving the last account's passes in memory;
-//   - the purchase screen showing a discounted first-year price and charging
-//     the list price (or the reverse) when Apple's promotional offer can't be
-//     signed;
+//   - the purchase screen promising a free month StoreKit did not confirm
+//     for this Apple ID (unknown eligibility must read as no free month), or
+//     a purchase other than the plain package purchase;
 //   - a 409 refusal reason with no copy of its own, or a copy key missing
 //     from copy/monetization.ts;
 //   - an interactive element with no testID.
 //
 // HOW. It TRANSPILES AND EXECUTES the real modules under plain node, with
 // throwing stubs for any import it didn't expect:
-//   - utils/leaguePass.ts (zero imports): coverage, the purchase path, the
+//   - utils/leaguePass.ts (zero imports): coverage, the quote plan, the
 //     refusal table, the notice, the config path;
 //   - copy/monetization.ts: every mon.lp key the sources use exists;
 //   - api/billing.ts against a recording `api`: the request paths, flag off
 //     and on;
-//   - api/purchases.ts against a fake RevenueCat SDK: the league offering,
-//     intro eligibility, the signed promotional offer, the discounted buy;
+//   - api/purchases.ts against a fake RevenueCat SDK: the league offering, the
+//     free-month eligibility the screen uses, the plain package buy;
 //   - state/useEntitlements.ts + state/accountReset.ts: passes stored,
 //     overwritten and cleared;
 //   - state/useLeaguePass.ts: `proForLeagueNow`, flag off and on;
@@ -153,51 +153,21 @@ check('1b. R26 coveredElsewhere: a live pass in ANOTHER league while nothing cov
   eq(C([pass('L1'), pass('L2')], 'L2', NOW), null, 'covered here and elsewhere → no line');
 });
 
-check('1c. the tier → purchase path: tier 0 standard; tier 1/2 intro-eligible → intro; else a signed promo → promo; else full price. Only promo uses the discounted call', () => {
-  const F = lp.purchasePathFor;
-  eq(F(0, true, true), 'standard', 'tier 0 ignores intro and promo');
-  for (const t of [1, 2]) {
-    eq(F(t, true, true), 'intro', `tier ${t} eligible`);
-    eq(F(t, true, false), 'intro', `tier ${t} eligible, no promo`);
-    eq(F(t, false, true), 'promo', `tier ${t} not eligible, promo signed`);
-    eq(F(t, false, false), 'full_price', `tier ${t} neither`);
+check('1c. the quote plan: the free month only when StoreKit confirmed it AND a package exists; the price is StoreKit\'s; without StoreKit nothing can be bought, the config price stands in and no free month is promised', () => {
+  const P = lp.purchasePlan;
+  let p = P({ storePrice: '$99.99', freeMonthConfirmed: true, configPrice: '$99.99' });
+  eq(p.freeMonth, true, 'confirmed → free month'); eq(p.price, '$99.99', 'StoreKit price'); eq(p.canBuy, true, 'can buy');
+  p = P({ storePrice: '$99.99', freeMonthConfirmed: false, configPrice: '$99.99' });
+  eq(p.freeMonth, false, 'not eligible → no free month'); eq(p.price, '$99.99', 'the yearly price'); eq(p.canBuy, true, 'can buy');
+  for (const unknown of [undefined, null, 'yes', 1]) {
+    eq(P({ storePrice: '$99.99', freeMonthConfirmed: unknown, configPrice: '$99.99' }).freeMonth, false, `unknown (${JSON.stringify(unknown)}) → no free month`);
   }
-  eq(lp.purchaseCallFor('promo'), 'discounted', 'promo → purchaseDiscountedPackage');
-  for (const p of ['standard', 'intro', 'full_price']) eq(lp.purchaseCallFor(p), 'package', `${p} → purchasePackage`);
-});
-
-check('1d. NEVER ONE PRICE SHOWN AND ANOTHER CHARGED: the plan\'s year-one price is the price of the path that runs; the fallback shows the full price only, with its notice', () => {
-  const base = { storeAvailable: true, standardPrice: '$99.99', introPrice: '$84.99', promoPrice: null, configYearOne: '$84.99', configRenewal: '$99.99' };
-  // intro
-  let p = lp.purchasePlan({ ...base, tier: 1, introEligible: true });
-  eq(p.path, 'intro', 'intro path'); eq(p.yearOne, '$84.99', 'intro: StoreKit intro price'); eq(p.renewal, '$99.99', 'renews at list');
-  eq(p.fullPriceNotice, false, 'no notice');
-  // eligible but StoreKit shows no intro on the product → never "intro" (Apple would charge the list price)
-  p = lp.purchasePlan({ ...base, tier: 1, introEligible: true, introPrice: null });
-  assert(p.path !== 'intro', 'eligible with no intro price must not take the intro path');
-  eq(p.yearOne, '$99.99', 'and shows the full price');
-  // promo
-  p = lp.purchasePlan({ ...base, tier: 2, introEligible: false, introPrice: '$69.99', promoPrice: '$69.99' });
-  eq(p.path, 'promo', 'promo path'); eq(p.yearOne, '$69.99', 'promo: the signed offer\'s price');
-  eq(lp.purchaseCallFor(p.path), 'discounted', 'promo runs the discounted call');
-  // the fallback: no intro, no signed offer
-  for (const tier of [1, 2]) {
-    p = lp.purchasePlan({ ...base, tier, introEligible: false, promoPrice: null });
-    eq(p.path, 'full_price', `tier ${tier} fallback path`);
-    eq(p.yearOne, '$99.99', `tier ${tier} fallback: year one is the FULL price`);
-    eq(p.renewal, '$99.99', `tier ${tier} fallback: renewal`);
-    assert(p.yearOne !== base.configYearOne, `tier ${tier} fallback never shows the config's discounted year-one price`);
-    eq(p.fullPriceNotice, true, `tier ${tier} fallback says so`);
-    eq(p.canBuy, true, 'and can still be bought (by choice)');
-    eq(lp.purchaseCallFor(p.path), 'package', 'at the list price, via purchasePackage');
-  }
-  // tier 0
-  p = lp.purchasePlan({ ...base, tier: 0, introEligible: true, promoPrice: '$1.00' });
-  eq(p.path, 'standard', 'tier 0'); eq(p.yearOne, '$99.99', 'tier 0 is the list price whatever StoreKit offers');
-  // no StoreKit: nothing can be bought; the server's strings are display only
-  p = lp.purchasePlan({ ...base, storeAvailable: false, standardPrice: null, tier: 1, introEligible: false });
-  eq(p.canBuy, false, 'no StoreKit → cannot buy'); eq(p.yearOne, '$84.99', 'config year one'); eq(p.renewal, '$99.99', 'config renewal');
-  eq(p.fullPriceNotice, false, 'no notice without a purchase');
+  p = P({ storePrice: 'CA$139.99', freeMonthConfirmed: false, configPrice: '$99.99' });
+  eq(p.price, 'CA$139.99', 'StoreKit\'s localized price beats the config string');
+  p = P({ storePrice: null, freeMonthConfirmed: true, configPrice: '$99.99' });
+  eq(p.canBuy, false, 'no StoreKit → cannot buy'); eq(p.freeMonth, false, 'no StoreKit → no free month, whatever was passed');
+  eq(p.price, '$99.99', 'config price, display only');
+  eq(lp.purchasePathFor, undefined, 'the tier/promo path is gone'); eq(lp.purchaseCallFor, undefined, 'no discounted call');
 });
 
 // The refusal reasons the user routes send, read from the API reference so a
@@ -205,16 +175,21 @@ check('1d. NEVER ONE PRICE SHOWN AND ANOTHER CHARGED: the plan\'s year-one price
 const API_REF = fs.readFileSync(path.join(REPO, 'docs/api-reference.md'), 'utf8');
 const lpRows = API_REF.split('\n').filter((l) => /^\| (GET|POST|PUT)[^|]*\| `\/api\/league-pass/.test(l));
 const REASONS = new Set();
+// `tier_mismatch` belonged to the tiered products the free-month decision
+// (operator 2026-11-24) removed; the client has no copy for it (an unknown
+// reason reads as the generic line). docs/api-reference.md is the server
+// branch's to change; once its bind row drops the reason this skip is inert.
+const RETIRED = new Set(['tier_mismatch']);
 for (const row of lpRows) {
   const tail = row.slice(row.indexOf('409'));
   // Backticked words after "409" are reasons, except a detail field the
   // row names alongside one (`cooldown` carries `can_repoint_at`).
-  if (row.includes('409')) for (const m of tail.matchAll(/`([a-z_]+)`/g)) if (m[1] !== 'can_repoint_at') REASONS.add(m[1]);
+  if (row.includes('409')) for (const m of tail.matchAll(/`([a-z_]+)`/g)) if (m[1] !== 'can_repoint_at' && !RETIRED.has(m[1])) REASONS.add(m[1]);
 }
 
 check('1e. every 409 reason the /api/league-pass routes document maps to its OWN copy key; an unknown reason gets the generic line; refusalReason reads only a 409 body', () => {
   assert(lpRows.length >= 5, `found ${lpRows.length} /api/league-pass rows in docs/api-reference.md`);
-  for (const r of ['not_member', 'league_not_allowed', 'already_covered', 'already_buyer', 'refund_blocked', 'tier_mismatch', 'no_purchase', 'no_pass', 'cooldown']) {
+  for (const r of ['not_member', 'league_not_allowed', 'already_covered', 'already_buyer', 'refund_blocked', 'no_purchase', 'no_pass', 'cooldown']) {
     assert(REASONS.has(r), `api-reference no longer lists ${r} (positive control)`);
   }
   const keys = new Set();
@@ -225,6 +200,7 @@ check('1e. every 409 reason the /api/league-pass routes document maps to its OWN
   }
   eq(keys.size, REASONS.size, 'one key per reason');
   eq(lp.refusalCopyKey('something_new'), 'mon.lp.refused.generic', 'unknown → generic');
+  eq(lp.refusalCopyKey('tier_mismatch'), 'mon.lp.refused.generic', 'the retired tier reason → generic');
   eq(lp.refusalCopyKey(null), 'mon.lp.refused.generic', 'null → generic');
   eq(lp.refusalCopyKey('__proto__'), 'mon.lp.refused.generic', 'no prototype keys');
   eq(lp.refusalReason({ status: 409, body: { error: 'cooldown', can_repoint_at: FUTURE } }), 'cooldown', '409');
@@ -284,7 +260,7 @@ check('2a. every mon.lp key the sources use exists in copy/monetization.ts, and 
   assert(copy.MON['mon.lp.refused.generic'], 'generic refusal');
 });
 
-check('2b. the mon.lp block: marked pending legal review; plain text — no hard-coded price, no em dash, no "free", no raw {league}', () => {
+check('2b. the mon.lp block: marked pending legal review; plain text — no hard-coded price, no em dash, "free" only in the .trial keys, no raw {league}; no tier or discount wording left', () => {
   const src = read('copy/monetization.ts');
   assert(/League pass[\s\S]{0,200}PENDING LEGAL REVIEW/.test(src), 'the block carries its pending-legal comment');
   const lpEntries = Object.entries(copy.MON).filter(([k]) => k.startsWith('mon.lp.'));
@@ -292,13 +268,23 @@ check('2b. the mon.lp block: marked pending legal review; plain text — no hard
   for (const [k, v] of lpEntries) {
     assert(!/[$€£]\s?\d/.test(v), `${k} hard-codes a price: ${v}`);
     assert(!/—|–/.test(v), `${k} has an em/en dash: ${v}`);
-    assert(!/\bfree\b/i.test(v), `${k} says "free": ${v}`);
+    if (!/\.trial$/.test(k)) assert(!/\bfree\b/i.test(v), `${k} says "free" outside a .trial key: ${v}`);
+    assert(!/first year|discount|full price|qualifies|already pay/i.test(v), `${k} keeps tier/discount wording: ${v}`);
     assert(!/\{league\}/.test(v), `${k} uses the invitee's {league} slot`);
   }
   for (const rel of NEW_FILES) {
     const s = strip(read(rel));
     assert(!/[$€£]\d/.test(s.replace(/\$\{/g, '')), `${rel} hard-codes a price`);
   }
+  const trialKeys = lpEntries.filter(([k]) => /\.trial$/.test(k)).map(([k]) => k).sort();
+  eq(JSON.stringify(trialKeys), JSON.stringify(['mon.lp.buy.trial', 'mon.lp.disclosure.trial', 'mon.lp.quote.trial']), 'the three trial keys');
+  // The required disclosure: after the free month it renews at the yearly
+  // price unless cancelled (the individual paywall's mon.pay.disc.trial).
+  const dt = copy.MON['mon.lp.disclosure.trial'];
+  assert(/1 month free, then \{price\} a year/.test(dt) && /charged to your Apple ID when the free month ends/.test(dt)
+    && /Renews automatically until cancelled/.test(dt) && /at least 24 hours before the free month or the current period ends/.test(dt), `trial disclosure: ${dt}`);
+  const dp = copy.MON['mon.lp.disclosure.paid'];
+  assert(/\{price\} a year, charged to your Apple ID when you confirm/.test(dp) && /Renews automatically until cancelled/.test(dp), `paid disclosure: ${dp}`);
 });
 
 // ═══ 3. api/billing.ts — the requests, flag off and on ════════════════════
@@ -339,34 +325,32 @@ check('3a. getPaywallConfig: flag off → exactly today\'s path (no caps); flag 
 });
 
 // ═══ 4. api/purchases.ts — against a fake RevenueCat SDK ══════════════════
-check('4a. the league offering, intro eligibility, the signed offer and the discounted buy: fail-safe, identity-gated, never a thrown read', async () => {
+check('4a. the league offering and the free-month eligibility the screen reads: fail-safe, never a thrown read; the promo wrappers are gone', async () => {
   const sdk = {
     calls: [],
     appUserId: null,
     offerings: { current: { identifier: 'default' }, all: { league: { identifier: 'league', availablePackages: [] } } },
     eligibility: {},
-    promo: { identifier: 'league_t1_y1', keyIdentifier: 'K', nonce: 'n', signature: 's', timestamp: 1 },
-    promoThrows: false,
+    eligThrows: false,
     configure({ appUserID }) { this.appUserId = appUserID; },
     async logIn(id) { this.appUserId = id; return {}; },
     async getAppUserID() { return this.appUserId; },
     async getOfferings() { return this.offerings; },
-    async checkTrialOrIntroductoryPriceEligibility(ids) { this.calls.push(['elig', ids.join()]); return this.eligibility; },
-    async getPromotionalOffer(product, discount) {
-      this.calls.push(['promo', product.identifier, discount.identifier]);
-      if (this.promoThrows) throw new Error('sign failed');
-      return this.promo;
+    async checkTrialOrIntroductoryPriceEligibility(ids) {
+      this.calls.push(['elig', ids.join()]);
+      if (this.eligThrows) throw new Error('storekit');
+      return this.eligibility;
     },
-    async purchaseDiscountedPackage(pkg, offer) { this.calls.push(['buyDiscounted', pkg.identifier, offer.identifier, this.appUserId]); return { customerInfo: {} }; },
     async purchasePackage(pkg) { this.calls.push(['buy', pkg.identifier, this.appUserId]); return { customerInfo: {} }; },
   };
+  const month = { price: 0, priceString: '$0.00', period: 'P1M', periodUnit: 'MONTH', periodNumberOfUnits: 1 };
+  const annual = { identifier: 'ftf_league_annual', priceString: '$99.99', price: 99.99, introPrice: month };
   // No key → every export inert.
   delete process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY;
   const off = load('api/purchases.ts', { 'react-native-purchases': { default: sdk } });
   eq(await off.getLeagueOffering('league'), null, 'no key: no offering');
-  eq(await off.checkIntroPriceEligible({ identifier: 'x', introPrice: { price: 1 } }), false, 'no key: not eligible');
-  eq(await off.getPromoOffer({ identifier: 'x', discounts: [] }, 'o', 'U1'), null, 'no key: no offer');
-  eq(await off.purchaseDiscountedPackage({ identifier: 'p' }, sdk.promo, 'U1'), null, 'no key: no purchase');
+  eq(JSON.stringify(await off.checkIntroEligibility([annual])), '{}', 'no key: no free month');
+  for (const gone of ['checkIntroPriceEligible', 'getPromoOffer', 'purchaseDiscountedPackage']) eq(off[gone], undefined, `${gone} is removed`);
 
   process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY = 'appl_test';
   const P = load('api/purchases.ts', { 'react-native-purchases': { default: sdk } });
@@ -375,29 +359,22 @@ check('4a. the league offering, intro eligibility, the signed offer and the disc
   await P.initPurchases('U1');
   eq((await P.getLeagueOffering('league'))?.identifier, 'league', 'the league offering by id (never `current`)');
   eq(await P.getLeagueOffering('nope'), null, 'unknown offering → null');
-  const t1 = { identifier: 'ftf_league_annual_t1', priceString: '$99.99', introPrice: { priceString: '$84.99', price: 84.99 },
-    discounts: [{ identifier: 'league_t1_y1', priceString: '$84.99', price: 84.99 }] };
-  sdk.eligibility = { ftf_league_annual_t1: { status: 2 } };
-  eq(await P.checkIntroPriceEligible(t1), true, 'StoreKit ELIGIBLE (2) with an intro price');
+  sdk.eligibility = { ftf_league_annual: { status: 2 } };
+  eq((await P.checkIntroEligibility([annual])).ftf_league_annual, true, 'ELIGIBLE (2) and an intro of one free month');
   for (const status of [0, 1, 3]) {
-    sdk.eligibility = { ftf_league_annual_t1: { status } };
-    eq(await P.checkIntroPriceEligible(t1), false, `status ${status} → not eligible`);
+    sdk.eligibility = { ftf_league_annual: { status } };
+    eq((await P.checkIntroEligibility([annual])).ftf_league_annual, false, `status ${status} (unknown / used the group's free month / no intro) → no free month`);
   }
-  sdk.eligibility = { ftf_league_annual_t1: { status: 2 } };
-  eq(await P.checkIntroPriceEligible({ ...t1, introPrice: null }), false, 'no intro on the product → not eligible');
-  const got = await P.getPromoOffer(t1, 'league_t1_y1', 'U1');
-  eq(got && got.offer.identifier, 'league_t1_y1', 'the signed offer'); eq(got && got.priceString, '$84.99', 'priced from the discount itself');
-  eq(await P.getPromoOffer(t1, 'league_t2_y1', 'U1'), null, 'a discount the product lacks → null');
-  eq(await P.getPromoOffer(t1, undefined, 'U1'), null, 'no offer id → null');
-  eq(await P.getPromoOffer(t1, 'league_t1_y1', 'SOMEONE_ELSE'), null, 'RevenueCat is not this user → null (the signature binds the user)');
-  sdk.promoThrows = true;
-  eq(await P.getPromoOffer(t1, 'league_t1_y1', 'U1'), null, 'signing failed → null, never a throw');
-  sdk.promoThrows = false;
-  const res = await P.purchaseDiscountedPackage({ identifier: '$rc_annual' }, sdk.promo, 'U1');
-  assert(res && sdk.calls.some((c) => c[0] === 'buyDiscounted' && c[2] === 'league_t1_y1' && c[3] === 'U1'), 'the discounted purchase runs with the exact offer, as U1');
-  let threw = false;
-  try { await P.purchaseDiscountedPackage({ identifier: '$rc_annual' }, sdk.promo, ''); } catch (e) { threw = e && e.name === 'PurchaseIdentityError'; }
-  assert(threw, 'no session user → PurchaseIdentityError, Apple\'s sheet never opens');
+  sdk.eligibility = { ftf_league_annual: { status: 2 } };
+  eq((await P.checkIntroEligibility([{ ...annual, introPrice: null }])).ftf_league_annual, false, 'no intro on the product → no free month');
+  eq((await P.checkIntroEligibility([{ ...annual, introPrice: { ...month, price: 84.99 } }])).ftf_league_annual, false, 'a PAID intro is not a free month');
+  sdk.eligibility = {};
+  eq((await P.checkIntroEligibility([annual])).ftf_league_annual, false, 'no answer for the product → no free month');
+  sdk.eligThrows = true;
+  eq((await P.checkIntroEligibility([annual])).ftf_league_annual, undefined, 'an SDK error → empty map, never a throw (the screen reads === true)');
+  sdk.eligThrows = false;
+  const res = await P.purchasePackage({ identifier: '$rc_annual' }, 'U1');
+  assert(res && sdk.calls.some((c) => c[0] === 'buy' && c[1] === '$rc_annual' && c[2] === 'U1'), 'the plain package purchase runs as U1');
 });
 
 // ═══ 5. state/useEntitlements.ts + accountReset + useLeaguePass ═══════════
@@ -656,14 +633,17 @@ check('9a. [shape] LeaguePass is registered ONCE in RootNav as a modal (no Feedb
   assert(!/\['paywall-config'/.test(s), 'its own config key, never the paywall\'s shared entry (check-tipjar 8f)');
 });
 
-check('9b. [shape] the purchase runs the plan it showed: the discounted call only with its signed offer (never a silent list-price fallback); prices only from the plan', () => {
+check('9b. [shape] the purchase is a plain package purchase; the free month copy rides only on plan.freeMonth, from checkIntroEligibility === true; prices only from the plan', () => {
   const s = strip(read('screens/LeaguePassScreen.tsx'));
-  assert(/if \(purchaseCallFor\(plan\.path\) === 'discounted'\) \{\s*if \(!promo\) throw new Error\('promo_offer_missing'\);\s*result = await purchaseDiscountedPackage\(pkg, promo, userId\);\s*\} else \{\s*result = await purchasePackage\(pkg, userId\);\s*\}/.test(s),
-    'discounted only with the offer; otherwise purchasePackage');
+  assert(/const result = await purchasePackage\(pkg, userId\);/.test(s), 'purchasePackage');
+  assert(!/purchaseDiscountedPackage|getPromoOffer|promo_offer_id|checkIntroPriceEligible|\.tier\b/.test(s), 'no promo or tier machinery');
+  assert(/const freeMonthConfirmed = sp \? \(await checkIntroEligibility\(\[sp\]\)\)\[sp\.identifier\] === true : false;/.test(s), 'eligibility: the individual paywall\'s confirmed-free-month rule, strictly true');
   assert(/const plan = purchasePlan\(\{/.test(s), 'the plan comes from utils/leaguePass.purchasePlan');
-  assert(/label=\{plan\.fullPriceNotice \? MON\['mon\.lp\.full_price\.continue'\] : MON\['mon\.lp\.buy'\]\}/.test(s), 'fallback: "Continue at full price"');
-  assert(/testID="league-pass\.full-price-cancel"/.test(s), 'fallback: Cancel');
-  assert(/introEligible = await checkIntroPriceEligible\(sp\);\s*if \(!introEligible\) \{[\s\S]{0,200}promo = await getPromoOffer\(sp, product\?\.promo_offer_id, userId\);/.test(s), 'intro first, then the config\'s promo_offer_id');
+  const trialUses = [...s.matchAll(/MON\['(mon\.lp\.[a-z_.]+\.trial)'\]/g)].map((m) => m[1]).sort();
+  eq(JSON.stringify(trialUses), JSON.stringify(['mon.lp.buy.trial', 'mon.lp.disclosure.trial', 'mon.lp.quote.trial']), 'each trial key used once');
+  assert(/const priceLine = plan\.freeMonth\s*\?\s*fill\(MON\['mon\.lp\.quote\.trial'\], \{ price \}\)\s*:\s*fill\(MON\['mon\.lp\.quote\.paid'\], \{ price \}\);/.test(s), 'price line');
+  assert(/const disclosure = plan\.freeMonth\s*\?\s*fill\(MON\['mon\.lp\.disclosure\.trial'\][^)]*\)\s*:\s*fill\(MON\['mon\.lp\.disclosure\.paid'\]/.test(s), 'disclosure');
+  assert(/label=\{plan\.freeMonth \? MON\['mon\.lp\.buy\.trial'\] : MON\['mon\.lp\.buy'\]\}/.test(s), 'button');
   assert(/await refreshEntitlements\(\);\s*const mine = buyerPass\(/.test(s), 'after the purchase: refresh until the buyer\'s pass shows');
   assert(/else if \(v\.unbound\) setStep\(\{ kind: 'idle' \}\);/.test(s), 'else the server\'s unbound view (choose a league, R19)');
 });
@@ -690,7 +670,7 @@ check('9c. analytics: the new surfaces fire only the existing paywall_purchase_*
     })(sf);
     assert(n > 0, `${rel}: positive control (found interactive elements)`);
   }
-  const want = ['league-pass-screen', 'league-pass.close', 'league-pass.buy', 'league-pass.full-price-cancel', 'league-pass.change-league',
+  const want = ['league-pass-screen', 'league-pass.close', 'league-pass.buy', 'league-pass.change-league',
     'league-pass.move', 'league-pass.show-name', 'league-pass.terms', 'league-pass.privacy', 'league-pass.done-close'];
   const s = read('screens/LeaguePassScreen.tsx');
   for (const id of want) assert(s.includes(`testID="${id}"`), `LeaguePassScreen: ${id}`);
