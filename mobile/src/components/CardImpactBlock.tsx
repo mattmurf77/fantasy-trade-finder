@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
 import { ink, chalk, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import type { CalcEvaluationInLeague } from '../api/calc';
+import { slotShortLabel } from '../utils/slotLabel';
 
 // #357 — "what does this trade do to my team?" ON THE DECK CARD.
 //
@@ -69,11 +70,6 @@ function signedPoints(delta: number): string {
   return pts > 0 ? `+${pts}` : `${pts}`;
 }
 
-/** Trim the numbered suffix off a repeated slot ("RB2" -> "RB") only when the
- *  template repeats it; the server already numbers them. */
-function slotLabel(slot: string): string {
-  return slot.replace(/_/g, ' ');
-}
 
 export default function CardImpactBlock({
   loading,
@@ -137,7 +133,7 @@ export default function CardImpactBlock({
             return (
               <View key={s.slot} style={styles.row}>
                 <Text style={styles.slot} numberOfLines={1}>
-                  {slotLabel(s.slot)}
+                  {slotShortLabel(s.slot)}
                 </Text>
                 <Text style={styles.name} numberOfLines={1}>
                   {s.before?.name ?? '—'}

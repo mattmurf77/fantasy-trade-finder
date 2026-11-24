@@ -12590,6 +12590,41 @@ def match_already_exists(
     return False
 
 
+def matched_package_keys(user_id: str, league_ids) -> set:
+    """Every package the user is in a trade_matches row for, in the given
+    leagues: {(league_id, frozenset(my_give), frozenset(my_receive))}, from
+    the USER's orientation (mirrored when the user is user_b). Any status,
+    dismissed or not — a matched package is never "awaiting" again, which is
+    the same rule load_awaiting_trades applies. Feeds GET /api/trades/liked.
+    """
+    league_ids = [lid for lid in set(league_ids or []) if lid]
+    if not user_id or not league_ids:
+        return set()
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(
+                trade_matches_table.c.league_id,
+                trade_matches_table.c.user_a_id,
+                trade_matches_table.c.user_a_give,
+                trade_matches_table.c.user_a_receive,
+            ).where(and_(
+                trade_matches_table.c.league_id.in_(league_ids),
+                or_(trade_matches_table.c.user_a_id == user_id,
+                    trade_matches_table.c.user_b_id == user_id),
+            ))
+        ).fetchall()
+    keys: set = set()
+    for r in rows:
+        try:
+            a_give = frozenset(json.loads(r.user_a_give))
+            a_recv = frozenset(json.loads(r.user_a_receive))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        keys.add((r.league_id, a_give, a_recv) if r.user_a_id == user_id
+                 else (r.league_id, a_recv, a_give))
+    return keys
+
+
 def create_trade_match(
     league_id: str,
     user_a_id: str,

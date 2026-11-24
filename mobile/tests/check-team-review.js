@@ -561,10 +561,12 @@ const planBody = planStart === -1
       bad('20b. Team Review posts only after a save landed', 'noteTeamReviewSave must follow the awaited write inside savePrefs');
     } else if (count(s, 'noteTeamReviewSave(') !== 1) {
       bad('20b. one post site', `found ${count(s, 'noteTeamReviewSave(')} noteTeamReviewSave( calls; expected 1, in savePrefs`);
-    } else if (!/if \(scoped\) \{\s*(?:\/\/[^\n]*\n\s*)*clearTeamReviewSave\(\);/.test(read(SCREEN))
-      || !finish.includes('clearTeamReviewSave();')) {
-      bad('20b. a scoped Finish drops the note', 'expected clearTeamReviewSave() at the top of `if (scoped) {` in the finish handler');
-    } else ok('20b. Team Review posts after a landed save and drops it when Finish runs a scoped search');
+    } else if (!/clearTeamReviewSave\(\);\s*(?:\/\/[^\n]*\n\s*)*const \{ pinnedGive, pinnedReceive \} = useFinderTargets\.getState\(\);\s*const searchId = beginTradeSearch\(/.test(finish)) {
+      // 2026-11-22 (sim pass, issue E): every Finish now runs a search (an
+      // unscoped one hands off like the landing's Find a Trade), so the note
+      // is dropped on every Finish, right before that search begins.
+      bad('20b. Finish drops the note', 'expected clearTeamReviewSave() right before the Finish search begins (beginTradeSearch) in the finish handler');
+    } else ok('20b. Team Review posts after a landed save and drops it when Finish runs its search');
     const focus = /useFocusEffect\(\s*useCallback\(\(\) => \{\s*if \(!consumeTeamReviewSave\(leagueId\)\) return;\s*prefsChangedSinceGenerateRef\.current = true;\s*if \(prefsChangedStripVisible\(consolidateOn, deck\.length, job\?\.status\)\) \{\s*setShowPrefsChangedStrip\(true\);/.test(trades);
     const dna = /prefsChangedSinceGenerateRef\.current &&\s*prefsChangedStripVisible\(consolidateOn, deck\.length, job\?\.status\)/.test(trades);
     if (!focus) bad('20c. Find a Trade consumes the note on focus and marks the deck stale', 'the useFocusEffect consuming consumeTeamReviewSave is missing or changed');
