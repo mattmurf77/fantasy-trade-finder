@@ -15,7 +15,7 @@
    The question itself is still open. Since then the profile write holds the daemon caller's
    users-row lock, so a user's own session never rebuilds their profile after they delete their
    account; a league-mate's sync still can.*
-   **Resolved 2026-11-24 ([D-281](../../../living-memory/DECISIONS.md), Q-040): options (a) + (b).**
+   **Resolved 2026-11-24 ([D-282](../../../living-memory/DECISIONS.md), Q-040): options (a) + (b).**
    The privacy page's "League data" item now says we build these summaries for every league
    manager, account or not, and stop for anyone who deletes their account. Account deletion
    records a keyed hash (HMAC-SHA256 under `EXPERIMENT_SALT_KEY`) of each of the person's league

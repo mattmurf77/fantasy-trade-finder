@@ -1,4 +1,4 @@
-"""Manager-profile suppression after account deletion (Q-040, D-281).
+"""Manager-profile suppression after account deletion (Q-040, D-282).
 
 `market.manager_profiles` rebuilds one profile per roster owner from public
 league history on every league-mate's sync, so deleting a person's rows is not

@@ -1,4 +1,4 @@
-## 2026-11-24 — Manager-profile suppression after account deletion (D-281, Q-040), branch `fix/q040-profile-suppression`
+## 2026-11-24 — Manager-profile suppression after account deletion (D-282, Q-040), branch `fix/q040-profile-suppression`
 
 - **Backend (venv in the worktree, Python 3.12.16, no network):** new `test_manager_profile_suppression.py` **7 passed**. With `test_manager_profiles`, `test_account_deletion_coverage`, `test_session_init_deleted_mid_daemon` (`_GUARDED_WRITERS`, unchanged), `test_test_profile`, `test_purge_entry_users`, `test_receipts_append_only`, `test_partner_activity`, `test_deletion_scrub`, `test_accounts`, `test_verified_sessions`, `test_seed_ui_test_db`: **520 passed**. Full `backend/tests` (`-n auto`): **15,954 passed, 43 skipped, 0 failed** (15,947 + the 7 new).
 - **Web:** `qa/web/check_web_structure.py` **265/265** after the privacy sentence (the legal-pinned "League data" sentence is unchanged and still verbatim).

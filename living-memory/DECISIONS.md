@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-281 — Manager profiles: disclose them on the privacy page, and suppress a deleted account's profile with a keyed hash (Q-040 (a) + (b))
+## D-282 — Manager profiles: disclose them on the privacy page, and suppress a deleted account's profile with a keyed hash (Q-040 (a) + (b))
 
 **Date:** 2026-11-24 · **Who:** the operator's decision on Q-040 through the main session; built by a builder subagent on `fix/q040-profile-suppression`. Scope: `docs/plans/manager-profiles/scope-q040-suppression.md`.
 **Context:** `market.manager_profiles` is on (#635). Each league sync rebuilds a profile for every roster owner from public league history, so a deleted account's profile came back on any league-mate's next sync, and the privacy page did not mention the profiles.

@@ -863,7 +863,7 @@ manager_profiles_table = Table("manager_profiles", metadata,
 )
 Index("ix_manager_profiles_league", manager_profiles_table.c.league_id)
 
-# manager_profile_suppressions (Q-040, D-281): the Sleeper league identities of
+# manager_profile_suppressions (Q-040, D-282): the Sleeper league identities of
 # deleted accounts whose manager profile must never be rebuilt. A league-mate's
 # sync rebuilds every owner's profile from public league history, so deleting
 # the row alone (accounts._delete_user_data) would not keep a deleted person's
