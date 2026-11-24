@@ -15,6 +15,16 @@
    The question itself is still open. Since then the profile write holds the daemon caller's
    users-row lock, so a user's own session never rebuilds their profile after they delete their
    account; a league-mate's sync still can.*
+   **Resolved 2026-11-24 ([D-282](../../../living-memory/DECISIONS.md), Q-040): options (a) + (b).**
+   The privacy page's "League data" item now says we build these summaries for every league
+   manager, account or not, and stop for anyone who deletes their account. Account deletion
+   records a keyed hash (HMAC-SHA256 under `EXPERIMENT_SALT_KEY`) of each of the person's league
+   ids in `manager_profile_suppressions`, in the deletion's transaction, and
+   `capture_manager_profiles` writes no row for a suppressed owner (one read per capture; this
+   leaf is unchanged). The entry is cleared when the same Sleeper user verifies a new account.
+   Not (c): profiling league-mates without an account is the point of the feature. Residual: a
+   league-mate capture already past its suppression read when the deletion commits can write
+   that profile once more; the league's next capture removes it.
 2. **Prior seasons.** Trade signals are thin within one season (median 2 trades per manager).
    `scripts/backfill_sleeper_trades.py` already stores up to 3 prior seasons of trades in
    `sleeper_trades`, under the prior seasons' league ids. Reading them needs one `/rosters` read

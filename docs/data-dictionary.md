@@ -173,6 +173,7 @@ counterparty board disclosure or client analytics event is added.
 - [`sleeper_trades`](#sleeper_trades)
 - [`sleeper_waiver_moves`](#sleeper_waiver_moves)
 - [`manager_profiles`](#manager_profiles)
+- [`manager_profile_suppressions`](#manager_profile_suppressions) — deleted accounts whose manager profile is never rebuilt (Q-040, D-282)
 - [`trade_matches`](#trade_matches)
 - [`trade_impressions`](#trade_impressions)
 - [`deck_impressions`](#deck_impressions)
@@ -515,7 +516,25 @@ Manager profiles (flag `market.manager_profiles`, on in `config/features.json`) 
 | `n_free_agent_adds` | int | completed free-agent adds attributed to the manager |
 | `profile` | text | JSON, sorted keys: `trade_activity`, `trade_style`, `trade_assets`, `waiver_bids` (each bid with dollars, `share_of_budget`, `share_of_remaining`, outcome, `clearing_bid`), `free_agents`, `rookie_draft` (`captured: false` in v1), `excluded.foreign_creator_moves`; each signal carries `usable` against the thinness floors in design.md §4 |
 
-Constraint: `uq_manager_profile` on `(league_id, owner_id)`. Read via `load_manager_profiles(league_id)` (no caller yet). Account deletion (`accounts.delete_user_data`) **deletes** a deleted account's rows (`owner_id`); account export includes them. A league-mate's next profiling sweep can rebuild a deleted manager's row from public data — open question 1 in the design.
+Constraint: `uq_manager_profile` on `(league_id, owner_id)`. Read via `load_manager_profiles(league_id)` (no caller yet). Account deletion (`accounts.delete_user_data`) **deletes** a deleted account's rows (`owner_id`) and records a suppression for each of their ids in [`manager_profile_suppressions`](#manager_profile_suppressions), in the same transaction; `capture_manager_profiles` then writes no row for a suppressed owner, so a league-mate's sync never rebuilds it (D-282). Account export includes the rows.
+
+---
+
+## `manager_profile_suppressions`
+
+The league identities of deleted accounts whose manager profile must never be rebuilt (Q-040, [D-282](../living-memory/DECISIONS.md); design.md open question 1). A league-mate's sync rebuilds every roster owner's profile from public league history, so deleting the rows alone would not keep a deleted person's profile deleted.
+- **Lifecycle:** one row per id, inserted in `accounts._delete_user_data`'s own transaction (`database.suppress_manager_profiles`), so a committed deletion always has its suppression and a rolled-back one has none. Ids minted by the app (`acct_` account keys, `entry:` ids) are skipped: they are never a Sleeper roster `owner_id`.
+- **Read:** `sleeper_trades_service.capture_manager_profiles` loads the suppressed subset of the league's owners once per capture (`database.load_manager_profile_suppressions`) and drops their rows before `replace_manager_profiles`.
+- **Cleared:** when the same id's new `users` row is verified for the first time (`accounts.mark_user_verified`, `database.clear_manager_profile_suppression`): the person has proven control of the id and accepted the policy that discloses profiles. A username-only sign-in (unverified) clears nothing.
+- **Retention:** kept indefinitely, unlike `deletion_scrub_jobs` (deleted when its scrub finishes): it is the minimal record needed to honour the deletion and holds no id.
+- **Privacy:** no raw id, league id or name. Never exported (its subject is gone; `accounts._KEPT_WITH_REASON`) and never logged.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id_hmac` | str PK | Hex HMAC-SHA256 of the owner id under `EXPERIMENT_SALT_KEY`, domain-separated (`database.manager_profile_suppression_hash`). Changing the key orphans every entry ([config-reference](config-reference.md)) |
+| `created_at` | str, not null | ISO UTC of the deletion |
+
+New table: `metadata.create_all` creates it; `_migrate_db` is untouched.
 
 ---
 
