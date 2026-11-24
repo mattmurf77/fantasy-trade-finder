@@ -241,6 +241,8 @@ counterparty board disclosure or client analytics event is added.
 - [`entitlements`](#entitlements)
 - [`paywall_previews`](#paywall_previews)
 - [`subscription_events`](#subscription_events)
+- [`league_passes`](#league_passes)
+- [`league_pass_intents`](#league_pass_intents)
 - [`referrals`](#referrals)
 - [`affiliate_clicks`](#affiliate_clicks)
 - [`shared_packages`](#shared_packages)
@@ -330,6 +332,7 @@ row. It inserts only on a Sleeper league's first init, with
 | `median_game` | integer, nullable | **2026-11-11** ([scope](plans/league-projections/median-leagues-scope.md)) — the Sleeper league-median setting (`settings.league_average_match`): `1` = every week each team also plays the league's median score (two results a week), `0` = head-to-head only, `NULL` = unknown (not a Sleeper league, a missing or unexpected setting, or not synced since the column arrived). Written by `upsert_league` from the league payload session init already fetched (`database.league_median_setting`; no extra call), on first link and on every later sync, so a commissioner's change between seasons is picked up; a `NULL` row is filled at that league's next sync (no backfill). An unknown value never overwrites a known one. ESPN / MFL / Fleaflicker rows stay `NULL` (no adapter reads an equivalent setting). **Descriptive only:** the playoff forecast reads the live Sleeper setting at capture, never this column. Not yet returned to clients. Migration entry in `_migrate_db`. |
 | `draft_order_rule` | str, nullable | **2026-11-12, D-258** ([contract](plans/league-projections/max-pf-trade-away/contract.md) §7) — how the league orders next year's draft for non-playoff teams, as a member answered it in the app (Max PF moves, flag `league.max_pf_moves`): `'maxpf_lowest_first'` \| `'reverse_standings'` \| `'lottery_or_other'`; NULL = never answered ("not sure" is not stored). Per league, the same for every member; last answer wins; who answered is not stored. Written only by `POST /api/leagues/<id>/draft-order-rule` (`database.set_league_draft_order_rule`). v1 reads it only to show or hide the Max PF moves list; it does not change pick pricing. Name and the first two values follow the unbuilt ESPN/MFL forecast design (§5.2). Migration entry in `_migrate_db`. |
 | `draft_order_rule_set_at` | str, nullable | ISO UTC of the last `draft_order_rule` write; NULL with it |
+| `previous_league_id` | str, nullable | **2026-11-22, league pass** — Sleeper's `previous_league_id` (last season's id for this league), written by Sleeper league sync (`"0"`/empty is not stored); read by `league_pass.follow_rollover` to move an active pass to the new season's league. NULL for ESPN/MFL and rows synced before the column |
 | `created_at`, `updated_at` | str | |
 
 ---
@@ -2208,7 +2211,7 @@ Single source of truth for paid access. Writers: billing webhook projector, refe
 | `user_id` | str, not null, indexed | Working key (sleeper id or `acct_*`) |
 | `account_id` | str, indexed | `accounts.account_id` when known — grants survive Sleeper re-links (resolution checks both) |
 | `entitlement` | str, not null | `'pro'` \| `'ad_free'` (ads plan HLD §4) |
-| `source` | str, not null | `apple_iap` \| `stripe` \| `founder_iap` \| `season_pass_iap` \| `promo_referral` \| `promo_group_unlock` \| `manual_grant` \| `trial` \| `rankset_purchase` |
+| `source` | str, not null | `apple_iap` \| `stripe` \| `founder_iap` \| `season_pass_iap` \| `league_pass_iap` (a league pass buyer's row, `ftf_league_*`) \| `promo_referral` \| `promo_group_unlock` \| `manual_grant` \| `trial` \| `rankset_purchase` |
 | `product_id` | str | Store SKU (`ftf_pro_annual`, `ftf_season_pass_2026`, `ftf_founder`, …) |
 | `status` | str, not null | `active` (default) \| `expired` \| `revoked` \| `refunded` — revoke/refund flip status, never delete |
 | `starts_at` / `expires_at` | str | ISO UTC; `expires_at` NULL = perpetual (founder, manual perpetual) |
@@ -2244,6 +2247,42 @@ Append-only billing ledger — every RevenueCat/Stripe webhook lands verbatim be
 | `occurred_at` | str, not null | Provider timestamp (fallback: receipt time) |
 | `processed_at` | str | NULL until the projector ran |
 | `process_error` | str | `'ignored: unhandled event_type …'` for consciously-skipped types |
+
+## `league_passes`
+
+League pass bindings ([design](plans/monetization/league-pass/lld.md) §2.1, 2026-11-22; flag `monetize.league_pass`, dark). One row per binding of one buyer's annual subscription (or an operator comp) to one league. **Coverage is derived at read time, never stored per member** (`league_pass.covers`): this row, the buyer's live `entitlements` row with source `league_pass_iap` (comp: `comp_expires_at`), and current membership (`league_members` for Sleeper, `platform_league_bindings` for ESPN/MFL), capped at `total_rosters` + `league_pass_seat_allowance`. `status` is reporting state only. Written only by `backend/league_pass.py`. A re-point or rollover releases the row and inserts its successor. Account deletion releases the buyer's active row (`deleted`) and blanks the buyer ids on all their rows (`league_pass.release_for_deletion`); exported under `buyer_user_id`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `origin` | str, not null | `purchase` \| `comp` |
+| `buyer_user_id` | str | Working key of the buyer; NULL for a comp and after the buyer's account deletion. Partial unique index `uq_league_passes_active_buyer` (one active row per buyer) |
+| `buyer_account_id` | str | `accounts.account_id` when known; NULL as above |
+| `product_id` | str | `ftf_league_annual` \| `_t1` \| `_t2`; NULL for a comp |
+| `league_id` | str, not null | Platform-native league id (`leagues.sleeper_league_id`). Partial unique index `uq_league_passes_active_league` (one active row per league) |
+| `platform` | str, not null | `sleeper` \| `espn` \| `mfl` |
+| `status` | str, not null | `active` (default) \| `released` \| `ended` |
+| `tier` | int | 0 \| 1 \| 2, the product's tier at bind; NULL for a comp |
+| `comp_expires_at` | str | ISO UTC; comp only |
+| `show_buyer` | int, not null | 1 = the buyer opted in to being named to covered members (default 0) |
+| `bound_at` | str, not null | ISO UTC; the re-point cooldown reads the buyer's latest non-rollover `bound_at` |
+| `released_at` / `release_reason` | str | Set when the row stops being active: `repoint` \| `rollover` \| `transfer` \| `ended` \| `refund` \| `deleted` \| `admin` |
+| `note` | str | Operator note on a comp |
+| `created_at` / `updated_at` | str, not null | ISO UTC |
+
+## `league_pass_intents`
+
+The league a member chose before the purchase sheet (lld §2.2). The billing webhook binds from the user's newest unconsumed, unexpired row (`league_pass_intent_ttl_minutes`). Private: deleted and exported with the user (`accounts._ADDITIONAL_PRIVATE_TABLES`).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str, not null | Working key of the would-be buyer |
+| `league_id` / `platform` | str, not null | The chosen league |
+| `tier` / `product_id` | int / str, not null | The quote: tier 0–2 and the product offered for it |
+| `paid_annual_count` | int, not null | Paid annual leaguemates at quote time, the snapshot behind the tier |
+| `created_at` / `expires_at` | str, not null | ISO UTC |
+| `consumed_at` / `consumed_event_id` | str | Set when a billing event binds from it |
 
 ## `referrals`
 

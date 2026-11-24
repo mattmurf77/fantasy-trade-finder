@@ -15,6 +15,7 @@ Linked calibration capture (2026-11-06): strict ESPN/MFL normalization reuses st
 Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense matching is private evidence of unchanged holdings, not full-roster fit or priced value. All holdings still count toward active capacity. Only offensive/pick legs proceed through the unchanged shared gates; fixed legs/cut plans fail. Unsupported constraints and account failures retain specific errors and failed GET polling does not requeue. [Contract](../docs/plans/calibration-coverage-repair/validation.md).
 
 ## Table of Contents
+- [2026-11-22 — League pass: derived coverage and the league-match check](#2026-11-22--league-pass-derived-coverage-and-the-league-match-check)
 - [2026-11-10 — Asset-pref vocabulary is four types; single membership spans all four](#2026-11-10--asset-pref-vocabulary-is-four-types-single-membership-spans-all-four)
 
 - [2026-11-10 — Calibration rounds side by side](#2026-11-10--calibration-rounds-side-by-side)
@@ -72,6 +73,14 @@ Calibration fixed-block safety (2026-11-07): exact disjoint kicker/defense match
 - [Deletion scrub: a work row in the deletion's transaction, two phases, one rule per field (2026-10-31, legal R28.20 (ii))](#deletion-scrub-a-work-row-in-the-deletions-transaction-two-phases-one-rule-per-field-2026-10-31-legal-r2820-ii)
 
 ---
+
+## 2026-11-22 — League pass: derived coverage and the league-match check
+
+`backend/league_pass.py` (flag `monetize.league_pass`, D-280). **Coverage is derived at read time, never stored per member**: `covers(user, league)` reads the league's active `league_passes` row, the allow-list (env `LEAGUE_PASS_LEAGUE_ALLOWLIST`), the buyer's live `league_pass_iap` entitlement (or a comp's expiry) and membership (`league_members` for Sleeper, `platform_league_bindings` for ESPN/MFL, capped at `total_rosters` + `league_pass_seat_allowance`). Write paths raise `Refused(reason)`; routes answer 409 `{error: reason}`. Conventions for gated work:
+
+- **Every `GATED` rule in `paywall_gate.ROUTES` needs a `LEAGUE_RESOLVERS` kind** (`test_paywall_league_resolvers.py`), and the kind must return the league the handler acts on, or None. `session`: the handler refuses any league but the session's. `active`: the handler acts on session state and a body league, so a body naming another league is not covered. `body`/`query`/`job`/`match`: the handler acts on exactly that value. A resolver never raises; None is "not covered".
+- **The league-match check.** A pass-allowed request carries `g.paywall_pass_league`. `_require_initialized_session` re-checks the session's league for `session`/`active` rules (a session switched after the hook gets the ordinary 402); `server._confirm_pass_league(league_id)` is the helper for a handler that fixes its league elsewhere; `GET /api/trades` forces its filter to the pass league. A new gated handler that can act on more than one league must call it.
+- Flag off: the hook resolves nothing and coverage is never read; `/api/me/entitlements` has no `league_passes` key, `/api/paywall/config` no `league_pass` block (served only with `caps=league_pass`).
 
 ## 2026-11-11 — A scoped tier save writes only the ids it is given
 

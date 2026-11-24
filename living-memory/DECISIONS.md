@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-280 — League pass: hybrid coverage, derived at read time and never stored per member, with a league-match check on every gated handler
+
+**Date:** 2026-11-22 · **Who:** the operator's ask through the main session ("Build server now"); built by builder subagents on `feat/league-pass-server`. Design: [prd](../docs/plans/monetization/league-pass/prd.md), [hld](../docs/plans/monetization/league-pass/hld.md) §2, §7, [lld](../docs/plans/monetization/league-pass/lld.md) §3–§4.
+**Context:** one buyer's annual subscription should unlock a league's gated features for every member. Account-wide coverage turns a throwaway league into many full Pro accounts; storing a grant per member needs fan-out on every purchase, renewal, refund and roster change.
+**Decision:**
+- **Hybrid coverage.** The buyer holds ordinary account-level `pro` (source `league_pass_iap`). A member holds no entitlement row: coverage is a separate, league-keyed answer at the paywall gate, so a member is gated as normal in every other league and keeps the deck preview and the individual free month.
+- **Derived, not stored.** `league_pass.covers` joins three facts at read time, each with one writer: the buyer's live `entitlements` row (the billing projector), the `league_passes` binding (`league_pass.py`), current membership (league sync). Lapse, refund, grace, late joiners and leavers need no fan-out.
+- **The gate checks coverage after account-level pro and before the preview**, only with `monetize.league_pass` on, for the league `paywall_gate.LEAGUE_RESOLVERS` names for the rule. An unverified session is answered before coverage is read; an unresolvable league, a resolver error or a coverage-read error is not covered (never fails open). A Sleeper co-owner is tried under the session's league identity, in the session's active league only.
+- **League-match check.** A request let through by a pass carries `g.paywall_pass_league` and may act on that league only: resolvers that read the session also require a body-named league to agree (`active`), `_require_initialized_session` re-checks the session's league at the handler, and `GET /api/trades` lists only the pass league.
+**Consequences:** three indexed reads on gated requests by verified non-Pro users while the flag is on; no cross-request cache. Flag off is byte-identical (nothing resolved, coverage never read). Covered accounts per league are capped at `total_rosters` + `league_pass_seat_allowance`; unproven ESPN/MFL team links count as membership (accepted, measured).
+
 ## D-279 — Home's next move also says when there is no move, as one untappable line from the server's reason, behind `league.next_move_empty`
 
 **Date:** 2026-11-21 · **Who:** the operator through the main session ("It should have content for the expected move too"); built by a builder subagent on `feat/next-move-empty`. Scope: `docs/plans/next-move-empty/scope.md`.

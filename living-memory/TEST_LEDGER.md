@@ -1,3 +1,11 @@
+## 2026-11-22 — League pass, server side, dark (D-280), branch `feat/league-pass-server`
+
+- **Backend (venv in the worktree, Python 3.12):** full `backend/tests`: **16,098 passed, 43 skipped, 0 failed**. New: `test_league_pass_coverage.py`, `test_league_pass_tiers.py`, `test_league_pass_bind.py`, `test_league_pass_routes.py` (100 passed together), `test_paywall_league_resolvers.py` and `test_paywall_gate_pass.py` (with the routes file, 72 passed). `test_paywall*.py` 703 passed.
+- **Flag off:** `test_flag_off_is_byte_identical_and_reads_no_coverage` (status and body equal with and without a pass row across generate, propose, status, overhauls, `/api/me/entitlements`, `/api/paywall/config?caps=league_pass`; no coverage function called) and `test_flag_off_hook_issues_the_same_queries`.
+- **Sabotages, red then restored (7, by the builder):** session league-match check removed; the `GET /api/trades` hold removed; `active` reading like `body`; the co-owner identity tried in any league; coverage read before verified-ness; the hook ignoring the flag; a resolver error failing open.
+- **Mid-build red, fixed:** part 1 alone left 5 guardrail tests failing (binding-table readers, purge discovery, two flag fixtures, test-profile reset scope); each registry now names the new tables or flag.
+- **Not verified:** anything against RevenueCat or the App Store (no league products exist); the refund and upgrade event shapes (lld §13); Postgres (the suite runs on SQLite); CI on a pushed sha (nothing is pushed). Mobile evidence waived for this phase (scope.md §3), pending operator sign-off.
+
 ## 2026-11-22 — Release: playoff card alignment fix, TestFlight 1.22.0 (201)
 
 - **CI:** PR #714 all four jobs green on head `2f289535`; merged as `df3bc0b4` (`--match-head-commit`). PR #713 (release record 200) green, merged first.

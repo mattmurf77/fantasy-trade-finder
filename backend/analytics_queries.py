@@ -492,6 +492,14 @@ NON_INTENT_EVENTS = frozenset({
     # group-unlock grants, none of them the recipient acting. INTENT would
     # mint a user-day for every recipient of a bulk grant.
     "entitlement_granted",
+    # League pass (league-pass lld §9, registered in the SAME commit as the
+    # emitters in backend/league_pass.py): quotes, binds and endings are
+    # system outcomes or operator/webhook writes; coverage_used is a gate
+    # outcome of a request the user already made, like paywall_gate_hit.
+    "league_pass_quote_viewed",
+    "league_pass_bound",
+    "league_pass_ended",
+    "league_pass_coverage_used",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

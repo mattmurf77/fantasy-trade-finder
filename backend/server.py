@@ -2947,6 +2947,8 @@ def _require_initialized_session() -> dict:
     if ("league" not in sess or "players" not in sess
             or not (sess.get("trade_svcs") or sess.get("trade_svc"))):
         raise _SessionNotInitialized()
+    if g.get("paywall_pass_league") is not None:   # league pass (lld §4.3)
+        _confirm_pass_session_league(sess)
     return sess
 
 
@@ -23465,7 +23467,9 @@ def get_trades():
     trade_service = sess["trade_svc"]
     g_user_id     = sess["user_id"]
     g_players     = sess["players"]
-    league_id = request.args.get("league_id") or None
+    # League pass (lld §4.3): without league_id this lists every league's
+    # cards, so a request a pass let through is held to the pass league.
+    league_id = g.get("paywall_pass_league") or request.args.get("league_id") or None
     cards = trade_service.get_pending_trades(user_id=g_user_id, league_id=league_id)
     # A card a still-running job wrote after a deletion's purge (#559 re-QA P2-b).
     cards = [card for card in cards if not _built_before_partner_deleted(card)]
@@ -31493,6 +31497,8 @@ def session_init():
                     # League median, from the league payload S0 already
                     # read (no extra call); None for a platform league.
                     median_game      = None if _platform_linked else league_median_setting(_s0_raw.get("meta")),
+                    # Sleeper's last-season id, for the league pass rollover.
+                    previous_league_id = None if _platform_linked else (_s0_raw.get("meta") or {}).get("previous_league_id"),
                 )
                 if (authoritative["platform"] == "sleeper" and is_enabled("league.projections")
                         and not _tp.is_test_league_id(league_id)):
@@ -31677,6 +31683,14 @@ def session_init():
                 return
             except Exception as db_err:
                 log.warning("  league_members upsert failed (continuing): %s", db_err)
+            # League pass (league-pass lld §3.4): a rolled-over Sleeper league
+            # takes last season's pass along. Flag-checked inside; idempotent.
+            if not _platform_linked:
+                try:
+                    from . import league_pass as _league_pass
+                    _league_pass.follow_rollover(league_id, (_s0_raw.get("meta") or {}).get("previous_league_id"))
+                except Exception:
+                    log.exception("  league pass rollover failed (continuing)")
 
             # ── Shared v1 rosters fetch (four consumers) ────────────────
             # ADR-011: trade_block_service used to fetch roster_id →
@@ -43555,21 +43569,34 @@ def _paywall_gate_hook():
     verify_required). A failed entitlement read fails open. A request allowed
     under the deck preview leaves g.paywall_preview for _serve_trade_job to
     cap and record. Each 402 also records paywall_gate_hit (C8 §B, analytics
-    only)."""
+    only).
+
+    League pass (lld §4.4): with monetize.league_pass on, the request's league
+    is resolved (paywall_gate.LEAGUE_RESOLVERS) and verdict checks coverage
+    after account-level pro and before the preview; a request a pass lets
+    through leaves g.paywall_pass_league for the league-match check
+    (_confirm_pass_league) and records league_pass_coverage_used. Flag off:
+    nothing is resolved and coverage is never read."""
     rule = request.url_rule.rule if request.url_rule is not None else ""
     if not _paywall_gate.applies(rule, request.method):
         return None
     sess = _get_session(request.headers.get("X-Session-Token", "")) or {}
     try:
+        ask = _paywall_deck_ask(sess.get("user_id"))
+        pass_league, pass_league_user = _paywall_pass_league(rule, sess, ask)
         result = _paywall_gate.verdict(
             rule, request.method, sess.get("user_id"),
             _paywall_gate.is_mobile_request(request.headers),
             bool(sess.get("verified") or _synthetic_demo_session(sess)),
             demo=_synthetic_demo_session(sess),
             route_verifies=_route_answers_unverified(request.endpoint, request.method),
-            ask=_paywall_deck_ask(sess.get("user_id")))
+            ask=ask, league_id=pass_league, league_user_id=pass_league_user)
     except Exception:
         log.exception("paywall gate failed open: %s %s", request.method, rule)
+        return None
+    if isinstance(result, _paywall_gate.PassAllowed):
+        g.paywall_pass_league = result.league_id
+        _emit_league_pass_coverage_used(sess.get("user_id"), result.league_id, rule)
         return None
     if isinstance(result, _paywall_gate.Preview):
         # A passive device refresh must never spend the user's free page.
@@ -43595,6 +43622,102 @@ def _emit_paywall_gate_hit(user_id: str | None, rule: str, body: dict) -> None:
             **_device_info_from_request())
     except Exception as e:
         log.warning("paywall_gate_hit not recorded: %s", type(e).__name__)
+
+
+def _paywall_pass_league(rule: str, sess: dict, ask) -> tuple[str | None, str | None]:
+    """(league, league identity) for verdict's league-pass check (lld §4.2,
+    §4.4), or (None, None). Flag off: returns before reading anything.
+
+    The body is parsed from the cached raw bytes, as the handlers' forced
+    get_json parses it, without touching Flask's JSON cache (which
+    _paywall_deck_ask's unforced read shares). A resolver failure is not
+    covered. The league identity (server._league_user_id: a Sleeper
+    co-owner's roster's primary owner, the id league_members carries) is
+    tried only when the league is the session's active one."""
+    if not _paywall_gate.pass_enabled():
+        return None, None
+    try:
+        league = sess.get("league")
+        session_league = (str(league.league_id)
+                          if getattr(league, "league_id", None) else None)
+        try:
+            body = json.loads(request.get_data(cache=True) or b"null")
+        except ValueError:
+            body = None
+        league_id = _paywall_gate.resolve_league(rule, request.method, _paywall_gate.LeagueAsk(
+            session_league=session_league, body=body if isinstance(body, dict) else {},
+            args=request.args, view_args=request.view_args or {},
+            job_league=lambda: _paywall_job_league(sess.get("user_id"), ask.job_id)))
+    except Exception:
+        log.exception("league pass: league not resolved: %s %s", request.method, rule)
+        return None, None
+    if league_id and league_id == session_league:
+        return league_id, _league_user_id(sess)
+    return league_id, None
+
+
+def _paywall_job_league(user_id, job_id) -> str | None:
+    """lld §4.2 `job`: the league of the deck GET /api/trades/status names
+    (`job_id` as _paywall_deck_ask reads it: the honoured `deck`, else
+    `job_id`). The requester's in-process job's key, else the stored page row
+    that job built, else its lineage row; every serve path of trade_job_status
+    stays inside that league (a rebase keeps the deck's scope). None when the
+    deck is not the requester's or is gone."""
+    if not user_id or not job_id:
+        return None
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        key = job["key"] if job is not None else None
+    if key is not None:
+        return str(key[1]) if key[0] == user_id else None
+    from . import database as _db
+    row = (_db.load_trade_page_for_job(user_id, job_id)
+           or _db.load_trade_deck_lineage(user_id, job_id))
+    return str(row["league_id"]) if row and row.get("league_id") else None
+
+
+def _emit_league_pass_coverage_used(user_id, league_id: str, rule: str) -> None:
+    """lld §9: league_pass_coverage_used for a request a pass let through
+    (paywall_gate.record_coverage_used). Analytics only: a failure is logged
+    by exception type and swallowed, never failing the request."""
+    try:
+        _paywall_gate.record_coverage_used(
+            user_id, league_id, rule,
+            is_mobile=_paywall_gate.is_mobile_request(request.headers),
+            **_device_info_from_request())
+    except Exception as e:
+        log.warning("league_pass_coverage_used not recorded: %s", type(e).__name__)
+
+
+def _confirm_pass_league(league_id) -> None:
+    """The league-match check (lld §4.3). A request a league pass let through
+    acts on that league only: when g.paywall_pass_league is set and the
+    league the handler acts on differs, abort with the ordinary 402
+    (paywall_gate.gate_reason). A no-op for every other request (flag off,
+    account-level pro, a free rule)."""
+    pass_league = g.get("paywall_pass_league")
+    if pass_league is None or str(league_id or "") == pass_league:
+        return
+    from flask import abort
+    rule = request.url_rule.rule if request.url_rule is not None else ""
+    method = "GET" if request.method == "HEAD" else request.method
+    user_id = (_get_session(request.headers.get("X-Session-Token", "")) or {}).get("user_id")
+    body = {"error": "pro_required", "gate": _paywall_gate.gate_reason(
+        user_id, deck=(method, rule) in _paywall_gate.DECK_ROUTES)}
+    _emit_paywall_gate_hit(user_id, rule, body)
+    abort(make_response(jsonify(body), 402))
+
+
+def _confirm_pass_session_league(sess) -> None:
+    """_confirm_pass_league for the `session` and `active` rules, whose
+    handlers act on the session's active league: called from
+    _require_initialized_session, so a session switched to another league
+    between the hook and the handler is refused too."""
+    rule = request.url_rule.rule if request.url_rule is not None else ""
+    method = "GET" if request.method == "HEAD" else request.method
+    if _paywall_gate.LEAGUE_RESOLVERS.get((method, rule)) in (_paywall_gate.SESSION,
+                                                              _paywall_gate.ACTIVE):
+        _confirm_pass_league(getattr(sess.get("league"), "league_id", None))
 
 
 def _paywall_deck_ask(user_id):
@@ -43732,12 +43855,19 @@ def me_entitlements():
     (_PAYWALL_PRICE_RISE_AT via _paywall_club_closes_at();
     entitlements.is_founder)."""
     sess = _require_session()
-    if sess.get("verified") or _synthetic_demo_session(sess):
+    verified = bool(sess.get("verified") or _synthetic_demo_session(sess))
+    if verified:
         out = entl.get_entitlements(sess["user_id"])
         out["founder"] = entl.is_founder(sess["user_id"], _paywall_club_closes_at())
     else:
         out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
+    # League pass (lld §6.1): only with monetize.league_pass on; absent
+    # otherwise. An unverified session gets [], like every other field.
+    if is_enabled(_league_pass.FLAG):
+        out["league_passes"] = [
+            {k: p[k] for k in ("league_id", "platform", "role", "covered_until", "buyer_display")}
+            for p in (_league_pass.passes_for(sess["user_id"]) if verified else [])]
     return jsonify(out)
 
 
@@ -43871,6 +44001,22 @@ def _paywall_tips_enabled() -> bool:
 
 _PAYWALL_PLATFORMS = ("ios", "web", "extension")
 
+# League pass block (league-pass lld §6.2, §7): fallback copy like the prices
+# above (StoreKit's localized price is authoritative). Product and offer ids
+# are a cross-client contract (docs/cross-client-invariants.md § Paywall
+# config). Served only to a client sending caps=league_pass.
+_PAYWALL_LEAGUE_PASS = {
+    "offering": "league",
+    "renews_at_price": "$99.99",
+    "products": [
+        {"product_id": "ftf_league_annual", "tier": 0, "display_price": "$99.99"},
+        {"product_id": "ftf_league_annual_t1", "tier": 1, "display_price": "$84.99",
+         "promo_offer_id": "league_t1_y1"},
+        {"product_id": "ftf_league_annual_t2", "tier": 2, "display_price": "$69.99",
+         "promo_offer_id": "league_t2_y1"},
+    ],
+}
+
 
 @app.route("/api/paywall/config", methods=["GET"])
 def paywall_config():
@@ -43904,7 +44050,7 @@ def paywall_config():
     # session is the unverified answer.
     session_verified = bool(sess.get("verified")) and not sess.get("is_demo")
     now = _paywall_now()   # read once: club.open and the prices flip together
-    return jsonify({
+    out = {
         "enabled": True,
         "platform": platform,
         "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _paywall_club_closes_at(),
@@ -43929,7 +44075,14 @@ def paywall_config():
         "tips": (_PAYWALL_TIPS
                  if platform == "ios" and session_verified
                  and _paywall_tips_enabled() else []),
-    })
+    }
+    # League pass (lld §6.2): only with monetize.league_pass on AND a client
+    # that asks for it (`caps=league_pass`), so the shipped binary, which
+    # sends no caps, never sees it.
+    if ("league_pass" in request.args.get("caps", "").split(",")
+            and is_enabled(_league_pass.FLAG)):
+        out["league_pass"] = _PAYWALL_LEAGUE_PASS
+    return jsonify(out)
 
 
 @app.route("/api/admin/entitlements/grant", methods=["POST"])
@@ -44004,6 +44157,156 @@ def admin_entitlements_list():
     if user_id is None:
         return jsonify({"error": "user_not_found"}), 404
     return jsonify({"user_id": user_id, "entitlements": entl.list_for_user(user_id)})
+
+
+# ─── League pass (docs/plans/monetization/league-pass/lld.md §6) ──────────
+# Thin wrappers over backend/league_pass.py. The user routes are FREE in
+# paywall_gate.ROUTES, need a verified session, and 404 while
+# monetize.league_pass is off; a refusal is 409 {"error": <reason>, ...}.
+# The admin routes are X-Cron-Secret guarded and live regardless of the flag,
+# like the grant routes above.
+
+from . import league_pass as _league_pass
+
+
+def _league_pass_off():
+    if not is_enabled(_league_pass.FLAG):
+        return jsonify({"error": "feature_disabled"}), 404
+    return None
+
+
+def _league_pass_refused(e):
+    return jsonify({"error": e.reason, **e.detail}), 409
+
+
+def _league_pass_body_league():
+    league_id = (request.get_json(silent=True) or {}).get("league_id")
+    return league_id.strip() if isinstance(league_id, str) and league_id.strip() else None
+
+
+@app.route("/api/league-pass/intent", methods=["POST"])
+@_gate_unverified_write
+def league_pass_intent():
+    """{league_id} → {intent_id, product_id, tier, teams, expires_at}: the
+    league a member chose before the purchase sheet, and its quote."""
+    off = _league_pass_off()
+    if off:
+        return off
+    sess = _require_session()
+    league_id = _league_pass_body_league()
+    if league_id is None:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+    try:
+        return jsonify(_league_pass.create_intent(sess["user_id"], league_id))
+    except _league_pass.Refused as e:
+        return _league_pass_refused(e)
+
+
+@app.route("/api/league-pass", methods=["GET"])
+@_gate_unverified_read
+def league_pass_mine():
+    """The caller's own pass as its buyer (league_pass.buyer_view)."""
+    off = _league_pass_off()
+    if off:
+        return off
+    sess = _require_session()
+    return jsonify(_league_pass.buyer_view(sess["user_id"]))
+
+
+@app.route("/api/league-pass/bind", methods=["POST"])
+@_gate_unverified_write
+def league_pass_bind():
+    """{league_id}: bind an unbound pass (R19). → the buyer view."""
+    off = _league_pass_off()
+    if off:
+        return off
+    sess = _require_session()
+    league_id = _league_pass_body_league()
+    if league_id is None:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+    try:
+        _league_pass.bind(sess["user_id"], league_id)
+    except _league_pass.Refused as e:
+        return _league_pass_refused(e)
+    return jsonify(_league_pass.buyer_view(sess["user_id"]))
+
+
+@app.route("/api/league-pass/repoint", methods=["POST"])
+@_gate_unverified_write
+def league_pass_repoint():
+    """{league_id}: move the pass (R21). → the buyer view; 409 cooldown
+    carries can_repoint_at."""
+    off = _league_pass_off()
+    if off:
+        return off
+    sess = _require_session()
+    league_id = _league_pass_body_league()
+    if league_id is None:
+        return jsonify({"error": "missing_field", "field": "league_id"}), 400
+    try:
+        _league_pass.repoint(sess["user_id"], league_id)
+    except _league_pass.Refused as e:
+        return _league_pass_refused(e)
+    return jsonify(_league_pass.buyer_view(sess["user_id"]))
+
+
+@app.route("/api/league-pass/settings", methods=["PUT", "POST"])
+@_gate_unverified_write
+def league_pass_settings():
+    """{show_buyer: bool}: name the buyer to covered members (R28). → the
+    buyer view."""
+    off = _league_pass_off()
+    if off:
+        return off
+    sess = _require_session()
+    show = (request.get_json(silent=True) or {}).get("show_buyer")
+    if not isinstance(show, bool):
+        return jsonify({"error": "invalid_field", "field": "show_buyer"}), 400
+    try:
+        _league_pass.set_show_buyer(sess["user_id"], show)
+    except _league_pass.Refused as e:
+        return _league_pass_refused(e)
+    return jsonify(_league_pass.buyer_view(sess["user_id"]))
+
+
+@app.route("/api/admin/league-pass/comp", methods=["POST"])
+def admin_league_pass_comp():
+    """Operator comp pass (R39). Body: {league_id, days: int, note}. → 201
+    the row; 409 {error: bad_days | unknown_league | already_covered}."""
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    try:
+        row = _league_pass.comp(str(body.get("league_id") or "").strip(),
+                                body.get("days"), body.get("note"))
+    except _league_pass.Refused as e:
+        return _league_pass_refused(e)
+    return jsonify(row), 201
+
+
+@app.route("/api/admin/league-pass", methods=["GET"])
+def admin_league_pass_list():
+    """?league_id= or ?user=<identifier> → every pass row, any status."""
+    _require_cron_auth()
+    league_id = request.args.get("league_id")
+    ident = request.args.get("user")
+    if league_id:
+        return jsonify({"passes": _league_pass.list_passes(league_id=league_id)})
+    if ident:
+        user_id, _ = entl.resolve_user(ident)
+        if user_id is None:
+            return jsonify({"error": "user_not_found"}), 404
+        return jsonify({"user_id": user_id,
+                        "passes": _league_pass.list_passes(user_id=user_id)})
+    return jsonify({"error": "league_id_or_user_required"}), 400
+
+
+@app.route("/api/admin/league-pass/<int:pass_id>", methods=["DELETE"])
+def admin_league_pass_end(pass_id: int):
+    """End an active pass (status flip, release_reason 'admin')."""
+    _require_cron_auth()
+    if not _league_pass.end(pass_id, "admin"):
+        return jsonify({"error": "not_found"}), 404
+    return jsonify({"ended": pass_id})
 
 
 @app.route("/api/billing/revenuecat/webhook", methods=["POST"])

@@ -128,6 +128,7 @@
   "monetize.paywall": false,
   "monetize.pro": false,
   "monetize.season_pass": false,
+  "monetize.league_pass": false,
   "monetize.founder": false,
   "monetize.affiliate": false,
   "monetize.ads_web": false,

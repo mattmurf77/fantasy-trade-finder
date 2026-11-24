@@ -75,7 +75,8 @@ def client(eng):
 
 MONETIZATION_FLAGS = [
     "monetize.entitlements", "monetize.paywall", "monetize.pro",
-    "monetize.season_pass", "monetize.founder", "monetize.affiliate",
+    "monetize.season_pass", "monetize.league_pass", "monetize.founder",
+    "monetize.affiliate",
     "monetize.ads_web", "monetize.ads_mobile",
     "growth.referral", "growth.group_unlock",
     "ranks.accuracy_scoring", "ranks.rank_sets", "ranks.set_types_extended",
@@ -547,12 +548,43 @@ def test_billing_issue_grace_never_shortens(eng):
     ("ftf_season_pass_2026", "season_pass_iap"),
     ("season_pass_2026", "season_pass_iap"),
     ("ftf_rookie_pass_2026", "season_pass_iap"),
+    # League pass (league-pass lld §5): every ftf_league_* product.
+    ("ftf_league_annual", "league_pass_iap"),
+    ("ftf_league_annual_t1", "league_pass_iap"),
+    ("ftf_league_annual_t2", "league_pass_iap"),
     ("ftf_pro_monthly", "apple_iap"),
     ("pro_annual_3499", "apple_iap"),
 ])
 def test_product_mapping_tolerates_runbook_skus(pid, expected_source):
     entitlement, source = entl._product_mapping(pid)
     assert (entitlement, source) == ("pro", expected_source)
+
+
+def test_league_product_projects_buyer_pro_and_a_bind_failure_never_fails_the_webhook(eng):
+    """league-pass lld §5: an ftf_league_* purchase is ordinary account-level
+    pro under league_pass_iap, and league_pass.on_billing_event runs after the
+    projector; an exception there is logged, never raised into the webhook."""
+    import backend.league_pass as lp
+    calls = []
+
+    def boom(*args):
+        calls.append(args)
+        raise RuntimeError("bind failed")
+
+    with patch.object(lp, "on_billing_event", boom):
+        r = _ingest(_rc_event("lp1", "INITIAL_PURCHASE", product="ftf_league_annual_t1"))
+    assert r == {"stored": True, "projected": True, "duplicate": False}
+    assert calls == [(USER, "ftf_league_annual_t1", "INITIAL_PURCHASE", "lp1")]
+    ent = entl.get_entitlements(USER)
+    assert ent["pro"] is True and ent["sources"] == ["league_pass_iap"]
+
+
+def test_non_league_product_never_calls_the_league_pass(eng):
+    import backend.league_pass as lp
+    with patch.object(lp, "on_billing_event") as hook:
+        _ingest(_rc_event("np1", "INITIAL_PURCHASE"))
+    hook.assert_not_called()
+    assert entl.get_entitlements(USER)["sources"] == ["apple_iap"]
 
 
 def test_runbook_founder_sku_projects_as_perpetual(eng):

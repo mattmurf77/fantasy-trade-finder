@@ -48,7 +48,8 @@ ENTITLEMENTS = ("pro", "ad_free")
 
 # Sources whose rows the projector may overwrite/expire. Manual grants and
 # promo rewards are never touched by billing events.
-_BILLING_SOURCES = ("apple_iap", "stripe", "founder_iap", "season_pass_iap", "trial")
+_BILLING_SOURCES = ("apple_iap", "stripe", "founder_iap", "season_pass_iap",
+                    "league_pass_iap", "trial")
 
 VALID_SOURCES = _BILLING_SOURCES + (
     "promo_referral", "promo_group_unlock", "manual_grant", "rankset_purchase",
@@ -453,6 +454,8 @@ def _product_mapping(product_id: str) -> tuple[str, str]:
     if (pid.startswith("ftf_season_pass") or pid.startswith("ftf_rookie_pass")
             or pid.startswith("season_pass_")):
         return "pro", "season_pass_iap"
+    if pid.startswith("ftf_league_"):
+        return "pro", "league_pass_iap"
     return "pro", "apple_iap"
 
 
@@ -558,6 +561,15 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
             .where(db.subscription_events_table.c.event_id == event_id)
             .values(processed_at=_now(), process_error=error)
         )
+    # League pass (league-pass lld §5): bind/end after the buyer's row is
+    # projected. A bind failure never fails the webhook; the buyer keeps pro.
+    if (projected and user_id and event_type != "TRANSFER"
+            and (product_id or "").lower().startswith("ftf_league_")):
+        try:
+            from . import league_pass
+            league_pass.on_billing_event(user_id, product_id, event_type, event_id)
+        except Exception:
+            log.exception("LEAGUE-PASS-BILLING-FAILED event_id=%s", event_id)
     return {"stored": True, "projected": projected, "duplicate": False}
 
 
@@ -599,6 +611,13 @@ def _project_transfer(event_id: str, payload: dict,
             )
     if not moved:
         return False, "ignored: TRANSFER matched no active billing rows"
+    # League pass (league-pass lld §5): the moved subscription's pass follows
+    # the new owner when they are a member of its league, else is released.
+    try:
+        from . import league_pass
+        league_pass.on_transfer(from_ids, canonical)
+    except Exception:
+        log.exception("LEAGUE-PASS-TRANSFER-FAILED event_id=%s", event_id)
     return True, None
 
 

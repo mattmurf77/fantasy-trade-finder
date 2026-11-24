@@ -689,6 +689,10 @@ leagues_table = Table("leagues", metadata,
     # the ones docs/plans/forecasts-espn-mfl/design.md §5.2 proposes.
     Column("draft_order_rule", String),
     Column("draft_order_rule_set_at", String),  # ISO UTC of the last write
+    # ── League pass (docs/plans/monetization/league-pass/lld.md §2.3) ─────
+    # Sleeper's `previous_league_id`: last season's id for this league. Written
+    # by league sync; read by league_pass.follow_rollover. NULL = none/unknown.
+    Column("previous_league_id", String),
 )
 
 # Each row = one pairwise (winner, loser) comparison extracted from a ranking or trade swipe.
@@ -3271,7 +3275,8 @@ entitlements_table = Table("entitlements", metadata,
                                                      # lets grants survive Sleeper re-links
     Column("entitlement", String,  nullable=False),  # 'pro' | 'ad_free' (glossary)
     Column("source",      String,  nullable=False),  # apple_iap | stripe | founder_iap |
-                                                     # season_pass_iap | promo_referral |
+                                                     # season_pass_iap | league_pass_iap |
+                                                     # promo_referral |
                                                      # promo_group_unlock | manual_grant |
                                                      # trial | rankset_purchase
     Column("product_id",  String),                   # store SKU (subs unlabeled, e.g.
@@ -3328,6 +3333,63 @@ paywall_previews_table = Table("paywall_previews", metadata,
     Column("window_trade_ids", Text),                      # JSON list: the window's trade ids at the last
                                                             # serve; the swipe check's fallback once the job
                                                             # is gone (P3-1). NULL on pre-P3-1 rows
+)
+
+# League pass (docs/plans/monetization/league-pass/lld.md §2). One buyer's
+# annual subscription covers one league. Coverage is DERIVED at read time
+# (league_pass.covers): the buyer's entitlements row, this binding, and current
+# membership. Nothing is stored per member. `status` is reporting state only.
+# One active row per league and one active row per buyer, as partial unique
+# indexes (comp rows have no buyer; NULLs never collide). New tables, so
+# metadata.create_all creates them; no migration_cols row. Deletion: the
+# buyer's rows are released and anonymized, intents deleted (accounts.py).
+league_passes_table = Table("league_passes", metadata,
+    Column("id",               Integer, primary_key=True, autoincrement=True),
+    Column("origin",           String,  nullable=False),  # 'purchase' | 'comp'
+    Column("buyer_user_id",    String),                   # working key; NULL for comp
+    Column("buyer_account_id", String),
+    Column("product_id",       String),                   # ftf_league_annual[_t1|_t2]; NULL for comp
+    Column("league_id",        String,  nullable=False),  # leagues.sleeper_league_id (platform-native)
+    Column("platform",         String,  nullable=False),  # 'sleeper' | 'espn' | 'mfl'
+    Column("status",           String,  nullable=False, server_default="active"),
+                                                          # active | released | ended
+    Column("tier",             Integer),                  # 0 | 1 | 2 at first bind
+    Column("comp_expires_at",  String),                   # ISO UTC; comp only
+    Column("show_buyer",       Integer, nullable=False, server_default="0"),
+    Column("bound_at",         String,  nullable=False),
+    Column("released_at",      String),
+    Column("release_reason",   String),   # repoint | rollover | transfer | ended | refund |
+                                          # deleted | admin
+    Column("note",             String),   # operator note on a comp pass
+    Column("created_at",       String,  nullable=False),
+    Column("updated_at",       String,  nullable=False),
+    Index("ix_league_passes_league", "league_id", "status"),
+    Index("ix_league_passes_buyer",  "buyer_user_id", "status"),
+    Index("uq_league_passes_active_league", "league_id", unique=True,
+          sqlite_where=text("status = 'active'"),
+          postgresql_where=text("status = 'active'")),
+    Index("uq_league_passes_active_buyer", "buyer_user_id", unique=True,
+          sqlite_where=text("status = 'active'"),
+          postgresql_where=text("status = 'active'")),
+)
+
+# League pass quote → purchase hand-off (lld §2.2): the league a member chose
+# before the purchase sheet. A user's newest unconsumed, unexpired row is the
+# one the billing webhook binds from. Private: deleted and exported via
+# accounts._ADDITIONAL_PRIVATE_TABLES.
+league_pass_intents_table = Table("league_pass_intents", metadata,
+    Column("id",                Integer, primary_key=True, autoincrement=True),
+    Column("user_id",           String,  nullable=False),
+    Column("league_id",         String,  nullable=False),
+    Column("platform",          String,  nullable=False),
+    Column("tier",              Integer, nullable=False),   # 0 | 1 | 2
+    Column("product_id",        String,  nullable=False),   # the product offered
+    Column("paid_annual_count", Integer, nullable=False),   # the snapshot behind the tier
+    Column("created_at",        String,  nullable=False),
+    Column("expires_at",        String,  nullable=False),
+    Column("consumed_at",       String),
+    Column("consumed_event_id", String),
+    Index("ix_lpi_user", "user_id", "consumed_at"),
 )
 
 # Give-get referral program (foundation §5). Fraud control is structural:
@@ -4187,6 +4249,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("referral_mint_enabled",     1.0,  "referral loop L7: exactly 1 = POST /api/invite/token mints while growth.referral_ledger is on; any other value = 404 not_found (clients fall back to the league-only link). Kill: scripts/set_knob.py referral_mint_enabled 0"),
     ("paywall_enforce_enabled",   0.0,  "monetization kill knob: exactly 1 lets entitlements.check_pro enforce (402) when monetize.entitlements AND monetize.paywall are both on; 0 = observe only. Read live per request, so 0 stops enforcement without a deploy; a missing row reads as 0"),
     ("paywall_web_enforce_enabled", 0.0, "web paywall knob: exactly 1 lets the global gate (paywall_gate.py) 402 web requests too, while entitlements.is_enforcing(); 0 = only the native app (X-Device iphone/ipad/macos/android) is gated. Read live per request; a missing row reads as 0"),
+    ("league_pass_repoint_cooldown_days", 30.0, "league pass (backend/league_pass.py): minimum days between a buyer's re-points; a Sleeper rollover does not count. Read live; a missing row reads as 30"),
+    ("league_pass_seat_allowance",        2.0,  "league pass: covered accounts allowed above the league's total_rosters (co-owners). Read live; a missing row reads as 2"),
+    ("league_pass_intent_ttl_minutes",    60.0, "league pass: minutes a chosen league (league_pass_intents row) stays usable for the purchase webhook to bind. Read live; a missing row reads as 60"),
     ("paywall_preview_pages",       1.0, "paywall deck preview: pages (trade_page_size cards each) of a never-entitled user's FIRST deck served free while enforcing; 0 = no preview (402 at the first deck request: never_trialed until a preview row exists, then preview_used). Read live per request; a missing row reads as 1"),
     # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
     # Served as the top-level int `app_min_version` on GET /api/feature-flags
@@ -4526,6 +4591,8 @@ def _migrate_db() -> None:
         # which is the correct backfill.
         ("leagues",            "draft_order_rule",      "VARCHAR"),
         ("leagues",            "draft_order_rule_set_at", "VARCHAR"),
+        # League pass rollover (league-pass lld §2.3).
+        ("leagues",            "previous_league_id",    "VARCHAR"),
         # Tracking plan v2 §S1 envelope columns (all nullable — v1 rows and
         # v1 record_event() call sites are untouched).
         ("user_events",        "event_id",              "VARCHAR"),
@@ -7210,6 +7277,7 @@ def upsert_league(
     require_user: bool = False,
     only_if_exists: bool = False,
     median_game: int | None = None,
+    previous_league_id: str | None = None,
 ) -> None:
     """Insert or refresh a league record.
 
@@ -7237,6 +7305,8 @@ def upsert_league(
 
     `median_game` (1/0, see `league_median_setting`) is written on insert and
     refreshed on every update that knows it; None leaves the stored value.
+    `previous_league_id` (Sleeper's, league pass rollover) follows the same
+    rule; Sleeper's "0" terminator is stored as nothing.
     """
     roster_json   = json.dumps(user_player_ids)
     opponent_json = json.dumps(opponent_rosters)
@@ -7255,6 +7325,8 @@ def upsert_league(
         "median_game":       median_game,
     }
     refresh = {"median_game": median_game} if median_game is not None else {}
+    if previous_league_id and str(previous_league_id) != "0":
+        row["previous_league_id"] = refresh["previous_league_id"] = str(previous_league_id)
 
     with engine.begin() as conn:
         if require_user:
@@ -7277,7 +7349,7 @@ def upsert_league(
             set_={
                 "name":       stmt.excluded.name,
                 "updated_at": stmt.excluded.updated_at,
-                **({"median_game": stmt.excluded.median_game} if refresh else {}),
+                **{k: getattr(stmt.excluded, k) for k in refresh},
             },
         )
         conn.execute(stmt)

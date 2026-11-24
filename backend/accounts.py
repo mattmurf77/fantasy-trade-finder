@@ -801,6 +801,9 @@ _ADDITIONAL_PRIVATE_TABLES = (
     # review page, written under their own account. The pages themselves
     # (founder_pages) name no person.
     "founder_page_notes",
+    # League pass (docs/plans/monetization/league-pass/lld.md §2.2): the
+    # league the user chose before a purchase.
+    "league_pass_intents",
 )
 
 # Tables that name a person and are neither deleted nor exported here, each
@@ -1027,6 +1030,11 @@ def _delete_user_data(sleeper_user_id: str,
             res = conn.execute(delete(tbl).where(
                 tbl.c.user_id.in_(user_ids) | tbl.c.account_id.in_(acct_ids)))
             counts[name + "_deleted"] = res.rowcount or 0
+        # League pass (lld §2.4, R38): the buyer's active pass is released and
+        # their pass rows lose the buyer ids (league_passes_table keeps the
+        # league, dates and tier, a non-personal record).
+        from . import league_pass
+        counts.update(league_pass.release_for_deletion(conn, user_ids, acct_ids))
 
         links = db.identity_links_table
         own_link = (links.c.sleeper_user_id.in_(user_ids)
@@ -1554,6 +1562,7 @@ _EXPORT_TABLES: tuple = (
      ("lease_token", "payload_json")),
     ("prepared_trade_participants", "prepared_trade_participants_table", "user_id", ()),
     ("overhauls", "overhauls_table", "account_user_id", ()),
+    ("league_passes", "league_passes_table", "buyer_user_id", ()),
     ("founder_label_overrides", "founder_label_overrides_table", "set_by", ()),
 )
 

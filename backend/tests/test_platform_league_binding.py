@@ -857,13 +857,15 @@ def test_binding_columns_have_one_reader():
 
 def test_binding_table_has_few_writers():
     """Only database.py writes bindings; accounts.py reads them for the
-    deletion hand-over; prepared_trade_runtime.py reads them into the cohort."""
+    deletion hand-over; league_pass.py reads them for ESPN / MFL league
+    membership (it never writes them); prepared_trade_runtime.py reads them
+    into the cohort."""
     import pathlib
     root = pathlib.Path(__file__).resolve().parents[1]
     users = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.py")
                    if "tests" not in p.relative_to(root).parts
                    and "platform_league_bindings_table" in p.read_text())
-    assert users == ["accounts.py", "database.py", "prepared_trade_runtime.py"]
+    assert users == ["accounts.py", "database.py", "league_pass.py", "prepared_trade_runtime.py"]
 
 
 def test_backfill_loses_the_race_to_a_concurrent_link(bare_db):
