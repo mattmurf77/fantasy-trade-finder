@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-24 — Manager-profile suppression after account deletion (D-282, Q-040 closed), branch `fix/q040-profile-suppression`
+
+- **What:** a deleted account's manager profile is no longer rebuilt by a league-mate's sync. Deletion writes a keyed hash (HMAC-SHA256, `EXPERIMENT_SALT_KEY`) of each of the person's league ids to new table `manager_profile_suppressions` in its own transaction; `capture_manager_profiles` skips those owners (one read per capture). The first verification of the same id's new account clears it. `web/privacy.html` §1 "League data" now discloses the profiles.
+- **Docs:** data-dictionary, config-reference (`EXPERIMENT_SALT_KEY` row), architecture, glossary, design.md open question 1, scope `docs/plans/manager-profiles/scope-q040-suppression.md`.
+- **Not done:** not pushed or merged. Policy effective date unchanged; the new sentence did not go through legal-lead (operator call).
+
 ## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, merged as `df3bc0b4` (PR #714), TestFlight 1.22.0 (201)
 
 - **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.
