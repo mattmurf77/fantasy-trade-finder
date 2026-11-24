@@ -414,6 +414,27 @@ def run() -> int:
             "apiFetch does not set X-Source to 'web'; the web's server-written rows "
             "would land device_type NULL")
 
+    # D-277 web parity (2026-11-24): the League Summary "Consider <Outlook>"
+    # prompt is computed against the saved outlook when the projected standings
+    # are read, so every web function that posts team_outlook must re-read them
+    # (window.loadLeagueProjectionBatch) after the save, or the prompt keeps
+    # suggesting the outlook that was just saved. Scoped per function body.
+    outlook_writers, stale = [], []
+    for rel in sorted((WEB / "js").glob("*.js")):
+        src = rel.read_text(encoding="utf-8")
+        for fn in re.finditer(r"\n([ \t]*)(?:async\s+)?function\s+(\w+)\([^)]*\)\s*\{(.*?)\n\1\}", src, flags=re.S):
+            body = fn.group(3)
+            write = re.search(r"\bteam_outlook\s*:", body)
+            if not write:
+                continue
+            outlook_writers.append(fn.group(2))
+            if "window.loadLeagueProjectionBatch()" not in body[write.end():]:
+                stale.append(f"{rel.name}:{fn.group(2)}")
+    r.check("HYG-outlook-save-refreshes-projections", bool(outlook_writers) and not stale,
+            "no web function posts team_outlook (check is matching nothing)" if not outlook_writers else
+            f"{', '.join(stale)} save team_outlook without re-reading the projected standings"
+            if stale else f"{len(outlook_writers)} outlook save paths re-read the projected standings")
+
     tiers = read("positional-tiers.html")
     r.check("HYG-no-stale-sample-roster", "SAMPLE_PLAYERS" not in tiers,
             "hardcoded 2024-era roster rendered before the API responds")

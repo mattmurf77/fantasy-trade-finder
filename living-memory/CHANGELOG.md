@@ -12,6 +12,12 @@
 ---
 
 
+## 2026-11-24 — Website outlook prompt refreshes after an outlook save (D-277 parity), branch `fix/web-outlook-prompt-refresh`, not merged
+
+- **What:** on the website's League Summary, "NN% playoff chance · Consider <Outlook>" stayed after that outlook was saved in the overlay, until the page was left and reopened. Same cause as the app's D-277: `outlook_recommendation.differs` is computed against the saved outlook when the projected standings are read, and no web save re-read them.
+- **Fix:** both web writers of `team_outlook` (`saveOutlookWithPositions`, `skipPositionalPrefs` in `web/js/app.js`) call `window.loadLeagueProjectionBatch()` on the success path. No server, flag, copy or app change; behind the existing `league.projection_outlook`.
+- **Guard:** `qa/web/check_web_structure.py` HYG-outlook-save-refreshes-projections (web-structure CI job). Not seen in a browser.
+
 ## 2026-11-24 — Manager-profile suppression after account deletion (D-282, Q-040 closed), branch `fix/q040-profile-suppression`
 
 - **What:** a deleted account's manager profile is no longer rebuilt by a league-mate's sync. Deletion writes a keyed hash (HMAC-SHA256, `EXPERIMENT_SALT_KEY`) of each of the person's league ids to new table `manager_profile_suppressions` in its own transaction; `capture_manager_profiles` skips those owners (one read per capture). The first verification of the same id's new account clears it. `web/privacy.html` §1 "League data" now discloses the profiles.
