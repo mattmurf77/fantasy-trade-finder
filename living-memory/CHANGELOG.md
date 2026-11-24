@@ -12,6 +12,16 @@
 ---
 
 
+## 2026-11-23 — Simulator full-app pass: account state, deck and match moment, UI polish, paywall copy; merged as `fa37a979` (PRs #717 to #720)
+
+- **What:** a full-app pass on a Release iOS 26.1 simulator build against a local test server found 33 items; these four PRs fix the ones that were bugs. Evidence per item is in each PR body and the TEST_LEDGER entries.
+- **#717 (D-280):** sign-out and a sign-in as another account run one reset (`state/accountReset.ts`: query cache, entitlement answer, per-account progress marks). A first sign-in on a fresh install now requests `/api/me/entitlements` once (`useEntitlements` tracks whose answer it holds); before, a paying user read "See plans" and Send skipped the paywall until the app was backgrounded. Verify row hidden when verified; Sign out confirms.
+- **#718:** a like that completes a match shows "New match with @partner" and lands on the row; `GET /api/trades/liked` omits matched packages; `GET /api/trades/awaiting` sends positions and teams; every like refreshes the Matches lists; likes-you cards no longer read "hasn't ranked / strength 0"; label fixes (outlook name, PICK with no age, SF / FLX).
+- **#719:** scroll content and pinned footers reserve the feedback button's footprint; Matches and League segment labels fit 375pt; an Undo toast no longer outlives its window; user-facing text says Fleeced (export file `fleeced-export.json`); roster drill-in opens at the top.
+- **#720:** paywall copy names only features kept by the 2026-11-21 launch audit (`mon.pay.b3`, `mon.pay.b4`, `mon.lock.free`); operator signed off the three lines; `web/terms.html` section 14.1 kept as is by operator decision, so it still lists Calibration, trends and the Draft Room as free.
+- **Shipped 2026-11-23:** merged in order on green CI with merge commits. #718 and #719 change `backend/server.py`, so Render deploys; the deploy and production were not checked. No EAS build made from these.
+- **Not verified:** Android, a real device. **Open:** the audit's cuts are not applied in the app (flags or code); the session token survives an app delete, so a reinstall plus a different Apple account dead-ends at sign-in.
+
 ## 2026-11-22 — Home playoff card: percentage, pick and "View ›" on one line, merged as `df3bc0b4` (PR #714), TestFlight 1.22.0 (201)
 
 - **What:** operator TestFlight report: on the card with "Playoff chance" and "Projected pick", the percentage, the pick and "View" were not level. Two causes. The block row was `alignItems: 'center'`, so "View ›" centred on label + value. And with a not-current forecast, the two "last saved" notes on the value lines came to 279.5pt against 264.5pt of room at 375pt, so the pick wrapped under the percentage.
