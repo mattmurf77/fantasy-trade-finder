@@ -153,7 +153,7 @@ export default function AccountDataSection({
     setExporting(true);
     try {
       const archive = await exportAccountData();
-      const uri = `${FileSystem.cacheDirectory}fantasy-trade-finder-export.json`;
+      const uri = `${FileSystem.cacheDirectory}fleeced-export.json`;
       await FileSystem.writeAsStringAsync(uri, JSON.stringify(archive, null, 2));
       await Share.share({ url: uri });
     } catch (e: unknown) {

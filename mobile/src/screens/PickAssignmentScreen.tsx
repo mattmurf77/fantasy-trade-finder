@@ -1160,7 +1160,7 @@ function SetupView({
         {seeded ? 'Draft order & rounds' : 'Set up your draft picks'}
       </Text>
       <Text style={styles.bodyDim}>
-        ESPN doesn&apos;t run rookie drafts, so Fantasy Trade Finder keeps this league&apos;s pick
+        ESPN doesn&apos;t run rookie drafts, so Fleeced keeps this league&apos;s pick
         ownership. Set the order once — every team starts owning its own picks, and you only record
         the ones that were traded.
       </Text>

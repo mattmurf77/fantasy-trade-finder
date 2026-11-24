@@ -33,6 +33,7 @@ import ShareTradeImage, { SHARE_VALUE_LINE, type ShareAsset } from '../component
 import SuggestionCard from '../components/SuggestionCard';
 import PlayerPickerModal from '../components/PlayerPickerModal';
 import Toast from '../components/Toast';
+import { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import { Button, Card, Icon, TickLabel } from '../components/chalkline';
 import { haptics } from '../utils/haptics';
 import { track } from '../api/events';
@@ -557,7 +558,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
     const names = (ids: string[]) =>
       ids.map((id) => activePlayerById[id]?.name ?? id).join(', ');
     const lines = [
-      `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+      `Trade idea (Fleeced Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
       `Side A: ${names(liveSendIds)}`,
       `Side B: ${names(liveReceiveIds)}`,
       // C2 (head-bizops): a share publishes no verdict, ratio or totals —
@@ -880,7 +881,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
               })}
             </View>
             <Text style={styles.tendency}>
-              Live consensus values from the FTF engine — no league or login needed.
+              Live consensus values from the Fleeced engine. No league or login needed.
             </Text>
             {valuesQuery.isLoading ? (
               <Card>
@@ -1031,7 +1032,7 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
                 // Sleeper player ids, never pick ids.
                 hasPickAssets={false}
                 fallbackText={[
-                  `Trade idea (DTF Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
+                  `Trade idea (Fleeced Trade Calculator · ${FORMATS.find((f) => f.key === format)?.label})`,
                   `Side A: ${liveSendIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
                   `Side B: ${liveReceiveIds.map((id) => livePlayerById[id]?.name ?? id).join(', ')}`,
                   SHARE_VALUE_LINE,
@@ -1118,7 +1119,8 @@ export default function TradeCalculatorScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: ink.ink0 },
-  scroll: { padding: space.lg, gap: space.md, paddingBottom: space.xxl + space.lg },
+  // The builder's right (You receive) column scrolls clear of the feedback FAB.
+  scroll: { padding: space.lg, gap: space.md, paddingBottom: FEEDBACK_FAB_CLEARANCE },
   modeRow: {
     flexDirection: 'row',
     borderRadius: radii.sm,

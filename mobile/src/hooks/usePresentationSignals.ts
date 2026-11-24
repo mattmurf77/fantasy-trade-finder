@@ -8,6 +8,7 @@ import {
   type Layer2Code,
 } from '../api/declineReasons';
 import { useFlag } from '../state/useFeatureFlags';
+import { refreshMatchesLists } from '../state/matchesLists';
 import type { TradeCard } from '../shared/types';
 
 // usePresentationSignals — the impression/outcome spine for the
@@ -199,7 +200,12 @@ export default function usePresentationSignals(screen: PresentationScreen): Pres
         decision,
         signal,
         screen === 'TodaysTrade' ? 'today' : 'browse',
-      ).catch(() => undefined);
+      )
+        // A landed like is in Matches > Awaiting (or Mutual) now.
+        .then(() => {
+          if (decision === 'like') void refreshMatchesLists();
+        })
+        .catch(() => undefined);
       return signal;
     },
     [signalForCard, screen],

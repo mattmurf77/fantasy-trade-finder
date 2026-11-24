@@ -24,9 +24,11 @@ import { useSession } from './useSession';
 //
 // The server cache is format-tagged: /api/tiers/status answers for the
 // session's active format, so a cached answer for another format is
-// ignored rather than misapplied. Like rankingMethodPref (RM_KEY), the
-// cache is device-scoped and intentionally survives sign-out; a different
-// user signing in converges after one launch's refresh.
+// ignored rather than misapplied. The snapshot is the signed-in account's
+// server answer, so the account reset (state/accountReset.ts) drops it on
+// sign-out and on a sign-in as someone else (clearQuicksetProgress + the disk
+// key): the next account routes like a fresh user until its own refresh,
+// never from the previous account's saved tiers (2026-11-22).
 
 const KEY = 'ftf_tiers_saved_cache_v1';
 
@@ -58,6 +60,13 @@ export async function hydrateQuicksetProgress(): Promise<void> {
   } catch {
     /* non-fatal — the cache is optimistic; defaults route like a fresh user */
   }
+}
+
+/** Account reset: forget the in-memory snapshot. The caller removes the disk
+ *  key (state/accountReset.ts ACCOUNT_DEVICE_KEYS). */
+export function clearQuicksetProgress(): void {
+  cachedSaved = [];
+  cachedFormat = null;
 }
 
 /** Detached refresh (after revalidateSession): pull the live tiers-status

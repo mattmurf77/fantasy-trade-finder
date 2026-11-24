@@ -133,6 +133,8 @@ def test_export_happy_path_matches_deletion_matrix(client):
     r = c.get("/api/account/export", headers=_h(token))
     assert r.status_code == 200, r.get_data(as_text=True)
     assert "attachment" in r.headers.get("Content-Disposition", "")
+    # The download carries the product name (Fleeced, D-057), not the repo's.
+    assert "filename=fleeced-export.json" in r.headers["Content-Disposition"]
     archive = r.get_json()
     assert archive["user_id"] == UID and archive["export_version"] == 2
 

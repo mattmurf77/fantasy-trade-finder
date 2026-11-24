@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useIsFocused } from '@react-navigation/native';
 
 import ChalkText from '../components/chalkline/Text';
 import Badge from '../components/chalkline/Badge';
@@ -21,6 +21,7 @@ import {
 } from '../api/league';
 import { FAIRNESS_PREF_KEY, fairnessOnFromPref } from '../api/tradePregen';
 import { markTeamReviewCompleted } from '../components/TeamReviewEntryCard';
+import { FEEDBACK_FAB_CLEARANCE, setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import { OUTLOOK_DISPLAY_NAME } from '../components/OutlookBiasReceipt';
 import { playoffOddsText, type PlayoffProof } from '../utils/playoffOdds';
 import { refreshAfterOutlookSave } from '../utils/outlookSaved';
@@ -192,6 +193,17 @@ export default function TeamReviewScreen() {
 
   const beat = beats[step];
 
+  // The pinned Next / Confirm / Find my trades footer reports its height to
+  // the feedback FAB, which then rides above it instead of covering the
+  // button's right edge (the Tiers / Quick Set pattern). Focused only, and
+  // only while the footer is on screen (it is absent while loading).
+  const isFocused = useIsFocused();
+  const [footerH, setFooterH] = useState(0);
+  useEffect(() => {
+    setPinnedBottomBarHeight('team_review', isFocused && beat ? footerH : 0);
+  }, [isFocused, beat, footerH]);
+  useEffect(() => () => setPinnedBottomBarHeight('team_review', 0), []);
+
   // #423 — COMPLETION = reaching the `plan` beat (operator ruling 2026-09-08):
   // the beat is the standing summary of everything set, so a user who reads it
   // has "gone through it" whether they leave by "Find my trades", the back
@@ -340,7 +352,10 @@ export default function TeamReviewScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View
+        style={styles.footer}
+        onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}
+      >
         {beat === 'window' ? (
           <Pressable
             testID="team-review.action.outlook_set"
@@ -383,32 +398,41 @@ export default function TeamReviewScreen() {
               // "Scoped to" row was decoration. The LLD (§4, writes table)
               // always specified the #330 handoff store for this; it was
               // simply never wired. Same contract LeagueSummaryScreen.tsx:1193
-              // uses, consumed one-shot on focus by TradesScreen.tsx:2382-2393
-              // — no new state layer, no new route, and nothing fires when the
-              // user never scoped anyone.
-              if (scoped) {
-                // The scoped search below builds a fresh deck under the saved
-                // preferences, so a "Preferences changed" nudge would be stale.
-                clearTeamReviewSave();
-                // R1 (time to suggestion; source `team_review`, granted Q-A):
-                // the scoped hand-off's auto-run is a search, so the tap
-                // begins it here — the deck's dispatch claims this id, as for
-                // League Summary. No partner ⇒ no search ⇒ no R1. `mode` is
-                // the deck this lands on: the hand-off sets no pins, so it
-                // reads whatever pins the finder already holds.
-                const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
-                const searchId = beginTradeSearch({
-                  source: 'team_review',
-                  mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
-                  searchType: 'pinned',
-                  screen: 'TeamReview',
-                });
-                useFinderTargets.getState().setHandoff({
-                  searchId,
-                  opponent: { userId: scoped.id, name: scoped.name },
-                  autoRun: true,
-                });
-              }
+              // uses, consumed one-shot on focus by TradesScreen (the
+              // finderHandoff effect), which under the results-push posture
+              // forwards it into the pushed TradeDeck.
+              //
+              // "Find my trades" runs the search with or without a partner
+              // (sim pass 2026-11-22): unscoped, it used to hand nothing over,
+              // so the user landed on the builder and had to find "Find a
+              // Trade" themselves. Unscoped now parks the same hand-off the
+              // landing's own Find a Trade produces with no partner chosen
+              // (`origin: 'calculator'`, `opponent: null`: the one origin the
+              // store allows a null opponent for), so both land on the same
+              // pushed results deck.
+              //
+              // The search below builds a fresh deck under the saved
+              // preferences, so a "Preferences changed" nudge would be stale.
+              clearTeamReviewSave();
+              // R1 (time to suggestion; source `team_review`, granted Q-A):
+              // the hand-off's auto-run is a search, so the tap begins it
+              // here — the deck's dispatch claims this id, as for League
+              // Summary. `mode` is the deck this lands on: the hand-off sets
+              // no pins, so it reads whatever pins the finder already holds.
+              const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
+              const searchId = beginTradeSearch({
+                source: 'team_review',
+                mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
+                searchType: 'pinned',
+                screen: 'TeamReview',
+              });
+              useFinderTargets.getState().setHandoff({
+                searchId,
+                autoRun: true,
+                ...(scoped
+                  ? { opponent: { userId: scoped.id, name: scoped.name } }
+                  : { opponent: null, origin: 'calculator' as const }),
+              });
               // Operator 2026-08-20 — completion is recorded so TradesHome
               // shows the minimized row from here on. Deliberately NOT awaited:
               // the write is local and the navigation must not wait on it, and
@@ -1452,7 +1476,8 @@ const styles = StyleSheet.create({
   tick: { flex: 1, height: 2, backgroundColor: ink.ink3, borderRadius: radii.xs },
   tickOn: { backgroundColor: ice.base },
   tickDone: { backgroundColor: ink.lineStrongA11y },
-  body: { padding: space.lg, gap: space.md, paddingBottom: space.xxl },
+  // The FAB rides just above the footer, over the end of this scroll.
+  body: { padding: space.lg, gap: space.md, paddingBottom: FEEDBACK_FAB_CLEARANCE },
 
   bubbleRow: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start' },
   bubble: {

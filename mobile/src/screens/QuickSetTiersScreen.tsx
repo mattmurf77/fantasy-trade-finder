@@ -33,7 +33,7 @@ import {
 import { TickLabel, Button, Icon, Text as ChalkText } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FormatToggle from '../components/FormatToggle';
-import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
+import { FEEDBACK_FAB_CLEARANCE, setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import RookieScopeControl, { RookieScopeEmpty } from '../components/RookieScopeControl';
 import { useRookieScope } from '../state/rookieScope';
 import { getRankings, saveTiers, splitRankings } from '../api/rankings';
@@ -739,7 +739,12 @@ export default function QuickSetTiersScreen() {
           renderItem={renderChip}
           numColumns={3}
           columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={styles.grid}
+          // The footer is absolute and the FAB rides above it, so the last
+          // row needs the footer's height plus the FAB's footprint to clear.
+          contentContainerStyle={[
+            styles.grid,
+            { paddingBottom: Math.max(96, footerH + FEEDBACK_FAB_CLEARANCE) },
+          ]}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             /* S2 PRD-04 — explanatory content, not a placeholder: faint

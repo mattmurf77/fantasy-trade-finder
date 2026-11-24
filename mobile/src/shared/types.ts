@@ -390,6 +390,13 @@ export interface AwaitingTrade {
   their_side_player_ids: string[];
   my_side_player_names?: string[];
   their_side_player_names?: string[];
+  /** Team + position, parallel to *_player_ids, exactly as TradeMatch carries
+   *  them (GET /api/trades/awaiting ships them since 2026-11-22). Absent on an
+   *  older server; "" means unknown (a draft pick, or a free agent). */
+  my_side_player_teams?: string[];
+  their_side_player_teams?: string[];
+  my_side_player_positions?: string[];
+  their_side_player_positions?: string[];
   counterparty_user_id: string;
   counterparty_username: string;
   liked_at: string;

@@ -81,7 +81,7 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 
 The server side is built dark on `feat/league-pass-server` (`monetize.league_pass` off); see [HANDOFF](HANDOFF.md) and `docs/plans/monetization/league-pass/`. Not queued above the seven active items. In order:
 
-1. **Bring the branch up to `main` and open the PR.** Resolve the two living-memory conflicts, renumber the decision record (D-280 is taken on `main`), re-run the full backend suite, push. *Why now:* `main` is 34 commits ahead and nothing else can start until this merges.
+1. **Open the PR and merge it.** `main` was merged in on 2026-11-24 and the decision record is now D-281. *Why now:* nothing else can start until this merges, and `main` moves fast enough to conflict again in the living-memory files.
 2. **Check the two partial unique indexes on Postgres** (`uq_league_passes_active_league`, `uq_league_passes_active_buyer`) before the merge reaches production. *Why now:* the suite only runs on SQLite.
 3. **Comp-pass test with real leagues** (PRD R39): comp one or two leagues through `POST /api/admin/league-pass/comp` and read `league_pass_coverage_used`. The operator routes work with the flag off, but coverage needs the flag on for those leagues, so set `LEAGUE_PASS_LEAGUE_ALLOWLIST` first. *Why now:* it shows whether covered members use Pro before any purchase screen is built.
 4. **App Store Connect and RevenueCat** (operator): products `ftf_league_annual`, `ftf_league_annual_t1`, `ftf_league_annual_t2`, the year-one intro and promotional offers, offering `league`, and the in-app purchase key for signed offers.

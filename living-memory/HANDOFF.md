@@ -81,8 +81,7 @@
 - Operator decisions already made: hybrid coverage; year-one buyer discount by tier; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
 
 **In flight**
-- The branch was cut from `cb260ca4`. `main` has moved 34 commits since. A merge conflicts in `living-memory/DECISIONS.md` and `living-memory/TEST_LEDGER.md`; the code files merge automatically.
-- The decision record is numbered D-280 on the branch, and `main` has since used D-280 for another decision. Renumber it at the merge, in DECISIONS.md and wherever the docs and tests cite it.
+- `main` was merged into the branch on 2026-11-24. The decision record is D-281: it was D-280 while the branch was being built, and `main` used that number first.
 
 **Not verified**
 - CI on the pushed sha. Locally: 16,098 passed, 43 skipped, 0 failed, before `main` moved. The suite has not been re-run against the new `main`.
