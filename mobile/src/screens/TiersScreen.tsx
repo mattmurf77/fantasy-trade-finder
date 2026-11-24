@@ -41,7 +41,7 @@ import { useNavigation, useIsFocused } from '@react-navigation/native';
 import { TickLabel, Button, Icon } from '../components/chalkline';
 import { useFlag } from '../state/useFeatureFlags';
 import { CONTINUITY_FLAG, tiersLeavePrompts } from '../navigation/navContinuity';
-import { setPinnedBottomBarHeight } from '../components/FeedbackFAB';
+import { FEEDBACK_FAB_CLEARANCE, setPinnedBottomBarHeight } from '../components/FeedbackFAB';
 import FormatToggle from '../components/FormatToggle';
 import PlayerCard from '../components/PlayerCard';
 import TileStats from '../components/TileStats';
@@ -787,13 +787,13 @@ export default function TiersScreen() {
   const [saveBarH, setSaveBarH] = useState(0);
   const [actionBarH, setActionBarH] = useState(0);
   const actionBarVisible = multiSelect && selectedIds.size > 0;
+  const barOccupied = Math.max(
+    saveBarH,
+    actionBarVisible ? ACTION_BAR_BOTTOM + actionBarH : 0,
+  );
   useEffect(() => {
-    const occupied = Math.max(
-      saveBarH,
-      actionBarVisible ? ACTION_BAR_BOTTOM + actionBarH : 0,
-    );
-    setPinnedBottomBarHeight('tiers', isFocused ? occupied : 0);
-  }, [isFocused, saveBarH, actionBarH, actionBarVisible]);
+    setPinnedBottomBarHeight('tiers', isFocused ? barOccupied : 0);
+  }, [isFocused, barOccupied]);
   useEffect(() => () => setPinnedBottomBarHeight('tiers', 0), []);
 
   // ── Sticky tier header (FB4-63) ─────────────────────────────────────
@@ -1476,8 +1476,9 @@ export default function TiersScreen() {
           contentContainerStyle={[
             styles.scroll,
             // S3 PRD-01 — extra clearance: with the FAB riding above the
-            // save bar, the board's last rows need room to scroll clear.
-            touchPolish && styles.scrollFabClearance,
+            // save bar (and the multi-select bar, when shown), the board's
+            // last rows need the bars' height plus the FAB's footprint.
+            touchPolish && { paddingBottom: Math.max(96, barOccupied + FEEDBACK_FAB_CLEARANCE) },
           ]}
         />
         {/* FB4-63 / #67 — pinned tier banner, OVERLAYING the top of the
@@ -1869,9 +1870,6 @@ const styles = StyleSheet.create({
     padding: space.lg,
     paddingBottom: 96, // room for the Save bar
   },
-  // S3 PRD-01 (ux.touch_polish) — the FAB rides above the save bar now;
-  // give the last rows room to scroll clear of it (52pt FAB + margin).
-  scrollFabClearance: { paddingBottom: 96 + 72 },
   emptyBin: {
     ...type.bodySm,
     color: chalk.faint,

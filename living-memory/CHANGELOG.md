@@ -12,7 +12,7 @@
 ---
 
 
-## 2026-11-24 — Manager-profile suppression after account deletion (D-280, Q-040 closed), branch `fix/q040-profile-suppression`
+## 2026-11-24 — Manager-profile suppression after account deletion (D-281, Q-040 closed), branch `fix/q040-profile-suppression`
 
 - **What:** a deleted account's manager profile is no longer rebuilt by a league-mate's sync. Deletion writes a keyed hash (HMAC-SHA256, `EXPERIMENT_SALT_KEY`) of each of the person's league ids to new table `manager_profile_suppressions` in its own transaction; `capture_manager_profiles` skips those owners (one read per capture). The first verification of the same id's new account clears it. `web/privacy.html` §1 "League data" now discloses the profiles.
 - **Docs:** data-dictionary, config-reference (`EXPERIMENT_SALT_KEY` row), architecture, glossary, design.md open question 1, scope `docs/plans/manager-profiles/scope-q040-suppression.md`.

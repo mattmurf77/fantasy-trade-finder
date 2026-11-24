@@ -18,9 +18,16 @@
 // item for the modal→push flip.
 //
 // No queries, no loading state.
+//
+// CONFIRMED (2026-11-22). The row signed out on a single tap. It now asks
+// first with the app's destructive-action pattern — the same native
+// `Alert.alert` with Cancel + a `destructive` button that Disconnect Sleeper
+// sending / ESPN / MFL and Delete account use (PlatformDisconnectSection,
+// AccountDataSection). `confirmSignOut` is shared with the hub-off Settings
+// list so both surfaces ask the same question.
 
 import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, Alert } from 'react-native';
 
 import { space } from '../../../theme/chalkline';
 import { useSession } from '../../../state/useSession';
@@ -32,6 +39,18 @@ export interface SignOutRowProps {
   onSignedOut: () => void;
 }
 
+/** Ask before signing out; `onConfirm` runs only on the destructive button. */
+export function confirmSignOut(onConfirm: () => void): void {
+  Alert.alert(
+    'Sign out?',
+    "You'll need to sign in again to see your leagues and trades on this device.",
+    [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: onConfirm },
+    ],
+  );
+}
+
 export default function SignOutRow({ onSignedOut }: SignOutRowProps) {
   const signOut = useSession((s) => s.signOut);
 
@@ -40,10 +59,10 @@ export default function SignOutRow({ onSignedOut }: SignOutRowProps) {
       <View style={{ height: space.xxl }} />
       <Pressable
         accessibilityRole="button"
-        onPress={async () => {
+        onPress={() => confirmSignOut(async () => {
           await signOut();
           onSignedOut();
-        }}
+        })}
         style={({ pressed }) => [styles.signOut, pressed && styles.rowPressed]}
       >
         <Text style={styles.signOutText}>Sign out</Text>

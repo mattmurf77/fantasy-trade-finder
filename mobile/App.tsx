@@ -49,6 +49,7 @@ import {
   refreshQuicksetProgress,
 } from './src/state/quicksetProgress';
 import { queryClient } from './src/state/queryClient';
+import { QUERY_CACHE_STORAGE_KEY } from './src/state/accountReset';
 import { initSentry, wrap as sentryWrap } from './src/observability/sentry';
 import { getTierConfig } from './src/api/rankings';
 import { initAnalytics, track } from './src/api/events';
@@ -72,7 +73,9 @@ installPaywallGate(navigationRef);
 // start — so the app shows cached data immediately while the network
 // round-trip is in flight. maxAge = 30 minutes keeps stale data from
 // being loaded hours later when player values may have shifted.
-const asyncStoragePersister = createAsyncStoragePersister({ storage: AsyncStorage });
+// The key is the persister's default, named in state/accountReset.ts so the
+// account reset (sign-out / a different account) can drop this copy too.
+const asyncStoragePersister = createAsyncStoragePersister({ storage: AsyncStorage, key: QUERY_CACHE_STORAGE_KEY });
 const PERSIST_KEYS = new Set(['rankings', 'progress', 'matches', 'tiers-status', 'liked-trades']);
 
 function App() {

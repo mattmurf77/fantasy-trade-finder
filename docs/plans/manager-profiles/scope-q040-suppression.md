@@ -5,7 +5,7 @@
 **Builder:** builder subagent on branch `fix/q040-profile-suppression`
 **Operator sign-off on waivers:** needed — §1 (c) and the §3 TestFlight row are waived; reasons below.
 
-Design: [design.md](design.md) open question 1. Decision: [D-280](../../../living-memory/DECISIONS.md).
+Design: [design.md](design.md) open question 1. Decision: [D-281](../../../living-memory/DECISIONS.md).
 
 ---
 
@@ -26,7 +26,7 @@ Design: [design.md](design.md) open question 1. Decision: [D-280](../../../livin
 - Account rights: holds no id; never exported, registered in `accounts._KEPT_WITH_REASON`.
 - Flags: none. Deliberately unflagged: the suppression is written on every deletion, so a
   deletion made while `market.manager_profiles` is off still holds when it is turned back on.
-- Env vars: none new. Reuses `EXPERIMENT_SALT_KEY` as the HMAC key (D-280 says why);
+- Env vars: none new. Reuses `EXPERIMENT_SALT_KEY` as the HMAC key (D-281 says why);
   `docs/config-reference.md` row updated (changing the key orphans every entry).
 
 ## 3. Evidence scope
@@ -55,7 +55,7 @@ Design: [design.md](design.md) open question 1. Decision: [D-280](../../../livin
 | `living-memory/HLD.md` | n/a | no new module, client or major flow |
 | `docs/cross-client-invariants.md` | n/a | nothing shared with clients |
 | `docs/glossary.md` | updated | "Manager profile" entry |
-| ADR or `DECISIONS.md` entry | updated | D-280 |
+| ADR or `DECISIONS.md` entry | updated | D-281 |
 
 ## 5. Ship gate declaration
 

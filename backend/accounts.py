@@ -523,7 +523,7 @@ def mark_user_verified(sleeper_user_id: str, via: str) -> None:
     The first verification of a users row is the moment a person who has
     proven control of this id opens their account (a username alone never
     verifies, and account deletion removes the row, marker included). Only
-    then is a deleted account's profile suppression cleared (Q-040, D-280):
+    then is a deleted account's profile suppression cleared (Q-040, D-281):
     they have accepted the policy that discloses manager profiles. Later
     re-verifications, and calls with no users row, clear nothing."""
     with db.engine.begin() as conn:
@@ -822,7 +822,7 @@ _KEPT_WITH_REASON = {
     # (deletion_scrub.enqueue below; legal R28.20 (ii), (ix)). Not the
     # person's data to export: they're gone.
     "deletion_scrub_jobs": "the deletion scrub's job, deleted when it finishes",
-    # Q-040 (D-280): keyed hashes of deleted owners' Sleeper ids, written by
+    # Q-040 (D-281): keyed hashes of deleted owners' Sleeper ids, written by
     # the deletion below so a league-mate's sync never rebuilds their profile.
     # Holds no id; its subject is gone, so never exported.
     "manager_profile_suppressions": "the deletion's own profile suppression, kept to honour it",
@@ -1369,7 +1369,7 @@ def _delete_user_data(sleeper_user_id: str,
         profiles = db.manager_profiles_table
         res = conn.execute(delete(profiles).where(profiles.c.owner_id.in_(user_ids)))
         counts["manager_profiles_deleted"] = res.rowcount or 0
-        # Q-040 (D-280): a league-mate's next sync would rebuild that profile
+        # Q-040 (D-281): a league-mate's next sync would rebuild that profile
         # from public league history, so the deletion also suppresses it for
         # good: a keyed hash of each id that can be a roster owner (minted
         # account / entry keys never are), no id, league or name. This is a

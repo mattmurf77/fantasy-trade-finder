@@ -82,7 +82,7 @@ export default function SleeperConnectScreen() {
         <Text style={type.bodySm}>
           Log in to Sleeper below. We never see your password — once you’re in,
           we securely connect and verify your account so you can send trades
-          from FTF.
+          from Fleeced.
         </Text>
         {/* Teardown 09-02 — token disclosure AT the consent moment (the
             policy already discloses this; the decision point didn't). */}
@@ -131,7 +131,7 @@ export default function SleeperConnectScreen() {
           </Text>
           <Text style={[type.bodySm, styles.overlaySub]}>
             {verified
-              ? 'Your ranks are now protected and trades can send from FTF.'
+              ? 'Your ranks are now protected and trades can send from Fleeced.'
               : 'Connected — verification will complete next time you send.'}
           </Text>
         </View>

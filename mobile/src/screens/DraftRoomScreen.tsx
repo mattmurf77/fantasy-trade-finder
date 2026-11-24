@@ -846,7 +846,7 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
               onPress={() => Linking.openURL(board.deep_link as string)}
             />
             <Text style={styles.ctaNote}>
-              Picks are made on the platform — Fantasy Trade Finder never drafts
+              Picks are made on the platform — Fleeced never drafts
               for you.
             </Text>
           </View>

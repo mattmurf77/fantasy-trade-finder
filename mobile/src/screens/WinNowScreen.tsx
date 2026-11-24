@@ -12,6 +12,7 @@ import { useEntitlements } from '../state/useEntitlements';
 import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
 import { probability, playoffChance, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
+import { NO_FORECAST_LINE } from '../utils/standingsTable';
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
 
 function Action({label, onPress, disabled = false, selected = false, primary = false, id}: {
@@ -75,6 +76,9 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   const [loadError, setLoadError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const explicitRefresh = useRef(false);
+  // Feedback for a tapped Refresh: with no projections the reply is the
+  // same empty state, so without a line the tap looked like it did nothing.
+  const [refreshed, setRefreshed] = useState(false);
   const [objective, setObjective] = useState<WinNowObjective>('wins');
   const [budget, setBudget] = useState('3');
   const [fairness, setFairness] = useState('90');
@@ -109,7 +113,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   useEffect(() => {
     const request = new AbortController();
     let active = true;
-    setBaseline(null); setLoadError(''); setLoading(false);
+    setBaseline(null); setLoadError(''); setLoading(false); setRefreshed(false);
     if (seasonOn && leagueId && focused) {
       setLoading(true);
       const cause = explicitRefresh.current ? 'refresh' : 'automatic';
@@ -117,7 +121,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
       loadSeasonProjections(leagueId, request.signal, cause).then(data => {
         if (active) setBaseline(data);
       }).catch(error => { if (active && error?.name !== 'AbortError') setLoadError(errorCopy(error)); })
-        .finally(() => { if (active) setLoading(false); });
+        .finally(() => { if (active) { setLoading(false); setRefreshed(cause === 'refresh'); } });
     }
     return () => { active = false; request.abort(); };
   }, [leagueId, seasonOn, focused, refresh]);
@@ -234,9 +238,15 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
       <Text style={s.body}>Improve this season while keeping dynasty sacrifice within your limit. Forecasts are estimates, not guarantees.</Text>
       {!seasonOn || !leagueId ? <Text testID="win-now.disabled" style={s.body}>Season projections are not available for this league yet.</Text> : <>
         <Action id="win-now.refresh" label={loading ? 'Loading season projections…' : 'Refresh season projections'} onPress={() => { explicitRefresh.current = true; setRefresh(n => n + 1); }} disabled={loading} />
+        {refreshed && !loadError && <Text testID="win-now.refreshed" accessibilityLiveRegion="polite" style={s.caption}>Checked just now.</Text>}
         {!!loadError && <Text accessibilityRole="alert" style={s.body}>{loadError}</Text>}
-        {baseline && <Text testID="win-now.source" style={s.caption}>{sourceReceipt(baseline.meta)}</Text>}
-        {baseline?.status === 'unavailable' && <Text testID="win-now.unavailable" style={s.body}>{baseline.message || baseline.reason?.replace(/_/g, ' ') || 'This league format or forecast source is not supported yet.'}</Text>}
+        {/* No projections: the Standings screen's line, nothing else. The
+            source receipt and the server's terse reason read as
+            "Source unavailable · timestamp unavailable · Coverage
+            unavailable" / "Source unavailable" (sim pass 2026-11-22); the
+            receipt describes a snapshot, and there is none. */}
+        {baseline && baseline.status !== 'unavailable' && <Text testID="win-now.source" style={s.caption}>{sourceReceipt(baseline.meta)}</Text>}
+        {baseline?.status === 'unavailable' && <Text testID="win-now.unavailable" style={s.body}>{NO_FORECAST_LINE}</Text>}
         {stale && <Text testID="win-now.stale" style={s.body}>These projections are stale. Refresh to get a supported snapshot before searching or evaluating.</Text>}
         {available && <>
           <View style={s.card}>
