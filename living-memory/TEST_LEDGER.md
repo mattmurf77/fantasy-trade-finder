@@ -4,6 +4,7 @@
 - **Flag off:** `test_flag_off_is_byte_identical_and_reads_no_coverage` (status and body equal with and without a pass row across generate, propose, status, overhauls, `/api/me/entitlements`, `/api/paywall/config?caps=league_pass`; no coverage function called) and `test_flag_off_hook_issues_the_same_queries`.
 - **Sabotages, red then restored (7, by the builder):** session league-match check removed; the `GET /api/trades` hold removed; `active` reading like `body`; the co-owner identity tried in any league; coverage read before verified-ness; the hook ignoring the flag; a resolver error failing open.
 - **Mid-build red, fixed:** part 1 alone left 5 guardrail tests failing (binding-table readers, purge discovery, two flag fixtures, test-profile reset scope); each registry now names the new tables or flag.
+- **After merging `origin/main` (2026-11-24, merge `fe6cb336`, decision renumbered D-280 → D-281):** full `backend/tests` again: **16,104 passed, 43 skipped, 0 failed**.
 - **Not verified:** anything against RevenueCat or the App Store (no league products exist); the refund and upgrade event shapes (lld §13); Postgres (the suite runs on SQLite); CI on a pushed sha (nothing is pushed). Mobile evidence waived for this phase (scope.md §3), pending operator sign-off.
 
 ## 2026-11-22 — Paywall copy names no cut feature, branch `fix/paywall-copy-cut-features`
