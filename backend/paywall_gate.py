@@ -557,6 +557,18 @@ class PassAllowed:
 
 
 @dataclass(frozen=True)
+class SessionPending:
+    """A covered member's `session` / `active` request on a session with no
+    league yet (sign-in before /api/session/init, or a session restored
+    after a restart). The hook answers the handlers' own 409
+    `session_not_initialized` and the request reaches no handler: a
+    body-named league never stands in for the missing session league."""
+
+
+SESSION_PENDING = SessionPending()
+
+
+@dataclass(frozen=True)
 class LeagueAsk:
     """What the hook knows for resolving a gated request's league (lld §4.2).
     `body` is the JSON body as the handlers parse it (forced, {} when not a
@@ -614,8 +626,8 @@ def pass_enabled() -> bool:
 def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
             verified: bool, *, demo: bool = False, route_verifies: bool = False,
             ask: DeckAsk | None = None, league_id: str | None = None,
-            league_user_id: str | None = None,
-            ) -> tuple[int, dict] | Preview | PassAllowed | None:
+            league_user_id: str | None = None, session_pending: bool = False,
+            ) -> tuple[int, dict] | Preview | PassAllowed | SessionPending | None:
     """The decision for a request that applies(): None (through), a Preview
     (through, capped to the preview window), a PassAllowed (through, on a
     league pass), or (402, body). No user → None: the route's own auth
@@ -629,7 +641,10 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
     league_members lists under the roster's primary owner); the hook passes
     it only when `league_id` is the session's active league. Everything
     before the pro check is unchanged, so an unverified session is settled
-    before any coverage read (R8).
+    before any coverage read (R8). `session_pending` (the hook's: flag on, a
+    `session` / `active` rule, a session with no league yet): a user some
+    live pass covers anywhere gets SESSION_PENDING, which the hook answers
+    with the handlers' 409 session_not_initialized, before the preview.
 
     Pro counts only on a verified session (or the server-made demo session):
     entitlements resolve by user_id, and an unverified username-only session
@@ -657,10 +672,23 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
         return None
     if league_id and pass_enabled() and _covered(league_id, user_id, league_user_id):
         return PassAllowed(league_id)
+    if session_pending and pass_enabled() and _covered_anywhere(user_id):
+        return SESSION_PENDING
     held = _held_pro(user_id)
     if held is None and deck:
         return _preview(rule, user_id, ask)
     return 402, {"error": "pro_required", "gate": _reason(held, deck)}
+
+
+def _covered_anywhere(user_id: str) -> bool:
+    """Whether any live pass covers the user (league_pass.passes_for is
+    non-empty), for a session that has no league yet. A failed read is not
+    covered, like _covered."""
+    try:
+        return bool(league_pass.passes_for(user_id))
+    except Exception:
+        log.exception("league pass: coverage read failed for user %s", user_id)
+        return False
 
 
 def _covered(league_id: str, *user_ids) -> bool:
@@ -930,15 +958,27 @@ def record_coverage_used(user_id: str, league_id: str, rule: str, *, is_mobile: 
                          device_type: str | None = None, os_version: str | None = None,
                          app_version: str | None = None) -> None:
     """The league_pass_coverage_used row for a request a pass let through,
-    at most one per (user_id, league_id) per UTC day, through the same
-    bounded per-process de-dupe as record_gate_hit (its own key shape, so the
-    two never collide). Non-touching; `family` is the closed route_family
-    set. The caller swallows any failure."""
+    at most one per (user_id, league_id) per UTC day. The bounded
+    per-process de-dupe record_gate_hit uses is the fast path (its own key
+    shape, so the two never collide); on its miss (the first covered request
+    per user, league and day in this process: after a restart, on another
+    worker, or after an eviction) one indexed read (ix_user_events_user_
+    occurred) skips the write when a row for today already exists, in the
+    insert's transaction. Two processes in the same instant can still both
+    write. Non-touching; `family` is the closed route_family set. The caller
+    swallows any failure."""
     if not _first_hit_today((COVERAGE_USED_EVENT, user_id, league_id)):
         return
-    db.record_event(
-        user_id, COVERAGE_USED_EVENT, league_id=league_id,
-        device_type=device_type, os_version=os_version, app_version=app_version,
-        source="mobile" if is_mobile else "web",
-        props={"family": route_family(rule)},
-        touch_user=False)
+    t = db.user_events_table
+    with db.engine.begin() as conn:
+        if conn.execute(select(t.c.id).where(
+                t.c.user_id == user_id, t.c.occurred_at >= f"{_utc_day()}T00:00:00",
+                t.c.event_type == COVERAGE_USED_EVENT, t.c.league_id == league_id,
+        ).limit(1)).first() is not None:
+            return
+        db.record_event(
+            user_id, COVERAGE_USED_EVENT, league_id=league_id,
+            device_type=device_type, os_version=os_version, app_version=app_version,
+            source="mobile" if is_mobile else "web",
+            props={"family": route_family(rule)},
+            touch_user=False, conn=conn)

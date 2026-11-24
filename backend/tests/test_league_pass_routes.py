@@ -15,7 +15,9 @@ Covers:
   (6) POST /repoint: 409 cooldown with can_repoint_at; moves after it
   (7) PUT/POST /settings: show_buyer, 400 on a non-bool, 409 no_pass
   (8) GET /api/me/entitlements `league_passes`: present only with the flag
-      on; [] for an unverified session; buyer_display only on opt-in
+      on; [] for an unverified session; buyer_display only on opt-in; the
+      Sleeper co-owner listed as member in the session's active league only;
+      flag off byte-identical; a co-owner's intent is refused not_member
   (9) GET /api/paywall/config `league_pass`: only with the flag on AND
       caps=league_pass
   (10) admin comp / list / end: X-Cron-Secret, refusals, 404s
@@ -235,6 +237,71 @@ def test_me_entitlements_league_passes(client, eng, flag):
     assert _req(client, "GET", "/api/me/entitlements", UNVERIFIED).get_json()["league_passes"] == []
     flag["on"] = False
     assert "league_passes" not in _req(client, "GET", "/api/me/entitlements", MATE_TOKEN).get_json()
+
+
+CO, CO_TOKEN = "acct_rco", "lpr-co"
+
+
+def _co_session(league_id=L, **extra):
+    from types import SimpleNamespace
+    with server._sessions_lock:
+        server._sessions[CO_TOKEN] = {"user_id": CO, "league_user_id": MATE, "verified": True,
+                                      "league": SimpleNamespace(league_id=league_id),
+                                      "last_active": time.time(), **extra}
+
+
+def test_me_entitlements_lists_the_pass_for_a_co_owner(client, eng, flag):
+    """The Sleeper co-owner (no league_members row; the session's league
+    identity is MATE's) gets the pass the gate would let them through on:
+    role member, the active league only. Unverified: []. Flag off: absent."""
+    with eng.begin() as conn:
+        w.ent_row(conn, BUYER, expires_days=100)
+        w.pass_row(conn, L, buyer=BUYER)
+    _co_session()
+    try:
+        entry = _req(client, "GET", "/api/me/entitlements", CO_TOKEN).get_json()["league_passes"]
+        mate = _req(client, "GET", "/api/me/entitlements", MATE_TOKEN).get_json()["league_passes"]
+        assert entry == mate
+        assert [(e["league_id"], e["role"]) for e in entry] == [(L, "member")]
+        _co_session(L2)        # the pass's league is not the session's active one
+        assert _req(client, "GET", "/api/me/entitlements", CO_TOKEN).get_json()[
+            "league_passes"] == []
+        _co_session(L, verified=False)
+        assert _req(client, "GET", "/api/me/entitlements", CO_TOKEN).get_json()[
+            "league_passes"] == []
+        _co_session()
+        flag["on"] = False
+        assert "league_passes" not in _req(client, "GET", "/api/me/entitlements",
+                                           CO_TOKEN).get_json()
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(CO_TOKEN, None)
+
+
+def test_me_entitlements_flag_off_is_byte_identical_for_a_co_owner(client, eng, flag):
+    flag["on"] = False
+    _co_session()
+    try:
+        without = _req(client, "GET", "/api/me/entitlements", CO_TOKEN).data
+        with eng.begin() as conn:
+            w.ent_row(conn, BUYER, expires_days=100)
+            w.pass_row(conn, L, buyer=BUYER)
+        assert _req(client, "GET", "/api/me/entitlements", CO_TOKEN).data == without
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(CO_TOKEN, None)
+
+
+def test_a_co_owner_cannot_quote_a_pass(client, eng):
+    """The intent route asks membership for the session's user, never its
+    league identity: a co-owner is refused not_member, as before."""
+    _co_session()
+    try:
+        r = _req(client, "POST", "/api/league-pass/intent", CO_TOKEN, {"league_id": L})
+        assert (r.status_code, r.get_json()) == (409, {"error": "not_member"})
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(CO_TOKEN, None)
 
 
 # ── (9) /api/paywall/config ────────────────────────────────────────────────

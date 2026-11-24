@@ -12,7 +12,11 @@ Covers `league_pass.covers` / `covered_members` / `is_member` / `passes_for`:
   * comp passes live until comp_expires_at;
   * membership: Sleeper league_members (acct_* resolves to its Sleeper id),
     ESPN / MFL platform_league_bindings (league_members' synthetic team rows
-    never count), a member of another league is not covered (R2).
+    never count), a member of another league is not covered (R2);
+  * the Sleeper co-owner in passes_for: listed as member under the league
+    identity in the active league only, riding the primary owner's seat (no
+    covered_members entry); a sole owner reads nothing more; a co-owner
+    cannot create an intent or bind.
 
 In-memory SQLite (patched backend.database.engine); flags patched on the
 league_pass module.
@@ -22,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import select
 
 import backend.database as db_module
 import backend.entitlements as entl
@@ -240,6 +245,111 @@ def test_passes_for_lists_live_passes_from_the_users_leagues(eng):
     assert lp.passes_for(MATE)[0]["buyer_display"] == "Buyer B"
     assert lp.passes_for(BUYER)[0]["role"] == "buyer"
     assert lp.passes_for("nobody") == []
+
+
+CO = "acct_coowner"     # a Sleeper co-owner of MATE's roster: no league_members row
+
+
+def test_passes_for_lists_the_pass_for_a_co_owner_in_the_active_league_only(eng):
+    """The gate's identity rule (paywall_gate.verdict): the session's league
+    identity (MATE, the roster's primary owner) is tried in the session's
+    active league only, and the entry is role 'member' even when that
+    identity is the buyer."""
+    pass_id = _paid_pass(eng)
+    with eng.begin() as conn:
+        w.user(conn, CO)
+    assert lp.passes_for(CO) == []
+    [entry] = lp.passes_for(CO, league_user_id=MATE, league_id=L)
+    assert (entry["pass_id"], entry["league_id"], entry["role"]) == (pass_id, L, "member")
+    assert entry["covered_until"] == lp.covers(MATE, L).covered_until
+    assert lp.passes_for(CO, league_user_id=BUYER, league_id=L)[0]["role"] == "member"
+    # Another league is never tried under the league identity: in lg_other
+    # (comp pass, one seat) MATE is covered and CO, a member past the cap, is not.
+    with eng.begin() as conn:
+        w.league(conn, "lg_other", total_rosters=1)
+        w.member(conn, "lg_other", MATE)
+        w.member(conn, "lg_other", CO)
+        w.pass_row(conn, "lg_other", origin="comp", comp_days=30)
+        w.knob(conn, "league_pass_seat_allowance", 0)
+    assert lp.covers(MATE, "lg_other") is not None and lp.covers(CO, "lg_other") is None
+    assert [e["league_id"] for e in lp.passes_for(CO, league_user_id=MATE, league_id=L)] == [L]
+    assert [e["league_id"] for e in lp.passes_for(
+        CO, league_user_id=MATE, league_id="lg_other")] == ["lg_other"]
+    assert lp.passes_for(CO, league_user_id=MATE, league_id=None) == []
+
+
+def test_co_owner_rides_the_primary_owners_seat(eng):
+    """A co-owner is not a covered_members entry and takes no seat; it is
+    covered exactly when its roster's primary owner is."""
+    _paid_pass(eng)
+    with eng.begin() as conn:
+        w.user(conn, CO)
+    before = lp.covered_members(L, "sleeper")
+    assert lp.passes_for(CO, league_user_id=MATE, league_id=L)
+    assert lp.covered_members(L, "sleeper") == before and CO not in before
+    with eng.begin() as conn:     # MATE past the cap: 2 teams + 0 allowance
+        conn.execute(db_module.leagues_table.update()
+                     .where(db_module.leagues_table.c.sleeper_league_id == L)
+                     .values(total_rosters=1))
+        w.knob(conn, "league_pass_seat_allowance", 0)
+    assert lp.covers(MATE, L) is None
+    assert lp.passes_for(CO, league_user_id=MATE, league_id=L) == []
+
+
+def test_passes_for_a_sole_owner_reads_nothing_more(eng):
+    """league_user_id equal to user_id (every sole owner) adds no read."""
+    from sqlalchemy import event
+    _paid_pass(eng)
+    stmts = []
+    event.listen(eng, "before_cursor_execute",
+                 lambda conn, cur, stmt, params, ctx, many: stmts.append(stmt))
+    plain = lp.passes_for(MATE)
+    before, stmts[:] = list(stmts), []
+    assert lp.passes_for(MATE, league_user_id=MATE, league_id=L) == plain
+    assert stmts == before
+
+
+def test_a_co_owner_cannot_buy_or_bind(eng):
+    """Co-owners still cannot buy: membership for intent and bind is the
+    user's own (league_members has no row for a co-owner), never the league
+    identity."""
+    _paid_pass(eng)
+    with eng.begin() as conn:
+        w.user(conn, CO)
+        w.ent_row(conn, CO)          # a league product bought on the co-owner's account
+        conn.execute(db_module.league_passes_table.update().values(status="released"))
+    with pytest.raises(lp.Refused) as exc:
+        lp.create_intent(CO, L)
+    assert exc.value.reason == "not_member"
+    with pytest.raises(lp.Refused) as exc:
+        lp.bind(CO, L)
+    assert exc.value.reason == "not_member"
+
+
+def test_seat_order_is_stable_across_a_member_resync(eng):
+    """D2: oldest app account first (users.created_at), not league_members.id,
+    which SQLite's INSERT OR REPLACE sync renews: a re-synced older member
+    keeps its seat at the cap."""
+    _paid_pass(eng)
+    lm, u = db_module.league_members_table, db_module.users_table
+    with eng.begin() as conn:
+        conn.execute(u.update().where(u.c.sleeper_user_id == MATE)
+                     .values(created_at=w.iso(-100)))
+        conn.execute(u.update().where(u.c.sleeper_user_id == BUYER)
+                     .values(created_at=w.iso(-10)))
+        conn.execute(db_module.leagues_table.update()
+                     .where(db_module.leagues_table.c.sleeper_league_id == L)
+                     .values(total_rosters=1))
+        w.knob(conn, "league_pass_seat_allowance", 0)
+    assert lp.covered_members(L, "sleeper") == [MATE]
+    db_module.upsert_league_members(L, [{"user_id": MATE, "username": MATE,
+                                         "player_ids": []}])
+    with eng.connect() as conn:
+        ids = dict(conn.execute(select(lm.c.user_id, lm.c.id)
+                                .where(lm.c.league_id == L)).fetchall())
+    assert ids[MATE] > ids[BUYER]          # the resync renewed MATE's row id
+    assert lp.covered_members(L, "sleeper") == [MATE]
+    assert lp.covers(MATE, L) is not None and lp.covers(BUYER, L) is None
 
 
 def test_the_four_events_are_registered_server_fired_and_non_intent():

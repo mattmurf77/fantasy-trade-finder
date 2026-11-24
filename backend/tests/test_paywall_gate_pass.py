@@ -25,6 +25,20 @@ Covers:
       its active league only, never in another league
   (8) league_pass_coverage_used: first per user, league and UTC day, prop
       `family`; an emitter failure never fails the request
+  (9) overhaul_api / win_now_api check the league they act on themselves
+      (the session's, the overhaul / job / scenario row's): a session view
+      moved to another league after _require_initialized_session's check gets
+      the ordinary 402; the pass league goes through; flag off (and pro) the
+      check reads nothing and changes no response
+  (10) swipe and pass-reason check the card's league before any write: a
+      card planted in another league gets the ordinary 402 with nothing
+      written; a body naming another league is never covered
+  (11) D1, a session with no league yet: a covered member gets the Pro
+      user's 409 session_not_initialized from the hook (no handler, no
+      preview, no body league standing in); no live coverage, unverified,
+      flag off and a coverage-read failure are unchanged
+  (12) D3: league_pass_coverage_used stays one row after the in-process
+      de-dupe is cleared (a restart, another worker)
 
 Gated views are stubbed (each reports what the hook left on `g`), so
 "through" reads as 200 without running the trade engine. In-memory SQLite.
@@ -418,3 +432,343 @@ def test_coverage_used_failure_never_fails_the_request(eng, client, monkeypatch)
     monkeypatch.setattr(pg, "record_coverage_used", boom)
     r = _call(client, "POST", "/api/trades/propose", body={"league_id": L})
     assert r.status_code == 200 and r.get_json()["pass_league"] == L
+
+
+# ── (9) the league-match check inside overhaul_api and win_now_api ─────────
+# Both modules call their injected require_session (server's
+# _require_initialized_session, which already confirms the session's league)
+# and then read the league themselves: the session's active league, or a
+# stored row's (overhaul, Win Now job, scenario). The race below lets that
+# check pass and then moves the request's session view to L2, so the module
+# reads L2: its own check (server._confirm_pass_league, injected as
+# confirm_pass_league) must answer the ordinary 402.
+
+import backend.overhaul_store as ovh_store
+import backend.win_now_api as win_now_api
+import backend.win_now_store as wn_store
+
+REAL_VIEWS = {ep: server.app.view_functions[ep]
+              for ep in ("overhaul_active_route", "overhaul_get_route",
+                         "win_now_job_route", "win_now_decision_route",
+                         "generate_trades", "win_now_search_route")}
+
+
+@pytest.fixture()
+def real_modules(client, monkeypatch):
+    for ep, fn in REAL_VIEWS.items():
+        monkeypatch.setitem(server.app.view_functions, ep, fn)
+    monkeypatch.setattr(win_now_api, "is_enabled", lambda k: k in (
+        "outlook.season_projections", "trades.win_now"))
+    monkeypatch.setattr(win_now_api.service, "wake_worker", lambda *_a, **_kw: None)
+    with server._sessions_lock:
+        server._sessions[TOKEN]["league_user_id"] = MATE
+    return client
+
+
+def _switch_after_the_session_check(monkeypatch, to=L2):
+    """The race: _require_initialized_session's own check passes on L, then
+    the request's session view (what the module reads) is in `to`."""
+    real = server._confirm_pass_session_league
+
+    def check_then_switch(sess):
+        real(sess)
+        sess.data["league"] = SimpleNamespace(league_id=to)
+    monkeypatch.setattr(server, "_confirm_pass_session_league", check_then_switch)
+
+
+def _overhaul_row(league_id):
+    return ovh_store.create_overhaul(
+        account_user_id=MATE, league_user_id=MATE, league_id=league_id, platform="sleeper",
+        scoring_format="1qb_ppr", client_key=f"ck-{league_id}", settings={}, snapshot=None,
+        recovery=None)["overhaul_id"]
+
+
+def _failed_job(league_id):
+    job = wn_store.create_job(MATE, league_id, {"actor": {}, "params": {}})
+    wn_store.claim_job(job["job_id"])
+    wn_store.finish_job(job["job_id"], reason="no_trades")
+    return job["job_id"]
+
+
+def _stale_scenario(league_id):
+    return wn_store.save_scenario(
+        MATE, league_id, "playoffs",
+        {"partner_roster_id": 2, "give": [], "receive": [], "eligible": True},
+        {"snapshot_id": "snap", "expires_at": w.iso(-1)})["scenario_id"]
+
+
+@pytest.mark.parametrize("read", ["overhaul_active", "overhaul_row", "win_now_job",
+                                  "win_now_scenario"])
+def test_module_reads_after_a_session_switch_get_the_ordinary_402(eng, real_modules,
+                                                                  monkeypatch, read):
+    _add_pass(eng)
+    method, path, body = {
+        "overhaul_active": lambda: ("GET", "/api/overhauls", None),
+        "overhaul_row": lambda: ("GET", f"/api/overhauls/{_overhaul_row(L2)}", None),
+        "win_now_job": lambda: ("GET", f"/api/win-now/jobs/{_failed_job(L2)}", None),
+        "win_now_scenario": lambda: ("POST", f"/api/win-now/scenarios/"
+                                     f"{_stale_scenario(L2)}/decision", {"decision": "like"}),
+    }[read]()
+    _switch_after_the_session_check(monkeypatch)
+    r = _call(real_modules, method, path, body=body)
+    assert (r.status_code, r.get_json()) == (402, NEVER)
+
+
+def test_module_reads_in_the_pass_league_go_through(eng, real_modules):
+    _add_pass(eng)
+    r = _call(real_modules, "GET", "/api/overhauls")
+    assert (r.status_code, r.get_json()) == (200, {"active": None})
+    r = _call(real_modules, "GET", f"/api/win-now/jobs/{_failed_job(L)}")
+    assert r.status_code == 200 and r.get_json()["status"] == "failed"
+    r = _call(real_modules, "POST", f"/api/win-now/scenarios/{_stale_scenario(L)}/decision",
+              body={"decision": "like"})
+    assert r.status_code == 200 and r.get_json()["reason"] == "stale_forecast"
+
+
+def test_module_checks_are_inert_without_a_pass(eng, real_modules, flag, monkeypatch):
+    """Flag off (and account-level pro), a session in L2 is answered from L2
+    exactly as before: the modules' check is a no-op that reads nothing, and
+    the same SQL is issued with and without a pass in L."""
+    from sqlalchemy import event
+    flag["on"] = False
+    ids = (_overhaul_row(L2), _failed_job(L2))
+    _session_league(TOKEN, L2)
+    paths = ["/api/overhauls", f"/api/overhauls/{ids[0]}", f"/api/win-now/jobs/{ids[1]}"]
+    # Account-level pro, so these gated reads reach the handler with the flag off.
+    with eng.begin() as conn:
+        w.ent_row(conn, MATE, product="ftf_pro_annual", source="apple_iap")
+    stmts = []
+    event.listen(eng, "before_cursor_execute",
+                 lambda conn, cur, stmt, params, ctx, many: stmts.append(stmt))
+    without = [_call(real_modules, "GET", p) for p in paths]
+    before, stmts[:] = list(stmts), []
+    _add_pass(eng)
+    stmts[:] = []
+    with_pass = [_call(real_modules, "GET", p) for p in paths]
+    assert stmts == before
+    import re
+    stamp = re.compile(rb'"checked_at":"[^"]*"')     # the capabilities read time
+    for p, a, b in zip(paths, without, with_pass):
+        assert a.status_code == 200, (p, a.data)
+        assert (a.status_code, stamp.sub(b"", a.data)) == (b.status_code, stamp.sub(b"", b.data)), p
+
+
+# ── (10) swipe and pass-reason: the card's own league ──────────────────────
+# Reachability (lld §4.3): a card is looked up in the session's trade
+# service, which session init builds for that session's league only, and a
+# card the service no longer holds is rebuilt in the body's league_id, else
+# the session's; the `active` resolver never covers a body naming another
+# league. So a pass-allowed request cannot name another league's card today.
+# The handlers still confirm the card's league before any write, so that
+# invariant is not the pass's only guard: a card planted in another league
+# gets the ordinary 402 and nothing is written.
+
+class _Deck:
+    """A session trade service holding one card; record_decision stops the
+    handler right after the league-match check."""
+
+    def __init__(self, league_id):
+        self._trade_cards = {"t-1": SimpleNamespace(
+            trade_id="t-1", league_id=league_id, target_user_id="u-partner",
+            give_player_ids=["p1"], receive_player_ids=["p2"], decision=None)}
+        self.decided = []
+
+    def record_decision(self, trade_id, decision):
+        self.decided.append(trade_id)
+        raise ValueError("stopped_after_the_check")
+
+
+def _deck(league_id):
+    deck = _Deck(league_id)
+    with server._sessions_lock:
+        server._sessions[TOKEN].update(trade_svc=deck, service=object())
+    return deck
+
+
+def _pass_reasons(eng):
+    with eng.connect() as conn:
+        return conn.execute(select(db_module.trade_pass_reasons_table)).fetchall()
+
+
+def test_swipe_on_a_card_from_another_league_gets_the_ordinary_402(eng, client):
+    _add_pass(eng)
+    deck = _deck(L2)
+    r = _call(client, "POST", "/api/trades/swipe", body={"trade_id": "t-1", "decision": "pass"})
+    assert (r.status_code, r.get_json()) == (402, NEVER)
+    assert deck.decided == [] and deck._trade_cards["t-1"].decision is None
+
+
+def test_swipe_on_a_pass_league_card_goes_through(eng, client):
+    _add_pass(eng)
+    deck = _deck(L)
+    r = _call(client, "POST", "/api/trades/swipe", body={"trade_id": "t-1", "decision": "pass"})
+    assert (r.status_code, r.get_json()) == (400, {"error": "stopped_after_the_check"})
+    assert deck.decided == ["t-1"]
+    # A card no longer held is rebuilt in the session's league: through.
+    r = _call(client, "POST", "/api/trades/swipe", body={"trade_id": "t-gone", "decision": "pass"})
+    assert r.status_code != 402 and deck.decided == ["t-1", "t-gone"]
+
+
+def test_swipe_naming_another_league_is_never_covered(eng, client):
+    """The FB-46 rebuild would use the body's league: the gate does not
+    cover it, so the answer is the one a user without a pass gets."""
+    _deck(L)
+    body = {"trade_id": "t-gone", "decision": "pass", "league_id": L2,
+            "give_player_ids": ["p1"], "receive_player_ids": ["p2"]}
+    without = _call(client, "POST", "/api/trades/swipe", body=body)
+    _add_pass(eng)
+    with_pass = _call(client, "POST", "/api/trades/swipe", body=body)
+    assert (with_pass.status_code, with_pass.data) == (without.status_code, without.data)
+
+
+def test_pass_reason_on_a_card_from_another_league_gets_the_ordinary_402(eng, client,
+                                                                         monkeypatch):
+    monkeypatch.setattr(server, "_decline_reasons_enabled", lambda: True)
+    _add_pass(eng)
+    _deck(L2)
+    r = _call(client, "POST", "/api/trades/pass-reason",
+              body={"trade_id": "t-1", "reason": "value"})
+    assert (r.status_code, r.get_json()) == (402, NEVER)
+    assert _pass_reasons(eng) == []
+
+
+def test_pass_reason_on_a_pass_league_card_goes_through(eng, client, monkeypatch):
+    monkeypatch.setattr(server, "_decline_reasons_enabled", lambda: True)
+    _add_pass(eng)
+    _deck(L)
+    r = _call(client, "POST", "/api/trades/pass-reason",
+              body={"trade_id": "t-1", "reason": "value"})
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert len(_pass_reasons(eng)) == 1
+
+
+# ── (11) D1: a covered member on a session with no league yet ──────────────
+# Signed in, /api/session/init not run (or a session restored after a
+# restart): a `session` / `active` rule cannot resolve a league. A Pro user
+# gets the handler's 409 session_not_initialized; a member some live pass
+# covers gets the same body from the hook, before any handler, the preview or
+# a body-named league is consulted. Everyone else's answer is unchanged.
+
+BARE, BARE_PRO, BARE_UNVERIFIED = "lpg-bare", "lpg-bare-pro", "lpg-bare-unverified"
+PRO = "u-pro"
+SESSION_NOT_READY = {"error": "session_not_initialized",
+                     "message": "League data is still loading — try again in a moment."}
+BARE_REQUESTS = [
+    ("POST", "/api/trades/generate", {"league_id": L}),               # active, deck
+    ("POST", "/api/trades/swipe", {"trade_id": "t-1", "decision": "pass", "league_id": L}),
+    ("GET", "/api/overhauls", None),                                  # session
+    ("POST", "/api/win-now/search", {"league_id": L}),                # session
+]
+
+
+@pytest.fixture()
+def bare(eng, real_modules, monkeypatch):
+    """Sessions with no league; every handler behind BARE_REQUESTS is real."""
+    for ep in ("generate_trades", "win_now_search_route"):
+        monkeypatch.setitem(server.app.view_functions, ep, REAL_VIEWS[ep])
+    with eng.begin() as conn:
+        w.ent_row(conn, PRO, product="ftf_pro_annual", source="apple_iap")
+    base = {"verified": True, "last_active": time.time()}
+    sessions = {BARE: {"user_id": MATE, **base}, BARE_PRO: {"user_id": PRO, **base},
+                BARE_UNVERIFIED: {"user_id": MATE, "last_active": time.time()}}
+    with server._sessions_lock:
+        server._sessions.update(sessions)
+    yield real_modules
+    with server._sessions_lock:
+        for t in sessions:
+            server._sessions.pop(t, None)
+
+
+@pytest.mark.parametrize("method,path,body", BARE_REQUESTS)
+def test_bare_session_covered_member_gets_the_pro_answer(eng, bare, method, path, body):
+    _add_pass(eng)
+    pro = _call(bare, method, path, BARE_PRO, body)
+    member = _call(bare, method, path, BARE, body)
+    assert (pro.status_code, pro.get_json()) == (409, SESSION_NOT_READY)
+    assert (member.status_code, member.data) == (pro.status_code, pro.data)
+    assert _previews(eng) == [] and w.events(eng, pg.COVERAGE_USED_EVENT) == []
+
+
+def test_bare_session_never_reaches_a_handler(eng, client, monkeypatch):
+    """The 409 comes from the hook: a stubbed handler (which would answer
+    200) is never run, even with a body naming the covered league."""
+    _add_pass(eng)
+    with server._sessions_lock:
+        server._sessions[BARE] = {"user_id": MATE, "verified": True,
+                                  "last_active": time.time()}
+    try:
+        for method, path, body in [("POST", "/api/trades/generate", {"league_id": L}),
+                                   ("GET", "/api/overhauls", None)]:
+            r = _call(client, method, path, BARE, body)
+            assert (r.status_code, r.get_json()) == (409, SESSION_NOT_READY), path
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(BARE, None)
+
+
+@pytest.mark.parametrize("method,path,body", BARE_REQUESTS)
+def test_bare_session_without_live_coverage_is_unchanged(eng, bare, method, path, body):
+    """No pass, an ended pass, or a pass in a league the user is not in:
+    the answer is today's (verdict never returns the 409 for them)."""
+    expected = _call(bare, method, path, BARE, body)
+    with eng.begin() as conn:
+        w.league(conn, "lg-other", total_rosters=12)
+        w.pass_row(conn, "lg-other", origin="comp", comp_days=30)
+        w.pass_row(conn, L2, origin="comp", comp_days=-1)
+    r = _call(bare, method, path, BARE, body)
+    assert (r.status_code, r.data) == (expected.status_code, expected.data)
+
+
+def test_bare_session_without_coverage_keeps_the_402_and_preview(eng, bare):
+    r = _call(bare, "POST", "/api/trades/swipe", BARE,
+              {"trade_id": "t-1", "decision": "pass"})
+    assert (r.status_code, r.get_json()) == (402, NEVER)
+
+
+def test_bare_unverified_session_does_not_depend_on_a_pass(eng, bare, monkeypatch):
+    without = [_call(bare, m, p, BARE_UNVERIFIED, b) for m, p, b in BARE_REQUESTS]
+    _add_pass(eng)
+    calls = []
+    for name in ("covers", "passes_for"):
+        real = getattr(lp, name)
+        monkeypatch.setattr(lp, name, lambda *a, _r=real, **kw: calls.append(a) or _r(*a, **kw))
+    with_pass = [_call(bare, m, p, BARE_UNVERIFIED, b) for m, p, b in BARE_REQUESTS]
+    assert [(r.status_code, r.data) for r in with_pass] == \
+        [(r.status_code, r.data) for r in without]
+    assert calls == []
+
+
+def test_bare_session_flag_off_reads_no_coverage(eng, bare, flag, monkeypatch):
+    flag["on"] = False
+    without = [_call(bare, m, p, BARE, b) for m, p, b in BARE_REQUESTS]
+    _add_pass(eng)
+
+    def never(*a, **_kw):
+        raise AssertionError("read with monetize.league_pass off")
+    monkeypatch.setattr(lp, "passes_for", never)
+    monkeypatch.setattr(lp, "covers", never)
+    with_pass = [_call(bare, m, p, BARE, b) for m, p, b in BARE_REQUESTS]
+    assert [(r.status_code, r.data) for r in with_pass] == \
+        [(r.status_code, r.data) for r in without]
+
+
+def test_bare_session_coverage_read_failure_is_not_covered(eng, bare, monkeypatch):
+    _add_pass(eng)
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(lp, "passes_for", boom)
+    r = _call(bare, "POST", "/api/trades/swipe", BARE, {"trade_id": "t-1", "decision": "pass"})
+    assert (r.status_code, r.get_json()) == (402, NEVER)
+
+
+# ── (12) D3: league_pass_coverage_used once per user, league and day ───────
+
+def test_coverage_used_survives_a_restart_the_same_day(eng, client):
+    """A cleared in-process de-dupe (a restart, another worker) still writes
+    no second row for the same user, league and UTC day."""
+    _add_pass(eng)
+    _call(client, "POST", "/api/trades/propose", body={"league_id": L})
+    pg._gate_hits.clear()
+    _call(client, "POST", "/api/trades/propose", body={"league_id": L})
+    assert w.events(eng, pg.COVERAGE_USED_EVENT) == [(MATE, {"family": "send"}, L)]

@@ -11,6 +11,12 @@
 - **League-match check.** A request let through by a pass carries `g.paywall_pass_league` and may act on that league only: resolvers that read the session also require a body-named league to agree (`active`), `_require_initialized_session` re-checks the session's league at the handler, and `GET /api/trades` lists only the pass league.
 **Consequences:** three indexed reads on gated requests by verified non-Pro users while the flag is on; no cross-request cache. Flag off is byte-identical (nothing resolved, coverage never read). Covered accounts per league are capped at `total_rosters` + `league_pass_seat_allowance`; unproven ESPN/MFL team links count as membership (accepted, measured).
 
+**Added 2026-11-24, after an independent test pass on `36a1666e`:**
+- The overhaul and Win Now modules, swipe and pass-reason now make the league-match check themselves, on the session league and on every row or card they load.
+- A covered member on a session with no league yet gets the handlers' 409 `session_not_initialized` from the hook, never a 402. A body-named league never stands in for the missing session league.
+- A Sleeper co-owner rides the roster owner's seat: covered when the owner is, listed in `league_passes` for the session's active league, not counted in `covered_count` and not capped beyond the owners' seats. So the cap in Consequences bounds stored members, not every covered account. PRD R7 calls the allowance a co-owner allowance; on Sleeper it is not used by co-owners. That wording is the operator's to settle.
+- Seats are ordered by `users.created_at`, then user id, so a re-sync cannot change who holds one. `league_pass_coverage_used` holds its once-per-day rule across processes with one indexed read.
+
 ## D-280 — Sign-out and a sign-in as another account run one account reset; Team review "done" and roster setup are stored per account
 
 **Date:** 2026-11-22 · **Who:** the operator's report from a Release simulator build with two accounts on one device; fixed on `fix/signout-clears-account-state`.
