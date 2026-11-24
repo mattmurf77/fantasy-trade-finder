@@ -47,9 +47,12 @@ export function useRosterSetupPassTrigger({
   const roster = useMyRosterAssets(leagueId, userId, enabled);
   const hydrated = useRosterSetup((s) => s.hydrated);
 
+  // Re-read whenever the store is not hydrated or the account changed — the
+  // account reset (state/accountReset.ts) un-hydrates it for the next account;
+  // hydrate() is a no-op when it already holds this account's records.
   useEffect(() => {
     if (enabled) void useRosterSetup.getState().hydrate();
-  }, [enabled]);
+  }, [enabled, hydrated, userId]);
 
   // Players alone decide "has a roster" once rosters answer; with no
   // players, wait for the picks read to settle.

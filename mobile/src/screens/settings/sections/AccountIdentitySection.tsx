@@ -281,8 +281,15 @@ export default function AccountIdentitySection({
           ) : null}
           {/* SleeperConnect verification requires a Sleeper-keyed session
               (the JWT claim must match the session user) — hidden for
-              account-only users, whose Apple sign-in IS the verification. */}
-          {!user?.account_only ? (
+              account-only users, whose Apple sign-in IS the verification.
+              Also hidden once THIS session is verified (2026-11-22): the row
+              sat under "Verified — your board and account actions are locked
+              to you" asking the user to verify again. Gated on the session's
+              own `session_verified`, not the label: an account verified
+              elsewhere whose session is not still needs this row. Linking
+              Sleeper for sending stays at the point of use (SendInSleeperButton
+              and the claim sheet open SleeperConnect when not linked). */}
+          {!user?.account_only && verification?.session_verified !== true ? (
             <Pressable
               accessibilityRole="button"
               onPress={() => navigate('SleeperConnect')}
