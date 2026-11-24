@@ -136,8 +136,22 @@ def is_member(user_id: str, league_id: str, platform: str) -> bool
 def covered_members(league_id: str, platform: str) -> list[str]
 ```
 
-The app users who are members, oldest first (by `league_members.id` or the binding's
-`created_at`), cut at `total_rosters + league_pass_seat_allowance` (R7).
+The app users who are members, oldest first, cut at
+`total_rosters + league_pass_seat_allowance` (R7). As built, "oldest" is stable: Sleeper orders by the member's app account age (`users.created_at`,
+written once; a missing one sorts first), then user id, because `league_members.id` is
+renewed by SQLite's `INSERT OR REPLACE` sync; ESPN / MFL by the binding's `created_at`
+(kept on re-link), then user id.
+
+A Sleeper co-owner has no row here: `league_members` lists only a roster's primary
+owner. As built, a co-owner rides that owner's seat (covered exactly when the owner is,
+§4.1) and takes no seat of its own, so it is not in `covered_members` and not in
+`covered_count`. The allowance absorbs extra accounts that do hold their own row: ESPN
+and MFL co-managers who each bind the same team, and turnover. So the cap bounds
+`covered_members`, not every covered account: a 12-team Sleeper league with allowance 0
+covers its 12 owners plus their co-owners. The server stores no co-owner list (ADR-012:
+a co-owner is an alias of the roster's owner), so counting them would need a schema
+change or a Sleeper read per coverage check; this reads PRD R7 as capping stored
+members, which differs from its "co-owner allowance" wording.
 
 ### 3.2 Coverage
 
@@ -165,11 +179,17 @@ Three indexed reads, on gated requests by non-Pro users only. No cross-request c
 the first version.
 
 ```python
-def passes_for(user_id: str) -> list[dict]
+def passes_for(user_id: str, *, league_user_id: str | None = None,
+               league_id: str | None = None) -> list[dict]
 ```
 
 Every live pass covering this user, for `/api/me/entitlements`. It starts from the
-user's leagues, not from all passes.
+user's leagues, not from all passes. As built, it also lists a Sleeper co-owner's pass
+by the gate's rule (§4.1): in `league_id` only (the route passes the session's active
+league), a pass that does not cover `user_id` is tried under `league_user_id`
+(`server._league_user_id`), with role `member`. A sole owner (`league_user_id` equal to
+`user_id`) reads nothing more. A co-owner still cannot buy: `create_intent`, `bind` and
+`repoint` check membership under the user's own id, never the league identity.
 
 ### 3.3 Quote and intent
 
@@ -294,27 +314,35 @@ Rules:
 def _confirm_pass_league(league_id: str | None) -> None
 ```
 
-As built, no gated handler calls it directly: every resolver returns exactly the league
-its handler acts on, except for one race. A `session` or `active` handler reads the
-session again, and `/api/session/init` updates the session in place, so a session switched
-to another league between the hook and the handler would act there. So
-`_require_initialized_session` (which every `session` and `active` handler, and both
-installed modules, use) calls it with the session's league for those kinds. A future
-gated handler that fixes its league some other way calls it directly. When
-`g.paywall_pass_league` is set and differs from the handler's league, it aborts with the
-ordinary 402 (`gate_reason(user_id, deck=…)`). When the request came through on
-account-level Pro, it does nothing.
+As built, it is called at every point a gated handler fixes the league it acts on.
+When `g.paywall_pass_league` is set and differs from the handler's league, it aborts
+with the ordinary 402 (`gate_reason(user_id, deck=…)`). When the request came through on
+account-level Pro, with the flag off, or on a free rule, it returns at once and reads
+nothing.
 
-One handler needs more than the check:
-
+- **The session switch.** `/api/session/init` updates the session in place, so a session
+  switched to another league between the hook and the handler would act there.
+  `_require_initialized_session` (which every `session` and `active` handler, and both
+  installed modules, use) calls it with the session's league for those kinds
+  (`_confirm_pass_session_league`).
+- **Overhaul and Win Now.** Both modules call their injected `require_session` and then
+  read the league themselves. `server.py` injects `_confirm_pass_league` as
+  `confirm_pass_league`, and each module calls it where it fixes its league:
+  `overhaul_api.py` on the session's league in `overhaul_create_route` and
+  `overhaul_active_route`, and on the row's league in `load` (every `<overhaul_id>`
+  rule); `win_now_api.py` in `actor`, and on the row's league in the job and scenario
+  reads. The request's session view is a per-request copy, so this repeats the
+  session-level check today; it keeps each module's own reads bound to the pass league.
+- **`swipe` and `pass-reason`.** Both act on a card from the session's trade service,
+  which session init builds for one league, or rebuild a card in the body's `league_id`,
+  else the session's; the `active` resolver never covers a body naming another league.
+  So a card from another league is not reachable today. Both handlers still check the
+  card's league (and `pass-reason` the row's league) before any write.
 - **`GET /api/trades`.** `league_id` is optional, and without it the handler returns
   cards from every league. For a pass-allowed request the handler forces the filter to
   `g.paywall_pass_league`.
 
-`GET /api/overhauls` and the Win Now rules need nothing extra. Each already refuses a
-request whose league is not the session's active league (`overhaul_api.py`
-`overhaul_active_route` and `load`; `win_now_api.py` `actor`, and the job and scenario
-reads).
+A future gated handler that fixes its league some other way calls it directly.
 
 ### 4.4 The hook
 
@@ -323,8 +351,26 @@ the flag on (`server._paywall_pass_league`), so a free route, and every route wi
 flag off, still reads nothing new. It passes `league_id` (and the co-owner's
 `league_user_id`) to `verdict`, and on `PassAllowed` sets `g.paywall_pass_league` and
 records `league_pass_coverage_used` (`paywall_gate.record_coverage_used`, first per user,
-league and UTC day, through `record_gate_hit`'s bounded de-dupe; a failure is swallowed).
-A resolver failure is not covered. `record_gate_hit` is unchanged.
+league and UTC day: `record_gate_hit`'s bounded in-process de-dupe is the fast path, and
+on its miss one indexed read of `user_events` skips the insert when today's row exists,
+so a restart or another worker writes no second row; a failure is swallowed). A
+resolver failure is not covered. `record_gate_hit` is unchanged (per process).
+
+**A session with no league yet** (sign-in before `/api/session/init`, or a session
+restored after a restart). A `session` or `active` rule has no league to resolve, and a
+body-named league never stands in for it. With the flag on, `server._paywall_session_pending`
+(no reads) tells `verdict`, which, after the pro check and before the preview, returns
+`SESSION_PENDING` when `league_pass.passes_for(user)` is non-empty (a read failure is
+not covered). The hook raises `_SessionNotInitialized`, so the answer is the handlers'
+own 409 `session_not_initialized`, the body a Pro user gets, and no handler runs. Every
+handler behind those rules refuses an uninitialized session before acting (a feature-flag
+404 is the only earlier answer), so letting the request through would also have been
+safe; the hook answers instead so that no future handler can act first, at the cost that
+a covered member gets the 409 where a Pro user would get a handler's flag-off 404. The
+cost is `passes_for`'s reads (the alias lookup, two membership reads, one pass read, then
+`covers` per active pass in the user's leagues), only for verified non-Pro users with the
+flag on, on those rules, on a session without a league. A Sleeper co-owner is not
+recognised there (its league identity comes with init) and gets today's answer.
 
 ## 5. `backend/entitlements.py` changes
 
@@ -491,8 +537,10 @@ product ids. `entitlement_granted` already fires for the buyer's row.
 | A covered member also buys an individual plan | Allowed. Both apply. |
 | A covered member in two covered leagues | Two entries in `league_passes`. |
 | The league is removed or unlinked in the app | Coverage has no members to cover; the buyer can move the pass. |
-| A co-owner takes the seat count over the cap | The newest account is not covered. |
+| A co-owner takes the seat count over the cap | A Sleeper co-owner takes no seat: it is covered exactly when its roster's primary owner is, in the session's active league only, and `league_passes` lists it there as `member`. ESPN / MFL co-managers each hold a binding: the newest account past the cap is not covered. |
 | An unverified session in a covered league | Settled before coverage is read: the route's 403 or `verify_required`. |
+| A covered member's session has no league yet | `session` / `active` rules: the handlers' 409 `session_not_initialized`, from the hook (§4.4). Other kinds resolve as usual. |
+| A re-sync renews a member's `league_members.id` | No change to who holds a seat: seats follow account age (§3.1). |
 | The demo session | Unchanged; exempt on deck routes. |
 | A web request | Coverage applies wherever the gate applies, so only when the web knob is on. |
 | A comp pass and a purchase for the same league | The purchase is refused as `already_covered` until the comp ends. |

@@ -23604,6 +23604,12 @@ def swipe_trade():
         return jsonify({"error": "trade_id and decision required"}), 400
     if decision not in ("like", "pass"):
         return jsonify({"error": "decision must be 'like' or 'pass'"}), 400
+    if g.get("paywall_pass_league") is not None:
+        # League pass (lld §4.3): the card's own league, before any write. A
+        # card not held here is rebuilt in the body's league, else the session's.
+        held = trade_service._trade_cards.get(trade_id)
+        _confirm_pass_league(held.league_id if held is not None
+                             else body.get("league_id") or g_league.league_id)
 
     try:
         try:
@@ -24687,6 +24693,11 @@ def trade_pass_reason():
                 g_user_id, league_id or "")
         except Exception:
             card = None
+    if g.get("paywall_pass_league") is not None:
+        # League pass (lld §4.3): the row's league and the card's, before any write.
+        _confirm_pass_league(league_id)
+        if card is not None:
+            _confirm_pass_league(card.league_id)
     if card is not None:
         _redact_held_card_partner(card)   # legal R28.26 #10, before any write
 
@@ -43612,16 +43623,22 @@ def _paywall_gate_hook():
     try:
         ask = _paywall_deck_ask(sess.get("user_id"))
         pass_league, pass_league_user = _paywall_pass_league(rule, sess, ask)
+        pending = _paywall_session_pending(rule, sess)
         result = _paywall_gate.verdict(
             rule, request.method, sess.get("user_id"),
             _paywall_gate.is_mobile_request(request.headers),
             bool(sess.get("verified") or _synthetic_demo_session(sess)),
             demo=_synthetic_demo_session(sess),
             route_verifies=_route_answers_unverified(request.endpoint, request.method),
-            ask=ask, league_id=pass_league, league_user_id=pass_league_user)
+            ask=ask, league_id=pass_league, league_user_id=pass_league_user,
+            session_pending=pending)
     except Exception:
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
+    if isinstance(result, _paywall_gate.SessionPending):
+        # League pass, D1: the answer the handler gives a Pro user on this
+        # session (its own 409), without reaching any handler.
+        raise _SessionNotInitialized()
     if isinstance(result, _paywall_gate.PassAllowed):
         g.paywall_pass_league = result.league_id
         _emit_league_pass_coverage_used(sess.get("user_id"), result.league_id, rule)
@@ -43682,6 +43699,19 @@ def _paywall_pass_league(rule: str, sess: dict, ask) -> tuple[str | None, str | 
     if league_id and league_id == session_league:
         return league_id, _league_user_id(sess)
     return league_id, None
+
+
+def _paywall_session_pending(rule: str, sess: dict) -> bool:
+    """League pass (D1): flag on, a `session` / `active` rule, and a session
+    with no league yet (signed in before /api/session/init, or restored after
+    a restart). verdict then answers a covered member the handlers' 409
+    instead of a 402. Reads nothing; flag off: False."""
+    if not _paywall_gate.pass_enabled():
+        return False
+    method = "GET" if request.method == "HEAD" else request.method
+    return (_paywall_gate.LEAGUE_RESOLVERS.get((method, rule))
+            in (_paywall_gate.SESSION, _paywall_gate.ACTIVE)
+            and not getattr(sess.get("league"), "league_id", None))
 
 
 def _paywall_job_league(user_id, job_id) -> str | None:
@@ -43891,11 +43921,16 @@ def me_entitlements():
         out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
     # League pass (lld §6.1): only with monetize.league_pass on; absent
-    # otherwise. An unverified session gets [], like every other field.
+    # otherwise. An unverified session gets [], like every other field. A
+    # Sleeper co-owner is listed under the session's league identity in its
+    # active league only, as the gate covers it (_paywall_pass_league).
     if is_enabled(_league_pass.FLAG):
+        active = getattr(sess.get("league"), "league_id", None)
         out["league_passes"] = [
             {k: p[k] for k in ("league_id", "platform", "role", "covered_until", "buyer_display")}
-            for p in (_league_pass.passes_for(sess["user_id"]) if verified else [])]
+            for p in (_league_pass.passes_for(
+                sess["user_id"], league_user_id=_league_user_id(sess),
+                league_id=str(active) if active else None) if verified else [])]
     return jsonify(out)
 
 
@@ -47028,7 +47063,8 @@ from .win_now_api import install as _install_win_now
 _install_win_now(app, require_session=_require_initialized_session,
                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
                  active_format=_active_format, league_user_id=_league_user_id,
-                 pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
+                 pool_provider=_get_universal_pool, fetch_json=_sleeper_get,
+                 confirm_pass_league=_confirm_pass_league)
 # Queued Win Now work resumes per serving process from _ensure_background_threads,
 # never at import (under --preload that would run in the gunicorn master).
 
@@ -47125,7 +47161,8 @@ _install_overhaul(app, require_session=_require_initialized_session,
                   pick_projection=_league_pick_projection,
                   pick_projection_fields=_owned_pick_projection_fields,
                   elo_to_value=_trade_service_mod.elo_to_value, sleeper_credential=get_sleeper_credential,
-                  sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get)
+                  sleeper_write=_sleeper_write, record_event=record_event, fetch_json=_sleeper_get,
+                  confirm_pass_league=_confirm_pass_league)
 
 
 if __name__ == "__main__":

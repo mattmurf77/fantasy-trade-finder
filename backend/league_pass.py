@@ -143,15 +143,19 @@ def _platform(conn, league_id: str) -> str | None:
 def _member_ids(conn, league_id: str, platform: str) -> list[str]:
     """App users in the league, oldest first. Sleeper: league_members rows
     with a users row (league_members also lists managers who never used the
-    app). ESPN / MFL: platform_league_bindings, because league_members holds
-    a synthetic id for every unbound team."""
+    app), oldest app account first (users.created_at, written once at
+    insert; a missing one sorts first), then user id: league_members.id is
+    not stable, because SQLite's INSERT OR REPLACE sync gives a re-synced
+    member a new id. ESPN / MFL: platform_league_bindings by created_at
+    (kept on re-link), then user id, because league_members holds a
+    synthetic id for every unbound team."""
     if platform == "sleeper":
         lm, u = db.league_members_table, db.users_table
         return list(conn.execute(
             select(lm.c.user_id)
             .join(u, u.c.sleeper_user_id == lm.c.user_id)
             .where(lm.c.league_id == league_id)
-            .order_by(lm.c.id)
+            .order_by(func.coalesce(u.c.created_at, ""), lm.c.user_id)
         ).scalars())
     plb = db.platform_league_bindings_table
     return list(conn.execute(
@@ -304,10 +308,21 @@ def covers(user_id: str, league_id: str) -> Coverage | None:
                     role="buyer" if _is_buyer(row, ids) else "member")
 
 
-def passes_for(user_id: str) -> list[dict]:
+def passes_for(user_id: str, *, league_user_id: str | None = None,
+               league_id: str | None = None) -> list[dict]:
     """Every live pass covering this user, starting from the user's leagues:
     [{pass_id, league_id, platform, role, covered_until, buyer_display}].
-    buyer_display is the buyer's display name only when show_buyer is 1."""
+    buyer_display is the buyer's display name only when show_buyer is 1.
+
+    The Sleeper co-owner, by the gate's rule (paywall_gate.verdict): in
+    `league_id` (the session's active league) only, a pass that does not
+    cover `user_id` is also tried under `league_user_id` (the session's
+    league identity, the roster's primary owner that league_members lists),
+    and listed with role 'member'. The co-owner rides that owner's seat: it
+    is not a covered_members entry and takes no seat of its own. Omitted, or
+    equal to `user_id` (a sole owner), nothing more is read."""
+    co = (league_user_id if league_user_id and league_id and league_user_id != user_id
+          else None)
     with db.engine.begin() as conn:
         ids = _aliases(conn, user_id)
         lm, plb = db.league_members_table, db.platform_league_bindings_table
@@ -315,6 +330,8 @@ def passes_for(user_id: str) -> list[dict]:
             select(lm.c.league_id).where(lm.c.user_id.in_(ids))).scalars())
         leagues |= set(conn.execute(
             select(plb.c.league_id).where(plb.c.user_id.in_(ids))).scalars())
+        if co:
+            leagues.add(league_id)
         t = db.league_passes_table
         bound = conn.execute(
             select(t).where(t.c.league_id.in_(leagues)).where(t.c.status == "active")
@@ -323,10 +340,13 @@ def passes_for(user_id: str) -> list[dict]:
     out = []
     for row in bound:
         cov = covers(user_id, row.league_id)
+        role = cov.role if cov is not None else "member"
+        if cov is None and co and row.league_id == league_id:
+            cov = covers(co, row.league_id)
         if cov is None:
             continue
         out.append({"pass_id": row.id, "league_id": row.league_id,
-                    "platform": row.platform, "role": cov.role,
+                    "platform": row.platform, "role": role,
                     "covered_until": cov.covered_until,
                     "buyer_display": _buyer_display(row) if row.show_buyer else None})
     return out
