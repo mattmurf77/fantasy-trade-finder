@@ -86,6 +86,11 @@ export interface UsageStatsRowProps {
   unit: UsageUnit;
   weeks: number[];
   focusStatus: LeagueStatus;
+  /** Add control for a free agent in the focused league, and per league in
+   *  the expanded list: the host decides from the move capability (launch
+   *  rule, owner call 2026-11-25). False: no Add. */
+  canAdd: boolean;
+  canLeagueAdd: (leagueId: string) => boolean;
   expanded: boolean;
   leagueRows: UsageLeagueRow[];
   onToggle: () => void;
@@ -102,6 +107,8 @@ export function UsageStatsRow({
   unit,
   weeks,
   focusStatus,
+  canAdd,
+  canLeagueAdd,
   expanded,
   leagueRows,
   onToggle,
@@ -151,7 +158,7 @@ export function UsageStatsRow({
           <Text scale="dense" style={[styles.cell, styles.lastCol, styles.total]}>{lastColumn(block, unit)}</Text>
         </Pressable>
         <View style={styles.actCell}>
-          {focusStatus === 'free_agent' ? (
+          {focusStatus === 'free_agent' ? (canAdd ? (
             <Pressable
               testID={`usage-trends.action.${id}`}
               accessibilityRole="button"
@@ -162,7 +169,7 @@ export function UsageStatsRow({
             >
               <Icon name="plus" size={16} color={chalk.base} />
             </Pressable>
-          ) : focusStatus === 'rostered' ? (
+          ) : null) : focusStatus === 'rostered' ? (
             <Pressable
               testID={`usage-trends.action.${id}`}
               accessibilityRole="button"
@@ -201,7 +208,7 @@ export function UsageStatsRow({
       </View>
       {expanded ? (
         <View style={styles.expand} testID={`usage-trends.expand.${id}`}>
-          <UsageLeagueList player={player} rows={leagueRows} onAdd={onLeagueAdd} onTrade={onLeagueTrade} compact />
+          <UsageLeagueList player={player} rows={leagueRows} canAdd={canLeagueAdd} onAdd={onLeagueAdd} onTrade={onLeagueTrade} compact />
         </View>
       ) : null}
     </View>

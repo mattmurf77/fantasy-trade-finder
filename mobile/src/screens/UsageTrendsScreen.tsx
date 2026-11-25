@@ -16,7 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Button, Icon, Text, TickLabel } from '../components/chalkline';
-import ClaimSheet, { explainNoAdd, resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
+import ClaimSheet, { resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
 import FeedbackFAB from '../components/FeedbackFAB';
 import UsageTrendCard from '../components/UsageTrendCard';
 import { UsageAvailabilitySheet, type UsageLeagueRow } from '../components/UsageLeagueList';
@@ -28,6 +28,7 @@ import { getFreeAgents } from '../api/league';
 import {
   capabilityAtTap,
   capabilityForRow,
+  FA_MOVE_CAPABILITY_ROOT,
   faMoveOpensSheet,
   prefetchLeagueCapability,
   prefetchListCapabilities,
@@ -205,6 +206,37 @@ export default function UsageTrendsScreen() {
     if (!enabled || !focusId || resolveAddPlatform(focusId, isDemo) !== 'sleeper') return;
     void prefetchLeagueCapability(queryClient, focusId);
   }, [enabled, focusId, isDemo, queryClient]);
+  // Launch rule (owner call 2026-11-25: no Add that cannot add). An Add
+  // control shows only where the league's cached capability opens the
+  // in-app move flow (`move.mode` 'submit', api/faMove.ts faMoveOpensSheet):
+  // no capability, 'handoff' or 'unsupported' ⇒ no Add, no hand-off sheet,
+  // no no-write-path alert. The capability cache is read imperatively
+  // (capabilityAtTap), so a cache write under FA_MOVE_CAPABILITY_ROOT bumps
+  // `capVersion` to re-render the list when a prefetch lands. Today's
+  // server sends no `move`, so no Add renders anywhere on this page; when
+  // the server turns real adds on, Add returns with no new binary.
+  const [capVersion, setCapVersion] = useState(0);
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((e) => {
+        const key = e?.query?.queryKey;
+        if (Array.isArray(key) && key[0] === FA_MOVE_CAPABILITY_ROOT[0]
+          && (e.type === 'added' || e.type === 'removed' || e.type === 'updated')) {
+          setCapVersion((v) => v + 1);
+        }
+      }),
+    [queryClient],
+  );
+  const canAddIn = useCallback(
+    (lgId: string, playerId: string): boolean => {
+      if (isDemo) return false;
+      const cap = capabilityForRow(capabilityAtTap(queryClient, lgId), playerId);
+      return faMoveOpensSheet(cap.move, cap.row);
+    },
+    // capVersion: re-read the cache after a capability write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isDemo, queryClient, capVersion],
+  );
   const faQuery = useQuery({
     queryKey: ['free-agents', claim?.leagueId, 'ALL'],
     queryFn: () => getFreeAgents(claim!.leagueId, 'ALL'),
@@ -421,19 +453,17 @@ export default function UsageTrendsScreen() {
   };
 
   const doAdd = async (p: UsagePlayer, lgId: string) => {
-    trackAction('add', p, lgId);
-    const platform = resolveAddPlatform(lgId, isDemo);
-    // D1 (scope §B1): the server's capability first, but only if it's already
+    // D1 (scope §B1): the server's capability, but only if it's already
     // cached, fresh (under 5 minutes) and not invalidated since; the tap never
-    // waits for it. Otherwise (or on today's server) it routes exactly as
-    // #509: Sleeper opens the sheet in hand-off, the rest get the alert. The
-    // sheet still reads its own list after the switch.
+    // waits for it. Launch rule (canAddIn above): only the in-app move flow
+    // opens the sheet. Anything else (no capability, hand-off, unsupported,
+    // or a capability that went stale since the Add rendered) does nothing:
+    // no hand-off sheet, no alert. The sheet still reads its own list after
+    // the switch.
     const cap = capabilityForRow(isDemo ? undefined : capabilityAtTap(queryClient, lgId), p.player_id);
+    if (!faMoveOpensSheet(cap.move, cap.row)) return;
+    trackAction('add', p, lgId);
     await closeSheetFirst();
-    if (platform !== 'sleeper' && !faMoveOpensSheet(cap.move, cap.row)) {
-      explainNoAdd(platform);
-      return;
-    }
     if (!(await switchTo(lgId))) return;
     setClaim({
       target: { player_id: p.player_id, name: p.name, position: p.position, team: p.team, ...cap.row },
@@ -532,6 +562,7 @@ export default function UsageTrendsScreen() {
             order={order}
             period={periodMeta}
             focusStatus={focusStatus}
+            canAdd={!!focusId && canAddIn(focusId, p.player_id)}
             leagueStatuses={(data?.leagues ?? []).map((lg) => statusIn(lg, p.player_id))}
             onAdd={() => focusId && doAdd(p, focusId)}
             onTrade={() => focusId && doTrade(p, focusId)}
@@ -553,6 +584,8 @@ export default function UsageTrendsScreen() {
         unit={unit}
         weeks={weeks}
         focusStatus={focusStatus}
+        canAdd={!!focusId && canAddIn(focusId, p.player_id)}
+        canLeagueAdd={(lgId) => canAddIn(lgId, p.player_id)}
         expanded={open}
         leagueRows={open ? leagueRowsFor(p) : []}
         onToggle={() => {
@@ -618,6 +651,8 @@ export default function UsageTrendsScreen() {
         data={items}
         keyExtractor={(it) => it.key}
         renderItem={renderItem}
+        // Re-render rows when a capability lands (Add appears or goes).
+        extraData={capVersion}
         contentContainerStyle={view === 'simple' ? styles.listSimple : styles.listStats}
         ListHeaderComponent={view === 'simple' ? (
           // Order and period share one wrapping row: side by side where they
@@ -860,6 +895,7 @@ export default function UsageTrendsScreen() {
           visible={!tradeSheetClosing}
           immediateDismiss={tradeSheetClosing}
           onDismiss={onTradeSheetDismissed}
+          canAdd={(lgId) => canAddIn(lgId, sheetPlayer.player_id)}
           onAdd={(lgId) => doAdd(sheetPlayer, lgId)}
           onTrade={(lgId) => doTrade(sheetPlayer, lgId)}
           onClose={() => setSheetPlayer(null)}

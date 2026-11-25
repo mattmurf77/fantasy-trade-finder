@@ -35,6 +35,14 @@
 //       query.isLoading (release-lead QA rule)                             [AST]
 //   H3  ClaimSheet's openSleeper passes `hasDrop: dropId != null` to
 //       openInSleeperApp, the source of #528's has_drop (head-eng ruling) [AST]
+//
+// Launch rule (owner call 2026-11-25, "no Add button that cannot add"): the
+// hosts no longer open this sheet without a `submit` capability, so with no
+// capability (today's server), 'handoff' or 'unsupported' there is no Add
+// and no hand-off sheet (pinned in check-fa-move.js F2). The hand-off render
+// pinned here stays in ClaimSheet because a submit-mode sheet still reaches
+// it for a row the server holds in hand-off (scope §B7, X7). The pins below
+// are about that render and the shared helpers, not about when hosts open it.
 //   S3  scheme opens: one openURL, `sleeper://…`, outcome 'app', no alert  [executed]
 //   S4  scheme rejects: the D2 alert, whose Get Sleeper opens
 //       apps.apple.com/app/id987367543; outcome 'not_installed'; no
