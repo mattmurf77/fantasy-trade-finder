@@ -145,3 +145,5 @@ the layer this rollout actually belongs to. Post-Phase-A, the onboarding flags i
 default (see the comment in `test_onboarding_v2_flags_are_release_plus_the_onboarding_surface`), so v3 may now be
 overlaying nothing. **If it is vestigial, stopping it frees the onboarding layer** and this rollout could be re-filed
 where it belongs. That was not verified, so it was not assumed.
+
+**2026-11-25 update:** by then every product layer held a running full-range rollout (`ranking`: `aggregate_tier_labels`; `growth`: this one; `onboarding`: `onboarding_v2_rollout` v3; `engine`: `timing_readout_rollout`; `trades_ui`: `trades_home_inline`). Rather than stop or re-version any of them, a sixth reserved layer, **`operator`**, was added for allowlist-targeted operator rollouts that are not experiments (`calibration_rollout` is the first). `validate_spec` refuses an `operator` experiment that does not target `is_tester_allowlist: true`. Future allowlist rollouts like this one belong there; the existing ones were left where they are.
