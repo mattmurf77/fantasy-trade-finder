@@ -5013,6 +5013,11 @@ html:has(#auth-screen:not(.hidden)), body:has(#auth-screen:not(.hidden)) { overf
 .lp-login-help { color: var(--chalk-dim); font: 400 12px/1.5 var(--font-ui); margin-top: 8px; }
 .lp-login-help summary { cursor: pointer; padding: 8px 0; min-height: 44px; }
 .lp-login-help summary:focus-visible, .lp-header a:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
+/* m3.web.espn_mfl_cta (11-18 flip): a reading line in chalk under the Sleeper door; its link is a reading link, chalk + underline (ice is for actions). */
+.cb-auth-help.lp-espn-mfl-cta { color: var(--chalk); }
+.cb-auth-help.lp-espn-mfl-cta a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+.cb-auth-help.lp-espn-mfl-cta a:hover { text-decoration-color: var(--ice); }
+.cb-auth-help.lp-espn-mfl-cta a:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
 .lp-connect .legal-links-row { margin-top: 12px; justify-content: flex-start; }
 @media (max-width: 1200px) { .lp-header, .lp-connect { margin-left: 20px; margin-right: 20px; } }
 @media (max-width: 960px) {
