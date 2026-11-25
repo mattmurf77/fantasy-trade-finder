@@ -29,7 +29,7 @@ import {
   capabilityAtTap,
   capabilityForRow,
   FA_MOVE_CAPABILITY_ROOT,
-  faMoveOpensSheet,
+  faMoveShowsAdd,
   prefetchLeagueCapability,
   prefetchListCapabilities,
   type FaMoveCapability,
@@ -208,8 +208,8 @@ export default function UsageTrendsScreen() {
   }, [enabled, focusId, isDemo, queryClient]);
   // Launch rule (owner call 2026-11-25: no Add that cannot add). An Add
   // control shows only where the league's cached capability opens the
-  // in-app move flow (`move.mode` 'submit', api/faMove.ts faMoveOpensSheet):
-  // no capability, 'handoff' or 'unsupported' ⇒ no Add, no hand-off sheet,
+  // in-app move flow and the row isn't held in hand-off (api/faMove.ts
+  // faMoveShowsAdd): no capability, 'handoff', 'unsupported' or a held row ⇒ no Add, no hand-off sheet,
   // no no-write-path alert. The capability cache is read imperatively
   // (capabilityAtTap), so a cache write under FA_MOVE_CAPABILITY_ROOT bumps
   // `capVersion` to re-render the list when a prefetch lands. Today's
@@ -231,7 +231,7 @@ export default function UsageTrendsScreen() {
     (lgId: string, playerId: string): boolean => {
       if (isDemo) return false;
       const cap = capabilityForRow(capabilityAtTap(queryClient, lgId), playerId);
-      return faMoveOpensSheet(cap.move, cap.row);
+      return faMoveShowsAdd(cap.move, cap.row);
     },
     // capVersion: re-read the cache after a capability write.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -461,7 +461,7 @@ export default function UsageTrendsScreen() {
     // no hand-off sheet, no alert. The sheet still reads its own list after
     // the switch.
     const cap = capabilityForRow(isDemo ? undefined : capabilityAtTap(queryClient, lgId), p.player_id);
-    if (!faMoveOpensSheet(cap.move, cap.row)) return;
+    if (!faMoveShowsAdd(cap.move, cap.row)) return;
     trackAction('add', p, lgId);
     await closeSheetFirst();
     if (!(await switchTo(lgId))) return;

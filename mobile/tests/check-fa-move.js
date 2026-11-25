@@ -11,10 +11,11 @@
 // the wire contract (docs/plans/sleeper-fa-write/contract.md):
 //
 //   F1  no client flag read: `send_add_drop` / `fa_write` nowhere in src    [text + AST]
-//   F2  faMoveGate's truth table; hosts show and open Add ONLY by the
-//       capability's in-app move flow (launch rule, owner call 2026-11-25:
+//   F2  faMoveGate's truth table; hosts show and open Add ONLY through
+//       faMoveShowsAdd: the capability's in-app move flow, and not a row
+//       the server holds in hand-off (launch rule, owner call 2026-11-25:
 //       no Add that cannot add, so no hand-off sheet and no NO_ADD_REASON
-//       alert from a host; submit mode unchanged)                         [executed + AST]
+//       alert from a host; a submittable row's flow is unchanged)        [executed + AST]
 //   F3  outcome unknown never retries; isMoveOutcomeUnknown's triggers     [executed + AST]
 //   F4  the named CTA comes from move.copy / the row's move_kind, with ONE
 //       platform-free fallback constant; no Sleeper literal in the submit
@@ -478,27 +479,45 @@ process.on('exit', () => {
       eq(gate({ ...SUBMIT, league_platform: 'espn', connect: 'expired' }), 'verify', 'espn has EspnConnect');
     });
   }
-  await check('F2 both hosts show and open Add only by the capability\'s in-app move flow (launch rule): no hand-off route, no NO_ADD_REASON alert', () => {
+  {
+    const h = harness();
+    await check('F2 faMoveShowsAdd (launch rule): a submit capability with one held row → Add on the submittable row, none on the held one', () => {
+      const S = h.faMove.faMoveShowsAdd;
+      eq([S(SUBMIT, { move_kind: 'add' }), S(SUBMIT, {}), S(SUBMIT, { move_mode: 'handoff', move_line: 'x' })],
+        [true, true, false], 'submittable vs held row');
+      eq([S({ ...SUBMIT, claims: false }, { move_kind: 'claim' }), S({ ...SUBMIT, claims: false }, { move_kind: 'add' })],
+        [false, true], 'a claim while claims are off is held; an add is not');
+      eq([undefined, null, { ...SUBMIT, mode: 'handoff' }, { ...SUBMIT, mode: 'unsupported' },
+        { ...SUBMIT, league_platform: 'mfl', connect: 'not_linked' }].map((m) => S(m, {})),
+      [false, false, false, false, false], 'no capability, handoff, unsupported → no Add');
+      expect(S({ ...SUBMIT, connect: 'not_linked' }, {}) && S({ ...SUBMIT, connect: 'expired' }, {}),
+        'connect / verify steps still show Add (the in-app flow handles them)');
+      expect(h.faMove.faMoveOpensSheet(SUBMIT, { move_mode: 'handoff' }),
+        'faMoveOpensSheet itself is unchanged (X7); the host rule is the narrower faMoveShowsAdd');
+    });
+  }
+  await check('F2 both hosts show and open Add only through faMoveShowsAdd (launch rule): no hand-off route, no NO_ADD_REASON alert, no Add on a held row', () => {
     // Launch rule (owner call 2026-11-25): an Add control exists only where
     // faMoveOpensSheet says the capability opens the in-app move (`submit`).
     // No capability, 'handoff' or 'unsupported' ⇒ no Add, no sheet, no alert.
     const faSrc = read(FREE_AGENTS);
-    expect(/if \(!leagueId \|\| !faMoveOpensSheet\(move, row\)\) return;\s*setClaimMove\(move\);\s*setClaimLeagueId\(leagueId\);\s*setClaimTarget\(row\);/.test(faSrc),
-      'FreeAgentsScreen onAdd opens the sheet only through faMoveOpensSheet');
-    expect(/canAdd=\{faMoveOpensSheet\(move, item\)\}/.test(faSrc)
+    expect(/if \(!leagueId \|\| !faMoveShowsAdd\(move, row\)\) return;\s*setClaimMove\(move\);\s*setClaimLeagueId\(leagueId\);\s*setClaimTarget\(row\);/.test(faSrc),
+      'FreeAgentsScreen onAdd opens the sheet only through faMoveShowsAdd');
+    expect(/canAdd=\{faMoveShowsAdd\(move, item\)\}/.test(faSrc) && !/faMoveOpensSheet/.test(faSrc)
       && /rightSlot=\{\s*canAdd \? \(\s*<Button\s+testID=\{`free-agents\.add\.\$\{row\.player_id\}`\}/.test(faSrc),
-      'FreeAgentsScreen renders the Add button only when faMoveOpensSheet(move, item)');
+      'FreeAgentsScreen renders the Add button only when faMoveShowsAdd(move, item)');
     expect(!/explainNoAdd|resolveAddPlatform|addPlatform === 'sleeper'/.test(faSrc),
       'FreeAgentsScreen has no hand-off route and no no-write-path alert');
     expect(/const move = query\.data\?\.move \?\? null;/.test(faSrc) && /move=\{claimMove\}/.test(faSrc),
       'Free Agents passes the capability it routed with');
     const ut = read(USAGE_TRENDS);
     const doAdd = declText(parse(USAGE_TRENDS), 'doAdd');
-    expect(/if \(!faMoveOpensSheet\(cap\.move, cap\.row\)\) return;/.test(doAdd)
-      && doAdd.indexOf('if (!faMoveOpensSheet(cap.move, cap.row)) return;') < doAdd.indexOf('await '),
+    expect(/if \(!faMoveShowsAdd\(cap\.move, cap\.row\)\) return;/.test(doAdd)
+      && doAdd.indexOf('if (!faMoveShowsAdd(cap.move, cap.row)) return;') < doAdd.indexOf('await ')
+      && !/faMoveOpensSheet/.test(ut),
       'UsageTrendsScreen doAdd returns before any await unless the capability opens the in-app flow');
     expect(!/explainNoAdd|platform !== 'sleeper'/.test(ut), 'Usage Trends has no hand-off route and no no-write-path alert');
-    expect(/const cap = capabilityForRow\(capabilityAtTap\(queryClient, lgId\), playerId\);\s*return faMoveOpensSheet\(cap\.move, cap\.row\);/.test(ut)
+    expect(/const cap = capabilityForRow\(capabilityAtTap\(queryClient, lgId\), playerId\);\s*return faMoveShowsAdd\(cap\.move, cap\.row\);/.test(ut)
       && /canAdd=\{!!focusId && canAddIn\(focusId, p\.player_id\)\}/.test(ut)
       && /canLeagueAdd=\{\(lgId\) => canAddIn\(lgId, p\.player_id\)\}/.test(ut)
       && /canAdd=\{\(lgId\) => canAddIn\(lgId, sheetPlayer\.player_id\)\}/.test(ut),
@@ -1161,7 +1180,11 @@ process.on('exit', () => {
     await check('X7 a non-Sleeper row held in hand-off opens the sheet with the server\'s line (else a neutral one), not NO_ADD_REASON', () => {
       const espnMove = { ...SUBMIT, league_platform: 'espn' };
       const held = { move_mode: 'handoff', move_line: 'A recent move wasn\'t confirmed.' };
-      expect(h.faMove.faMoveOpensSheet(espnMove, held), 'the host opens the sheet');
+      // Since the 2026-11-25 launch rule no host shows Add on a held row
+      // (faMoveShowsAdd, F2); the sheet's held view below is still reached
+      // when an in-sheet re-read lands on the hand-off (e.g. 10e add → claim).
+      expect(h.faMove.faMoveOpensSheet(espnMove, held) && !h.faMove.faMoveShowsAdd(espnMove, held),
+        'the in-app flow covers the row, but hosts show no Add on it');
       const espn = h.plan.copyFns(espnMove, { league: 'L', name: 'A' });
       eq(h.plan.initialView(espnMove, held, espn), { step: 'handoff', line: 'A recent move wasn\'t confirmed.' }, 'server line');
       eq(h.plan.initialView(espnMove, { move_mode: 'handoff' }, espn),

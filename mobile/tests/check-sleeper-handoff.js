@@ -39,9 +39,12 @@
 // Launch rule (owner call 2026-11-25, "no Add button that cannot add"): the
 // hosts no longer open this sheet without a `submit` capability, so with no
 // capability (today's server), 'handoff' or 'unsupported' there is no Add
-// and no hand-off sheet (pinned in check-fa-move.js F2). The hand-off render
-// pinned here stays in ClaimSheet because a submit-mode sheet still reaches
-// it for a row the server holds in hand-off (scope §B7, X7). The pins below
+// and no hand-off sheet, and a submit-mode row the server holds in hand-off
+// gets no Add either (faMoveShowsAdd, pinned in check-fa-move.js F2). No host
+// OPENS the sheet on the hand-off any more; the render pinned here is still
+// reached from inside a submit-mode sheet when a move answer or re-read lands
+// on it (404 feature_disabled, state 14, a 10e add → claim with claims off:
+// claimSheetPlan planFailure / reread, check-fa-move P3-3). The pins below
 // are about that render and the shared helpers, not about when hosts open it.
 //   S3  scheme opens: one openURL, `sleeper://…`, outcome 'app', no alert  [executed]
 //   S4  scheme rejects: the D2 alert, whose Get Sleeper opens

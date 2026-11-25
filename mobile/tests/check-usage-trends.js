@@ -345,8 +345,9 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
   // capability opens the in-app flow; no hand-off sheet, no no-write-path
   // alert (check-fa-move.js F2 pins the routing in detail).
   assert(/from '\.\.\/components\/ClaimSheet'/.test(screen) && /<ClaimSheet/.test(screen)
-    && /if \(!faMoveOpensSheet\(cap\.move, cap\.row\)\) return;/.test(screen) && !/explainNoAdd/.test(screen),
-    '2i. Add reuses the shared claim sheet, only through the capability\'s in-app move flow (no hand-off, no alert)');
+    && /if \(!faMoveShowsAdd\(cap\.move, cap\.row\)\) return;/.test(screen)
+    && /return faMoveShowsAdd\(cap\.move, cap\.row\);/.test(screen) && !/explainNoAdd/.test(screen),
+    '2i. Add reuses the shared claim sheet, only through faMoveShowsAdd: the in-app move flow, never a held row (no hand-off, no alert)');
   assert(/from '\.\.\/components\/ClaimSheet'/.test(fa) && !/function ClaimSheet/.test(fa),
     '2j. Free Agents uses the same ClaimSheet (one implementation)');
   assert(/screen: 'Rank',\s*params: \{ screen: 'QuickSetTiers', params: \{ position: p\.position, positionSeq: Date\.now\(\) \} \}/.test(screen),

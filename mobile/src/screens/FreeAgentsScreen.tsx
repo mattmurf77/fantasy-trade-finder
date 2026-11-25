@@ -28,7 +28,7 @@ import ClaimSheet from '../components/ClaimSheet';
 import FeedbackFAB, { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
-import { faMoveOpensSheet, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
+import { faMoveShowsAdd, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
 import { isClaimPending, useClaimsPending } from '../state/claimsPending';
 import { ApiError } from '../api/client';
 import { readErrorCopy } from '../utils/verification';
@@ -80,8 +80,9 @@ export default function FreeAgentsScreen() {
   const move = query.data?.move ?? null;
   // Launch rule (owner call 2026-11-25: no Add button that cannot add). A
   // row shows Add only when the capability's in-app move flow covers it
-  // (`move.mode` 'submit', api/faMove.ts faMoveOpensSheet); with no
-  // capability (today's server), 'handoff' or 'unsupported' the list shows
+  // (`move.mode` 'submit', api/faMove.ts faMoveShowsAdd) and the server does
+  // not hold the row in hand-off; with no capability (today's server),
+  // 'handoff', 'unsupported' or a held row the list shows
   // no Add, and nothing opens the hand-off sheet or the no-write-path
   // alert. When the server turns real adds on, Add returns with no new
   // binary. The submit-mode flow is unchanged.
@@ -102,7 +103,7 @@ export default function FreeAgentsScreen() {
   const pendingClaims = useClaimsPending((s) => s.keys);
   const onAdd = useCallback(
     (row: FreeAgentRow) => {
-      if (!leagueId || !faMoveOpensSheet(move, row)) return;
+      if (!leagueId || !faMoveShowsAdd(move, row)) return;
       setClaimMove(move);
       setClaimLeagueId(leagueId);
       setClaimTarget(row);
@@ -227,7 +228,7 @@ export default function FreeAgentsScreen() {
           renderItem={({ item }) => (
             <FreeAgentRowCard
               row={item}
-              canAdd={faMoveOpensSheet(move, item)}
+              canAdd={faMoveShowsAdd(move, item)}
               claimPending={isClaimPending(pendingClaims, leagueId, item.player_id)}
               onAdd={onAdd}
             />
