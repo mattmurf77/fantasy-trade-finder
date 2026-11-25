@@ -9,8 +9,10 @@ Disallow: /style-guide.html
 Disallow: /color-lab.html
 Disallow: /color-lab-2.html
 
-# Signed-in tools — nothing to index behind the sign-in.
+# Signed-in tools — nothing to index behind the sign-in. Since the
+# 2026-11-25 launch cut these redirect to / (_CUT_WEB_PAGES in backend/server.py).
 Disallow: /calculator.html
+Disallow: /positional-tiers.html
 
 # Dark behind `league.power_rankings` (false): the route 401s for a crawler.
 # Remove this line and restore the sitemap entry when the flag is lit.

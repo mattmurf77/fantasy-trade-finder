@@ -28,8 +28,7 @@ WEB = ROOT / "web"
 
 # Pages that ship to real users. Each must satisfy the SEO + a11y checks.
 PAGES = [
-    "index.html", "faq.html", "contact.html",
-    "positional-tiers.html", "profile.html",
+    "index.html", "faq.html", "contact.html", "profile.html",
     "ranking-method.html", "privacy.html", "terms.html", "404.html",
 ]
 
@@ -37,7 +36,11 @@ PAGES = [
 # page behind it). The files stay in web/, but backend/server.py's
 # _CUT_WEB_PAGES redirects each to "/" in every environment, so they no longer
 # ship. CUT-pages-redirected below pins that.
-CUT_PAGES = ("calculator.html", "league-rankings.html", "player.html")
+# positional-tiers.html (the web Tiers ranking tool) joined on the follow-up:
+# with a stored session it loaded and saved personal tiers, and signed out
+# every edit failed to save.
+CUT_PAGES = ("calculator.html", "league-rankings.html", "player.html",
+             "positional-tiers.html")
 
 # Excluded, with the reason recorded so the exclusion is auditable.
 EXCLUDED = {
@@ -485,6 +488,32 @@ def run() -> int:
              f"_CUT_WEB_PAGES is {sorted(redirected)}, want {sorted('/' + c for c in CUT_PAGES)}"
              if redirected != {"/" + c for c in CUT_PAGES} else "; ".join(linked))
             if not cut_ok else f"{len(CUT_PAGES)} cut pages redirect to / and no served page links them")
+
+    # Crawl files follow the cut: no cut page in the sitemap, each one
+    # Disallow-ed in robots.txt (it 302s to / anyway).
+    sitemap = (WEB / "sitemap.xml").read_text(encoding="utf-8")
+    robots = (WEB / "robots.txt").read_text(encoding="utf-8")
+    disallowed = {line.split(":", 1)[1].strip() for line in robots.splitlines()
+                  if line.lower().startswith("disallow:")}
+    crawl = [f"sitemap lists /{c}" for c in CUT_PAGES if "/" + c in sitemap]
+    crawl += [f"robots.txt doesn't Disallow /{c}" for c in CUT_PAGES if "/" + c not in disallowed]
+    r.check("CUT-crawl-files", not crawl, "; ".join(crawl) if crawl
+            else "sitemap omits and robots.txt disallows every cut page")
+
+    # No served page sends a visitor into the cut app or promises one.
+    APP_PROMISES = ("Back to app", "Back to the app", "Open the web app", "Find Trades",
+                    "web app", "Go to the app")
+    promises = []
+    for page in PAGES:
+        src = strip_comments(all_sources[page])
+        if re.search(r'href="/?\?view=', src):
+            promises.append(f"{page} links /?view=")
+        text = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", strip_style_and_script(src))))
+        # Case-sensitive for the nav label: prose says "find trades" freely.
+        promises += [f'{page}: "{w}"' for w in APP_PROMISES
+                     if (w in text if w == "Find Trades" else w.lower() in text.lower())]
+    r.check("CUT-no-app-promises", not promises, "; ".join(promises) if promises
+            else "no served page links /?view= or promises a web app")
 
     # D-277 web parity (2026-11-24): the League Summary "Consider <Outlook>"
     # prompt is computed against the saved outlook when the projected standings
