@@ -248,5 +248,5 @@ Blocking order:
 | **Offer codes** | The purchase leaves the app's flow, codes are transferable, and a code inventory has to be kept. Dropped by the operator. |
 | **Cash rebates** | Paying people outside the App Store brings payment, tax and fraud handling, and risks reading as getting around in-app purchase. |
 | **Binding through RevenueCat subscriber attributes** | They are set by the client, so the league would be client-asserted. |
-| **Apple multiseat or Family Sharing** | Seats go to Apple accounts and know nothing about leagues. Both are off on purpose. |
+| **Apple multiseat or Family Sharing** | Seats go to Apple accounts and know nothing about leagues, so neither is how a league is covered. Family Sharing is off. Multiseat purchasing is left at Apple's default (allowed) on the store product (operator, 2026-11-25); it is not a feature of the pass. |
 | **Commissioner-only purchase** | No commissioner data is stored, and it differs across the three platforms. |

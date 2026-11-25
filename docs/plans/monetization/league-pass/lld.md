@@ -451,7 +451,8 @@ contract (`docs/cross-client-invariants.md` § Paywall config).
 ## 7. Store and RevenueCat setup
 
 **App Store Connect**, group "Fleeced Pro". One product, at one level above the
-individual plans. Family Sharing and multiseat stay off.
+individual plans. Family Sharing stays off. Multiseat purchasing is left at Apple's default,
+allowed (operator, 2026-11-25); nothing in the pass uses it.
 
 | Product | Standard price | Introductory offer | Promotional offer |
 |---|---|---|---|

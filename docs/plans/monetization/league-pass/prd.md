@@ -44,7 +44,8 @@ none, and more ranked managers per league.
 - More than one covered league per buyer (a later phase).
 - Android or web purchase (a later phase). Coverage itself applies on every client the
   gate applies to.
-- Apple Family Sharing or Apple multiseat purchasing. Both stay off.
+- Apple Family Sharing or Apple multiseat purchasing as a way to cover a league. Family
+  Sharing stays off. Multiseat is left at Apple's default, allowed (operator, 2026-11-25).
 - Shipping in the first paid release.
 
 ## 3. Users and stories
