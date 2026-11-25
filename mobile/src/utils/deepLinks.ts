@@ -173,7 +173,10 @@ const V2_SCREENS = {
         screens: {
           RankHome: 'home',
           Trios: 'trios',
-          Anchors: 'anchors',
+          // No `Anchors` / `Trends` paths: both pages were cut for launch
+          // (owner call 2026-11-25). Their routes stay registered in TabNav;
+          // an old `app/rank/anchors` or `app/rank/trends` link is rewritten
+          // to the chooser (`app/rank/home`) in rewriteUniversalPath below.
           Tiers: 'tiers',
           QuickSetTiers: 'quickset',
           QuickRank: 'quickrank',
@@ -183,7 +186,6 @@ const V2_SCREENS = {
           // renders an honest unavailable state when `ranks.rookie_subset`
           // is off (there is no in-app entry point in that state).
           RookieRanks: 'rookies',
-          Trends: 'trends',
         },
       },
       Trades: {
@@ -234,6 +236,11 @@ const V2_CONFIG = { screens: V2_SCREENS } as any;
 // Applied in BOTH resolution paths: react-navigation's `linking` config
 // (cold start) via the getStateFromPath override below, and _routePathV2
 // (warm-start url events through handleDeepLink).
+//
+// Launch cuts (owner call 2026-11-25): the Pick Anchors and Trends rank
+// pages have no entry point, so their old links land on the rank chooser
+// instead of a page the app no longer offers:
+//   app/rank/anchors, app/rank/trends → app/rank/home
 export function rewriteUniversalPath(pathWithQuery: string): string {
   const qi = pathWithQuery.search(/[?#]/);
   const rawPath = qi === -1 ? pathWithQuery : pathWithQuery.slice(0, qi);
@@ -241,6 +248,7 @@ export function rewriteUniversalPath(pathWithQuery: string): string {
   const path = rawPath.replace(/^\/+/, '').replace(/\/+$/, '');
   if (/^s\/trade\/[^/?#]+$/i.test(path)) return `app/matches${suffix}`;
   if (/^s\/p\/[^/?#]+$/i.test(path)) return `app/trades${suffix}`;
+  if (/^app\/rank\/(anchors|trends)$/i.test(path)) return `app/rank/home${suffix}`;
   return pathWithQuery;
 }
 

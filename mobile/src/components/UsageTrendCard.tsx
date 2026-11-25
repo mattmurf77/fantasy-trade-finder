@@ -102,6 +102,11 @@ export interface UsageTrendCardProps {
    *  (`periodHeadline`) and flares the period's weeks. Absent = Last week. */
   period?: UsagePeriodWeeks | null;
   focusStatus: LeagueStatus;
+  /** Whether a free agent in the focused league gets an Add control. The
+   *  host decides from the league's move capability (launch rule, owner
+   *  call 2026-11-25: Add only where the app can really submit the move).
+   *  False: a free agent shows no Add. */
+  canAdd: boolean;
   /** Statuses across the caller's leagues, focused league first (pips). */
   leagueStatuses: LeagueStatus[];
   onAdd: () => void;
@@ -118,6 +123,7 @@ export default function UsageTrendCard({
   order = 'jumps',
   period = null,
   focusStatus,
+  canAdd,
   leagueStatuses,
   onAdd,
   onTrade,
@@ -160,7 +166,7 @@ export default function UsageTrendCard({
         />
       </View>
       <View style={styles.actions}>
-        {focusStatus === 'free_agent' ? (
+        {focusStatus === 'free_agent' ? (canAdd ? (
           <Pressable
             testID={`usage-trends.action.${id}`}
             accessibilityRole="button"
@@ -171,7 +177,7 @@ export default function UsageTrendCard({
             <Icon name="plus" size={16} color={chalk.base} />
             <Text style={styles.btnText}>Add</Text>
           </Pressable>
-        ) : focusStatus === 'rostered' ? (
+        ) : null) : focusStatus === 'rostered' ? (
           <Pressable
             testID={`usage-trends.action.${id}`}
             accessibilityRole="button"

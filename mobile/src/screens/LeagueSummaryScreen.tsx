@@ -117,9 +117,9 @@ import { playoffOddsText } from '../utils/playoffOdds';
 //     ONLY when the payload says `starters_available` (honest degradation —
 //     platforms without a slot template hide the control entirely).
 //   - Basis toggle: Consensus (universal-pool values) | My board (the caller's
-//     own values, consensus fallback for unranked players). Redraft is a
-//     disabled "(soon)" chip — the backend reserves basis=redraft but answers
-//     501 not_available. The derived starters split is basis-aware (the
+//     own values, consensus fallback for unranked players). No Redraft chip
+//     (cut for launch 2026-11-25) — the backend reserves basis=redraft but
+//     answers 501 not_available. The derived starters split is basis-aware (the
 //     server computes it from the same values it ranks with).
 //   - Drill-in focus (2026-07-26): tapping a team (bar or row) keeps ITS bar
 //     in full position colors and switches every other bar to muted-gray
@@ -1880,9 +1880,10 @@ export default function LeagueSummaryScreen() {
         ) : null}
 
         {/* Basis toggle — subnav-pill construction (hairline chip, active =
-            ink-3 well + line-strong border). Redraft is informational-only:
-            disabled with a "(soon)" suffix until a redraft value source
-            exists (backend answers 501 not_available). #248 — with both
+            ink-3 well + line-strong border). Two options only: the disabled
+            Redraft placeholder chip was cut for launch (owner call
+            2026-11-25; the backend still answers basis=redraft with 501
+            not_available). #248 — with both
             boards loaded (and differing) the toggle no longer swaps WHICH
             data you see, only which basis draws the bars (ticks always show
             the other), so the labels flip to the mock's "… sorts" wording. */}
@@ -1898,12 +1899,6 @@ export default function LeagueSummaryScreen() {
             label={boardsDiffer ? 'My board sorts' : 'My board'}
             active={basis === 'personal'}
             onPress={() => changeBasis('personal')}
-          />
-          <BasisChip
-            testID="league-summary.basis.redraft"
-            label="Redraft (soon)"
-            active={false}
-            disabled
           />
         </View>
 

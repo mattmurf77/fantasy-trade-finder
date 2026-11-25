@@ -24,11 +24,11 @@ import {
   type,
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
-import ClaimSheet, { explainNoAdd, resolveAddPlatform } from '../components/ClaimSheet';
+import ClaimSheet from '../components/ClaimSheet';
 import FeedbackFAB, { FEEDBACK_FAB_CLEARANCE } from '../components/FeedbackFAB';
 import PlayerCard from '../components/PlayerCard';
 import { getFreeAgents, type FreeAgentRow } from '../api/league';
-import { faMoveOpensSheet, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
+import { faMoveShowsAdd, FA_MOVE_FALLBACK_COPY, type FaMoveCapability } from '../api/faMove';
 import { isClaimPending, useClaimsPending } from '../state/claimsPending';
 import { ApiError } from '../api/client';
 import { readErrorCopy } from '../utils/verification';
@@ -50,7 +50,6 @@ export default function FreeAgentsScreen() {
   const [filter, setFilter] = useState<PositionFilter>('ALL');
   const leagueId = useSession((s) => s.league?.league_id);
   const leagueName = useSession((s) => s.league?.league_name);
-  const isDemo = useSession((s) => s.isDemo);
   // S4 PRD-05 (ux.empty_state_ctas): the no-league state gets the action
   // its copy describes. Flag off: copy-only, as before.
   const emptyCtasOn = useFlag('ux.empty_state_ctas');
@@ -77,14 +76,16 @@ export default function FreeAgentsScreen() {
 
   const rows = query.data?.free_agents ?? [];
   const consensusOnly = !!query.data && !query.data.user_has_rankings;
-  // #179 — Add affordance context (platform + Sleeper claim-sheet data).
-  const addPlatform = resolveAddPlatform(leagueId, isDemo);
   // D1: the server's move capability for this league, from the same read.
-  // Absent on today's server, and then every Add routes exactly as before.
   const move = query.data?.move ?? null;
-  // Add opens the claim sheet when the capability's in-app move flow covers
-  // this row (any platform, no build), else as today: Sleeper leagues get
-  // the hand-off sheet, the rest the honest no-write-path explanation.
+  // Launch rule (owner call 2026-11-25: no Add button that cannot add). A
+  // row shows Add only when the capability's in-app move flow covers it
+  // (`move.mode` 'submit', api/faMove.ts faMoveShowsAdd) and the server does
+  // not hold the row in hand-off; with no capability (today's server),
+  // 'handoff', 'unsupported' or a held row the list shows
+  // no Add, and nothing opens the hand-off sheet or the no-write-path
+  // alert. When the server turns real adds on, Add returns with no new
+  // binary. The submit-mode flow is unchanged.
   const [claimTarget, setClaimTarget] = useState<FreeAgentRow | null>(null);
   // The capability as it was at the tap; the sheet holds it from there.
   const [claimMove, setClaimMove] = useState<FaMoveCapability | null>(null);
@@ -102,16 +103,12 @@ export default function FreeAgentsScreen() {
   const pendingClaims = useClaimsPending((s) => s.keys);
   const onAdd = useCallback(
     (row: FreeAgentRow) => {
-      if (!leagueId) return;
-      if (faMoveOpensSheet(move, row) || addPlatform === 'sleeper') {
-        setClaimMove(move);
-        setClaimLeagueId(leagueId);
-        setClaimTarget(row);
-      } else {
-        explainNoAdd(addPlatform);
-      }
+      if (!leagueId || !faMoveShowsAdd(move, row)) return;
+      setClaimMove(move);
+      setClaimLeagueId(leagueId);
+      setClaimTarget(row);
     },
-    [leagueId, addPlatform, move],
+    [leagueId, move],
   );
 
   return (
@@ -231,7 +228,7 @@ export default function FreeAgentsScreen() {
           renderItem={({ item }) => (
             <FreeAgentRowCard
               row={item}
-              canAdd={faMoveOpensSheet(move, item) || addPlatform === 'sleeper'}
+              canAdd={faMoveShowsAdd(move, item)}
               claimPending={isClaimPending(pendingClaims, leagueId, item.player_id)}
               onAdd={onAdd}
             />
@@ -266,9 +263,8 @@ export default function FreeAgentsScreen() {
 // One FA row: dense PlayerCard (60px two-line) — line 2 carries the drop
 // suggestion; right cluster = the player's overall positional rank on the
 // caller's board (server `pos_rank`: rostered players counted, so TE23).
-// #179: rightSlot carries the Add affordance — secondary where Add opens the
-// claim sheet (the Sleeper hand-off, or D1's in-app move), ghost/dim for
-// platforms with no write path (tap explains why).
+// #179: rightSlot carries the Add affordance — only where Add opens D1's
+// in-app move (launch rule, owner call 2026-11-25); no rightSlot otherwise.
 function FreeAgentRowCard({
   row,
   canAdd,
@@ -276,6 +272,7 @@ function FreeAgentRowCard({
   onAdd,
 }: {
   row: FreeAgentRow;
+  /** Launch rule: false ⇒ the row has no Add control at all. */
   canAdd: boolean;
   /** D1 state 9: a claim for this player was submitted this session. */
   claimPending: boolean;
@@ -303,13 +300,15 @@ function FreeAgentRowCard({
         // line-2 TierChalkBadge). Old servers omit it → no badge, no number.
         tier={row.tier ?? null}
         rightSlot={
-          <Button
-            testID={`free-agents.add.${row.player_id}`}
-            label="Add"
-            variant={canAdd ? 'secondary' : 'ghost'}
-            compact
-            onPress={() => onAdd(row)}
-          />
+          canAdd ? (
+            <Button
+              testID={`free-agents.add.${row.player_id}`}
+              label="Add"
+              variant="secondary"
+              compact
+              onPress={() => onAdd(row)}
+            />
+          ) : undefined
         }
         statsSlot={
           claimPending ? (

@@ -18,8 +18,10 @@
 //        spacing, uppercase), fits its third of a 375pt screen less the
 //        row's margins, border and the segment's own horizontal padding.
 //   (m2) VoiceOver still hears the full names (a11yName).
-//   (l1) League's basis row: if the three chips, at their WIDEST labels
-//        (the "… sorts" set), don't fit one 375pt line, `basisRow` must wrap.
+//   (l1) League's basis row: if the chips, at their WIDEST labels (the
+//        "… sorts" set), don't fit one 375pt line, `basisRow` must wrap.
+//   (l2) The disabled "Redraft (soon)" placeholder chip stays gone (launch
+//        cut, owner call 2026-11-25): the row has exactly two chips.
 //
 // HONEST LABEL (G-035): widths are an ESTIMATE, not a measurement. Glyph
 // advances are conservative per-class constants (upper-case 0.70em, digits
@@ -113,7 +115,8 @@ function styleProp(src, styleName, prop) {
 {
   const SRC = read('src/screens/LeagueSummaryScreen.tsx');
   const widest = [];
-  for (const id of ['consensus', 'personal', 'redraft']) {
+  const IDS = ['consensus', 'personal'];
+  for (const id of IDS) {
     const i = SRC.indexOf(`testID="league-summary.basis.${id}"`);
     const tail = SRC.slice(i, SRC.indexOf('/>', i));
     const lits = [...tail.matchAll(/'([^']+)'|label="([^"]+)"/g)].map((m) => m[1] || m[2]);
@@ -125,14 +128,17 @@ function styleProp(src, styleName, prop) {
   const scrollPad = resolveSpace(styleProp(SRC, 'scroll', 'padding') || 0);
   const total = widest
     .map((l) => textWidth(UPPER ? l.toUpperCase() : l, LABEL_SIZE, LABEL_TRACK) + 2 * chipPad + 2 * chipBorder)
-    .reduce((a, b) => a + b, 0) + 2 * rowGap;
+    .reduce((a, b) => a + b, 0) + (IDS.length - 1) * rowGap;
   const avail = SCREEN_W - 2 * scrollPad;
   const wraps = /^'wrap'$/.test(styleProp(SRC, 'basisRow', 'flexWrap') || '');
-  assert(widest.every(Boolean), 'l0. read the three basis chip labels', JSON.stringify(widest));
+  assert(widest.every(Boolean), 'l0. read the two basis chip labels', JSON.stringify(widest));
+  assert(!/league-summary\.basis\.redraft/.test(SRC) && !/Redraft \(soon\)/.test(SRC)
+      && (SRC.match(/<BasisChip\b/g) || []).length === 2,
+    'l2. no "Redraft (soon)" chip: the basis row has exactly two chips (launch cut)');
   assert(total <= avail || wraps,
     `l1. basis chips at their widest (${widest.join(' / ')}) need ${total.toFixed(0)}pt of ${avail}pt: `
       + (total <= avail ? 'they fit one line' : 'so the row must wrap'),
-    wraps ? '' : 'basisRow has no flexWrap: \'wrap\', so the third chip clips off the right edge');
+    wraps ? '' : 'basisRow has no flexWrap: \'wrap\', so the last chip clips off the right edge');
 }
 
 if (failures > 0) {
