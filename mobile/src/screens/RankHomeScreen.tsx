@@ -40,8 +40,9 @@ import { CONSOLIDATED_VIEW, useRookieScope } from '../state/rookieScope';
 // #232 consolidation (approved mocks rank-method-consolidation-v2 + -v3):
 // THREE primary cards labeled by outcome — FASTEST = Quick set (recommended,
 // with the Quick-rank follow-on subrow) · MOST PRECISE = Head-to-heads
-// (Trios) · MOST CONTROL = Tiers board — with Pick Anchors / Overall ranks /
-// Trends behind a collapsed "More ways to rank" disclosure. Content comes
+// (Trios) · MOST CONTROL = Tiers board — with Overall ranks behind a
+// collapsed "More ways to rank" disclosure (Pick Anchors and Trends were cut
+// for launch, 2026-11-25; see rankChooserModel.ts). Content comes
 // from the shared model (navigation/rankChooserModel.ts) also consumed by
 // the Rank-tab RankMenu sheet, so the two surfaces can't diverge.
 //
