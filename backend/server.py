@@ -30127,24 +30127,30 @@ def sleeper_leagues(user_id):
     # Cached columns only — no detection, no platform read (the hourly tick +
     # session_init's sync path own refresh). A league we've never synced has
     # no row, so both fields come back null and it simply doesn't qualify.
-    # Flag OFF ⇒ this block is skipped and the payload is byte-identical.
-    if is_enabled("draft.room"):
-        for lg in sleeper_data:
-            if not isinstance(lg, dict):
-                continue
-            try:
-                ctx = get_league_draft_context(str(lg.get("league_id") or ""))
-            except Exception as e:
-                log.warning("  draft-status stamp failed for %s: %s",
-                            lg.get("league_id"), e)
-                ctx = None
+    # Flag OFF ⇒ no draft_status fields.
+    #
+    # `platform` is stamped whatever `draft.room` says (2026-11-25, when the
+    # owner's launch ruling turned draft.room off). Without the key
+    # `mobile/src/api/sleeper.ts` coerces every league to 'sleeper', and the
+    # onboarding test profile's linked ESPN / MFL leagues (stored as
+    # `qa_tp:…` ids, so they arrive in the local-league append above) would
+    # lose their platform: no ESPN badge, re-sync or Draft picks tile, and
+    # session init routed through Sleeper. get_league_draft_context carries
+    # the platform from the leagues row; an unknown league reads 'sleeper'.
+    draft_room_on = is_enabled("draft.room")
+    for lg in sleeper_data:
+        if not isinstance(lg, dict):
+            continue
+        try:
+            ctx = get_league_draft_context(str(lg.get("league_id") or ""))
+        except Exception as e:
+            log.warning("  league-context stamp failed for %s: %s",
+                        lg.get("league_id"), e)
+            ctx = None
+        if draft_room_on:
             lg["draft_status"] = (ctx or {}).get("status")
             lg["draft_status_confidence"] = (ctx or {}).get("confidence")
-            # The client's tab predicate also requires a BOUND platform adapter
-            # (ab5050f). Without this key `mobile/src/api/sleeper.ts` coerces every
-            # league to 'sleeper', which made that guard inert — it returned true
-            # for everything. get_league_draft_context already carries platform.
-            lg["platform"] = (ctx or {}).get("platform") or "sleeper"
+        lg["platform"] = (ctx or {}).get("platform") or "sleeper"
 
     return jsonify(sleeper_data)
 
