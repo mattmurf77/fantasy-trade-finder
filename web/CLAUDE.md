@@ -10,7 +10,7 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 and every page behind it, and the browser extension's download links. The site is now
 marketing + legal only; Fleeced runs on iPhone. `index.html` is the landing page alone (no
 sign-in, no app shell, loads only `js/landing-steps.js`); `calculator.html`,
-`league-rankings.html` and `player.html` stay in the repo but `_CUT_WEB_PAGES` in
+`league-rankings.html`, `player.html` and `positional-tiers.html` stay in the repo but `_CUT_WEB_PAGES` in
 `backend/server.py` 302s them to `/`. `js/app.js`, `browser-auth.js`, `events.js`,
 `win-now.js`, `league-projections.js` and `playoff-odds.js` stay in the repo (mobile/tests and
 qa/web read them) but no page loads them. Reversing the cut = revert that commit. The table
@@ -20,7 +20,7 @@ below predates the cut except where marked.
 |---|---|---|
 | `index.html` | yes | **Since the 2026-11-25 cut: the landing page only** — hero, three-step explainer, "Get the iPhone app" panel (`#entry-mobile`, "Request TestFlight access" → `/contact.html`), FAQ/contact/legal links. Before the cut: single-page app entry — Dynasty Rankings. Only page that links out to `faq`, `league-rankings`, `positional-tiers`. Landing offers **Sleeper** only: the ESPN/MFL chips are hard-off on web (`WEB_PLATFORM_ENTRY` in `js/app.js`, head-eng 2026-10-27; they ran off `landing.platform_options` from 2026-09-03 — [scope §V3](../docs/plans/landing-platform-options/scope.md)); entry users (`entry:` ids) read leagues from `/api/{espn,mfl}/leagues`, never the Sleeper proxies |
 | `league-rankings.html` | **cut 2026-11-25** (302 → `/`) | Per-league ranking view. Dark — `league.power_rankings` is false, so the route 401s and the nav link is hidden |
-| `positional-tiers.html` | yes | Positional tier boards |
+| `positional-tiers.html` | **cut 2026-11-25** (302 → `/`; off the sitemap, `Disallow`-ed) | Web Tiers ranking tool. With a stored session it loaded and saved personal tiers; signed out every edit failed to save. Source kept |
 | `player.html` | **cut 2026-11-25** (302 → `/`) | Player profile. Dark — `players.profile_pages` is false, so it renders a sign-in prompt and fires no requests |
 | `profile.html` | yes | Public profile, served at `/u/<username>`. Dark — `profiles.public_pages` is false |
 | `ranking-method.html` | yes | "Set your rankings" explainer. **Not linked from any web page** — it is reached from the mobile app (`mobile/src/screens/TradesScreen.tsx` `readMoreUrl`), so do not delete it. Static content only; its tiles were fake controls until 2026-08-19 |
@@ -46,7 +46,7 @@ and only one of the twelve copies got it.
 
 ## The web CI gate
 
-`python3 qa/web/check_web_structure.py` — 234 structural checks (2026-11-25; the `CUT-*` group pins the launch cut) over the shipped
+`python3 qa/web/check_web_structure.py` — 224 structural checks (2026-11-25; the `CUT-*` group pins the launch cut) over the shipped
 HTML/CSS/JS: design tokens, emoji-as-icons, radii, fonts, SEO metadata, a11y
 landmarks/headings, and hygiene. No browser, no server, no dependencies; runs in
 well under a second. Wired as the `web-structure` job in `.github/workflows/ci.yml`.

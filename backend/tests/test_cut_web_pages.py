@@ -5,12 +5,16 @@ landing page no longer loads the web app, and the standalone signed-in pages
 redirect to it in every environment, so a bookmark or a typed URL lands on the
 landing page instead of a half-working app. The files stay in web/.
 """
+from pathlib import Path
+
 import pytest
 
 import backend.server as server
 
 
-CUT = ["/calculator.html", "/league-rankings.html", "/player.html"]
+CUT = ["/calculator.html", "/league-rankings.html", "/player.html",
+       "/positional-tiers.html"]
+WEB = Path(__file__).resolve().parents[2] / "web"
 
 
 @pytest.fixture()
@@ -35,8 +39,24 @@ def test_cut_page_redirects_to_landing(client, monkeypatch, path, prod):
 
 @pytest.mark.parametrize("path", [
     "/", "/index.html", "/faq.html", "/contact.html", "/privacy", "/terms",
-    "/positional-tiers.html", "/ranking-method.html",
+    "/ranking-method.html", "/sitemap.xml", "/robots.txt",
 ])
 def test_public_pages_still_served(client, monkeypatch, path):
     monkeypatch.setattr(server, "_IS_PROD_ENV", True)
     assert client.get(path).status_code == 200
+
+
+def test_sitemap_omits_and_robots_disallows_cut_pages():
+    sitemap = (WEB / "sitemap.xml").read_text()
+    disallowed = {line.split(":", 1)[1].strip()
+                  for line in (WEB / "robots.txt").read_text().splitlines()
+                  if line.lower().startswith("disallow:")}
+    for path in CUT:
+        assert path not in sitemap, path
+        assert path in disallowed, path
+
+
+def test_cut_files_stay_in_repo():
+    """The cut is a redirect, not a deletion: the sources stay for a revert."""
+    for path in CUT:
+        assert (WEB / path.lstrip("/")).is_file(), path

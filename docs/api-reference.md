@@ -63,7 +63,7 @@ the operator reaches it by running the server locally.
 
 **Cut web pages (2026-11-25 launch cut).** Web sign-in and every page behind it were cut
 (launch keep/cut list section 13). `_CUT_WEB_PAGES` in `backend/server.py` 302-redirects
-`/calculator.html`, `/league-rankings.html` and `/player.html` to `/` in every environment;
+`/calculator.html`, `/league-rankings.html`, `/player.html` and `/positional-tiers.html` to `/` in every environment;
 the files stay in `web/`. No `/api/*` route changed. Pinned by `backend/tests/test_cut_web_pages.py`
 and `CUT-pages-redirected` in `qa/web/check_web_structure.py`.
 

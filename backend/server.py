@@ -18924,11 +18924,13 @@ def _block_dev_surfaces_in_prod():
 # behind it are cut. These standalone signed-in pages stay in web/ (source
 # kept; mobile/tests read calculator.html) but are never served: a typed or
 # bookmarked URL lands on the landing page. Every environment; 302 so the
-# browser doesn't cache the cut.
+# browser doesn't cache the cut. positional-tiers.html is the web Tiers
+# ranking tool: it loads and saves a stored session's personal tiers.
 _CUT_WEB_PAGES = frozenset({
     "/calculator.html",
     "/league-rankings.html",
     "/player.html",
+    "/positional-tiers.html",
 })
 
 
