@@ -2568,7 +2568,7 @@ Index: `ix_deletion_scrub_jobs_deleted` (`deleted_at`), for the 24 h count.
 `backend/experiments.py` + `backend/analytics_stats.py`. Append-only except `experiments.status`. Gated on `experiments.engine`.
 
 ### `experiment_layers`
-Per-layer bucketing salt. `layer` PK ∈ `onboarding|ranking|trades_ui|engine|growth`; `salt` = `HMAC(EXPERIMENT_SALT_KEY, layer)` in prod (deterministic constant off-prod); `created_at`. Seeded once by `_seed_experiment_layers` — **never rotate a stored salt** (reshuffles every bucket in the layer).
+Per-layer bucketing salt. `layer` PK ∈ `onboarding|ranking|trades_ui|engine|growth|operator` (`operator` added 2026-11-25 for allowlist-targeted operator rollouts; seeded at boot like the others); `salt` = `HMAC(EXPERIMENT_SALT_KEY, layer)` in prod (deterministic constant off-prod); `created_at`. Seeded once by `_seed_experiment_layers` — **never rotate a stored salt** (reshuffles every bucket in the layer).
 
 ### `experiments`
 PK `(key, version)`. `layer`, `status` (draft|running|paused|stopped|decided), `unit_type` (account|device), `hypothesis`, `bucket_start`/`bucket_end` (half-open in-layer claim, 0..10000), `targeting_json`, `variants_json` (`[{name, weight_bp, model_overlay?, client_config?}]`, weights sum 10000), `primary_metric` (program-plan catalog), `guardrails_json` (PFO five auto-attached), `exposure_surface`, `scope_json` (FR-32 stamp scope), `mde`/`alpha`/`power`, `override_underpowered`, timestamps, `decision`/`decision_rationale`/`decided_at`. Edits to a running experiment mint a new version (`revise`).

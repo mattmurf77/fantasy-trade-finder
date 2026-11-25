@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, insert
 
 import backend.blind_grading as bg
 import backend.database as db
@@ -40,7 +40,7 @@ CURRENT = f"/api/grading/sessions/current?league_id={LEAGUE}"
 # The experiment the owner submits (runbook, Gate 2; lld.md §8.2).
 CALIBRATION_ROLLOUT = {
     "key": "calibration_rollout",
-    "layer": "ranking",
+    "layer": "operator",
     "unit_type": "account",
     "bucket_start": 0,
     "bucket_end": 10000,
@@ -84,6 +84,7 @@ def world(monkeypatch, tmp_path):
                     "league": SimpleNamespace(league_id=LEAGUE, platform="sleeper"),
                     "players": [], "trade_svc": object(), "last_active": 0.0}
         try:
+            client.engine = eng
             yield client
         finally:
             with server._sessions_lock:
@@ -92,15 +93,33 @@ def world(monkeypatch, tmp_path):
             experiments.invalidate_cache()
 
 
-def _launch(client) -> None:
+TRANSITION_RUNNING = {"version": 1, "to": "running", "override_underpowered": True,
+                      "reason": "allowlist rollout for Gate 2 grading, not a powered test"}
+
+
+def _launch(client, spec=None) -> None:
+    spec = spec or CALIBRATION_ROLLOUT
     cron = {"X-Cron-Secret": CRON}
-    r = client.post("/api/admin/experiments", json=CALIBRATION_ROLLOUT, headers=cron)
+    r = client.post("/api/admin/experiments", json=spec, headers=cron)
     assert r.status_code == 201, r.get_json()
-    assert r.get_json() == {"key": "calibration_rollout", "version": 1, "status": "draft"}
-    r = client.post("/api/admin/experiments/calibration_rollout/transition", headers=cron,
-                    json={"version": 1, "to": "running", "override_underpowered": True,
-                          "reason": "allowlist rollout for Gate 2 grading, not a powered test"})
+    assert r.get_json() == {"key": spec["key"], "version": 1, "status": "draft"}
+    r = client.post(f"/api/admin/experiments/{spec['key']}/transition", headers=cron,
+                    json=TRANSITION_RUNNING)
     assert r.status_code == 200 and r.get_json()["status"] == "running", r.get_json()
+
+
+def _running_full_range(eng, key, layer, unit_type="account") -> None:
+    """A RUNNING full-range [0,10000) rollout, as production holds in every product layer."""
+    with eng.begin() as conn:
+        conn.execute(insert(db.experiments_table).values(
+            key=key, version=1, layer=layer, status="running", unit_type=unit_type,
+            bucket_start=0, bucket_end=10000,
+            targeting_json=json.dumps({"is_tester_allowlist": True}),
+            variants_json=json.dumps([{"name": "control", "weight_bp": 0},
+                                      {"name": "treatment", "weight_bp": 10000}]),
+            primary_metric="activation_rate", guardrails_json="[]",
+            exposure_surface="x", scope_json="{}", created_at="2026-11-01T00:00:00+00:00"))
+    experiments.invalidate_cache()
 
 
 def _as(uid: str) -> dict:
@@ -165,8 +184,73 @@ def test_overlay_alone_is_not_enough_off_the_allowlist(world, monkeypatch):
     """The two server checks are independent: an overlay that somehow reached a
     non-allowlisted account (here, targeting widened to everyone) still fails
     _calibration_allowed and 404s."""
-    monkeypatch.setitem(CALIBRATION_ROLLOUT, "targeting", {})
-    _launch(world)
+    misfiled = {**CALIBRATION_ROLLOUT, "layer": "trades_ui", "targeting": {}}
+    _launch(world, misfiled)
     flags = world.get("/api/feature-flags", headers=_as(MEMBER)).get_json()
     assert flags["configs"]["calibration_rollout"]["flags"]["grading.blind"] is True
     assert world.get(CURRENT, headers=_as(MEMBER)).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# The `operator` layer (2026-11-25): production already holds a running
+# full-range rollout in each of the five product layers, so a full-range
+# calibration_rollout can only launch in a layer of its own.
+# ---------------------------------------------------------------------------
+
+PRODUCT_LAYERS = {"ranking": "aggregate_tier_labels", "growth": "mascot_ram_rollout",
+                  "onboarding": "onboarding_v2_rollout", "engine": "timing_readout_rollout",
+                  "trades_ui": "trades_home_inline"}
+
+
+def test_operator_layer_is_reserved_seeded_and_matches_the_database_list(world):
+    assert experiments.RESERVED_LAYERS == db.EXPERIMENT_LAYERS
+    assert "operator" in experiments.RESERVED_LAYERS
+    assert "operator" in experiments._load_cache()["layers"]     # seeded salt
+
+
+def test_launch_in_operator_succeeds_beside_full_range_rollouts_in_every_other_layer(world):
+    for layer, key in PRODUCT_LAYERS.items():
+        _running_full_range(world.engine, key, layer,
+                            unit_type="device" if layer == "onboarding" else "account")
+    # The production situation: every product layer is taken.
+    cron = {"X-Cron-Secret": CRON}
+    for layer in PRODUCT_LAYERS:
+        spec = {**CALIBRATION_ROLLOUT, "key": f"try_{layer}", "layer": layer,
+                "unit_type": "device" if layer == "onboarding" else "account"}
+        assert world.post("/api/admin/experiments", json=spec, headers=cron).status_code == 201
+        r = world.post(f"/api/admin/experiments/try_{layer}/transition", headers=cron,
+                       json=TRANSITION_RUNNING)
+        assert r.status_code == 400 and "layer_overlap" in r.get_json()["detail"], layer
+    _launch(world)                                                   # operator: free
+    flags = world.get("/api/feature-flags", headers=_as(FOUNDER)).get_json()
+    assert flags["configs"]["calibration_rollout"]["flags"]["grading.blind"] is True
+    assert world.get(CURRENT, headers=_as(FOUNDER)).status_code == 200
+    assert world.get(CURRENT, headers=_as(MEMBER)).status_code == 404
+
+
+def test_operator_layer_keeps_in_layer_exclusivity(world):
+    _launch(world)
+    second = {**CALIBRATION_ROLLOUT, "key": "another_operator_rollout"}
+    cron = {"X-Cron-Secret": CRON}
+    assert world.post("/api/admin/experiments", json=second, headers=cron).status_code == 201
+    r = world.post("/api/admin/experiments/another_operator_rollout/transition", headers=cron,
+                   json=TRANSITION_RUNNING)
+    assert r.status_code == 400
+    assert "layer_overlap" in r.get_json()["detail"]
+    assert "calibration_rollout" in r.get_json()["detail"]
+
+
+@pytest.mark.parametrize("targeting", [{}, {"is_tester_allowlist": False},
+                                       {"platform": ["ios"]}])
+def test_operator_layer_requires_tester_allowlist_targeting(world, targeting):
+    spec = {**CALIBRATION_ROLLOUT, "targeting": targeting}
+    r = world.post("/api/admin/experiments", json=spec, headers={"X-Cron-Secret": CRON})
+    assert r.status_code == 400
+    assert "operator_layer_requires_tester_allowlist" in r.get_json()["detail"]
+
+
+def test_operator_layer_allows_device_units(world):
+    """Unlike onboarding (device only), operator takes account or device units."""
+    spec = {**CALIBRATION_ROLLOUT, "key": "device_rollout", "unit_type": "device"}
+    experiments.validate_spec(spec)
+    experiments.validate_spec(CALIBRATION_ROLLOUT)
