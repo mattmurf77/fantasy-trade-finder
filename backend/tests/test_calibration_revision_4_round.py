@@ -33,6 +33,9 @@ def flags(monkeypatch):
 @pytest.fixture
 def client(engine, flags, monkeypatch):  # noqa: F811
     monkeypatch.setattr(server, "_CRON_SECRET", "synthetic-cron-secret")
+    # Owner launch ruling 2026-11-25: Calibration is tester-allowlist only; both accounts
+    # these tests sign in as are testers.
+    monkeypatch.setattr(server, "_load_tester_allowlist", lambda: {"account", "account-1"})
     with engine.begin() as conn:
         conn.execute(db.leagues_table.insert().values(sleeper_league_id="league", user_id="account"))
     sess = {"user_id": "account", "league_user_id": "seat", "verified": True, "last_active": 0.,

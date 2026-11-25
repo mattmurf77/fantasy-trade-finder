@@ -235,8 +235,10 @@ def test_outlook_sleeper_fetch_without_captured_arg_does_not_crash():
 # Flag registration — `outlook.odds` is a full 4-touch flag, DARK everywhere
 # ---------------------------------------------------------------------------
 
-def test_flag_is_registered_and_lit_in_config_but_fails_closed_in_code():
-    """LIT 2026-08-19 by operator override (D-094, superseding D-093).
+def test_flag_is_registered_and_off_in_config_and_code():
+    """OFF again by the owner's launch ruling of 2026-11-25 (the older League
+    season-outlook section is cut). It was LIT 2026-08-19 by operator override
+    (D-094, superseding D-093).
 
     This test used to be `test_flag_is_registered_and_defaults_off_everywhere`
     and existed to keep the flag dark. The operator lit it; the assertions are
@@ -256,8 +258,8 @@ def test_flag_is_registered_and_lit_in_config_but_fails_closed_in_code():
     features = json.loads((REPO / "config/features.json").read_text())
     release = json.loads(
         (REPO / "backend/tests/fixtures/flags/release.json").read_text())
-    assert features["outlook.odds"] is True
-    assert release["outlook.odds"] is True, (
+    assert features["outlook.odds"] is False
+    assert release["outlook.odds"] is False, (
         "release fixture must mirror config/features.json — a half-flip makes "
         "the seeded UI-test DB disagree with production")
     all_on = json.loads(
@@ -302,18 +304,26 @@ def _headers():
     return {"X-Session-Token": TOKEN, "Content-Type": "application/json"}
 
 
-def test_flag_on_the_route_is_reachable(client):
-    """LIT (D-094): with the REAL flag map the route no longer 404s.
+def test_shipped_flag_map_closes_the_route_and_flag_on_opens_it(client):
+    """Owner launch ruling 2026-11-25: with the REAL flag map the route 404s
+    again, before any upstream fetch. Turning the flag back on reopens it.
 
     Asserted via the missing-league 400 rather than a full payload, so this
     test needs no league fixture and cannot rot when the payload shape moves.
-    The only thing it pins is that the FLAG no longer closes the door.
+    The only thing it pins is that the FLAG is what opens or closes the door.
     """
-    assert server.is_enabled("outlook.odds") is True
+    assert server.is_enabled("outlook.odds") is False
     fake, log = _fake_sleeper()
     with patch.object(server, "_sleeper_get", fake):
         r = client.get("/api/league/outlook", headers=_headers())
-    assert r.status_code != 404, "the flag is lit; the route must be reachable"
+    assert (r.status_code, r.get_json()) == (404, {"error": "not_found"})
+    assert log == []
+    real = server.is_enabled
+    with patch.object(server, "is_enabled",
+                      lambda k: True if k == "outlook.odds" else real(k)), \
+         patch.object(server, "_sleeper_get", fake):
+        r = client.get("/api/league/outlook", headers=_headers())
+    assert r.status_code != 404, "with the flag on the route must be reachable"
     assert r.status_code == 400
     assert r.get_json() == {"error": "league_id is required"}
     assert log == [], "a 400 must short-circuit before any upstream fetch"
