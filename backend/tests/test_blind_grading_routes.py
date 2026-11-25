@@ -181,14 +181,15 @@ def inline_build_thread(monkeypatch):
 # (a) flags
 # ---------------------------------------------------------------------------
 
-def test_flag_registered_default_off_and_shipped_on_mirrored():
-    """Code default stays False (new code ships dark); config turns it on for every app user
-    (operator 2026-10-05) and the fixtures mirror that."""
+def test_flag_registered_default_off_and_shipped_off_mirrored():
+    """Code default stays False (new code ships dark). It was on for every app user from
+    2026-10-05; the owner's launch ruling of 2026-11-25 turns it off in config (testers
+    get it through the calibration_rollout overlay) and the fixtures mirror that."""
     assert "grading.blind" in FLAG_KEYS
     assert DEFAULT_FLAGS["grading.blind"] is False
-    assert _json(REPO / "config/features.json")["grading.blind"] is True
+    assert _json(REPO / "config/features.json")["grading.blind"] is False
     for name in ("release", "profiles-on", "onboarding-v2"):
-        assert _json(FLAG_DIR / f"{name}.json")["grading.blind"] is True, name
+        assert _json(FLAG_DIR / f"{name}.json")["grading.blind"] is False, name
     # These carry no trade.value_core either; they get no grading.blind.
     for name in ("all-on", "release-300", "release-espn-send-off"):
         assert "grading.blind" not in _json(FLAG_DIR / f"{name}.json"), name
@@ -217,13 +218,26 @@ def test_routes_404_without_flag_for_caller(client, flag_off, allowlisted, servi
             assert (r.status_code, r.get_json()) == (404, {"error": "not_found"})
 
 
-def test_open_to_every_app_user(client, monkeypatch, flag_on, nobody_allowed):
-    """Operator 2026-10-05: Calibration is open to every app user. With grading.blind on,
-    a caller on no allowlist reaches the routes."""
-    monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": None})
+def test_routes_404_off_the_allowlist_even_with_flag_on(client, flag_on, nobody_allowed,
+                                                         service_unreachable):
+    """Owner launch ruling 2026-11-25: Calibration is for tester-allowlisted accounts only.
+    Even with grading.blind on for the caller, an account off the allowlist gets 404
+    on every user route, before any service call."""
     with _injected(_session()):
-        r = client.get(CURRENT, headers=AUTH)
-    assert (r.status_code, r.get_json()) == (200, {"session": None})
+        for r in _hit_all(client, AUTH):
+            assert (r.status_code, r.get_json()) == (404, {"error": "not_found"})
+
+
+def test_calibration_allowed_reads_the_tester_allowlist(monkeypatch):
+    """The restored predicate (lld.md §6): session user id OR league user id on the
+    tester allowlist; an empty id never matches."""
+    monkeypatch.setattr(server, "_load_tester_allowlist", lambda: {"tester", "seat-7"})
+    assert server._calibration_allowed({"user_id": "tester"}) is True
+    assert server._calibration_allowed({"user_id": "co-owner", "league_user_id": "seat-7"}) is True
+    assert server._calibration_allowed({"user_id": "someone", "league_user_id": "someone"}) is False
+    assert server._calibration_allowed({}) is False
+    monkeypatch.setattr(server, "_load_tester_allowlist", lambda: {""})
+    assert server._calibration_allowed({"user_id": "", "league_user_id": None}) is False
 
 
 def test_account_overlay_resolves_flag_for_caller(client, monkeypatch, allowlisted):
@@ -289,9 +303,9 @@ def test_no_session_404(client, flag_on, allowlisted, service_unreachable):
 
 
 def test_calibration_allowed_is_the_single_audience_predicate(client, monkeypatch, flag_on,
-                                                              nobody_allowed):
-    """_calibration_allowed is the one audience switch: it is open (True) today, and
-    making it refuse closes every grading route (prd.md FR-2)."""
+                                                              allowlisted):
+    """_calibration_allowed is the one audience switch: an allowlisted caller passes it,
+    and making it refuse closes every grading route (prd.md FR-2)."""
     monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": None})
     with _injected(_session()):
         assert client.get(CURRENT, headers=AUTH).status_code == 200
