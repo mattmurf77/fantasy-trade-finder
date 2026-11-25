@@ -18920,6 +18920,25 @@ def _block_dev_surfaces_in_prod():
     return None
 
 
+# Launch cut 2026-11-25 (keep/cut list section 13): web sign-in and every page
+# behind it are cut. These standalone signed-in pages stay in web/ (source
+# kept; mobile/tests read calculator.html) but are never served: a typed or
+# bookmarked URL lands on the landing page. Every environment; 302 so the
+# browser doesn't cache the cut.
+_CUT_WEB_PAGES = frozenset({
+    "/calculator.html",
+    "/league-rankings.html",
+    "/player.html",
+})
+
+
+@app.before_request
+def _redirect_cut_web_pages():
+    if request.path in _CUT_WEB_PAGES:
+        return redirect("/", code=302)
+    return None
+
+
 @app.errorhandler(404)
 def _not_found(_e):
     """Browsers get an HTML page; API clients keep the JSON contract.
