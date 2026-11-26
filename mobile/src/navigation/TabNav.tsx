@@ -267,10 +267,13 @@ function popNestedToTop(navigation: any, route: any): boolean {
 // navigator's FIRST mount, which is exactly the contract we want: a
 // mid-session preference change (Settings slider) applies next launch,
 // while the chooser itself routes immediately via navigation.replace.
+// No `anchor` entry: Pick Anchors was cut for launch (owner call
+// 2026-11-25), so a saved 'anchor' preference (already dropped on hydrate,
+// state/useSession.ts) can never open the Anchors page; it falls through to
+// the no-pref default below.
 const PREF_ROUTE: Record<string, RankRoute> = {
   quickset: 'QuickSetTiers',
   trio:     'Trios',
-  anchor:   'Anchors',
   tiers:    'Tiers',
   manual:   'ManualRanks',
 };

@@ -28,10 +28,19 @@ WEB = ROOT / "web"
 
 # Pages that ship to real users. Each must satisfy the SEO + a11y checks.
 PAGES = [
-    "index.html", "faq.html", "contact.html", "calculator.html", "player.html",
-    "positional-tiers.html", "league-rankings.html", "profile.html",
+    "index.html", "faq.html", "contact.html", "profile.html",
     "ranking-method.html", "privacy.html", "terms.html", "404.html",
 ]
+
+# Cut for launch 2026-11-25 (keep/cut list section 13: web sign-in and every
+# page behind it). The files stay in web/, but backend/server.py's
+# _CUT_WEB_PAGES redirects each to "/" in every environment, so they no longer
+# ship. CUT-pages-redirected below pins that.
+# positional-tiers.html (the web Tiers ranking tool) joined on the follow-up:
+# with a stored session it loaded and saved personal tiers, and signed out
+# every edit failed to save.
+CUT_PAGES = ("calculator.html", "league-rankings.html", "player.html",
+             "positional-tiers.html")
 
 # Excluded, with the reason recorded so the exclusion is auditable.
 EXCLUDED = {
@@ -39,6 +48,8 @@ EXCLUDED = {
     "color-lab-2.html": "frozen ADR-005 palette artifact; not shipped",
     "style-guide.html": "internal design reference; 404s in prod",
     "admin/analytics.html": "operator dashboard; 404s in prod, CRON_SECRET-gated data",
+    **{page: "signed-in page cut for launch 2026-11-25; the server redirects it to /"
+       for page in CUT_PAGES},
 }
 
 # docs/design/design-system.md is the authority for these.
@@ -277,7 +288,7 @@ def run() -> int:
     for tag in ("main", "nav"):
         r.check(f"A11Y-landmark-{tag}[index.html]",
                 bool(re.search(rf"<{tag}\b", idx, flags=re.I)),
-                f"no <{tag}> landmark in the application shell")
+                f"no <{tag}> landmark on the landing page")
 
     # ── HYGIENE ──────────────────────────────────────────────────────────
     app_js = (WEB / "js" / "app.js").read_text(encoding="utf-8")
@@ -329,9 +340,9 @@ def run() -> int:
     #   - exactly one WEB_PLATFORM_ENTRY declaration anywhere, `const … = false`;
     #   - the reveal derives espnOn / mflOn from optionsOn, assigned once each,
     #     and selectEntryPlatform refuses through the constant;
-    #   - the ESPN/MFL chips exist once, on index.html only, hidden (the class
-    #     TOKEN), as does their row; no other platform chip ships visible, and
-    #     no other page carries one.
+    #   - no served page carries a platform chip or the chip row. Until the
+    #     2026-11-25 launch cut the ESPN/MFL chips sat hidden on index.html;
+    #     the cut removed web sign-in, and with it every chip (CUT-* below).
     def strip_js_comments(src: str) -> str:
         # Strings stay (a URL's // isn't a comment); // and /* */ comments go.
         # A regex literal stays too, so a quote or backtick inside one (/`/g)
@@ -375,21 +386,9 @@ def run() -> int:
             out.append((tid.group(1) if tid else "", cls.group(1).split() if cls else []))
         return out
 
-    chip_problems = []
-    for page, html in web_pages.items():
-        tags = tags_of(html)
-        chips = [(i, c) for i, c in tags
-                 if i.startswith("platform-chip-") or i == "platform-row" or "cb-platform-chip" in c]
-        if page != "index.html":
-            if chips:
-                chip_problems.append(f"{page} carries a platform chip")
-            continue
-        for want in ("platform-row", "platform-chip-espn", "platform-chip-mfl"):
-            n = sum(1 for i, _ in chips if i == want)
-            if n != 1:
-                chip_problems.append(f"{n}× #{want}")
-        chip_problems += [f"#{i or '(no id)'} isn't hidden" for i, c in chips
-                          if i != "platform-chip-sleeper" and "hidden" not in c]
+    chip_problems = [f"{page} carries a platform chip" for page, html in web_pages.items()
+                     if any(i.startswith("platform-chip-") or i == "platform-row" or "cb-platform-chip" in c
+                            for i, c in tags_of(html))]
     ok = (not names_flag and [(k, v) for _, k, v in decls] == [("const", "false")]
           and via_gate and not chip_problems)
     r.check("GATE-web-espn-mfl-off[index.html]", ok,
@@ -399,7 +398,7 @@ def run() -> int:
              "the chip reveal (espnOn / mflOn from optionsOn) or selectEntryPlatform doesn't go "
              "through WEB_PLATFORM_ENTRY" if not via_gate else
              "; ".join(chip_problems))
-            if not ok else "web ESPN/MFL chips hard-off; landing.platform_options is the app's flag")
+            if not ok else "no web platform chips; landing.platform_options is the app's flag")
 
     # G-068: server-written rows (Win Now search, overhaul events) take
     # device_type from X-Device, else a declared X-Source, else NULL. The
@@ -413,6 +412,108 @@ def run() -> int:
             "web/js/app.js has no `async function apiFetch(`" if api_fetch is None else
             "apiFetch does not set X-Source to 'web'; the web's server-written rows "
             "would land device_type NULL")
+
+    # ── CUT: launch cuts, 2026-11-25 (keep/cut list sections 13-14) ──────
+    # The owner cut web sign-in and every page behind it, and the browser
+    # extension's download links. The website is marketing and legal pages
+    # only; Fleeced runs on iPhone. web/js/app.js and its siblings stay in the
+    # repo (mobile/tests and qa/web read them) but no served page loads them.
+    landing_src = strip_comments(all_sources["index.html"])
+    landing_body = strip_style_and_script(body_of(landing_src))
+    landing_text = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", landing_body)))
+    signin = []
+    for tag in ("form", "input", "textarea", "select"):
+        if re.search(rf"<{tag}\b", landing_body, flags=re.I):
+            signin.append(f"a <{tag}>")
+    for el_id in ("username-input", "auth-btn", "auth-error", "entry-sleeper",
+                  "league-screen", "method-screen"):
+        if re.search(rf'\bid="{el_id}"', landing_body):
+            signin.append(f"#{el_id}")
+    for words in ("Verify", "Sleeper username", "How Sleeper sign-in works", "Log out"):
+        if words.lower() in landing_text.lower():
+            signin.append(f'"{words}"')
+    if re.search(r"\bonclick=", landing_body, flags=re.I):
+        signin.append("an inline onclick (the old app's handlers)")
+    r.check("CUT-no-web-signin[index.html]", not signin,
+            "the landing still carries web sign-in: " + ", ".join(signin) if signin
+            else "no sign-in form, Verify button or sign-in help on the landing")
+
+    APP_SCRIPTS = ("app.js", "browser-auth.js", "win-now.js", "league-projections.js")
+    loaders = [f"{page} loads {s}" for page in PAGES
+               for src_attr in re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', strip_comments(all_sources[page]))
+               for s in APP_SCRIPTS if re.search(r"/js/" + re.escape(s) + r"(?:\?|$)", src_attr)]
+    r.check("CUT-no-app-scripts", not loaders,
+            "; ".join(loaders) if loaders
+            else "no served page loads the signed-in web app's scripts")
+
+    panel = re.search(r'<div\b([^>]*\bid="entry-mobile"[^>]*)>(.*?)</div>', landing_body, flags=re.S)
+    cta = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*>(.*?)</a>', panel.group(2), flags=re.S) if panel else []
+    cta_href = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*href="([^"]*)"', panel.group(2)) if panel else []
+    # The app isn't in the App Store yet, and unreleased text may not sit in
+    # served HTML (legal W3; PR 456's description). The App Store link
+    # arrives with PR 456's release flip, which replaces this pin.
+    store = [s for s in ("apps.apple.com", "[APP STORE") if s in all_sources["index.html"]]
+    cta_ok = (bool(panel) and "hidden" not in re.findall(r'class="([^"]*)"', panel.group(1))[0].split()
+              and len(cta) == 1 and cta_href == ["/contact.html"]
+              and re.sub(r"<[^>]+>|\s+|→", " ", cta[0]).split() == ["Request", "TestFlight", "access"]
+              and not store)
+    r.check("CUT-iphone-cta[index.html]", cta_ok,
+            ("no #entry-mobile panel" if not panel else
+             f"App Store text before release: {store}" if store else
+             "#entry-mobile is hidden, or its one lp-mobile-link isn't "
+             "'Request TestFlight access' to /contact.html")
+            if not cta_ok else "visible iPhone CTA: Request TestFlight access → /contact.html")
+
+    # Extension: leave the code, remove every download link and every line
+    # telling a visitor to get it. The privacy policy and terms still name the
+    # extension in their data and scope text (legal text, not a download
+    # prompt); they're held to the link rule only.
+    ext = [f"{page} links a release download ({m})" for page in PAGES
+           for m in re.findall(r'href="([^"]*(?:/releases/[^"]*|\.zip|\.crx))"', strip_comments(all_sources[page]))]
+    for page in ("index.html", "faq.html"):
+        src = strip_style_and_script(strip_comments(all_sources[page]))
+        if re.search(r"\bextension\b", unescape(re.sub(r"<[^>]+>", " ", src)), flags=re.I):
+            ext.append(f"{page} mentions the extension")
+    r.check("CUT-no-extension-download", not ext, "; ".join(ext) if ext
+            else "no extension download link on any served page; landing and FAQ don't mention it")
+
+    server_src = (ROOT / "backend" / "server.py").read_text(encoding="utf-8")
+    cut_set = re.search(r"_CUT_WEB_PAGES\s*=\s*frozenset\(\{(.*?)\}\)", server_src, flags=re.S)
+    redirected = set(re.findall(r'"(/[^"]+)"', cut_set.group(1))) if cut_set else set()
+    linked = [f"{page} links /{cut}" for page in PAGES for cut in CUT_PAGES
+              if re.search(r'href="/?' + re.escape(cut), strip_comments(all_sources[page]))]
+    cut_ok = bool(cut_set) and redirected == {"/" + c for c in CUT_PAGES} and not linked
+    r.check("CUT-pages-redirected", cut_ok,
+            ("backend/server.py has no _CUT_WEB_PAGES" if not cut_set else
+             f"_CUT_WEB_PAGES is {sorted(redirected)}, want {sorted('/' + c for c in CUT_PAGES)}"
+             if redirected != {"/" + c for c in CUT_PAGES} else "; ".join(linked))
+            if not cut_ok else f"{len(CUT_PAGES)} cut pages redirect to / and no served page links them")
+
+    # Crawl files follow the cut: no cut page in the sitemap, each one
+    # Disallow-ed in robots.txt (it 302s to / anyway).
+    sitemap = (WEB / "sitemap.xml").read_text(encoding="utf-8")
+    robots = (WEB / "robots.txt").read_text(encoding="utf-8")
+    disallowed = {line.split(":", 1)[1].strip() for line in robots.splitlines()
+                  if line.lower().startswith("disallow:")}
+    crawl = [f"sitemap lists /{c}" for c in CUT_PAGES if "/" + c in sitemap]
+    crawl += [f"robots.txt doesn't Disallow /{c}" for c in CUT_PAGES if "/" + c not in disallowed]
+    r.check("CUT-crawl-files", not crawl, "; ".join(crawl) if crawl
+            else "sitemap omits and robots.txt disallows every cut page")
+
+    # No served page sends a visitor into the cut app or promises one.
+    APP_PROMISES = ("Back to app", "Back to the app", "Open the web app", "Find Trades",
+                    "web app", "Go to the app")
+    promises = []
+    for page in PAGES:
+        src = strip_comments(all_sources[page])
+        if re.search(r'href="/?\?view=', src):
+            promises.append(f"{page} links /?view=")
+        text = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", strip_style_and_script(src))))
+        # Case-sensitive for the nav label: prose says "find trades" freely.
+        promises += [f'{page}: "{w}"' for w in APP_PROMISES
+                     if (w in text if w == "Find Trades" else w.lower() in text.lower())]
+    r.check("CUT-no-app-promises", not promises, "; ".join(promises) if promises
+            else "no served page links /?view= or promises a web app")
 
     # D-277 web parity (2026-11-24): the League Summary "Consider <Outlook>"
     # prompt is computed against the saved outlook when the projected standings
@@ -1179,10 +1280,9 @@ def run() -> int:
             'the "I AM SPEED" question is back')
     r.check("POL-faq-no-testflight", "testflight" not in faq_text.lower(),
             "the FAQ names TestFlight")
-    release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', all_sources["index.html"])
-    faq_release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', faq)
-    r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
-            f"FAQ extension link {faq_release} != index.html's {release[:1]}")
+    # POL-faq-extension-link (the FAQ's extension link matched the landing's)
+    # retired with the 2026-11-25 launch cut: neither page links the
+    # extension now. CUT-no-extension-download pins that.
 
     # Q5/Q6 first paragraphs: marketing's OA-8 text (marketing-lead-copy.md §2;
     # §1g rows 3-4, FIXED), which legal R28.15 row 7 treats as the live

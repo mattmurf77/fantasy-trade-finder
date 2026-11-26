@@ -341,9 +341,13 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
     && /if \(!stillCurrent \|\| !switched/.test(screen)
     && screen.indexOf('const [, switched]') < screen.indexOf("store.setSide('give'"),
     '2h. pins are written AFTER dismissal and confirmed league switch');
+  // Launch rule (owner call 2026-11-25): Add only where the league's move
+  // capability opens the in-app flow; no hand-off sheet, no no-write-path
+  // alert (check-fa-move.js F2 pins the routing in detail).
   assert(/from '\.\.\/components\/ClaimSheet'/.test(screen) && /<ClaimSheet/.test(screen)
-    && /resolveAddPlatform\(lgId, isDemo\)/.test(screen) && /explainNoAdd\(platform\)/.test(screen),
-    '2i. Add reuses the shared claim sheet and the honest no-write-path explanation');
+    && /if \(!faMoveShowsAdd\(cap\.move, cap\.row\)\) return;/.test(screen)
+    && /return faMoveShowsAdd\(cap\.move, cap\.row\);/.test(screen) && !/explainNoAdd/.test(screen),
+    '2i. Add reuses the shared claim sheet, only through faMoveShowsAdd: the in-app move flow, never a held row (no hand-off, no alert)');
   assert(/from '\.\.\/components\/ClaimSheet'/.test(fa) && !/function ClaimSheet/.test(fa),
     '2j. Free Agents uses the same ClaimSheet (one implementation)');
   assert(/screen: 'Rank',\s*params: \{ screen: 'QuickSetTiers', params: \{ position: p\.position, positionSeq: Date\.now\(\) \} \}/.test(screen),

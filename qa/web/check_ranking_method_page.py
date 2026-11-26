@@ -10,7 +10,8 @@ tappable on a page that cannot open any app screen. This pins:
   APP    every [app] string is verbatim with the app source it comes from:
          the chooser model's titles, roles, bodies and Quick set follow-on
          (rankChooserModel.ts), and RankHome's "Then, if you want:" lead-in.
-         Trends stays out.
+  CUT    Pick Anchors and Trends left the app's chooser in the 2026-11-25
+         launch cuts; neither appears on the page.
   COPY   addendum 11's final strings, exactly: <title>, og:title, the meta
          and og descriptions, the H1, the subtitle, section 1's heading and
          its three paragraphs in order.
@@ -78,25 +79,37 @@ entries = re.findall(r"\{\s*(pref:.*?key:\s*'\w+',)\s*\}", model, flags=re.S)
 app_strings = []
 for e in entries:
     key = re.search(r"key:\s*'(\w+)'", e).group(1)
-    if key == "trends":
-        trends_title = js_concat(re.search(r"title:\s*([^\n]+)", e).group(1))
-        trends_body = js_concat(re.search(r"body:\s*(.*?),\n", e, flags=re.S).group(1))
-        continue
     for field in ("title", "role", "body", "sub"):
         fm = re.search(rf"\b{field}:\s*(.*?),\n\s*(?://.*\n\s*)?(?:\w+:|$)", e, flags=re.S)
         if fm:
             app_strings.append((f"{key}.{field}", js_concat(fm.group(1))))
-check("APP-model-read", len(app_strings) == 14,
-      f"expected 14 chooser strings (3 primary × title/role/body, Quick set's sub, "
-      f"2 more × title/body), read {len(app_strings)}: {[k for k, _ in app_strings]}")
+# 12 since the 2026-11-25 launch cuts: 3 primary × title/role/body, Quick
+# set's sub, and Overall ranks' title/body (Pick Anchors and Trends left).
+check("APP-model-read", len(app_strings) == 12,
+      f"expected 12 chooser strings (3 primary × title/role/body, Quick set's sub, "
+      f"1 more × title/body), read {len(app_strings)}: {[k for k, _ in app_strings]}")
 for key, value in app_strings:
     check(f"APP-verbatim[{key}]", value in flat, f"not verbatim on the page: {value!r}")
 lead = re.search(r"subLead\}>([^<]+)</Text>", RANK_HOME.read_text(encoding="utf-8"))
 lead_text = lead.group(1).strip() if lead else ""
 check("APP-verbatim[then-lead-in]", bool(lead_text) and lead_text in flat,
       f"RankHome's lead-in {lead_text!r} is not on the page")
-check("APP-trends-left-out", trends_title not in text and trends_body not in text,
-      "the chooser's Trends row (a view, not a way to rank) is on the page")
+# ── CUT: methods the owner cut for launch (2026-11-25) ─────────────────────
+# Pinned as literals (the strings the chooser carried before the cut): the
+# model no longer has these entries to compare against, and it must not
+# grow them back unnoticed either.
+CUT_METHODS = {
+    "anchor": ("Pick Anchors", "Price players in draft picks, one at a time"),
+    "trends": ("Trends", "Your biggest movers vs consensus"),
+}
+for key, (cut_title, cut_body) in CUT_METHODS.items():
+    names = [norm_name.strip() for norm_name in
+             re.findall(r'<h3 class="method-name">([^<]*)</h3>', body_code)]
+    on_page = cut_title in names or cut_body in text or (key == "anchor" and cut_title in text)
+    check(f"CUT-{key}-not-on-page", not on_page,
+          f"the cut {cut_title!r} method is on the page")
+    check(f"CUT-{key}-not-in-model", f"key: '{key}'" not in model,
+          f"rankChooserModel.ts has a '{key}' entry again; update this page and checker with it")
 
 # ── COPY: marketing's final strings (§6 addendum 11, 2026-10-28) ───────────
 # Pinned as literals: the marketing copy file is not on main.
