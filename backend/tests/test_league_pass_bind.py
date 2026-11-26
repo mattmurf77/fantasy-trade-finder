@@ -20,7 +20,11 @@ Covers:
   * TRANSFER re-keys the pass to a member, else releases it;
   * expiry / refund end the pass and a refund blocks a new intent (R36);
   * comp and end (R39); account deletion releases and anonymizes (R38);
-  * upsert_league stores Sleeper's previous_league_id ("0" = none).
+  * upsert_league stores Sleeper's previous_league_id ("0" = none);
+  * existing Pro buyers (operator 2026-11-25): a lifetime / promo / Founder
+    grant holder buys, binds and keeps the grant when the pass ends (a grant
+    never keeps a lapsed pass alive); an individual subscriber upgrades by
+    each handled RevenueCat sequence; a downgrade ends the pass.
 
 In-memory SQLite; flags patched on the league_pass module; billing events go
 through the real entitlements projector.
@@ -476,3 +480,156 @@ def test_export_carries_the_buyers_passes(eng):
     tables = accounts.export_user_data(BUYER)["tables"]
     assert [r["league_id"] for r in tables["league_passes"]] == [L]
     assert [r["league_id"] for r in tables["league_pass_intents"]] == [L]
+
+
+# ── existing Pro buyers (operator 2026-11-25) ───────────────────────────────
+# A user who already holds pro can buy: (b) by a non-store grant (lifetime
+# grant to existing users at launch, comp, promo, founder lifetime), and (a)
+# by an individual subscription, for whom the pass is an App Store upgrade
+# within the one subscription group. Coverage follows the league_pass_iap
+# row only, never the buyer's other pro.
+
+_GRANTS = {
+    "lifetime_grant": dict(source="manual_grant", product=None, expires_days=None),
+    "promo": dict(source="promo_referral", product=None, expires_days=30),
+    "founder": dict(source="founder_iap", product="ftf_founder_lifetime", expires_days=None),
+}
+
+
+@pytest.mark.parametrize("grant", sorted(_GRANTS))
+def test_a_granted_pro_user_buys_binds_and_keeps_the_grant_after_expiry(eng, grant):
+    with eng.begin() as conn:
+        w.ent_row(conn, BUYER, **_GRANTS[grant])
+    assert entl.get_entitlements(BUYER)["pro"] is True
+    lp.create_intent(BUYER, L)                       # pro is no refusal
+    _rc("buy1", "INITIAL_PURCHASE")
+    [p] = _active(eng)
+    assert (p["buyer_user_id"], p["league_id"]) == (BUYER, L)
+    assert lp.covers(MATE, L).role == "member"
+    assert lp.covers(BUYER, L).role == "buyer"
+    assert "league_pass_iap" in entl.get_entitlements(BUYER)["sources"]
+    _rc("exp1", "EXPIRATION")
+    assert lp.covers(MATE, L) is None and lp.covers(BUYER, L) is None
+    [p] = w.passes(eng)
+    assert (p["status"], p["release_reason"]) == ("ended", "ended")
+    ents = entl.get_entitlements(BUYER)
+    assert ents["pro"] is True and ents["sources"] == [_GRANTS[grant]["source"]]
+    assert lp.buyer_view(BUYER) == {"pass": None, "unbound": False}
+
+
+def test_a_lifetime_grant_never_keeps_a_lapsed_pass_alive(eng):
+    """No EXPIRATION at all: the league row's expiry alone ends coverage."""
+    with eng.begin() as conn:
+        w.ent_row(conn, BUYER, source="manual_grant", product=None, expires_days=None)
+    lp.create_intent(BUYER, L)
+    _rc("buy1", "INITIAL_PURCHASE")
+    with eng.begin() as conn:
+        conn.execute(db_module.entitlements_table.update()
+                     .where(db_module.entitlements_table.c.source == "league_pass_iap")
+                     .values(expires_at=w.iso(-0.01)))
+    assert lp.covers(MATE, L) is None and lp.covers(BUYER, L) is None
+    assert lp.passes_for(MATE) == []
+    assert entl.get_entitlements(BUYER)["pro"] is True
+    # A grant is no purchase: the manual bind still wants a league row, and
+    # the lapsed pass no longer blocks the league.
+    assert _refused(lp.bind, BUYER, L2) == "no_purchase"
+    assert lp.create_intent(MATE, L)["product_id"] == "ftf_league_annual"
+
+
+def test_a_lifetime_grant_holders_refund_ends_the_pass_not_the_grant(eng):
+    with eng.begin() as conn:
+        w.ent_row(conn, BUYER, source="manual_grant", product=None, expires_days=None)
+    lp.create_intent(BUYER, L)
+    _rc("buy1", "INITIAL_PURCHASE")
+    _rc("ref1", "REFUND")
+    assert lp.covers(MATE, L) is None
+    assert entl.get_entitlements(BUYER)["sources"] == ["manual_grant"]
+    assert _refused(lp.create_intent, BUYER, L2) == "refund_blocked"
+
+
+CHAIN = "otx-upgrade"
+
+
+def _subscribe(product="ftf_pro_annual", **extra):
+    _rc("sub1", "INITIAL_PURCHASE", product=product, original_transaction_id=CHAIN, **extra)
+
+
+def _upgrade_pc(eid="pc1", old="ftf_pro_annual", **extra):
+    extra.setdefault("expiration_at_ms", _ms(365))
+    return _rc(eid, "PRODUCT_CHANGE", product=old, new_product_id="ftf_league_annual",
+               original_transaction_id=CHAIN, **extra)
+
+
+def _league(eid, etype):
+    return _rc(eid, etype, original_transaction_id=CHAIN)
+
+
+# Each plausible RevenueCat sequence for an App Store upgrade into the pass
+# (none verified against the store).
+_UPGRADES = {
+    "product_change_only": lambda old: _upgrade_pc(old=old),
+    "product_change_then_renewal": lambda old: (_upgrade_pc(old=old), _league("up2", "RENEWAL")),
+    "product_change_then_initial": lambda old: (_upgrade_pc(old=old),
+                                                _league("up2", "INITIAL_PURCHASE")),
+    "renewal_only": lambda old: _league("up1", "RENEWAL"),
+    "initial_purchase_only": lambda old: _league("up1", "INITIAL_PURCHASE"),
+    "product_change_without_expiry_then_renewal": lambda old: (
+        _upgrade_pc(old=old, expiration_at_ms=None), _league("up2", "RENEWAL")),
+}
+
+
+@pytest.mark.parametrize("old", ["ftf_pro_annual", "ftf_pro_monthly"])
+@pytest.mark.parametrize("sequence", sorted(_UPGRADES))
+def test_an_individual_subscriber_upgrades_into_a_bound_pass(eng, sequence, old):
+    _subscribe(old, period_type="TRIAL" if old == "ftf_pro_monthly" else "NORMAL")
+    lp.create_intent(BUYER, L)                       # a subscriber is no refusal
+    _UPGRADES[sequence](old)
+    [p] = _active(eng)
+    assert (p["buyer_user_id"], p["league_id"], p["product_id"]) == (
+        BUYER, L, "ftf_league_annual")
+    assert w.events(eng, "league_pass_bound") == [
+        (BUYER, {"origin": "purchase", "platform": "sleeper", "via": "webhook"}, L)]
+    rows = {r["product_id"]: (r["source"], r["status"]) for r in entl.list_for_user(BUYER)}
+    assert rows == {old: ("apple_iap", "expired"),
+                    "ftf_league_annual": ("league_pass_iap", "active")}
+    assert entl.get_entitlements(BUYER)["sources"] == ["league_pass_iap"]
+    assert lp.covers(MATE, L).role == "member"
+    assert lp.buyer_view(BUYER)["pass"]["league_id"] == L
+
+
+def test_an_upgrade_without_an_intent_is_unbound_then_binds_manually(eng):
+    _subscribe()
+    _upgrade_pc()
+    assert w.passes(eng) == [] and lp.buyer_view(BUYER)["unbound"] is True
+    assert lp.bind(BUYER, L)["league_id"] == L
+
+
+def test_a_downgrade_ends_the_pass_when_it_takes_effect(eng):
+    _subscribe("ftf_league_annual")                  # a league buyer on CHAIN
+    with eng.begin() as conn:                        # bound before the change
+        w.pass_row(conn, L, buyer=BUYER)
+    # Requesting the downgrade changes nothing: it waits for the renewal.
+    _rc("pc1", "PRODUCT_CHANGE", product="ftf_league_annual",
+        new_product_id="ftf_pro_annual", original_transaction_id=CHAIN,
+        expiration_at_ms=_ms(200))
+    assert lp.covers(MATE, L) is not None
+    # The renewal into the individual plan ends the league row and the pass.
+    _rc("dn1", "RENEWAL", product="ftf_pro_annual", original_transaction_id=CHAIN)
+    assert lp.covers(MATE, L) is None and lp.covers(BUYER, L) is None
+    [p] = w.passes(eng)
+    assert (p["status"], p["release_reason"]) == ("ended", "ended")
+    assert w.events(eng, "league_pass_ended") == [(BUYER, {"reason": "ended"}, L)]
+    assert entl.get_entitlements(BUYER)["sources"] == ["apple_iap"]
+
+
+def test_a_downgrade_with_no_chain_id_still_lapses_at_the_league_expiry(eng):
+    _rc("sub1", "INITIAL_PURCHASE", expiration_at_ms=_ms(0.0001))
+    with eng.begin() as conn:
+        w.pass_row(conn, L, buyer=BUYER)
+    _rc("dn1", "RENEWAL", product="ftf_pro_annual")
+    with eng.begin() as conn:
+        conn.execute(db_module.entitlements_table.update()
+                     .where(db_module.entitlements_table.c.source == "league_pass_iap")
+                     .values(expires_at=w.iso(-0.01)))
+    assert lp.covers(MATE, L) is None
+    assert entl.get_entitlements(BUYER)["sources"] == ["apple_iap"]

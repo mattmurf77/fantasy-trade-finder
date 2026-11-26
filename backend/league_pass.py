@@ -444,22 +444,36 @@ def _bind(user_id: str, league_id: str, platform: str, product_id: str, *,
 
 
 def on_billing_event(user_id: str, product_id: str, event_type: str, event_id: str) -> None:
-    """After the projector, for ftf_league_* products, while the flag is on.
+    """After the projector, while the flag is on, for an ftf_league_* product
+    (the product the event projected onto: a PRODUCT_CHANGE into the league
+    product counts, entitlements._effective_product), or for an activating
+    event of another product that ended the buyer's league row
+    (entitlements._supersede).
 
-    Activating: if the buyer already has an active pass (a renewal, or a
-    free trial converting to paid), nothing. Else bind from their newest unconsumed, unexpired intent. No intent, or a
-    failed re-check, leaves the pass unbound (logged); the buyer keeps pro.
+    Activating, league product: if the buyer already has an active pass (a
+    renewal, or a free trial converting to paid), nothing. Else bind from
+    their newest unconsumed, unexpired intent, whatever other pro the buyer
+    holds (an individual subscription upgraded into the pass, a lifetime
+    grant). No intent, or a failed re-check, leaves the pass unbound
+    (logged); the buyer keeps pro.
+    Another product: when the buyer's league row is no longer live (a
+    downgrade to an individual plan took effect), their pass is ended.
     Deactivating (expiry, refund): once the buyer has no live league row
     left, their pass is ended (reporting state; coverage already followed
     the row). A free trial's INITIAL_PURCHASE (period_type TRIAL) binds like
     any other: the projector ignores period_type, and there is no limit on
     trials per league (D-281 addendum 2026-11-24)."""
-    if not is_enabled(FLAG) or not (product_id or "").lower().startswith(PRODUCT_PREFIX):
+    if not is_enabled(FLAG):
         return
+    league = (product_id or "").lower().startswith(PRODUCT_PREFIX)
     with db.engine.begin() as conn:
         ids = _aliases(conn, user_id)
         current = _buyer_pass(conn, ids)
         live = _buyer_row(conn, user_id) is not None
+    if not league:
+        if current is not None and not live:
+            end(current.id, "ended")
+        return
     if event_type in entitlements._RC_DEACTIVATING or event_type in (
             "customer.subscription.deleted", "charge.refunded"):
         if current is not None and not live:

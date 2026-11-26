@@ -385,6 +385,37 @@ def _product_mapping(product_id):
   when they are a member of the league, else release it.
 - `_held_pro` needs no change: a `league_pass_iap` row reads as paid, which is right for
   the buyer. A covered member has no row.
+
+### 5.1 Upgrades and downgrades within the subscription group (2026-11-25)
+
+Existing Pro users can buy (prd R42). For an App Store individual subscriber the pass
+is an upgrade on the same subscription chain (`original_transaction_id`).
+
+- `_effective_product`: a RevenueCat `PRODUCT_CHANGE` whose `new_product_id` is a
+  league product projects onto that product (an upgrade into the top-ranked product
+  takes effect at once). Every other `PRODUCT_CHANGE` projects onto `product_id`, as
+  before (a downgrade waits for the renewal). The ledger keeps the provider's
+  `product_id`. A `PRODUCT_CHANGE` with no `expiration_at_ms` is refused by the
+  perpetual-grant guard and the next league event projects instead.
+- `_supersede`: after an activating RevenueCat event for an `apple_iap` or
+  `league_pass_iap` product, the user's other active rows of those sources in the same
+  lane whose last ledger event (`granted_by`) carries the same
+  `original_transaction_id` are set `expired`. An upgrade ends the individual row; a
+  downgrade's renewal ends the league row. No chain id on either side: the row lapses at
+  its own `expires_at`.
+- `ingest_billing_event` calls `league_pass.on_billing_event` for a league product (the
+  effective one) and for any event that superseded a `league_pass_iap` row; the latter
+  ends the buyer's pass once no league row is live.
+- `league_pass.on_billing_event` binds on any activating event for the league product
+  when the buyer has no active pass (`INITIAL_PURCHASE`, `RENEWAL` or the upgrade's
+  `PRODUCT_CHANGE`), whatever other `pro` the buyer holds. Grants (`manual_grant`,
+  `promo_*`, `founder_iap`) are never touched; `covers` reads the `league_pass_iap` row
+  only.
+
+Handled upgrade sequences (tests): `PRODUCT_CHANGE` alone; `PRODUCT_CHANGE` then
+`RENEWAL` or `INITIAL_PURCHASE`; `RENEWAL` alone; `INITIAL_PURCHASE` alone; a
+`PRODUCT_CHANGE` with no expiry then `RENEWAL`. Which one RevenueCat sends is not
+verified (§13 item 4).
 - `is_founder` needs no change.
 - The sandbox lane needs no change. A sandbox purchase binds like any other and lapses
   within 24 hours.
@@ -483,7 +514,7 @@ All in `mobile/src/`. JavaScript only; no new native module.
 | `components/SendInSleeperButton.tsx:72` | `sendPreCheck(resume, leagueId)`; the MFL and ESPN buttons pass their league |
 | `screens/LeaguePassScreen.tsx` (new) | Pick a league → `intent` → price, teams and renewal price → purchase → confirmation. Handles the refusal reasons and an unbound pass |
 | `screens/PaywallScreen.tsx` | A separate entry to `LeaguePassScreen`, below the plans (R30); the other-league line when the user is covered elsewhere (R26) |
-| `components/SubscriptionSection.tsx` | Member: covered league and date (R25). Buyer: league, renewal, covered count, move, show-my-name (R27, R28) |
+| `components/SubscriptionSection.tsx` | Member: covered league and date (R25). Buyer: league, renewal, covered count, move, show-my-name (R27, R28). A Pro user who is not a buyer: a buy row to `LeaguePassScreen` (R42, 2026-11-25), whose quote says before Buy that the pass replaces an App Store individual subscription, or that other Pro stays |
 | `components/PaywallGateNotice.tsx` | No logic change. It still reads no entitlement field |
 | `copy/monetization.ts` | New `mon.lp.*` keys, verbatim from legal. No hard-coded strings elsewhere |
 | `tests/check-league-pass.js` (new) | Structural suite, in the style of `check-paid-launch.js` |
@@ -523,8 +554,9 @@ product ids. `entitlement_granted` already fires for the buyer's row.
 | The buyer starts the free trial | Binds and covers like a paid purchase. Converting to paid is a renewal: nothing changes. |
 | The buyer cancels the trial | Coverage runs to the trial's end, then ends with the row (`expires_at` is read-time truth; the `EXPIRATION` event ends the pass row). |
 | Members chain trials in one league | Allowed, no server limit (operator, 2026-11-24). Each needs the member's own intro eligibility. |
-| The buyer upgrades from an individual plan | Apple prorates. The old row expires through its own events. Event shape to confirm (§13). |
-| The buyer downgrades to an individual plan | Takes effect at renewal. The pass ends when the league row expires. |
+| The buyer upgrades from an individual plan | Apple prorates. Binds on the first league event (§5.1); the old row is set `expired` when the events share an `original_transaction_id`, else it runs to its own expiry. Event shape to confirm (§13). |
+| The buyer downgrades to an individual plan | Takes effect at renewal: the individual product's renewal on the same chain ends the league row and the pass (§5.1); without a chain id the pass ends when the league row expires. |
+| A lifetime, comp or promo Pro holder buys | Binds like anyone. The grant is untouched; when the league row ends the pass ends and the buyer keeps the grant. |
 | A covered member also buys an individual plan | Allowed. Both apply. |
 | A covered member in two covered leagues | Two entries in `league_passes`. |
 | The league is removed or unlinked in the app | Coverage has no members to cover; the buyer can move the pass. |
@@ -600,9 +632,12 @@ Nothing is open. The design proceeds on these answers.
 3. **Refund events.** The projector acts on `REFUND`. The first real refund's row in
    `subscription_events` shows whether RevenueCat sends that or `CANCELLATION` with a
    customer-support reason. This also affects the individual plan.
-4. **Upgrade events.** The event sequence for an upgrade from `ftf_pro_annual` to a
-   league product, and that the old row ends cleanly. Read from the first sandbox
-   upgrade in phase 2.
+4. **Upgrade events.** The event sequence for an upgrade from `ftf_pro_annual` or
+   `ftf_pro_monthly` to the league product, and for a downgrade back: which events
+   RevenueCat sends, whether `PRODUCT_CHANGE` carries `new_product_id` and the NEW
+   product's `expiration_at_ms`, and whether every event carries the same
+   `original_transaction_id`. §5.1 handles each plausible sequence; read the first
+   sandbox upgrade and downgrade in `subscription_events` to confirm.
 **Closed**
 
 2. **Unproven team links.** Accepted as is. A public ESPN league and an MFL league

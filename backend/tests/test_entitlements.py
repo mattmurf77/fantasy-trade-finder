@@ -682,3 +682,60 @@ def test_is_tip_product_predicate():
     assert not entl.is_tip_product("ftf_pro_annual")
     assert not entl.is_tip_product("ftf_founder")
     assert not entl.is_tip_product(None)
+
+
+# ── one subscription chain across products (league-pass lld §5.1) ──────────
+# The league pass and the individual plans share one App Store subscription
+# group, so an upgrade or downgrade keeps the chain's original_transaction_id
+# and moves it to another product. The RevenueCat event sequence for that is
+# not verified against the store; these pin the projector's handling.
+
+def _chain(eid, etype, product, *, chain="otx-1", **extra):
+    ev = _rc_event(eid, etype, product=product)
+    ev.update(original_transaction_id=chain, **extra)
+    return _ingest(ev)
+
+
+def _rows():
+    return {r["product_id"]: (r["source"], r["status"]) for r in entl.list_for_user(USER)}
+
+
+def test_product_change_into_the_league_product_projects_onto_it(eng):
+    _chain("i1", "INITIAL_PURCHASE", "ftf_pro_annual")
+    r = _chain("pc1", "PRODUCT_CHANGE", "ftf_pro_annual",
+               new_product_id="ftf_league_annual")
+    assert r["projected"] is True
+    assert _rows() == {"ftf_pro_annual": ("apple_iap", "expired"),
+                       "ftf_league_annual": ("league_pass_iap", "active")}
+    assert entl.get_entitlements(USER)["sources"] == ["league_pass_iap"]
+    # the ledger keeps the provider's product_id
+    with eng.begin() as conn:
+        pid = conn.execute(select(subscription_events_table.c.product_id)
+                           .where(subscription_events_table.c.event_id == "pc1")).scalar()
+    assert pid == "ftf_pro_annual"
+
+
+def test_a_renewal_on_the_same_chain_supersedes_the_other_product(eng):
+    _chain("i1", "INITIAL_PURCHASE", "ftf_league_annual")
+    _chain("r1", "RENEWAL", "ftf_pro_annual")          # a downgrade took effect
+    assert _rows() == {"ftf_league_annual": ("league_pass_iap", "expired"),
+                       "ftf_pro_annual": ("apple_iap", "active")}
+
+
+def test_a_product_change_out_of_the_league_product_waits_for_renewal(eng):
+    _chain("i1", "INITIAL_PURCHASE", "ftf_league_annual")
+    _chain("pc1", "PRODUCT_CHANGE", "ftf_league_annual", new_product_id="ftf_pro_annual")
+    assert _rows() == {"ftf_league_annual": ("league_pass_iap", "active")}
+
+
+def test_another_chain_and_non_group_rows_are_never_superseded(eng):
+    entl.grant(USER, "pro", source="manual_grant")            # lifetime grant
+    _chain("f1", "NON_RENEWING_PURCHASE", "ftf_founder_lifetime", chain="otx-1")
+    _chain("i1", "INITIAL_PURCHASE", "ftf_pro_annual", chain="otx-2")
+    _chain("i2", "INITIAL_PURCHASE", "ftf_league_annual", chain="otx-3")
+    statuses = [r["status"] for r in entl.list_for_user(USER)]
+    assert statuses == ["active"] * 4
+    # no original_transaction_id → nothing is superseded either
+    ev = _rc_event("r1", "RENEWAL", product="ftf_pro_monthly")
+    _ingest(ev)
+    assert all(r["status"] == "active" for r in entl.list_for_user(USER))

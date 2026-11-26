@@ -45,7 +45,8 @@ none, and more ranked managers per league.
 - Android or web purchase (a later phase). Coverage itself applies on every client the
   gate applies to.
 - Apple Family Sharing or Apple multiseat purchasing. Both stay off.
-- Shipping in the first paid release.
+- ~~Shipping in the first paid release.~~ Overridden, operator 2026-11-25: the league
+  pass is ON at the initial public launch (R42).
 
 ## 3. Users and stories
 
@@ -124,6 +125,19 @@ none, and more ranked managers per league.
   becomes covered. Nothing about their plan changes automatically.
 - **R30.** The paywall offers the pass as a separate entry, not as a third plan row
   beside monthly and annual.
+- **R42.** (Operator, 2026-11-25: "existing pro users need the option to purchase a
+  league pass".) A Pro user who is not already a pass buyer can buy a pass from Settings
+  › Subscription, whether or not a leaguemate's pass covers them. Holding Pro from another
+  source is never a refusal. Two kinds:
+  - an App Store individual subscriber (monthly or annual, in the free month or paying):
+    the pass is an upgrade in the same subscription group and replaces that
+    subscription, and the quote says so before Buy (Apple prorates). The free month is
+    shown only when StoreKit confirms eligibility, so a subscriber who used the
+    individual free month sees the paid quote;
+  - Pro with no App Store subscription (a lifetime grant to existing users at launch, a
+    comp or promo grant, Founder lifetime): nothing is replaced, and that Pro stays when
+    the pass ends. Coverage follows the pass's own subscription only (R4), so a grant
+    never keeps a lapsed pass alive.
 
 ### 4.5 Lapse, cancellation and refund
 
@@ -177,6 +191,9 @@ them): quote viewed, pass bound, pass moved, pass ended, coverage used. Purchase
 reuse the existing `paywall_purchase_*` events with the new product ids.
 
 ## 6. Rollout
+
+**Operator, 2026-11-25:** the league pass is ON at the initial public launch, so phase 0
+does not gate it; the phases below are kept as the original plan.
 
 | Phase | What | Exit |
 |---|---|---|
