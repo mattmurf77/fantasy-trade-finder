@@ -88,7 +88,7 @@
 
 **Not verified**
 - CI on either branch (no PR). Locally: backend 16,144 passed, 43 skipped, 0 failed; mobile `tsc` clean, testid-lint OK, 207 of 207 check suites.
-- Anything on a device. All `mon.lp.*` copy is placeholder, pending legal.
+- Anything on a device. The `mon.lp.*` copy is no longer pending legal: legal's wording (R29.1-R29.63) is on branch `feat/league-pass-legal-copy` (2026-11-26, not merged). Open: the refund-block owner call (review §4.5).
 - Postgres. The suite runs on SQLite; check the two partial unique indexes on `league_passes` and the `coalesce(users.created_at, '')` seat ordering.
 - RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence and intro-offer (free-trial) eligibility.
 

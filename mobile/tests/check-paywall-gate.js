@@ -770,8 +770,15 @@ check('4m. R28.8 #6: the plan titles match App Store Connect exactly; no em-dash
   assert(!/product\?\.title/.test(s), 'the screen renders StoreKit\'s title instead of the ASC constant');
 });
 check('4n. scope §3.4: no "days free", "30 days" or trial_days anywhere in mobile/src', () => {
+  // Exempt: the league pass MOVE lock (legal R29.26, R29.53, R29.62,
+  // 2026-11-26), a cooldown and not a trial length. Those three values only.
+  const lockKeys = ['mon.lp.unbound.body', 'mon.lp.move.body', 'mon.lp.quote.t3'];
+  for (const k of lockKeys) assert(/\b30 days\b/.test(copy.MON[k]) && !/free|trial/i.test(copy.MON[k]), `${k}: the 30-day move lock`);
   for (const f of walk(SRC)) {
-    const s = strip(fs.readFileSync(f, 'utf8'));
+    let s = strip(fs.readFileSync(f, 'utf8'));
+    if (f.endsWith(path.join('copy', 'monetization.ts'))) {
+      for (const k of lockKeys) s = s.split(copy.MON[k]).join('');
+    }
     const hit = s.match(/days free|\b30 days\b|trial_days/i);
     assert(!hit, `${path.relative(ROOT, f)}: "${hit && hit[0]}"`);
   }
@@ -786,7 +793,7 @@ check('4o. D10 / scope §3.6: no countdown, days-left, ends-soon or trial-end da
       .replace('const closesAt = config?.club?.closes_at;', '')
       .replace("new Date(closesAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })", '')
       : source;
-    const hit = s.match(/days? left|ends? soon|countdown|last chance|trial ends|ends on|expires on|closes_at|expires_at|toLocaleDateString/i);
+    const hit = s.match(/days? left|ends? soon\b|countdown|last chance|trial ends|ends on|expires on|closes_at|expires_at|toLocaleDateString/i);
     assert(!hit, `${f}: "${hit && hit[0]}"`);
   }
 });
