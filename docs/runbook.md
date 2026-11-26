@@ -2155,3 +2155,4 @@ curl -sS -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/
 
 Page contract: each comment box is a `textarea` with `data-k="<stable key>"` and optionally `data-label="<question>"`. In the app the page runs in a web view with no session, cookie or API URL; the app fills the boxes from the founder's saved comments and saves edits about a second after typing stops (the top bar shows Saving… / Saved / "Could not save, retrying"). `#exportBtn` and `#clearBtn`, if present, are hidden in the app. http(s) links open in the browser; nothing else navigates. **Symptoms:** no "Review pages" choice → no page uploaded, the flag off, or not a founder; 413 on upload → over 8 MiB; 400 `not_html` → the file does not start with the DOCTYPE.
 
+<!-- skip-by-area proof, never merged -->
