@@ -539,6 +539,7 @@ NOT_KEYED = {
     "sessions.account_id": "no account (sessions.user_id is covered)",
     "sessions.account_only": "a boolean",
     "subscription_events.account_id": "no account, no purchase",
+    "league_passes.buyer_account_id": "no account, no purchase (buyer_user_id is covered)",
     "affiliate_clicks.partner": "an affiliate partner name, not a user",
     "bad_trade_flags.target_username": "a league-mate's name; the row's user_id is covered",
     "draft_picks.owner_username": "a display name inside a league row (league_id covered)",

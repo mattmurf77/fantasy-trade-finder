@@ -693,6 +693,10 @@ NOT_USER_KEYS = {
     # user's own platform leagues (an enum filter) and the OTHER binders of
     # each, reached through leagues.user_id, which the purge discovers.
     ("leagues", "platform"), ("platform_league_bindings", "league_id"),
+    # the league pass release (league_pass.release_for_deletion): the buyer's
+    # account (reached through the account the purge discovers, like
+    # entitlements.account_id) and the pass status (an enum filter).
+    ("league_passes", "buyer_account_id"), ("league_passes", "status"),
 }
 
 

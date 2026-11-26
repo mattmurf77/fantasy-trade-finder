@@ -7,19 +7,19 @@ import { playoffOddsText, playoffSortKey, type PlayoffProof } from './playoffOdd
 // One row per team: the current standings (utils/standings.ts, from the
 // session-seeded Sleeper rosters) joined by roster id to the SAVED weekly
 // forecast when there is one. Two views of the same rows behind a pill:
-//   Record — W–L · Proj. W–L · Playoffs
+//   Record — W–L · Proj. W–L · Playoffs · SoS
 //   Points — PF · Max PF · Proj. Max PF
 // Every heading sorts. A forecast-only column shows a dash when there is no
 // forecast for the team, and dashes sort last in both directions.
 
 export type StandingsView = 'record' | 'points';
-export type StandingsColumn = 'team' | 'wl' | 'projWl' | 'playoffs' | 'pf' | 'maxPf' | 'projMaxPf';
+export type StandingsColumn = 'team' | 'wl' | 'projWl' | 'playoffs' | 'sos' | 'pf' | 'maxPf' | 'projMaxPf';
 /** 'desc' = biggest first (best record, most points); for Team, 'asc' = A–Z. */
 export type SortDir = 'asc' | 'desc';
 export interface StandingsSort { column: StandingsColumn; dir: SortDir }
 
-export const VIEW_COLUMNS: Record<StandingsView, readonly [StandingsColumn, StandingsColumn, StandingsColumn]> = {
-  record: ['wl', 'projWl', 'playoffs'],
+export const VIEW_COLUMNS: Record<StandingsView, readonly StandingsColumn[]> = {
+  record: ['wl', 'projWl', 'playoffs', 'sos'],
   points: ['pf', 'maxPf', 'projMaxPf'],
 };
 
@@ -31,6 +31,14 @@ export const DEFAULT_SORT: Record<StandingsView, StandingsSort> = {
 
 export const DASH = '—';
 
+/** The forecast week fields the SoS column reads (a structural subset of api/leagueProjections ProjectionWeek). */
+export interface ForecastWeekInput {
+  week: number;
+  opponent_roster_id: number;
+  modeled_score_mean: number;
+  actual_score_observed?: boolean;
+}
+
 /** Forecast fields the table reads (a structural subset of api/leagueProjections ProjectionTeam).
  *  `playoff_clinched` / `playoff_eliminated` (D-262) are absent on a run saved before them. */
 export interface ForecastTeamInput extends PlayoffProof {
@@ -41,6 +49,7 @@ export interface ForecastTeamInput extends PlayoffProof {
   bye_probability: number;
   maxpf_mean: number;
   current_maxpf: number;
+  weeks: readonly ForecastWeekInput[];
 }
 
 /** Current-standings fields the table reads (a structural subset of utils/standings StandingsRow). */
@@ -71,6 +80,36 @@ export interface TableRow<F extends ForecastTeamInput = ForecastTeamInput> {
   /** Sleeper's season-to-date Max PF; the saved forecast's when Sleeper sent none; else null. */
   maxPf: number | null;
   forecast: F | null;
+  /** Strength of schedule: rank 1 = toughest remaining schedule; null = a dash. */
+  sos: SosCell | null;
+}
+
+/** A team's remaining-schedule rank. `band` marks the toughest third ("hard") and the easiest third ("easy"). */
+export interface SosCell { mean: number; rank: number; band: 'hard' | 'easy' | null }
+
+/**
+ * The average, over a team's remaining weeks (`actual_score_observed !== true`),
+ * of each opponent's projected score that same week (the opponent's
+ * `modeled_score_mean` for the week). Null without remaining weeks, or when an
+ * opponent or its week is missing from the forecast.
+ */
+export function remainingScheduleMean(team: ForecastTeamInput, byRoster: ReadonlyMap<number, ForecastTeamInput>): number | null {
+  const remaining = team.weeks.filter((w) => w.actual_score_observed !== true);
+  if (remaining.length === 0) return null;
+  let sum = 0;
+  for (const w of remaining) {
+    const opp = byRoster.get(w.opponent_roster_id)?.weeks.find((o) => o.week === w.week);
+    if (!opp || !Number.isFinite(opp.modeled_score_mean)) return null;
+    sum += opp.modeled_score_mean;
+  }
+  return sum / remaining.length;
+}
+
+/** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th, 21st. */
+export function ordinal(n: number): string {
+  const tens = n % 100;
+  const suffix = tens >= 11 && tens <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10] ?? 'th';
+  return `${n}${suffix}`;
 }
 
 /** Join the standings rows to the forecast teams by roster id (standings order kept). */
@@ -80,6 +119,21 @@ export function buildTableRows<F extends ForecastTeamInput>(
 ): TableRow<F>[] {
   const byRoster = new Map<number, F>();
   for (const t of forecastTeams ?? []) byRoster.set(t.roster_id, t);
+  // SoS ranks (the review build's compute.py): highest mean = 1; an exact tie
+  // goes to the lower roster id; thirds of the league's team count.
+  const means = rows
+    .map((r) => {
+      const f = byRoster.get(r.rosterId);
+      return { rosterId: r.rosterId, mean: f ? remainingScheduleMean(f, byRoster) : null };
+    })
+    .filter((m): m is { rosterId: number; mean: number } => m.mean != null)
+    .sort((a, b) => b.mean - a.mean || a.rosterId - b.rosterId);
+  const sosByRoster = new Map<number, SosCell>();
+  means.forEach((m, i) => {
+    const rank = i + 1;
+    const band = rank <= rows.length / 3 ? 'hard' : rank > (2 * rows.length) / 3 ? 'easy' : null;
+    sosByRoster.set(m.rosterId, { mean: m.mean, rank, band });
+  });
   return rows.map((r) => {
     const forecast = byRoster.get(r.rosterId) ?? null;
     const fallbackMax = forecast && Number.isFinite(forecast.current_maxpf) ? forecast.current_maxpf : null;
@@ -95,6 +149,7 @@ export function buildTableRows<F extends ForecastTeamInput>(
       pointsFor: r.pointsFor,
       maxPf: r.maxPf ?? fallbackMax,
       forecast,
+      sos: sosByRoster.get(r.rosterId) ?? null,
     };
   });
 }
@@ -115,6 +170,8 @@ function sortValue(row: TableRow, column: StandingsColumn): number[] | null {
     case 'projWl': return f ? [recordPct(f.modal_record), recordPct(f.expected_record)] : null;
     // Proof breaks an equal probability: a proven 100% above ">99%", a proven 0% below "<1%".
     case 'playoffs': return f ? playoffSortKey(f.playoff_probability, f) : null;
+    // 'desc' (the first tap) puts rank 1, the toughest schedule, first.
+    case 'sos': return row.sos ? [-row.sos.rank] : null;
     case 'pf': return [row.pointsFor];
     case 'maxPf': return row.maxPf == null ? null : [row.maxPf];
     case 'projMaxPf': return f ? [f.maxpf_mean] : null;
@@ -179,6 +236,7 @@ export function cellText(row: TableRow, column: StandingsColumn): string {
     case 'wl': return recordText([row.wins, row.losses, row.ties]);
     case 'projWl': return f ? recordText(f.modal_record) : DASH;
     case 'playoffs': return f ? oddsText(f.playoff_probability, f) : DASH;
+    case 'sos': return row.sos ? ordinal(row.sos.rank) : DASH;
     case 'pf': return pointsText(row.pointsFor);
     case 'maxPf': return row.maxPf == null ? DASH : pointsText(row.maxPf);
     case 'projMaxPf': return f ? pointsText(f.maxpf_mean) : DASH;
@@ -186,12 +244,14 @@ export function cellText(row: TableRow, column: StandingsColumn): string {
   }
 }
 
-/** Heading text. "Proj. Max PF" breaks after "Proj." to leave room for team names. */
+/** Heading text. "Proj. Max PF" breaks after "Proj." and "Playoffs" after "Play" to leave room for
+ *  team names. "SoS" keeps its lowercase o (the screen exempts it from the label style's uppercase). */
 export const COLUMN_LABEL: Record<StandingsColumn, string> = {
   team: 'Team',
   wl: 'W–L',
   projWl: 'Proj. W–L',
-  playoffs: 'Playoffs',
+  playoffs: 'Play\noffs',
+  sos: 'SoS',
   pf: 'PF',
   maxPf: 'Max PF',
   projMaxPf: 'Proj.\nMax PF',
@@ -203,37 +263,35 @@ export const COLUMN_SPOKEN: Record<StandingsColumn, string> = {
   wl: 'record',
   projWl: 'projected record',
   playoffs: 'playoff odds',
+  sos: 'strength of schedule',
   pf: 'points for',
   maxPf: 'Max PF',
   projMaxPf: 'projected Max PF',
 };
 
 /**
- * The open team's two summary lines. `leftOut` holds what the current view
- * leaves out of the row; `average` is the forecast's exact average record
- * (with bye odds where the league has byes), or null without a forecast.
+ * The open team's stat rows: what the current view leaves out of the row,
+ * then the forecast's exact average record and, where the league has byes,
+ * the bye odds. Rows without a value are left out.
  */
-export function openTeamLines(
-  view: StandingsView,
-  row: TableRow,
-  playoffByes: number,
-): { leftOut: string; average: string | null } {
+export function openTeamStats(view: StandingsView, row: TableRow, playoffByes: number): { label: string; value: string }[] {
   const f = row.forecast;
-  const leftOut = view === 'record'
+  const stats: ({ label: string; value: string } | null)[] = view === 'record'
     ? [
-      `Points for ${row.pointsFor.toFixed(1)}`,
-      row.maxPf == null ? null : `Max PF ${pointsText(row.maxPf)}`,
-      f ? `Projected Max PF ${pointsText(f.maxpf_mean)}` : null,
-    ].filter(Boolean).join(' · ')
+      { label: 'Points for', value: row.pointsFor.toFixed(1) },
+      row.maxPf == null ? null : { label: 'Max PF', value: pointsText(row.maxPf) },
+      f ? { label: 'Projected Max PF', value: pointsText(f.maxpf_mean) } : null,
+    ]
     : [
-      `Record ${recordText([row.wins, row.losses, row.ties])}`,
-      f ? `Projected ${recordText(f.modal_record)}` : null,
-      f ? `Playoff odds ${oddsText(f.playoff_probability, f)}` : null,
-    ].filter(Boolean).join(' · ');
-  const average = f
-    ? `Average final record: ${averageRecordText(f.expected_record)}${playoffByes > 0 ? ` · Bye odds: ${(f.bye_probability * 100).toFixed(1)}%` : ''}`
-    : null;
-  return { leftOut, average };
+      { label: 'Record', value: recordText([row.wins, row.losses, row.ties]) },
+      f ? { label: 'Projected', value: recordText(f.modal_record) } : null,
+      f ? { label: 'Playoff odds', value: oddsText(f.playoff_probability, f) } : null,
+    ];
+  if (f) {
+    stats.push({ label: 'Average final record', value: averageRecordText(f.expected_record) });
+    if (playoffByes > 0) stats.push({ label: 'Bye odds', value: `${(f.bye_probability * 100).toFixed(1)}%` });
+  }
+  return stats.filter((x): x is { label: string; value: string } => x != null);
 }
 
 /** The saved forecast's state words (moved verbatim from the old Projected section). */

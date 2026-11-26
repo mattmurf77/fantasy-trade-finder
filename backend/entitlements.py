@@ -48,7 +48,8 @@ ENTITLEMENTS = ("pro", "ad_free")
 
 # Sources whose rows the projector may overwrite/expire. Manual grants and
 # promo rewards are never touched by billing events.
-_BILLING_SOURCES = ("apple_iap", "stripe", "founder_iap", "season_pass_iap", "trial")
+_BILLING_SOURCES = ("apple_iap", "stripe", "founder_iap", "season_pass_iap",
+                    "league_pass_iap", "trial")
 
 VALID_SOURCES = _BILLING_SOURCES + (
     "promo_referral", "promo_group_unlock", "manual_grant", "rankset_purchase",
@@ -453,7 +454,73 @@ def _product_mapping(product_id: str) -> tuple[str, str]:
     if (pid.startswith("ftf_season_pass") or pid.startswith("ftf_rookie_pass")
             or pid.startswith("season_pass_")):
         return "pro", "season_pass_iap"
+    if pid.startswith("ftf_league_"):
+        return "pro", "league_pass_iap"
     return "pro", "apple_iap"
+
+
+def is_league_product(product_id: str | None) -> bool:
+    return (product_id or "").lower().startswith("ftf_league_")
+
+
+def _effective_product(source: str, event_type: str, payload: dict,
+                       product_id: str | None) -> str | None:
+    """The product an event projects onto. RevenueCat's PRODUCT_CHANGE names
+    the OLD product in `product_id` and the new one in `new_product_id`.
+    A change INTO the league product is an upgrade (it is ranked above the
+    individual plans in the one subscription group), which the App Store
+    applies at once, so it projects onto the league product (league-pass
+    lld §5.1). Every other PRODUCT_CHANGE (a downgrade or crossgrade, which
+    waits for the renewal) keeps projecting onto `product_id`, as before."""
+    new = (payload or {}).get("new_product_id")
+    if (source == "revenuecat" and event_type == "PRODUCT_CHANGE"
+            and isinstance(new, str) and is_league_product(new)):
+        return new
+    return product_id
+
+
+# The sources of the one App Store subscription group (individual plans and
+# the league pass): one subscription chain moves between these products.
+_GROUP_SOURCES = ("apple_iap", "league_pass_iap")
+
+
+def _supersede(conn, user_id: str, product_id: str, payload: dict,
+               sandbox: bool, marked_by: str) -> list[str]:
+    """An activating event for one product of the subscription group ends
+    this user's other active group rows on the SAME subscription chain
+    (RevenueCat `original_transaction_id`, kept by the store across
+    upgrades and downgrades): an upgrade to the league pass ends the
+    individual row it replaced, and a downgrade taking effect at renewal
+    ends the league row (league-pass lld §5.1). A row's chain is read from
+    the ledger event that last wrote it (granted_by). No id in the payload,
+    or none on the row, → that row is left alone (it lapses at its own
+    expiry). Returns the sources of the rows ended."""
+    chain = (payload or {}).get("original_transaction_id")
+    if not chain:
+        return []
+    e, ev = db.entitlements_table, db.subscription_events_table
+    rows = conn.execute(
+        select(e.c.id, e.c.granted_by, e.c.source)
+        .where(e.c.user_id == user_id)
+        .where(e.c.product_id != product_id)
+        .where(e.c.source.in_(_GROUP_SOURCES))
+        .where(e.c.status == "active")
+        .where(_lane(sandbox))
+    ).fetchall()
+    ended = []
+    for row in rows:
+        event_id = (row.granted_by or "").removeprefix(SANDBOX_GRANT_PREFIX)
+        raw = conn.execute(select(ev.c.payload).where(ev.c.event_id == event_id)).scalar()
+        try:
+            same = raw is not None and (json.loads(raw) or {}).get(
+                "original_transaction_id") == chain
+        except (ValueError, TypeError, AttributeError):
+            same = False
+        if same:
+            conn.execute(update(e).where(e.c.id == row.id).values(
+                status="expired", granted_by=marked_by, updated_at=_now()))
+            ended.append(row.source)
+    return ended
 
 
 def _ms_to_iso(ms) -> str | None:
@@ -549,15 +616,30 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
                     str((payload or {}).get("environment") or "UNKNOWN").upper(),
                     user_id)
 
+    # The ledger keeps the provider's product_id; projection uses the
+    # product the event moves the subscription onto (_effective_product).
+    product_id = _effective_product(source, event_type, payload, product_id)
+    superseded: list[str] = []
     projected, error = _project(source, event_id, event_type, payload,
                                 user_id=user_id, product_id=product_id,
-                                candidates=candidates)
+                                candidates=candidates, superseded=superseded)
     with db.engine.begin() as conn:
         conn.execute(
             update(db.subscription_events_table)
             .where(db.subscription_events_table.c.event_id == event_id)
             .values(processed_at=_now(), process_error=error)
         )
+    # League pass (league-pass lld §5): bind/end after the buyer's row is
+    # projected. A bind failure never fails the webhook; the buyer keeps pro.
+    # An event for another product is passed too when it ended the buyer's
+    # league row (_supersede: a downgrade taking effect at renewal).
+    if (projected and user_id and event_type != "TRANSFER"
+            and (is_league_product(product_id) or "league_pass_iap" in superseded)):
+        try:
+            from . import league_pass
+            league_pass.on_billing_event(user_id, product_id, event_type, event_id)
+        except Exception:
+            log.exception("LEAGUE-PASS-BILLING-FAILED event_id=%s", event_id)
     return {"stored": True, "projected": projected, "duplicate": False}
 
 
@@ -599,6 +681,13 @@ def _project_transfer(event_id: str, payload: dict,
             )
     if not moved:
         return False, "ignored: TRANSFER matched no active billing rows"
+    # League pass (league-pass lld §5): the moved subscription's pass follows
+    # the new owner when they are a member of its league, else is released.
+    try:
+        from . import league_pass
+        league_pass.on_transfer(from_ids, canonical)
+    except Exception:
+        log.exception("LEAGUE-PASS-TRANSFER-FAILED event_id=%s", event_id)
     return True, None
 
 
@@ -640,11 +729,12 @@ def _project_grace(event_id: str, payload: dict, user_id: str,
 
 def _project(source: str, event_id: str, event_type: str, payload: dict, *,
              user_id: str | None, product_id: str | None,
-             candidates=None) -> tuple[bool, str | None]:
+             candidates=None, superseded: list | None = None) -> tuple[bool, str | None]:
     """Apply one billing event to entitlements. Upserts by
     (user_id, product_id) among billing-source rows in the event's lane
     only (_lane: sandbox events never touch production rows, and vice
-    versa) — promo and manual rows are never touched by billing traffic."""
+    versa) — promo and manual rows are never touched by billing traffic.
+    `superseded`, when given, collects the sources of rows _supersede ended."""
     sandbox = _is_sandbox(source, payload)
     marked_by = f"{SANDBOX_GRANT_PREFIX}{event_id}" if sandbox else event_id
 
@@ -704,9 +794,14 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                     .values(status="active", expires_at=expires_at,
                             granted_by=marked_by, updated_at=_now())
                 )
-                return True, None
-        grant(user_id, entitlement, source=src, product_id=product_id,
-              expires_at=expires_at, granted_by=marked_by)
+        if existing is None:
+            grant(user_id, entitlement, source=src, product_id=product_id,
+                  expires_at=expires_at, granted_by=marked_by)
+        if source == "revenuecat" and src in _GROUP_SOURCES:
+            with db.engine.begin() as conn:
+                ended = _supersede(conn, user_id, product_id, payload, sandbox, marked_by)
+            if superseded is not None:
+                superseded.extend(ended)
         return True, None
 
     deactivate_status = _RC_DEACTIVATING.get(event_type) or {

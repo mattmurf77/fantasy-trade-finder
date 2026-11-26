@@ -14,7 +14,14 @@ from .feature_flags import is_enabled
 
 
 def install(app, *, require_session, read_denial, write_denial, active_format,
-            league_user_id, pool_provider, fetch_json):
+            league_user_id, pool_provider, fetch_json, confirm_pass_league=None):
+    def confirm(league_id):
+        # League pass (lld §4.3): a request a pass let through acts on that
+        # league only. server._confirm_pass_league answers 402 on a mismatch
+        # and is a no-op (no read) when no pass let the request through.
+        if confirm_pass_league is not None:
+            confirm_pass_league(league_id)
+
     def session(write=False):
         if not is_enabled("outlook.season_projections"):
             return None, (jsonify({"error": "feature_disabled"}), 404)
@@ -27,6 +34,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format,
         league = sess["league"]
         if not isinstance(league_id, str) or league_id != str(league.league_id):
             raise PermissionError("league_mismatch")
+        confirm(league_id)
         fmt = active_format(sess)
         pool, seed = pool_provider(fmt)
         players = {p.id: {"name": p.name, "position": p.position} for p in pool}
@@ -133,6 +141,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format,
         job = store.get_job(job_id, str(sess["user_id"]))
         if not job or str(sess["league"].league_id) != job["league_id"]:
             return jsonify({"error": "not_found"}), 404
+        confirm(job["league_id"])
         if service.timestamp(job["expires_at"]) <= service.now_utc():
             raise service.Unavailable("stale_forecast", "These forecasts have expired. Run a new search.")
         response = {"job_id": job_id, "status": job["status"]}
@@ -205,6 +214,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format,
         row = store.get_scenario(scenario_id, str(sess["user_id"]))
         if not row or row["league_id"] != str(sess["league"].league_id):
             return jsonify({"error": "not_found"}), 404
+        confirm(row["league_id"])
         if service.timestamp(row["expires_at"]) <= service.now_utc():
             raise service.Unavailable("stale_forecast")
         data = body()

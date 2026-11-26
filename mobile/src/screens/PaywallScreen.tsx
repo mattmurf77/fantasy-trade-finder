@@ -41,6 +41,7 @@ import { customerInfoApplies, purchasesIdentityTarget } from '../state/subscript
 import { isUnverifiedSession, verifyThenReturn } from '../state/usePaywallGate';
 import { track } from '../api/events';
 import { claimFounderWelcome, clubWindowOpen } from './FounderWelcomeScreen';
+import { LeaguePassOtherLeagueLine, LeaguePassPaywallEntry } from '../components/LeaguePassRows';
 import {
   FOUNDER_TAG,
   MON,
@@ -652,6 +653,9 @@ export default function PaywallScreen({ navigation, route }: any) {
           </ChalkText>
         </Pressable>
       </View>
+      {/* League pass R30 (D-281): a SEPARATE entry below the plans, never a
+          plan row; self-gated on monetize.league_pass (nothing when off). */}
+      <LeaguePassPaywallEntry source={source} />
     </View>
   );
 
@@ -691,6 +695,9 @@ export default function PaywallScreen({ navigation, route }: any) {
               {MON['mon.invitee.board']}
             </ChalkText>
           ) : null}
+          {/* League pass R26 (D-281): covered in another league only.
+              Self-gated on monetize.league_pass (nothing when off). */}
+          <LeaguePassOtherLeagueLine />
 
           <View style={styles.value}>
             <ChalkText variant="body">{MON['mon.pay.value']}</ChalkText>

@@ -11,6 +11,7 @@
 - [Current State 2026-11-09](#current-state-2026-11-09)
 - [Shipped 2026-11-10: offer learnings and fast deck, on in production](#shipped-2026-11-10-offer-learnings-and-fast-deck-on-in-production)
 - [2026-11-11: projection model v5 and the outlook suggestion](#2026-11-11-projection-model-v5-and-the-outlook-suggestion)
+- [2026-11-24: league pass, server side, built dark](#2026-11-24-league-pass-server-side-built-dark)
 
 ---
 
@@ -70,3 +71,31 @@
 - `coverage.estimated` is true on every production run; it cannot gate anything. Use `coverage.estimate_status`.
 - Sleeper's stored projections for past weeks are stamped after the games. They are not pregame snapshots.
 - Team Review sends `team_outlook` whenever it saves positions. Any new value placed in `window.inferred` must not reach that backfill (`backfillOutlook`).
+
+## 2026-11-24: league pass, server side, built dark
+
+**Where I stopped**
+- Server: branch `feat/league-pass-server` (worktree `.claude/worktrees/league-pass`), pushed, level with `main` as of 2026-11-24. Client: branch `feat/league-pass-client` (worktree `.claude/worktrees/league-pass-client`), stacked on the server branch, pushed. No PR is open for either. Nothing is merged or deployed.
+- Everything is behind `monetize.league_pass`, which is off. Design and scope: `docs/plans/monetization/league-pass/` (plan, PRD, HLD, LLD, `scope.md`, `scope-client.md`, `evidence-client.md`). Decision record: D-281, with a 2026-11-24 addendum.
+- The operator signed off the server scope waiver (no mobile evidence in phase 1) on 2026-11-24. The client scope has no waiver: its TestFlight checklist is required and not run.
+- An independent black-box test pass on the server found three defects; all are fixed and its re-run found none open. Report: `data/review/sim-test-league-pass-2026-11-24/REPORT.md` in the main checkout.
+- Operator decisions already made: hybrid coverage; one product `ftf_league_annual` ($99.99/year) with a one-month free trial, the year-one discount tiers dropped (2026-11-24, D-281 addendum); no server limit on trials per league; no promo codes; no notice when a pass is ending; unproven ESPN and MFL team links are accepted under the seat cap; MFL league ids are treated as stable.
+
+**In flight**
+- The 2026-11-24 change from discount tiers to one product with a free trial is in the server working tree, uncommitted, pending review: tiers, promo offer ids, the leaguemate count and the `tier` columns removed; trial coverage tested. The client branch is being changed to the same contract in parallel.
+- `main` moves fast enough that the server branch conflicts again in `living-memory/DECISIONS.md` and `TEST_LEDGER.md` within hours; both are append-only, keep both sides.
+- The client's Shop offers check is not converted: its entitlement read lives on `feat/paid-launch`, which the client branch does not include. `check-league-pass.js` 7a fails as soon as that file reads `useEntitlements` without `useProForLeague`.
+
+**Not verified**
+- CI on either branch (no PR). Locally: backend 16,144 passed, 43 skipped, 0 failed; mobile `tsc` clean, testid-lint OK, 207 of 207 check suites.
+- Anything on a device. All `mon.lp.*` copy is placeholder, pending legal.
+- Postgres. The suite runs on SQLite; check the two partial unique indexes on `league_passes` and the `coalesce(users.created_at, '')` seat ordering.
+- RevenueCat and App Store behaviour: the products do not exist yet. That covers the refund event shape, the upgrade event sequence and intro-offer (free-trial) eligibility.
+
+**Don't repeat**
+- Importing `backend.server` outside pytest runs the platform-bindings backfill against the local dev database. Use the test fixtures.
+- New tables and flags trip five guardrail registries: the binding-table writer count, purge discovery (`NOT_USER_KEYS`), the two seeded flag fixtures, and the test-profile reset scope (`NOT_KEYED`). Run the full suite, not only the new tests.
+- The allow-list is the environment variable `LEAGUE_PASS_LEAGUE_ALLOWLIST`, not a `model_config` key: that table holds numbers only. Unset means no restriction.
+- The server worktree has its own `.venv` (Python 3.12); the client worktree's `mobile/node_modules` is a symlink to the `paid-launch` worktree's. Both are excluded through `.git/info/exclude`.
+- A Sleeper co-owner rides the roster owner's seat: covered when the owner is, not counted and not capped. PRD R7 still calls the allowance a co-owner allowance; the wording is the operator's to settle.
+- On a session with no league, a covered member gets 409 `session_not_initialized` from the gate hook even on a route whose own flag is off, where a Pro user gets that route's 404.

@@ -9,6 +9,7 @@ import { NO_LEAGUE_ID, useSession } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import { homePlayoffBanner } from '../../utils/homePlayoffBanner';
 import { playoffOddsText } from '../../utils/playoffOdds';
+import { likelyPickText } from '../../utils/pickRange';
 import { track } from '../../api/events';
 import {
   cardBlock, pickFigure, viewOpensSheet, shownProps, sheetRows, CARD_EVENTS,
@@ -73,6 +74,9 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
   const view = homePlayoffBanner(query.data, rosterId, query.isError, Date.now(), prefsQuery.data?.team_outlook);
   const percent = view.probability != null ? playoffOddsText(view.probability, view.proof, 0.1) : null;
   const pick = pickFigure(direction, percent != null);
+  // "likely 1.01–1.02" under the pick: a 25%+ miss chance and a range only.
+  const likely = pick && view.pickRange
+    ? likelyPickText(view.pickRange.missProbability, view.pickRange.pickProbabilities, view.pickRange.draftRound) : null;
   // direction_card_shown: once per mount, the first render with a block.
   useEffect(() => {
     if (!direction || shownRef.current) return;
@@ -127,12 +131,13 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
         {percent && !view.current ? <Text style={styles.note}>last saved</Text> : null}
       </View>
       {pick ? <View style={styles.figure} testID="home.playoff.pick" accessible
-        accessibilityLabel={`${C['SUM.pick']} ${pick.label}${pick.owner ? `, ${pick.owner}` : ''}${view.current ? '' : ', last saved'}`}>
+        accessibilityLabel={`${C['SUM.pick']} ${pick.label}${likely ? `, likely ${likely}` : ''}${pick.owner ? `, ${pick.owner}` : ''}${view.current ? '' : ', last saved'}`}>
         <Text scale="dense" style={type.label}>{C['SUM.pick']}</Text>
         <View style={styles.figureLine} testID="home.playoff.pick.line">
           <Text testID="home.playoff.pick.value" style={styles.figureValue}>{pick.label}</Text>
         </View>
         {view.current ? null : <Text style={styles.note}>last saved</Text>}
+        {likely ? <Text testID="home.playoff.pick.range" style={styles.note}>{`likely ${likely}`}</Text> : null}
         {pick.owner ? <Text testID="home.playoff.pick.owner" style={styles.note}>{pick.owner}</Text> : null}
       </View> : null}
     </View>
@@ -174,6 +179,7 @@ export default function HomePlayoffBanner({ rosterId, onDetails, onReviewOutlook
       {percent && !view.current && savedOn ? <Text style={styles.body}>{`Last saved ${savedOn}. ${view.status}.`}</Text> : null}
       {view.incomplete ? <Text style={styles.body}>Incomplete: a played starter's score is not recorded yet.</Text> : null}
       {pick ? <Text testID="home.playoff.pick.explanation" style={styles.body}>{K['EXPLAIN.pick']}</Text> : null}
+      {likely ? <Text testID="home.playoff.pick.range.explanation" style={styles.body}>Likely range: where your pick lands in 8 of 10 simulated seasons where you miss the playoffs.</Text> : null}
       {suggestion ? <Text testID="home.playoff.suggestion" style={styles.body}>{suggestion}</Text> : null}
       {explanation ? <Text style={styles.body}>{explanation}</Text> : null}
     </View> : null}

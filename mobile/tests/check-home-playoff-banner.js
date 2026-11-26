@@ -15,6 +15,8 @@
 //      saved ⇒ no prompt, even while the cached read still says `differs`
 //   I  every outlook save refreshes the saved forecast read too, through the
 //      one shared helper (utils/outlookSaved.refreshAfterOutlookSave)
+//   J  the "likely 1.01–1.02" note under the projected pick and its info
+//      sentence: a 25%+ miss chance and a range (utils/pickRange, executed)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32,6 +34,10 @@ const playoffOdds = {};
 vm.runInNewContext(ts.transpileModule(read('src/utils/playoffOdds.ts'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
 }).outputText, { exports: playoffOdds });
+const pickRange = {};
+vm.runInNewContext(ts.transpileModule(read('src/utils/pickRange.ts'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText, { exports: pickRange });
 const now = Date.parse('2026-11-07T15:00:00Z');
 function data(probability = .8, state = 'current') {
   return { state, model_current: true, next_attempt_not_before: '2026-11-10T14:30:00Z', run: {
@@ -256,6 +262,7 @@ const modules = {
   '../../state/useFeatureFlags': { useFlag: name => { assert(name in flags, `Unexpected flag: ${name}`); return flags[name]; } },
   '../../utils/homePlayoffBanner': { homePlayoffBanner: (value, roster, failed, _now, saved) => model(value, roster, failed, now, saved) },
   '../../utils/playoffOdds': playoffOdds,
+  '../../utils/pickRange': pickRange,
   '../OutlookBiasReceipt': { outlookDisplayName: value => (value ? NAMES[value] ?? null : null) },
   './StatusRow': { RowAction: 'RowAction' },
   '../../api/events': { track: (...a) => tracked.push(a) },
@@ -448,6 +455,55 @@ active.leagues[0].platform = 'sleeper'; flags['league.projections'] = false; ass
 // Flags off: no impression, no sheet, no direction tap, whatever the read holds.
 assert.equal(tracked.length, 0, 'flags off: direction_card_shown never fires');
 assert(!calls.some(c => String(c).startsWith('direction:')), 'flags off: no direction tap');
+// ── J. the likely pick note (Home card, direction block on) ───────────────
+// The util passes through what the note needs, from the viewer's team only.
+{
+  const withPick = (miss, probs, round = 1) => { const d = data(1 - miss); d.run.result.config = { draft_round: round };
+    Object.assign(d.run.result.teams[1], { nonplayoff_probability: miss, pick_probabilities: probs }); return d; };
+  const laResistance = [0.83704, 0.16296, 0, 0, 0, 0];
+  const viewPick = model(withPick(1, laResistance), 2, false, now).pickRange;
+  assert.deepEqual(JSON.parse(JSON.stringify(viewPick)), { missProbability: 1, pickProbabilities: laResistance, draftRound: 1 });
+  assert.equal(model(withPick(1, laResistance), 99, false, now).pickRange, null, 'no team, nothing passed');
+  assert.equal(model(undefined, 2, false, now).pickRange, null);
+  assert(component.includes('const likely = pick && view.pickRange\n    ? likelyPickText(view.pickRange.missProbability, view.pickRange.pickProbabilities, view.pickRange.draftRound) : null;'));
+  // Rendered with the card on: the note sits in the owned-by slot, styled like it.
+  Object.assign(flags, { 'league.projections': true, 'league.direction_card': true });
+  const block = (owns = true) => ({ version: 1, state: 'ready', options: { playoffs: { offered: true }, draft_pick: { offered: true } },
+    projected_pick: { label: '1.01', slot: 1, owns_own_pick: owns, owner_name: 'Team B' } });
+  const show = (d, owns, explain = false) => {
+    d.team_direction = block(owns); queryData = d; hookStore.length = 0; let t = render();
+    if (explain) { byId(t, 'home.playoff.explain').props.onPress(); t = render(); }
+    return t;
+  };
+  const SENTENCE = 'Likely range: where your pick lands in 8 of 10 simulated seasons where you miss the playoffs.';
+  let t = show(withPick(1, laResistance), true, true);
+  const note = byId(t, 'home.playoff.pick.range');
+  assert.deepEqual(words(note), ['likely 1.01–1.02']);
+  assert.equal(byId(t, 'home.playoff.pick').props.accessibilityLabel.includes(', likely 1.01–1.02'), true, 'VoiceOver reads the note with the pick');
+  assert.deepEqual(words(byId(t, 'home.playoff.pick.range.explanation')), [SENTENCE], 'the info text gains the sentence with the note');
+  // Owned by another team: both notes, the range first (build.py home_screen).
+  t = show(withPick(1, laResistance), false);
+  const pickKids = nodes(byId(t, 'home.playoff.pick')).map(n => n.props?.testID).filter(Boolean);
+  assert(pickKids.indexOf('home.playoff.pick.range') > 0 && pickKids.indexOf('home.playoff.pick.owner') > pickKids.indexOf('home.playoff.pick.range'));
+  assert.equal(byId(t, 'home.playoff.pick.range').props.style, byId(t, 'home.playoff.pick.owner').props.style, 'the "owned by" note\'s style');
+  // Exactly 25% shows; under 25%, a zero sum or no draft round shows neither the note nor the sentence.
+  t = show(withPick(0.25, [0, 0, 0.0148, 0.0586, 0.1188, 0.0739]), true, true);
+  assert.deepEqual(words(byId(t, 'home.playoff.pick.range')), ['likely 1.04–1.06']);
+  for (const d of [withPick(0.025088, [0, 0, 0, 0.00002, 0.00168, 0.023388]), withPick(0.5, [0, 0, 0]), withPick(1, laResistance, null)]) {
+    t = show(d, true, true);
+    assert.equal(byId(t, 'home.playoff.pick.range'), undefined);
+    assert.equal(byId(t, 'home.playoff.pick.range.explanation'), undefined);
+    assert(byId(t, 'home.playoff.pick.explanation'), 'the existing pick sentence stays');
+  }
+  // Flag off (today's row): no note, whatever the read holds.
+  flags['league.direction_card'] = false; t = show(withPick(1, laResistance), true, true);
+  assert.equal(byId(t, 'home.playoff.pick.range'), undefined);
+  assert.equal(byId(t, 'home.playoff.pick.range.explanation'), undefined);
+  // Analytics unchanged: the one impression call, byte for byte.
+  assert.equal((component.match(/track\(/g) || []).length, 1);
+  assert(component.includes('track(CARD_EVENTS.shown, shownProps(direction, sheetOn, !!pick), screen);'));
+  flags['league.projections'] = false; queryData = data(.8); hookStore.length = 0;
+}
 // ── I. every outlook save refreshes the saved forecast read ────────────────
 // The helper, executed against a recording QueryClient.
 const helperSource = read('src/utils/outlookSaved.ts');
