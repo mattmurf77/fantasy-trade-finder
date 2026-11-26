@@ -15,3 +15,13 @@ prove the skip-by-area rule, were never meant to merge, and their PRs were close
 The run links are recorded in the PR 735 description. No worktrees were involved.
 
 Recovery: `git branch <name> <sha>`.
+
+## Second pass, same day
+
+| Tip sha | Branch | Closed PR |
+|---|---|---|
+| `b803eb15` | `ci/skip-proof-docs-2` | 741 |
+
+Why deletion was safe: `ci/skip-by-area` at `f87dcb93` (after merging the sharded suite from
+main) plus one throwaway commit appending a comment line to `docs/runbook.md`, to re-prove the
+skip on real CI. PR closed unmerged. No worktree. Recovery: `git branch <name> <sha>`.
