@@ -396,15 +396,21 @@ const PlayerCard = forwardRef<View, PlayerCardProps>(function PlayerCard(
             {badgeSlot}
           </View>
 
-          {/* A projected pick in a compact (two-column trade card) row may
-              take a second line: at ~84pt the 16pt name "2027 1.02 (from
-              dondags)" would ellipsize to "2027 1.0…" and cut the very slot
-              the tag explains. Two lines break after "2027 1.02"; only the
-              "(from …)" tail can truncate. Every other row stays one line. */}
+          {/* [D-286] item 3 (owner, App Store screenshot review: "Names
+              can't be cutoff"): a COMPACT row (the two-column trade card —
+              TradeCard is the only host that passes `compact`) never clamps
+              the name. At ~84-95pt beside the lock / swap / remove controls
+              "Tetairoa McMillan" read "Tetairoa M…" and even the projected
+              pick's two-line allowance left "2027 1.04 / (from hard…". The
+              box grows instead: a player name takes up to 2-3 lines, a pick
+              label up to 3. Every host of the card measures it (the deck's
+              onLayout + peek clip, Matches' unmeasured rows, no
+              getItemLayout), so a taller card breaks no fixed layout. Every
+              non-compact row keeps its one line. */}
           <Text
             scale="body"
             style={[type.title, styles.name]}
-            numberOfLines={proj && compact ? 2 : 1}
+            numberOfLines={compact ? undefined : 1}
           >
             {displayName}
           </Text>

@@ -210,8 +210,11 @@ console.log('§4 printed name (structural, G-035)');
     '4.1 PlayerCard: displayName = proj ? proj.name : player.name');
   assert(count(s, '{displayName}') === 2 && !/>\s*\{player\.name\}\s*</.test(s),
     '4.2 PlayerCard: both name Texts print {displayName}; no bare {player.name} child left');
-  assert(s.includes('numberOfLines={proj && compact ? 2 : 1}'),
-    '4.2b PlayerCard: only a projected pick in a compact row gets 2 lines (slot never ellipsized); every other row keeps 1');
+  // [D-286] item 3 superseded the "projected compact pick gets 2 lines"
+  // rule: every compact (trade-card) row is unclamped, so the slot can
+  // never be ellipsized; non-compact rows keep 1.
+  assert(s.includes('numberOfLines={compact ? undefined : 1}'),
+    '4.2b PlayerCard: a compact (trade-card) row never clamps the name (slot never ellipsized) [D-286]; every other row keeps 1');
   assert(/\[\s*displayName,/.test(s) && s.includes('proj ? projectedPickA11y(proj) : null,'),
     '4.3 PlayerCard composed a11y: leads with displayName, clause is null (filtered) when absent');
 }

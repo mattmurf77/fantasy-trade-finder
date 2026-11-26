@@ -273,14 +273,17 @@ assert(/onHiddenChange\?:/.test(read(path.join(SRC, 'components/OutlookBiasRecei
 assert((side.match(/numberOfLines=\{compact \? 1 : undefined\}/g) || []).length === 1
   && /<Text style=\{type\.bodySm\} numberOfLines=\{compact \? 1 : undefined\}>\{teamName\}<\/Text>/.test(side),
   '16b. the one remaining clamp is the compact team-name header [D-286]');
-// 17 — re-specced by #411. The meta line now carries the position chip too,
-// so the chip + tier badge pair is the binding constraint on 97.5pt of info
-// width; `flexShrink` alone is not enough, because a flex child will not
-// shrink past its intrinsic content width without `minWidth: 0`. The TEXT
-// must be the only thing that yields.
-assert(/compactMetaText: \{[^}]*flexShrink: 1[^}]*minWidth: 0[^}]*\}/.test(side),
-  '17. the compact meta line yields before the tier badge — and can actually reach zero',
-  'without flexShrink+minWidth the badge is pushed out of ~97pt of info width — the price disappears');
+// 17 — re-specced by #411, then by [D-286]. #411 made the meta TEXT the
+// line's only yielder (flexShrink 1 + minWidth 0) so the tier badge stayed
+// on one clamped line. [D-286] wraps the row instead, and on the 402pt
+// simulator that yielder rule squeezed "CAR · 23 yrs" into a letter-by-
+// letter column beside the badge. The text now never shrinks (flexShrink 0,
+// no minWidth 0): the badge moves to line 2, and the price is still drawn.
+assert(/compactMetaText: \{[^}]*flexShrink: 0[^}]*\}/.test(side)
+  && !/compactMetaText: \{[^}]*minWidth: 0[^}]*\}/.test(side)
+  && /compactMetaLine: \{[^}]*flexWrap: 'wrap'[^}]*\}/.test(side),
+  '17. the compact meta text keeps its one-line width and the row wraps the badge instead [D-286]',
+  'a shrinking detail inside a wrapping row is squeezed into a sliver (seen on screen at 402pt)');
 assert(/compactChipSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side)
   && /compactPriceSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side),
   '17b. the meta line\'s two DATA ENCODINGS never shrink or clip',

@@ -26,6 +26,10 @@
 // clamps are gone and the row is allowed to wrap; it cannot prove what Yoga
 // lays out at 402pt (that is the simulator check the coordinator runs).
 //
+// ITEM 3 — the deck trade card (TradeCard → PlayerCard `compact`) never
+// clamps an asset name: "Tetairoa M…", "Jahmyr Gi…" and "2027 1.04 /
+// (from hard…" were seen at 402pt. Structural only (§4).
+//
 // Run: node tests/check-eveners-unfair-only.js
 //   (or: npm run test:eveners-unfair-only)
 
@@ -180,9 +184,56 @@ console.log('§3 TradeSide column-mode rows (structural only)');
   // The stacked page is unchanged: tag on its own line, full label.
   assert(/\{proj \? <ProjectedPickTag \/> : null\}/.test(code),
     '3.9 the stacked page keeps its PROJECTED tag line');
+  // Coordinator's 402pt run: with flexShrink 1 + minWidth 0 the detail
+  // was squeezed letter-by-letter between chip and badge. It must keep its
+  // one-line width (no shrink, no minWidth 0) so the BADGE wraps instead,
+  // and it must carry no clamp (no numberOfLines on it at all).
+  assert(/compactMetaText: \{[^}]*flexShrink: 0[^}]*\}/.test(code)
+    && !/compactMetaText: \{[^}]*(minWidth: 0|flexShrink: 1)[^}]*\}/.test(code),
+    '3.11 the compact detail never shrinks below its own width (flexShrink 0, no minWidth 0)');
+  assert(/<Text style=\{\[type\.bodySm, compact && styles\.compactMetaText\]\}>/.test(code),
+    '3.12 the detail Text carries no numberOfLines (one line by width, never an ellipsis)');
+  assert(code.includes("`${p.nflTeam} · ${p.age} yo`") && !/\$\{p\.age\} yrs/.test(code),
+    '3.13 the calculator row says "yo" like the deck card');
   for (const id of ['calc.member-entered.${p.id}']) {
     assert(side.includes(id), `3.10 testID ${id} kept`);
   }
+}
+
+// ── 4. Deck trade card names never clamp (structural, G-035) ─────────────
+console.log('§4 PlayerCard compact (trade-card) names (structural only)');
+{
+  const pc = read('components/PlayerCard.tsx');
+  const code = strip(pc);
+  assert(code.includes('numberOfLines={compact ? undefined : 1}'),
+    '4.1 the classic-branch name is unclamped in compact rows, one line elsewhere');
+  assert(!/numberOfLines=\{proj && compact \? 2 : 1\}/.test(code),
+    '4.2 the old "2 lines for a projected compact pick" clamp is gone');
+  assert(!/ellipsizeMode/.test(code), '4.3 no ellipsizeMode in PlayerCard');
+  // Hosts: only TradeCard passes `compact` to PlayerCard. A new compact host
+  // must be checked for fixed-height layouts before it inherits wrapping.
+  const hosts = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (/\.tsx$/.test(e.name) && fs.readFileSync(full, 'utf8').includes('<PlayerCard')) {
+        hosts.push(path.relative(SRC, full));
+      }
+    }
+  })(SRC);
+  const compactHosts = hosts.filter((rel) => {
+    const src = read(rel);
+    let n = 0;
+    for (let i = src.indexOf('<PlayerCard'); i >= 0; i = src.indexOf('<PlayerCard', i + 1)) {
+      if (/\n\s*compact\b/.test(src.slice(i, i + 400))) n++;
+    }
+    return n > 0;
+  });
+  assert(compactHosts.length === 1 && compactHosts[0] === 'components/TradeCard.tsx',
+    '4.4 TradeCard is the only host of the compact PlayerCard', compactHosts.join(', '));
+  // The team / age line and the action buttons are untouched by this item.
+  assert(/`\$\{player\.age\} yo`/.test(code), '4.5 the deck card age still reads "N yo"');
 }
 
 if (failures) {

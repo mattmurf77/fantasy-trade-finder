@@ -12,12 +12,13 @@
 ---
 
 
-## 2026-11-25 — Calculator screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`, PR open
+## 2026-11-25 — Calculator and deck screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`, PR #732 open
 
-- **What (1):** "Recommended to even it" rows show only when the evaluate verdict is `unfair`; `fair` / `even` hide them, so the value bar follows the trade window. One predicate, `evenersWanted` in `EvenerRows.tsx`, used by the in-league calculator and Real values. A missing verdict renders as before; the half-built "Trade options" rows are unchanged. No server change. Narrows #251.
-- **What (2):** merged in-league columns (`TradeSide compact`): names and the chip · detail · tier row wrap instead of ending in "…"; pick rows drop the duplicate "PICK" detail; PROJ sits beside the PICK chip. Reverses #411's one-line name ruling. Stacked page and the deck card unchanged.
-- **Guard:** new `check-eveners-unfair-only.js`; `check-calc-merged-layout` 16/16b/17e and `check-projected-pick-tag` 3.3 re-specced. Scope: `docs/plans/eveners-unfair-only/scope.md`.
-- **Open:** not seen on a simulator yet; the deck card clamps names the same way (reported).
+- **(1)** "Recommended to even it" rows only for an `unfair` verdict, both calculators, one predicate (`evenersWanted`); missing verdict renders as before; "Trade options" unchanged; no server change. Narrows #251.
+- **(2)** Merged in-league columns (`TradeSide compact`): names and the chip · detail · tier row wrap, no "…"; the detail keeps its one-line width (badge wraps instead) and reads "yo"; pick rows drop "PICK · 0 yrs"; PROJ beside the PICK chip. Reverses #411's one-line name.
+- **(3)** Deck trade card (`PlayerCard compact`, TradeCard only): names unclamped; the box grows. Dense rows (Tiers, Free agents, League Summary) unchanged.
+- **Guard:** `check-eveners-unfair-only.js`; `check-calc-merged-layout` 16/16b/17/17e and `check-projected-pick-tag` 3.3/4.2b re-specced. Scope: `docs/plans/eveners-unfair-only/scope.md`.
+- **Open:** items 2 and 3 seen only partly on the simulator; 402 pt recheck pending.
 
 ## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
 

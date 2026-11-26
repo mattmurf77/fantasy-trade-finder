@@ -131,21 +131,19 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                       {proj ? <ProjectedPickTag short /> : null}
                     </View>
                   ) : null}
-                  {/* flexShrink so this line yields before the tier badge:
-                      without it the badge is pushed out of the ~97pt of
-                      info width a 375pt screen leaves, which is the price
-                      silently disappearing again. #411 adds minWidth 0 so
-                      it can actually reach zero — with the chip now sharing
-                      the line, the chip+badge pair is the binding
-                      constraint and the TEXT must be the only yielder. */}
+                  {/* #411 made this text the line's only yielder (flexShrink
+                      1 + minWidth 0); [D-286] replaced that with wrapping:
+                      the text keeps its one-line width and the tier badge
+                      moves to a second line when the three do not fit. */}
                   {/* [D-286] item 2 — column mode no longer clamps this
                       line (the meta row WRAPS instead, see compactMetaLine),
                       and a pick row prints no detail text there: the PICK
                       chip already says it, and the in-league pick's
-                      "PICK · 0 yrs" was the ellipsized duplicate on screen. */}
+                      "PICK · 0 yrs" was the ellipsized duplicate on screen.
+                      "yo", not "yrs", since [D-286]: the deck card's word. */}
                   {compact && (p.pick || p.pos === 'PICK') ? null : (
                     <Text style={[type.bodySm, compact && styles.compactMetaText]}>
-                      {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
+                      {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yo`}
                     </Text>
                   )}
                   {/* Column mode has no room for a trailing value column, so
@@ -276,9 +274,12 @@ const styles = StyleSheet.create({
     lineHeight: type.bodySm.lineHeight,
     flexShrink: 1,
   },
-  // [D-286] — flexGrow keeps the tier badge right-aligned when the line
-  // fits, and lets the detail take the line's slack when the badge wraps.
-  compactMetaText: { flexShrink: 1, minWidth: 0, flexGrow: 1 },
+  // [D-286] — the detail NEVER shrinks below its own one-line width: with
+  // flexShrink 1 + minWidth 0 Yoga packed chip + detail + tier on one line
+  // and squeezed "CAR · 23 yo" into a letter-by-letter column (seen at
+  // 402pt). flexShrink 0 makes the row WRAP the tier badge to line 2
+  // instead; flexGrow keeps the badge right-aligned when it does fit.
+  compactMetaText: { flexShrink: 0, flexGrow: 1 },
   // #411 — the meta line's two DATA ENCODINGS (position hex, tier label).
   // Neither shrinks or clips: the meta text yields first, always.
   // [D-286] — the chip slot also holds a projected pick's PROJ tag.
