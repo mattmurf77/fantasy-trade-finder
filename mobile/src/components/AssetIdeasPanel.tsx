@@ -4,6 +4,7 @@ import { ink, chalk, ice, space, radii, type, semantic } from '../theme/chalklin
 import { posColor } from '../theme/colors';
 import { Icon, TickLabel, Card, Text } from './chalkline';
 import { assetIdeaKey } from './FeaturedTradeWindow';
+import PaywallGateNotice, { type GateNotice } from './PaywallGateNotice';
 import type { AssetIdea, AssetIdeasResponse } from '../api/trades';
 import type { Player } from '../shared/types';
 
@@ -30,6 +31,10 @@ interface Props {
   featuredKey: string | null;
   /** Tap a row → feature that idea (host swaps the window + records history). */
   onSelectIdea: (idea: AssetIdea) => void;
+  /** Paid launch: the sweep was refused by the paywall gate (the host's
+   *  gateNoticeFor(query.error)). Renders the lock line + See plans instead
+   *  of the "No defensible packages" empty, which would be false. */
+  gated?: GateNotice | null;
 }
 
 const GROUP_KEYS = ['upgrade', 'lateral', 'downgrade'] as const;
@@ -152,6 +157,7 @@ export default function AssetIdeasPanel({
   direction,
   featuredKey,
   onSelectIdea,
+  gated,
 }: Props) {
   const groups = data?.groups;
   const total = groups
@@ -174,6 +180,8 @@ export default function AssetIdeasPanel({
             <ActivityIndicator color={chalk.dim} size="small" />
             <Text style={type.bodySm}>Sweeping rosters…</Text>
           </View>
+        ) : gated && !groups ? (
+          <PaywallGateNotice testID="trades.asset-ideas-gated" notice={gated} />
         ) : !groups || total === 0 ? (
           <Text style={[type.bodySm, styles.empty]}>
             No defensible packages found around this asset right now.

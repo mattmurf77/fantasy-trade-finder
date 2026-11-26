@@ -25,7 +25,7 @@ import {
   getSleeperLinkStatus,
   validateTradeSend,
 } from '../api/sendInSleeper';
-import { ApiError } from '../api/client';
+import { ApiError, gateSignalFor } from '../api/client';
 import { track } from '../api/events';
 import { recordGuideReceipt } from '../state/useGuide';
 import { GUIDE_RECEIPTS } from './analystScript';
@@ -320,6 +320,11 @@ export default function SendInSleeperButton({
         from_deck: !!impressionId,
       });
       setState('idle');
+      // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+      // this gated route) already opened the paywall or the VerifySheet in
+      // api/client. No second, contradictory alert on top of it. Null while
+      // monetize.paywall is off, so today's alerts are unchanged.
+      if (gateSignalFor(err, '/api/trades/propose')) return;
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail;
 

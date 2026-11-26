@@ -171,6 +171,7 @@ import {
   type Layer2Code,
 } from '../api/declineReasons';
 import AssetIdeasPanel from '../components/AssetIdeasPanel';
+import { gateNoticeFor } from '../components/PaywallGateNotice';
 import FeaturedTradeWindow, { assetIdeaKey } from '../components/FeaturedTradeWindow';
 import {
   getLeaguePreferences,
@@ -5675,6 +5676,13 @@ export default function TradesScreen({ navigation, route }: any) {
     if (payEntitled) resumeDeckPages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payEntitled]);
+  // Paid launch: a purchase or Restore while the single-pin ideas panel
+  // shows its gate notice sweeps again, so the notice gives way to ideas
+  // instead of offering See plans to a subscriber. A refetch, not routing.
+  useEffect(() => {
+    if (payEntitled && assetIdeasQuery.isError) void assetIdeasQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payEntitled]);
   function handleDeckGateEndPress() {
     haptics.selection();
     if (deckGateEnd?.verify || sessionUnverified) {
@@ -8177,6 +8185,7 @@ export default function TradesScreen({ navigation, route }: any) {
     <AssetIdeasPanel
       data={assetIdeasQuery.data}
       loading={assetIdeasQuery.isFetching}
+      gated={assetIdeasQuery.isError ? gateNoticeFor(assetIdeasQuery.error, '/api/trades/asset-ideas') : null}
       pinnedName={singlePin!.player.name}
       direction={singlePin!.direction}
       // #317 — while the deck holds the slot the featured window is NOT on

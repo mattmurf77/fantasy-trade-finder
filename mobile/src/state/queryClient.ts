@@ -19,12 +19,23 @@ import type { SessionInitSeed } from '../api/auth';
 // `refetchOnReconnect: true` is LIVE as of the S7 PRD-04 NetInfo bridge:
 // App.tsx wires onlineManager to @react-native-community/netinfo, so
 // active queries revalidate when connectivity returns.
+/** One retry, as before, EXCEPT for a paywall gate answer (402
+ *  pro_required, paid launch 2026-11-21): the server will say the same thing
+ *  again, and a user-initiated retry would re-open the paywall right after the
+ *  user dismissed it. Duck-typed (status + body) so this module keeps no
+ *  import of api/client. */
+export function retryUnlessGated(failureCount: number, error: unknown): boolean {
+  const e = error as { status?: unknown; body?: { error?: unknown } | null } | null;
+  if (e && e.status === 402 && e.body?.error === 'pro_required') return false;
+  return failureCount < 1;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
       gcTime: 30 * 60_000,
-      retry: 1,
+      retry: retryUnlessGated,
       refetchOnReconnect: true,
       refetchOnWindowFocus: false,
     },
