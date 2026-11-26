@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-284 — Launch cuts: 36 features off by the owner's row-by-row calls; Calibration kept for testers through a new `operator` experiment layer
+
+**Date:** 2026-11-25 · **Who:** the owner's calls on the 62 rows the launch feature audit recommended cutting, given to the main session; built by three builder subagents on `chore/launch-cuts`. Scope: `docs/plans/launch-cuts/scope.md`.
+**Context:** the 2026-11-21 audit recommended 69 cuts. The owner kept 7 earlier (Home "Next move" and the three features behind it, "More offers", standing offers) and on 2026-11-25 ruled on the rest: 22 keep, 36 cut, and the 4 paywall rows left undecided.
+**Decision:**
+- **Cut by flag (13):** Calibration (`grading.blind`), rookie ranks (`ranks.rookie_subset`, code kept for the offseason), the Draft Room family (`draft.room`, `league.rookie_board_entry`, `draft.live_poll`, `draft.mfl`, `picks.slot_values`, `draft.rank_inline`, `draft.mock`, `draft.manual_picks`), Team Review (`trades.team_review`, Roster setup replaces it), Season outlook (`outlook.odds`), Market pulse (`market.movers`). No kept feature reads any of them; ESPN pick assignment depends on no draft flag.
+- **Cut in code:** Home "Check trends" tile; Trends and Pick Anchors (chooser, Settings stop, saved preference, deep links; routes stay registered); "Redraft (soon)" chip; the website's sign-in and everything behind it; extension distribution (links only, `extension/` untouched).
+- **Free-agent Add:** "no Add button that cannot add". Add shows only where the server's per-league `move` capability can submit that row, so it returns with no new build when real adds are switched on.
+- **Calibration for testers:** `_calibration_allowed` checks the tester allowlist again. The flag is delivered by a `calibration_rollout` overlay. Production's five reserved experiment layers each hold a running full-range rollout, so a sixth reserved layer, `operator`, was added for allowlist-targeted operator rollouts; an experiment in it must target `is_tester_allowlist: true`. Rejected: stopping or re-versioning an existing production rollout to free a layer.
+- **Kept against the audit (22):** Win Now and season projections, Send in ESPN, ESPN pick assignment, Usage Trends, the Free agents list and its entry points, leaderboards, contrarian ranks, the Improve pages and the "View" half sheet, trade-shape chips, revised-offer cards, manager profiles (privacy disclosure already made, D-282).
+**Consequences:** flags and the website change on deploy; the mobile changes need the next build. After deploy Calibration is off for everyone until the overlay is launched. The website no longer sends usage events or captures invite referrals. Terms and privacy wording about web sign-in, the extension and three cut features is now untrue and is with the owner. `/api/sleeper/leagues` now always stamps `platform` (it sat inside the `draft.room` gate). AI matchup selection stays off only while `ANTHROPIC_API_KEY` is unset; its knob defaults on.
+
 ## D-282 — Manager profiles: disclose them on the privacy page, and suppress a deleted account's profile with a keyed hash (Q-040 (a) + (b))
 
 **Date:** 2026-11-24 · **Who:** the operator's decision on Q-040 through the main session; built by a builder subagent on `fix/q040-profile-suppression`. Scope: `docs/plans/manager-profiles/scope-q040-suppression.md`.

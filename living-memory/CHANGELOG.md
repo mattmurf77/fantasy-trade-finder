@@ -12,6 +12,21 @@
 ---
 
 
+## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
+
+- **What:** 36 features cut for launch from the audit's 62 candidates (22 kept, 4 paywall rows undecided and untouched). Scope and the full list: `docs/plans/launch-cuts/scope.md`.
+- **Flags off (13):** `grading.blind`, `ranks.rookie_subset`, `draft.room`, `league.rookie_board_entry`, `draft.live_poll`, `draft.mfl`, `picks.slot_values`, `draft.rank_inline`, `draft.mock`, `draft.manual_picks`, `trades.team_review`, `outlook.odds`, `market.movers`.
+- **Calibration** is testers-only again; it reaches the tester allowlist through a `calibration_rollout` overlay in a new experiment layer, `operator` (every other layer is held in production). **The overlay must be launched after deploy** or Calibration is off for everyone.
+- **Mobile (next build):** no Check trends tile, Trends, Pick Anchors or Redraft chip; free-agent Add only where the server can submit the move; closed state for an old Draft Room link.
+- **Web:** marketing-only landing, no sign-in; four signed-in pages 302 to `/`; extension links gone. PR 456 needs a rebase.
+- **Open:** legal wording made untrue by the web cut is not edited (owner's ruling pending).
+
+## 2026-11-24 — Website outlook prompt refreshes after an outlook save (D-277 parity), branch `fix/web-outlook-prompt-refresh`, not merged
+
+- **What:** on the website's League Summary, "NN% playoff chance · Consider <Outlook>" stayed after that outlook was saved in the overlay, until the page was left and reopened. Same cause as the app's D-277: `outlook_recommendation.differs` is computed against the saved outlook when the projected standings are read, and no web save re-read them.
+- **Fix:** both web writers of `team_outlook` (`saveOutlookWithPositions`, `skipPositionalPrefs` in `web/js/app.js`) call `window.loadLeagueProjectionBatch()` on the success path. No server, flag, copy or app change; behind the existing `league.projection_outlook`.
+- **Guard:** `qa/web/check_web_structure.py` HYG-outlook-save-refreshes-projections (web-structure CI job). Not seen in a browser.
+
 ## 2026-11-24 — Manager-profile suppression after account deletion (D-282, Q-040 closed), branch `fix/q040-profile-suppression`
 
 - **What:** a deleted account's manager profile is no longer rebuilt by a league-mate's sync. Deletion writes a keyed hash (HMAC-SHA256, `EXPERIMENT_SALT_KEY`) of each of the person's league ids to new table `manager_profile_suppressions` in its own transaction; `capture_manager_profiles` skips those owners (one read per capture). The first verification of the same id's new account clears it. `web/privacy.html` §1 "League data" now discloses the profiles.

@@ -735,7 +735,7 @@ This is an operator action, not code. It is modelled on [`../ram-mascot/experime
 | Field | Value | Why |
 |---|---|---|
 | key / version | `calibration_rollout` v1 | — |
-| layer | a layer with free buckets. Check `GET /api/admin/experiments` first; `onboarding` and `growth` are full. | In-layer bucket exclusivity (D3) |
+| layer | **`operator`** (added 2026-11-25) | In-layer bucket exclusivity (D3). Every product layer (`onboarding`, `ranking`, `trades_ui`, `engine`, `growth`) holds a running full-range rollout in production, so a full-range overlay collides in all of them. `operator` is the reserved layer for allowlist-targeted operator rollouts; `validate_spec` requires `is_tester_allowlist: true` there. |
 | unit_type | **`account`** | The server resolves it from `sess["user_id"]` alone. Mobile also sends `X-Device-Id`, so a device unit would also resolve. |
 | buckets | `[0, 10000)` | Targeting narrows; bucketing must never drop a tester |
 | targeting | `{"is_tester_allowlist": true}` | **Only** this attribute. `_grading_flag_for_caller` passes no header attrs, so targeting on platform or app_version would resolve differently on the server than in `/api/feature-flags`. |
@@ -743,6 +743,8 @@ This is an operator action, not code. It is modelled on [`../ram-mascot/experime
 | primary_metric / exposure_surface | `activation_rate` (required, carried and not claimed) / `calibration_tab` | Required fields |
 | launch | `/transition` → `running` with `override_underpowered: true`, reason "allowlist rollout for Gate 2 grading, not a powered test" | — |
 | kill | `/transition` → `stopped` | 404 within 60 s; the tab disappears at the next launch |
+
+**Timing (2026-11-25):** the `operator` layer exists only once this code is deployed (its salt is seeded at boot), so the overlay can be created only after the deploy. Between the deploy (which also turns `grading.blind` off) and the launch of this experiment, Calibration is off for everyone, the owner included.
 
 **Verification:**
 - `GET /api/feature-flags` with a tester's session shows `configs.calibration_rollout.flags["grading.blind"] === true`.

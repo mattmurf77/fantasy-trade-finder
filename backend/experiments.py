@@ -71,7 +71,13 @@ METRIC_CATALOG = {
 PFO_GUARDRAILS = ["activation_rate", "ttfv_p50", "empty_deck_rate",
                   "insult_rate", "crash_free_core_loop"]
 
-RESERVED_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth")
+# `operator` (2026-11-25): allowlist-targeted operator rollouts that are not
+# experiments (e.g. calibration_rollout). Every product layer already holds a
+# full-range running rollout in production, so these get their own layer; the
+# same in-layer exclusivity applies, and validate_spec requires
+# is_tester_allowlist targeting so the layer can never reach real users.
+# Must match database.EXPERIMENT_LAYERS (seeded salts); a test pins that.
+RESERVED_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth", "operator")
 _STATUS = ("draft", "running", "paused", "stopped", "decided")
 _LEGAL_EDGES = {
     ("draft", "running"),
@@ -470,6 +476,10 @@ def validate_spec(spec: dict, *, for_launch: bool = False):
     # onboarding layer must use device units (FR-34)
     if layer == "onboarding" and unit_type != "device":
         errs.append("onboarding_layer_requires_device_unit")
+    # operator layer is for allowlist rollouts only: it must target testers.
+    if layer == "operator" and (spec.get("targeting") or {}).get("is_tester_allowlist") is not True:
+        errs.append("operator_layer_requires_tester_allowlist: targeting must include "
+                    "\"is_tester_allowlist\": true")
     if for_launch:
         try:
             with db.ro_engine.connect() as conn:

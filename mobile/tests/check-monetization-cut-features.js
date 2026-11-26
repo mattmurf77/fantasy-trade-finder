@@ -20,9 +20,17 @@
 //        FILES exists and yields strings, and the scan visits the paywall's
 //        first bullet and its free line.
 //
-// DENY is a short explicit list from the audit's N rows, not the whole audit.
-// When a cut feature is restored for launch, drop its entry here in the same
-// commit that names it in the copy again.
+// DENY is a short explicit list of features CUT for launch by the owner's
+// final keep/cut calls (data/review/launch-feature-audit-2026-11-21/
+// keep-cut-list.md, 2026-11-25), plus features already dark at launch that
+// paywall copy could plausibly name (Team Overhaul) — not the whole audit.
+// Features the owner KEPT (Send in ESPN, Win Now, the "More offers" shop
+// window, standing offers, Usage Trends, free agents, leaderboards,
+// contrarian ranks, Max PF moves, Playoff targets, ESPN pick assignment) are
+// deliberately absent: this guard does not decide what the paywall sells
+// (the paywall rows are undecided), it only keeps cut features out. When a
+// cut feature returns, drop its entry here in the same commit that names it
+// in the copy again.
 //
 // HONEST LABEL (G-035): this proves the source holds no such string, not what
 // renders. Text the server sends (paywall config) is out of its reach.
@@ -55,23 +63,22 @@ const FILES = [
   'components/VerifySheet.tsx',
 ];
 
-// Cut for launch per the 2026-11-21 audit (N rows).
+// Cut for launch per the owner's calls of 2026-11-25 (keep-cut-list.md).
 const DENY = [
-  [/\bESPN\b/i, 'Send in ESPN'],
-  [/\bWin Now\b/i, 'Win Now'],
-  [/\bshop\b|\bmore offers\b/i, '"More offers" shop window'],
-  [/\bstanding offers?\b/i, 'standing offers'],
-  [/\bcalibration\b/i, 'Calibration tab'],
-  [/\btrends?\b/i, 'Trends / Usage Trends'],
-  [/\busage\b/i, 'Usage Trends'],
-  [/\bdraft room\b|\bmock draft\b|\brookie/i, 'Draft Room, mock draft, rookie ranks'],
-  [/\boverhaul\b/i, 'Team Overhaul'],
   [/\bteam review\b/i, 'Team Review'],
-  [/\bleaderboards?\b|\bcontrarian\b|\bmarket pulse\b/i, 'leaderboards, contrarian ranks, market pulse'],
-  [/\bfree agents?\b/i, 'Free agents'],
+  [/\bdraft room\b|\brookie draft\b|\blive draft\b/i, 'Draft Room (and its live polling)'],
+  [/\bmock drafts?\b/i, 'mock draft'],
+  [/\brecord(ing)? picks\b/i, 'record picks'],
   [/\bpick anchors?\b|\banchors\b/i, 'Pick Anchors'],
-  [/\bmax pf\b|\bplayoff targets?\b/i, 'Max PF moves, Playoff targets'],
-  [/\bpick assignment\b|\brecord picks\b/i, 'ESPN pick assignment, record picks'],
+  [/\brookie/i, 'rookie ranks, rookie board'],
+  [/\bcalibration\b|\bblind grading\b/i, 'Calibration tab'],
+  // The Rank-stack Trends page (movers vs consensus) is cut; Usage Trends is
+  // kept, so "usage trends" is allowed.
+  [/(?<!\busage )\b(trends?|movers?|risers?|fallers?)\b/i, 'Trends (risers / fallers)'],
+  [/\bmarket pulse\b/i, 'market pulse'],
+  [/\bseason outlook\b/i, 'Season outlook section'],
+  [/\bredraft\b/i, '"Redraft (soon)" chip'],
+  [/\boverhaul\b/i, 'Team Overhaul (dark at launch)'],
 ];
 
 let failures = 0;
@@ -133,7 +140,7 @@ check('p. every monetization file exists and yields strings', () => {
   }
 });
 
-check('s1. no monetization string names a feature the launch audit cuts', () => {
+check('s1. no monetization string names a feature cut for launch', () => {
   const hits = [];
   for (const rel of FILES) {
     for (const s of seen[rel] || []) {
