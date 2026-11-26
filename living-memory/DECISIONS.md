@@ -1,5 +1,19 @@
 # Decisions — Fantasy Trade Finder
 
+## D-285 — Standings display rows: stat rows, a client-computed SoS column, Remaining schedule, a likely pick range; the partial-data, uncalibrated and odds-don't-confirm text and the diagnostics leave the app
+
+**Date:** 2026-11-25 · **Who:** the operator's calls in design review (2026-11-24/25, nine mockup revisions) after comparing our projections with dynastyhound.com; built by two builder subagents on `feat/standings-display-rows`. Scope: `docs/plans/standings-display-rows/scope.md`; code walk: `evidence.md` there.
+**Context:** the open Standings team packed its stats into two dot-separated sentences, the open week carried a long diagnostic paragraph, and under the table sat four lines of caveats. The competitor shows a remaining strength of schedule and a likely pick range; both can be computed from the saved forecast the app already reads.
+**Decision:**
+- Mobile only, display only: no schema, API, server, flag or analytics change. Operator waivers (2026-11-25): no feature flag (rollback = revert + a new TestFlight build) and no new events.
+- Open team: one stat per row (`StatRow`). Record view gains **SoS**: the mean of each remaining opponent's projected score that week, ranked 1 = toughest, "hard" / "easy" for the top / bottom third, computed on the client. "Play" / "offs" stacks and the Record columns shrink to 40 / 51 / 46 / 37pt (team column 125pt at 375pt, was 123). The sort arrow moves left of a numeric heading so the text keeps its cells' right edge.
+- "Weekly projections" becomes **Remaining schedule** (Wk · Opponent · Proj. · Opp. · Win %; "Edge" W / L / Even within 3 points when a week has no win chance), each week opening to its projected lineup and no-estimate players only.
+- Draft pick odds become rows; a **likely pick** (10th–90th percentile slot when the team misses) and the chance of the 1.01 show only at a miss chance of 25% or more, also as a note under Home's Projected pick (both notes show when the pick is owned elsewhere).
+- Removed from the app: tie / loss odds, score SD, the Max PF target and "predictive uncertainty is not calibrated" sentence, model diagnostics, per-player partial and coverage text, the "Partial Sleeper data" tag, the status and incomplete sentences under the table, "Odds don't confirm a playoff spot", the Max PF footnote, "Expected pick if this team misses", "Missed-playoff simulations".
+- Web (`web/js/league-projections.js`) deliberately unchanged; the difference is tabled in `docs/cross-client-invariants.md` § Stored weekly projection results. No page loads it since the 2026-11-25 web cut.
+- Deferred: a Luck view and a Median what-if view (they need completed weekly scores the saved forecast does not carry), the web version, the note on the Improve Draft Pick page.
+**Consequences:** nothing in the app now says a forecast is partial, that simulation uncertainty is uncalibrated or that playoff odds don't confirm a spot; diagnostics are reachable only from the data. A team under 25% shows no pick position at the top of Draft pick odds (the nested list still does). Completed weeks are no longer listed in the open team. A "You" row whose name is wider than about 76pt truncates at 375pt (as it already did). No event measures SoS or Remaining schedule use. Needs a TestFlight build; the checklist is the only runtime evidence.
+
 ## D-284 — Launch cuts: 36 features off by the owner's row-by-row calls; Calibration kept for testers through a new `operator` experiment layer
 
 **Date:** 2026-11-25 · **Who:** the owner's calls on the 62 rows the launch feature audit recommended cutting, given to the main session; built by three builder subagents on `chore/launch-cuts`. Scope: `docs/plans/launch-cuts/scope.md`.

@@ -8,6 +8,7 @@ import Text from '../components/chalkline/Text';
 import { Badge, Button, Icon } from '../components/chalkline';
 import FeedbackFAB from '../components/FeedbackFAB';
 import { ProjectionTeamDetail } from '../components/LeagueProjectionDetail';
+import { StatRow } from '../components/StatRow';
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
 import { getLeagueRosters, getLeagueUsers, findMyRoster } from '../api/sleeper';
 import { getLeagueProjectionBatch } from '../api/leagueProjections';
@@ -15,9 +16,8 @@ import { track } from '../api/events';
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { currentStandings } from '../utils/standings';
-import { incompleteSentence } from '../utils/projectionCoverage';
 import {
-  buildTableRows, sortRows, nextSort, cellText, openTeamLines, forecastStatusText, noForecastLine,
+  buildTableRows, sortRows, nextSort, cellText, openTeamStats, noForecastLine,
   VIEW_COLUMNS, DEFAULT_SORT, COLUMN_LABEL, COLUMN_SPOKEN, DASH,
   type StandingsView, type StandingsColumn,
 } from '../utils/standingsTable';
@@ -31,7 +31,7 @@ import {
 // ONE TABLE, one row per team. The current results come from the Sleeper
 // rosters session init already seeded (utils/standings.ts: W–L, PF, Max PF),
 // joined by roster id to the SAVED weekly forecast (Proj. W–L, Playoffs,
-// Proj. Max PF). A Record | Points pill picks which three numbers show; every
+// Proj. Max PF, SoS). A Record | Points pill picks which numbers show; every
 // heading sorts (utils/standingsTable.ts). No forecast ⇒ those columns are a
 // dash and one line says why.
 //
@@ -54,20 +54,19 @@ const PLATFORM_NAME: Record<string, string> = {
 const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 // Numeric column widths (pt). A heading is exactly this wide, so a long one
-// wraps to two lines ("Proj." over "W–L" / "Max PF"); a number cell is AT
-// LEAST this wide, so a number never truncates and, at large text sizes,
-// the team column (flex: 1, ellipsis) gives way instead. On a 375pt phone:
-// 375 − 2×16 page padding − 2×4 row padding − 16 chevron − 4×4 gaps = 303pt
-// for team + numbers; Record 48+56+76 leaves the team 123pt, Points
-// 48+60+60 leaves it 135pt.
+// wraps to two lines ("Proj." over "W–L" / "Max PF", "Play" over "offs"); a
+// number cell is AT LEAST this wide, so a number never truncates and, at large
+// text sizes, the team column (flex: 1, ellipsis) gives way instead. Record
+// columns are sized to their widest real cell or their heading plus the 12pt
+// sort caret (10pt arrow + 2pt gap), whichever is larger, plus about 1pt for
+// text rounding: W–L "8–5–1" 39; "PROJ." 38 + 12; "OFFS" 33 + 12; "SoS" 24 + 12
+// (cells "12th" 31, "easy" 23). On a 375pt phone: 375 − 2×16 page padding − 2×4
+// row padding − 16 chevron = 319pt; Record 40+51+46+37 and five 4pt gaps leave
+// the team 125pt, Points 48+60+60 and four gaps leave it 135pt.
 const COL_WIDTH: Record<StandingsColumn, number> = {
-  team: 0, wl: 48, projWl: 56, playoffs: 76, pf: 48, maxPf: 60, projMaxPf: 60,
+  team: 0, wl: 40, projWl: 51, playoffs: 46, sos: 37, pf: 48, maxPf: 60, projMaxPf: 60,
 };
-
-const VIEW_FOOT: Record<StandingsView, string> = {
-  record: 'Projected W–L is the most likely final record from the weekly forecast. Odds don’t confirm a playoff spot.',
-  points: 'Max PF is the season so far. Projected Max PF is the forecast for the full regular season.',
-};
+const CHEVRON = 16;
 
 export default function StandingsScreen() {
   const leagueId = useSession((s) => s.league?.league_id) || null;
@@ -197,13 +196,10 @@ export default function StandingsScreen() {
       </View>
     );
   } else {
-    // The old Projected section's status line, moved under the table.
     const state = data?.state || 'no_run';
-    const status = forecastStatusText({ isLoading: forecastQuery.isLoading, isError: forecastQuery.isError, state });
     // A run saved by an older model is last saved, never current.
     const lastSaved = !!result && (forecastQuery.isError || state !== 'current' || data?.model_current === false);
     const incomplete = result?.coverage?.estimate_status === 'incomplete';
-    const missingSlots = result?.coverage?.missing_lineup_slots;
     // Every team 0–0 and nothing projected: say so rather than rank a league-wide tie.
     const showTable = standings.gamesPlayed || !!result;
     const week = Math.max(0, ...standings.rows.map((r) => r.games));
@@ -234,9 +230,9 @@ export default function StandingsScreen() {
             {sorted.map((r) => {
               const isOpen = openRosterId === r.rosterId;
               const spoken = cols
-                .map((c) => `${COLUMN_SPOKEN[c]} ${cellText(r, c) === DASH ? 'not available' : cellText(r, c)}`)
+                .map((c) => `${COLUMN_SPOKEN[c]} ${cellText(r, c) === DASH ? 'not available' : cellText(r, c)}${c === 'sos' && r.sos?.band ? `, ${r.sos.band}` : ''}`)
                 .join('. ');
-              const lines = isOpen ? openTeamLines(view, r, result?.playoff_byes ?? 0) : null;
+              const stats = isOpen ? openTeamStats(view, r, result?.playoff_byes ?? 0) : null;
               return (
                 <View
                   key={r.rosterId}
@@ -259,6 +255,14 @@ export default function StandingsScreen() {
                     </View>
                     {cols.map((c) => {
                       const text = cellText(r, c);
+                      if (c === 'sos' && r.sos) {
+                        return (
+                          <View key={c} style={[styles.sosCell, { minWidth: COL_WIDTH.sos }]}>
+                            <Text scale="dense" style={styles.num}>{text}</Text>
+                            {r.sos.band ? <Text scale="dense" style={styles.band}>{r.sos.band}</Text> : null}
+                          </View>
+                        );
+                      }
                       return (
                         <Text
                           key={c}
@@ -270,15 +274,14 @@ export default function StandingsScreen() {
                       );
                     })}
                     <View style={styles.chevronCol}>
-                      <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color={isOpen ? ice.base : chalk.dim} />
+                      <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} size={CHEVRON} color={isOpen ? ice.base : chalk.dim} />
                     </View>
                   </Pressable>
-                  {lines ? (
+                  {stats ? (
                     <View style={styles.openBody}>
-                      <Text variant="bodySm" testID="standings.open.left-out">{lines.leftOut}</Text>
-                      {lines.average ? (
-                        <Text variant="bodySm" testID="standings.open.average">{lines.average}</Text>
-                      ) : null}
+                      <View style={styles.stats} testID="standings.open.stats">
+                        {stats.map((x) => <StatRow key={x.label} label={x.label} value={x.value} />)}
+                      </View>
                       {r.forecast && result ? <ProjectionTeamDetail team={r.forecast} result={result} maxPf={{
                         block: data?.max_pf_moves, flagOn: maxPfMovesOn, isSleeper, liveRosterIds, leagueId, userId,
                       }} targets={{
@@ -295,11 +298,7 @@ export default function StandingsScreen() {
         {result ? (
           <View style={styles.notes} testID="standings.forecast-status">
             <Text variant="bodySm">{[lastSaved ? `Last saved: ${date(result.captured_at)}` : 'Weekly estimate',
-              incomplete ? 'Incomplete' : null,
-              result.coverage?.estimated ? 'Partial Sleeper data' : null, result.provisional ? 'Provisional' : null].filter(Boolean).join(' · ')}</Text>
-            {status ? <Text variant="bodySm">{status}</Text> : null}
-            {incomplete ? <Text variant="bodySm" style={styles.strong} testID="league-projections.incomplete">{incompleteSentence(missingSlots)}</Text> : null}
-            {showTable ? <Text variant="bodySm">{VIEW_FOOT[view]}</Text> : null}
+              incomplete ? 'Incomplete' : null, result.provisional ? 'Provisional' : null].filter(Boolean).join(' · ')}</Text>
           </View>
         ) : (
           <View style={styles.notes} testID="standings.no-forecast">
@@ -364,7 +363,9 @@ function ViewSeg({ label, active, onPress, testID }: {
 }
 
 // A sortable heading: the active one is ice with an arrow (down = best /
-// biggest first, up = reversed; Team: up = A–Z).
+// biggest first, up = reversed; Team: up = A–Z; SoS: down = toughest first).
+// A number heading draws its arrow on the LEFT, so the heading text keeps the
+// cells' right edge in every sort state; Team keeps it on the right.
 function HeadCell({ column, sort, onSort }: {
   column: StandingsColumn;
   sort: { column: StandingsColumn; dir: 'asc' | 'desc' };
@@ -374,7 +375,12 @@ function HeadCell({ column, sort, onSort }: {
   const isTeam = column === 'team';
   const dirWord = !active ? 'not sorted' : isTeam
     ? (sort.dir === 'asc' ? 'A to Z' : 'Z to A')
-    : (sort.dir === 'desc' ? 'highest first' : 'lowest first');
+    : column === 'sos'
+      ? (sort.dir === 'desc' ? 'toughest first' : 'easiest first')
+      : (sort.dir === 'desc' ? 'highest first' : 'lowest first');
+  const caret = active ? (
+    <Icon name={sort.dir === 'asc' ? 'chevron-up' : 'chevron-down'} size={10} color={ice.base} />
+  ) : null;
   return (
     <Pressable
       testID={`standings.sort.${column}`}
@@ -384,16 +390,15 @@ function HeadCell({ column, sort, onSort }: {
       hitSlop={{ top: 8, bottom: 8 }}
       style={[styles.headCell, isTeam ? styles.teamCol : { width: COL_WIDTH[column], justifyContent: 'flex-end' }]}
     >
+      {isTeam ? null : caret}
       <Text
         variant="label"
         numberOfLines={2}
-        style={[styles.headText, !isTeam && styles.right, active && styles.headActive]}
+        style={[styles.headText, !isTeam && styles.right, column === 'sos' && styles.asWritten, active && styles.headActive]}
       >
         {COLUMN_LABEL[column]}
       </Text>
-      {active ? (
-        <Icon name={sort.dir === 'asc' ? 'chevron-up' : 'chevron-down'} size={10} color={ice.base} />
-      ) : null}
+      {isTeam ? caret : null}
     </Pressable>
   );
 }
@@ -434,6 +439,8 @@ const styles = StyleSheet.create({
   },
   headCell: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, minHeight: 28 },
   headText: { flexShrink: 1 },
+  // "SoS" keeps its lowercase o: the one heading exempt from the label style's uppercase.
+  asWritten: { textTransform: 'none' },
   headActive: { color: ice.base },
   row: { paddingHorizontal: space.xs, borderBottomWidth: 1, borderBottomColor: ink.line },
   rowYou: { backgroundColor: ink.ink2, borderBottomColor: ink.lineStrong },
@@ -452,7 +459,7 @@ const styles = StyleSheet.create({
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs, minHeight: 44 },
   rowPressed: { backgroundColor: ink.ink3 },
   teamCol: { flex: 1, minWidth: 0 },
-  chevronCol: { width: 16, alignItems: 'center' },
+  chevronCol: { width: CHEVRON, alignItems: 'center' },
   right: { textAlign: 'right' },
   nameCell: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   name: { ...type.body, flexShrink: 1 },
@@ -460,8 +467,12 @@ const styles = StyleSheet.create({
   num: { ...type.data, textAlign: 'right', flexShrink: 0 },
   record: { fontFamily: fonts.dataSemi },
   dash: { color: chalk.faint },
+  // SoS: the rank, with "hard" / "easy" under it in small muted text (label size, body face).
+  sosCell: { alignItems: 'flex-end', flexShrink: 0 },
+  band: { ...type.bodySm, fontSize: type.label.fontSize, lineHeight: type.label.lineHeight, textAlign: 'right' },
   openBody: { gap: space.xs, paddingBottom: space.sm },
-  strong: { color: chalk.base },
+  // Stat values end under the last number column, not under the chevron.
+  stats: { marginRight: space.xs + CHEVRON },
 
   notes: { gap: space.xs, marginTop: space.md, alignItems: 'flex-start' },
   note: { marginTop: space.md },

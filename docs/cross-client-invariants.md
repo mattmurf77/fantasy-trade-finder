@@ -1558,9 +1558,21 @@ The app's tier page (`mobile/src/utils/rosterSetup.ts` `applyTierMove`, `tierReb
 
 ### Stored weekly projection results
 
-Mobile Projected standings, League Summary and web League Summary read the same stored batch contract. They must not trigger simulation/provider fetch on entry or fall back to a differently attributed computed model while `league.projections` is enabled. Display expected and modal W-L-T separately; picks are unconditional, expected pick is conditional with sample threshold/null. Ownership applies only to the selected year/round. Weekly inputs remain visibly dated. Read/refresh failures retain same-context last-valid output; switching account/league clears it. Unadmitted missing coverage never becomes zero; finite modeled omissions retain explicit provenance.
+Mobile Projected standings, League Summary and web League Summary read the same stored batch contract. They must not trigger simulation/provider fetch on entry or fall back to a differently attributed computed model while `league.projections` is enabled. Display expected and modal W-L-T separately; picks are unconditional, expected pick is conditional with sample threshold/null (web only since D-285; see the table below). Ownership applies only to the selected year/round. Weekly inputs remain visibly dated. Read/refresh failures retain same-context last-valid output; switching account/league clears it. Unadmitted missing coverage never becomes zero; finite modeled omissions retain explicit provenance.
 
-Both clients disclose modeled scoring omissions and preserve the requested Max PF target in the joint model. Weekly text compares the target with the simulated average; advanced diagnostics distinguish latent parameters from realized variance/correlation and report rounding and Monte Carlo uncertainty. Decoder consistency and simulation invariants are separate from predictive accuracy.
+Still shared by both clients: the stored contract above, never simulating on entry, expected and modal records shown separately, playoff and miss chances through the one D-262 helper per client, ownership for the selected year/round only, and the "(free agent)" lineup marker. Decoder consistency and simulation invariants are separate from predictive accuracy.
+
+**Deliberately different since D-285 (2026-11-25, mobile only; web unchanged):**
+
+| Shown by | Web (`web/js/league-projections.js`) | Mobile (`StandingsScreen`, `LeagueProjectionDetail`) |
+|---|---|---|
+| Modeled scoring omissions ("Partial Sleeper data", per-player partial contributions, "not confirmed zeros") | yes | no |
+| Weekly Max PF target vs simulated average, "not calibrated" sentence, advanced diagnostics | yes | no |
+| Weekly win / tie / loss odds and score SD | yes | win chance only (whole percent) |
+| Conditional expected pick if the team misses (with its sample threshold / null) | yes | no; a 10th–90th percentile "likely pick" range at a 25%+ miss chance instead |
+| Remaining weeks' matchup table, SoS column, stat rows | no | yes |
+
+The table is the rule: a change to either column is a decision, not drift. No web page loads `league-projections.js` since the 2026-11-25 launch cut, so no user sees the web column today; reversing that cut brings the difference back into view.
 
 ### Max PF moves (2026-11-12, D-258, flag `league.max_pf_moves`)
 

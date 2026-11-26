@@ -1,3 +1,11 @@
+## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`
+
+- **App (the branch, one commit on `origin/main` `c9091e5a`):** `npx tsc --noEmit` clean; all **210** `tests/check-*.js` exit 0; `scripts/testid-lint.sh` OK (main session's run).
+- **Suites touched:** `check-standings-table` **147 passed** (107 at base `30ee823c`); `check-league-projections` passes (prints no count; 101 assertion call sites, 43 at base); `check-home-playoff-banner` passes (no count; 197 call sites, 180 at base); `check-playoff-odds-display` **21 passed** (two pins moved to the row form); `check-direction-card` **94 passed** (harness loads `utils/pickRange`); `check-league-projections-web` passes untouched. The six re-run by the docs writer on the same tree: same results.
+- **Code-walk proof:** `docs/plans/standings-display-rows/evidence.md` §1.
+- **Backend / web:** not run locally (no backend or web file changed); CI on the PR.
+- **Not verified:** nothing on a device. Text metrics and truncation at 375pt, large Dynamic Type, the two-line SoS cell, VoiceOver order, and the Home card with three notes are left to the TestFlight checklist (`docs/plans/standings-display-rows/testflight-checklist.md`, 30 steps, not run).
+
 ## 2026-11-25 — Paid launch branch brought up to main after the launch cuts, branch `feat/paid-launch`
 
 - **What changed on the branch:** merged `origin/main` `30ee823c` (PR 729 launch cuts and the 11-24 fixes). Conflicts in this file and `mobile/tests/README.md` only, both sides kept: the README keeps this branch's `check-paywall` row (with `check-paid-launch`) and takes main's realigned `check-monetization-cut-features` row and new `check-launch-cuts` row.
