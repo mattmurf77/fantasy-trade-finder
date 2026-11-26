@@ -24,12 +24,19 @@ Covers:
       a web request with the web knob 0 (or missing) while mobile enforces
   (5) hot path: dark → no model_config or entitlement read; not enforcing →
       no entitlement read
+  (6) the web knob at 1 (owner 2026-11-25): every gated rule walls a
+      non-app request (no header, a browser, X-Device web, the extension, an
+      unknown device) exactly like the app, a subscriber passes, a signed-out
+      browser never gets a 402; every non-gated rule passes with no
+      entitlement read; the website's pages, share/OG/join pages, the
+      RevenueCat webhook, cron and admin never answer 402
 
 Gated views are stubbed to a plain 200 so "the hook let it through" reads as
 200 without running the trade engine. In-memory SQLite, no network.
 """
 
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -567,3 +574,176 @@ def test_integrated_account_shop_send_is_stopped_before_elo(eng, client, path, v
     assert response.status_code == 402, response.get_json()
     assert response.get_json()["gate"] == ("never_trialed" if verified else "verify_required")
     signal.assert_not_called()
+
+
+# ── (6) the web knob at 1 (owner 2026-11-25: "aligned. Close this") ───────
+#
+# paywall_web_enforce_enabled = 1 is a required turn-on step (turn-on-runbook
+# §B). With it on, a request without the native app's X-Device is walled
+# exactly like the app; nothing the website still serves after the launch cut
+# of web sign-in (landing, legal, ranking-method, share and OG landings, the
+# referral join page, the RevenueCat webhook, cron) may start answering 402.
+# The seed stays 0 (test_web_knob_seeded_zero): turning it on is the
+# operator's step, never a default.
+
+BROWSER = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                   "(KHTML, like Gecko) Version/18.1 Safari/605.1.15"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+NON_APP = {
+    "no_header": {},
+    "browser": BROWSER,
+    "expo_web": {"X-Device": "web", **BROWSER},
+    "extension": {"X-Source": "extension"},
+    "unknown_device": {"X-Device": "windows"},
+}
+
+
+def _rule_keys():
+    return sorted({(m, r.rule) for r in server.app.url_map.iter_rules()
+                   for m in r.methods if m not in ("HEAD", "OPTIONS")},
+                  key=lambda k: (k[1], k[0]))
+
+
+GATED_RULES = [k for k in _rule_keys() if pg.ROUTES.get(k) == pg.GATED]
+NOT_GATED_RULES = [k for k in _rule_keys() if pg.ROUTES.get(k) != pg.GATED]
+
+
+def _concrete(rule):
+    """A request path for a Flask rule: <int:x> → 7, any other <x> → x1."""
+    return re.sub(r"<[^>]+>", "x1", re.sub(r"<int:[^>]+>", "7", rule))
+
+
+def _web_wall(eng):
+    """Enforcing with the web knob at 1, the preview off."""
+    _set_config(eng, **{ENFORCE_KNOB: 1.0, WEB_KNOB: 1.0, **NO_PREVIEW})
+    return patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS))
+
+
+@pytest.fixture()
+def gated_stubbed(monkeypatch):
+    """Every gated rule's view returns a plain 200."""
+    endpoints = {r.endpoint for r in server.app.url_map.iter_rules()
+                 if any(pg.ROUTES.get((m, r.rule)) == pg.GATED for m in r.methods)}
+    for ep in endpoints:
+        monkeypatch.setitem(server.app.view_functions, ep, lambda **_kw: ("ok", 200))
+
+
+def test_gated_rule_lists_are_not_vacuous():
+    assert len(GATED_RULES) >= 30 and ("POST", "/api/trades/propose-espn") in GATED_RULES
+    assert ("POST", "/api/billing/revenuecat/webhook") in NOT_GATED_RULES
+    assert ("GET", "/<path:filename>") in NOT_GATED_RULES
+
+
+@pytest.mark.parametrize("method,rule", GATED_RULES)
+def test_web_knob_1_walls_every_gated_rule_like_the_app(eng, method, rule):
+    """Pure decide(): with the web knob at 1 a non-app request gets the app's
+    answer on every gated rule: 402 for a never-entitled verified session,
+    through for a subscriber, through with no session (the route's own auth
+    answers). Knob 0: the same non-app request passes."""
+    blocked = (402, {"error": "pro_required", "gate": "never_trialed"})
+    with _web_wall(eng):
+        assert pg.decide(rule, method, USER, False, True) == blocked
+        assert pg.decide(rule, method, USER, True, True) == blocked
+        assert pg.decide(rule, method, None, False, True) is None
+        _set_config(eng, **{WEB_KNOB: 0.0})
+        assert pg.decide(rule, method, USER, False, True) is None
+        _set_config(eng, **{WEB_KNOB: 1.0})
+        entl.grant(USER, "pro", source="manual_grant")
+        assert pg.decide(rule, method, USER, False, True) is None
+
+
+@pytest.mark.parametrize("client_name", list(NON_APP))
+def test_web_knob_1_http_every_gated_rule_402s_a_non_app_request(
+        eng, client, gated_stubbed, client_name):
+    headers = {"X-Session-Token": TOKEN, **NON_APP[client_name]}
+    with _web_wall(eng):
+        for method, rule in GATED_RULES:
+            r = client.open(_concrete(rule), method=method, headers=headers)
+            assert (r.status_code, r.get_json()) == (
+                402, {"error": "pro_required", "gate": "never_trialed"}), (method, rule)
+
+
+@pytest.mark.parametrize("client_name", list(NON_APP))
+def test_web_knob_1_http_subscriber_passes_every_gated_rule(
+        eng, client, gated_stubbed, client_name):
+    _make_user("active_paid")
+    headers = {"X-Session-Token": TOKEN, **NON_APP[client_name]}
+    with _web_wall(eng):
+        for method, rule in GATED_RULES:
+            r = client.open(_concrete(rule), method=method, headers=headers)
+            assert r.status_code == 200, (method, rule)
+
+
+@pytest.mark.parametrize("client_name", ["browser", "expo_web"])
+def test_web_knob_1_unverified_browser_gets_verify_required(eng, client, stubbed, client_name):
+    """A browser holding an unverified session: verify_required, never a
+    price, the same as the app (every gated rule: test_paywall_gate_unverified)."""
+    _make_user("active_paid")
+    with _web_wall(eng):
+        r = client.post("/api/trades/propose",
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **NON_APP[client_name]})
+    assert (r.status_code, r.get_json()) == (
+        402, {"error": "pro_required", "gate": "verify_required"})
+
+
+@pytest.mark.parametrize("client_name", list(NON_APP))
+def test_web_knob_1_no_session_never_402(eng, client, gated_stubbed, client_name):
+    """What a signed-out browser gets: never a 402 (the route's own auth
+    answers; here the stub's 200)."""
+    with _web_wall(eng):
+        for method, rule in GATED_RULES:
+            r = client.open(_concrete(rule), method=method, headers=NON_APP[client_name])
+            assert r.status_code == 200, (method, rule)
+
+
+def test_web_knob_1_every_non_gated_rule_passes_without_a_read(eng):
+    """Pure decide() over every non-gated rule in app.url_map: a verified,
+    never-entitled, non-app session passes, and no entitlement is read."""
+    ent, hist = _Spy(entl.get_entitlements), _Spy(entl.list_for_user)
+    with _web_wall(eng), patch.object(entl, "get_entitlements", ent), \
+            patch.object(entl, "list_for_user", hist):
+        through = [(m, r) for m, r in NOT_GATED_RULES
+                   if pg.decide(r, m, USER, False, True) is not None]
+    assert through == []
+    assert (ent.calls, hist.calls) == (0, 0)
+
+
+# What the website still serves after the 2026-11-25 cut (web/CLAUDE.md
+# §Pages), plus the provider and operator traffic that reaches the same host.
+# Real views except the cron tick (stubbed: with no CRON_SECRET in a test
+# env it would run the whole tick). Status is whatever the view answers (200,
+# 302 for a cut page, 404 for an unknown share token, 4xx for an empty body),
+# never 402.
+WEBSITE_REQUESTS = [
+    ("GET", "/"), ("GET", "/index.html"), ("GET", "/faq.html"), ("GET", "/contact.html"),
+    ("GET", "/privacy"), ("GET", "/terms"), ("GET", "/privacy.html"), ("GET", "/terms.html"),
+    ("GET", "/ranking-method.html"), ("GET", "/profile.html"), ("GET", "/404.html"),
+    ("GET", "/robots.txt"), ("GET", "/sitemap.xml"), ("GET", "/css/styles.css"),
+    ("GET", "/js/landing-steps.js"), ("GET", "/no-such-page"),
+    ("GET", "/calculator.html"), ("GET", "/positional-tiers.html"),
+    ("GET", "/.well-known/apple-app-site-association"),
+    ("GET", "/u/someone"), ("GET", "/s/trade/tok1"), ("GET", "/s/p/abc"),
+    ("GET", "/s/tiers/QB/someone"), ("GET", "/og/trade/tok1.png"), ("GET", "/og/p/abc.png"),
+    ("GET", "/app/league/join/l1"), ("GET", "/app/league/join/l1/go/web"),
+    ("GET", "/api/feature-flags"), ("GET", "/api/me/entitlements"),
+    ("GET", "/api/paywall/config"), ("GET", "/api/session/ping"),
+    ("POST", "/api/feedback"), ("POST", "/api/events"),
+    ("POST", "/api/billing/revenuecat/webhook"), ("POST", "/api/cron/daily-tick"),
+    ("GET", "/api/admin/config"),
+]
+
+
+@pytest.mark.usefixtures("no_real_network")
+@pytest.mark.parametrize("token", [None, TOKEN], ids=["signed_out", "stale_session"])
+@pytest.mark.parametrize("method,path", WEBSITE_REQUESTS)
+def test_web_knob_1_website_and_provider_routes_never_402(
+        eng, client, monkeypatch, method, path, token):
+    monkeypatch.setitem(server.app.view_functions, "cron_daily_tick", lambda: ("ok", 200))
+    headers = dict(BROWSER, **({"X-Session-Token": token} if token else {}))
+    with _web_wall(eng):
+        r = client.open(path, method=method, headers=headers,
+                        json={} if method == "POST" else None)
+    assert r.status_code != 402, (method, path, r.status_code)
+    assert b"pro_required" not in r.get_data(), (method, path)

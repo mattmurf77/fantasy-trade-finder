@@ -294,14 +294,15 @@ def _post_bulk(base_url: str, secret: str, body: dict, timeout: int = 120):
         return 0, None
 
 
-def apply(keys, base_url, secret, batch_size) -> list:
-    """Send every key in batches; returns [(key, reason)] failures."""
+def apply(keys, base_url, secret, batch_size, note: str = NOTE) -> list:
+    """Send every key in batches; returns [(key, reason)] failures.
+    `note` is stored on each grant (grant_pro_to_users.py passes its own)."""
     failures = []
     keys = sorted(keys)
     for i in range(0, len(keys), batch_size):
         chunk = keys[i:i + batch_size]
         status, payload = _post_bulk(base_url, secret, {
-            "users": chunk, "entitlement": "pro", "perpetual": True, "note": NOTE})
+            "users": chunk, "entitlement": "pro", "perpetual": True, "note": note})
         if status != 201 or not isinstance(payload, dict):
             failures += [(k, f"http {status or 'unreachable'}") for k in chunk]
             print(f"  batch {i // batch_size + 1}: FAILED (http {status or 'unreachable'}), "
