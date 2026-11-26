@@ -29,6 +29,11 @@ overridden by head-eng (2026-10-24):
     paywall_previews, so its answer can't depend on subscriber status or
     Fleeced history.
   * The server-made demo session (try-before-sync) is exempt on deck routes.
+  * League pass (docs/plans/monetization/league-pass/lld.md §4): with
+    monetize.league_pass on, a verified user without pro whom a pass covers
+    in the league the request acts on (LEAGUE_RESOLVERS) is let through as
+    PassAllowed, after the pro check and before the preview. Flag off: no
+    league is resolved and coverage is never read.
 
 One before_request hook in server.py reads ROUTES, a per-route table keyed by
 (method, Flask rule string), never by prefix: /api/trades/* mixes free and
@@ -39,17 +44,22 @@ it. Everything stateful is a plain function so it tests without Flask.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Mapping
 
 from sqlalchemy import insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from . import database as db
 from . import entitlements
+from . import league_pass
+from .feature_flags import is_enabled
+
+log = logging.getLogger(__name__)
 
 GATED, FREE, NEVER_GATE = "gated", "free", "never_gate"
 
@@ -142,6 +152,9 @@ ROUTES = {
     ("PUT", "/api/admin/founder-pages/<slug>"): NEVER_GATE,
     ("DELETE", "/api/admin/founder-pages/<slug>"): NEVER_GATE,
     ("GET", "/api/admin/founder-pages/<slug>/notes"): NEVER_GATE,
+    ("POST", "/api/admin/league-pass/comp"): NEVER_GATE,     # league pass (cron secret)
+    ("GET", "/api/admin/league-pass"): NEVER_GATE,
+    ("DELETE", "/api/admin/league-pass/<int:pass_id>"): NEVER_GATE,
     ("POST", "/api/admin/grading/add-fit-arms"): NEVER_GATE,
     ("POST", "/api/admin/grading/pregenerate"): NEVER_GATE,
     ("GET", "/api/admin/grading/report"): NEVER_GATE,
@@ -226,6 +239,12 @@ ROUTES = {
     ("GET", "/api/invite/impact"): FREE,
     ("POST", "/api/invite/token"): FREE,
     ("GET", "/api/leaderboard"): FREE,
+    ("GET", "/api/league-pass"): FREE,             # league pass (docs/plans/monetization/league-pass/)
+    ("POST", "/api/league-pass/bind"): FREE,
+    ("POST", "/api/league-pass/intent"): FREE,
+    ("POST", "/api/league-pass/repoint"): FREE,
+    ("POST", "/api/league-pass/settings"): FREE,
+    ("PUT", "/api/league-pass/settings"): FREE,
     ("GET", "/api/league/<league_id>/receipts"): FREE,
     ("GET", "/api/league/activity"): FREE,
     ("GET", "/api/league/asset-prefs"): FREE,
@@ -382,6 +401,64 @@ ROUTES = {
     ("GET", "/u/<path:username>"): FREE,
 }
 
+# ── league pass: how each gated rule finds the league it acts on (lld §4.2) ──
+# Every GATED rule has a kind (test_paywall_league_resolvers.py). A kind must
+# return the league its handler acts on, or None (not covered), never a
+# league the handler might not act on:
+#   session — the session's active league. The handler refuses any other
+#             (overhaul_api `load` / the active-overhaul read and create,
+#             win_now_api `actor` and its job / scenario reads).
+#   active  — the session's active league, and None when the body names a
+#             different `league_id`: these handlers act on session state
+#             (its league's members, rosters, deck) AND on the body's league,
+#             so a mismatch is never covered.
+#   body    — the body's `league_id` (stripped, as the handler reads it), else
+#             the session's: the handler acts on that league only (the
+#             propose and respond routes read no session league).
+#   query   — `?league_id=`, else the session's; GET /api/trades then forces
+#             its filter to the pass league (server.get_trades).
+#   job     — the league in the key of the deck the /status request names
+#             (server._paywall_job_league).
+#   match   — the trade_matches row's league_id.
+# For `session` and `active`, server._require_initialized_session confirms the
+# session's league again when the handler reads the session, so a session
+# switched to another league after the hook is refused (lld §4.3).
+SESSION, ACTIVE, BODY, QUERY, JOB, MATCH = "session", "active", "body", "query", "job", "match"
+LEAGUE_RESOLVERS = {
+    ("GET", "/api/trades"): QUERY,
+    ("POST", "/api/trades/generate"): ACTIVE,
+    ("POST", "/api/trades/pass-reason"): ACTIVE,
+    ("GET", "/api/trades/status"): JOB,
+    ("POST", "/api/trades/swipe"): ACTIVE,
+    ("POST", "/api/trades/propose"): BODY,
+    ("POST", "/api/trades/propose-espn"): BODY,
+    ("POST", "/api/trades/propose-mfl"): BODY,
+    ("POST", "/api/trades/queue"): ACTIVE,
+    ("POST", "/api/trades/respond-mfl"): BODY,
+    ("POST", "/api/trades/asset-ideas"): ACTIVE,
+    ("POST", "/api/trades/fair-packages"): ACTIVE,
+    ("POST", "/api/trades/matches/<int:match_id>/disposition"): MATCH,
+    ("POST", "/api/trades/standing-offer"): ACTIVE,
+    ("GET", "/api/overhauls"): SESSION,
+    ("POST", "/api/overhauls"): SESSION,
+    ("GET", "/api/overhauls/<overhaul_id>"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/assemble"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/attempts/<attempt_id>/status"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/decisions"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/generate"): SESSION,
+    ("GET", "/api/overhauls/<overhaul_id>/offers"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/refresh"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/roadmaps/<roadmap_id>/prepare-send"): SESSION,
+    ("PUT", "/api/overhauls/<overhaul_id>/roadmaps/<roadmap_id>/priorities"): SESSION,
+    ("PUT", "/api/overhauls/<overhaul_id>/roadmaps/<roadmap_id>/select"): SESSION,
+    ("POST", "/api/overhauls/<overhaul_id>/send"): SESSION,
+    ("PUT", "/api/overhauls/<overhaul_id>/settings"): SESSION,
+    ("POST", "/api/win-now/evaluate"): SESSION,
+    ("GET", "/api/win-now/jobs/<job_id>"): SESSION,
+    ("POST", "/api/win-now/scenarios/<scenario_id>/decision"): SESSION,
+    ("POST", "/api/win-now/search"): SESSION,
+}
+
 # The `route_family` prop of paywall_gate_hit (C8 §B), by the matched rule,
 # never the raw path. A closed set: `other` is a gated rule not mapped here
 # (test_paywall_gate_hit.py keeps every gated rule in ROUTES off it).
@@ -472,12 +549,102 @@ class Preview:
         return min(self.pages, max(1, math.ceil(raw_end / self.page_size)))
 
 
+@dataclass(frozen=True)
+class PassAllowed:
+    """Allowed by a league pass (lld §4.1): through, for `league_id` only.
+    The hook sets g.paywall_pass_league; the preview is never reached."""
+    league_id: str
+
+
+@dataclass(frozen=True)
+class SessionPending:
+    """A covered member's `session` / `active` request on a session with no
+    league yet (sign-in before /api/session/init, or a session restored
+    after a restart). The hook answers the handlers' own 409
+    `session_not_initialized` and the request reaches no handler: a
+    body-named league never stands in for the missing session league."""
+
+
+SESSION_PENDING = SessionPending()
+
+
+@dataclass(frozen=True)
+class LeagueAsk:
+    """What the hook knows for resolving a gated request's league (lld §4.2).
+    `body` is the JSON body as the handlers parse it (forced, {} when not a
+    dict). `job_league()` is server.py's lookup of the deck /status names."""
+    session_league: str | None = None
+    body: Mapping = None
+    args: Mapping = None
+    view_args: Mapping = None
+    job_league: Callable[[], str | None] = lambda: None
+
+
+def _named(value) -> str | None:
+    """A request-named league id as the propose routes read it."""
+    return str(value or "").strip() or None
+
+
+def resolve_league(rule: str, method: str, ask: LeagueAsk) -> str | None:
+    """The league a gated request acts on, by its LEAGUE_RESOLVERS kind, or
+    None (not covered). Never raises: an exception is logged and reads as
+    None, so a pass never widens access on an error (unlike the entitlement
+    read, which fails open)."""
+    try:
+        kind = LEAGUE_RESOLVERS.get((("GET" if method == "HEAD" else method), rule))
+        body, args = ask.body or {}, ask.args or {}
+        if kind == SESSION:
+            return ask.session_league or None
+        if kind == ACTIVE:
+            named = body.get("league_id")
+            if named and str(named) != ask.session_league:
+                return None
+            return ask.session_league or None
+        if kind == BODY:
+            return _named(body.get("league_id")) or ask.session_league or None
+        if kind == QUERY:
+            return args.get("league_id") or ask.session_league or None
+        if kind == JOB:
+            return ask.job_league() or None
+        if kind == MATCH:
+            t = db.trade_matches_table
+            with db.engine.begin() as conn:
+                league = conn.execute(select(t.c.league_id).where(
+                    t.c.id == int((ask.view_args or {})["match_id"]))).scalar()
+            return str(league) if league else None
+    except Exception:
+        log.exception("league pass: league resolver failed: %s %s", method, rule)
+    return None
+
+
+def pass_enabled() -> bool:
+    """monetize.league_pass. Off: no league is resolved and coverage is
+    never read (R40)."""
+    return is_enabled(league_pass.FLAG)
+
+
 def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
             verified: bool, *, demo: bool = False, route_verifies: bool = False,
-            ask: DeckAsk | None = None) -> tuple[int, dict] | Preview | None:
+            ask: DeckAsk | None = None, league_id: str | None = None,
+            league_user_id: str | None = None, session_pending: bool = False,
+            ) -> tuple[int, dict] | Preview | PassAllowed | SessionPending | None:
     """The decision for a request that applies(): None (through), a Preview
-    (through, capped to the preview window), or (402, body). No user → None:
-    the route's own auth answers (401), never a 402.
+    (through, capped to the preview window), a PassAllowed (through, on a
+    league pass), or (402, body). No user → None: the route's own auth
+    answers (401), never a 402.
+
+    League pass (lld §4.1): with monetize.league_pass on and the request's
+    league resolved (`league_id`), a user without account-level pro whom a
+    pass covers there is PassAllowed, before the preview, so a covered
+    request never spends it (R9). `league_user_id` is a second identity to
+    try, the session's league identity (a Sleeper co-owner, whom
+    league_members lists under the roster's primary owner); the hook passes
+    it only when `league_id` is the session's active league. Everything
+    before the pro check is unchanged, so an unverified session is settled
+    before any coverage read (R8). `session_pending` (the hook's: flag on, a
+    `session` / `active` rule, a session with no league yet): a user some
+    live pass covers anywhere gets SESSION_PENDING, which the hook answers
+    with the handlers' 409 session_not_initialized, before the preview.
 
     Pro counts only on a verified session (or the server-made demo session):
     entitlements resolve by user_id, and an unverified username-only session
@@ -503,10 +670,37 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
         return 402, {"error": "pro_required", "gate": VERIFY_REQUIRED}
     if entitlements.get_entitlements(user_id)["pro"]:
         return None
+    if league_id and pass_enabled() and _covered(league_id, user_id, league_user_id):
+        return PassAllowed(league_id)
+    if session_pending and pass_enabled() and _covered_anywhere(user_id):
+        return SESSION_PENDING
     held = _held_pro(user_id)
     if held is None and deck:
         return _preview(rule, user_id, ask)
     return 402, {"error": "pro_required", "gate": _reason(held, deck)}
+
+
+def _covered_anywhere(user_id: str) -> bool:
+    """Whether any live pass covers the user (league_pass.passes_for is
+    non-empty), for a session that has no league yet. A failed read is not
+    covered, like _covered."""
+    try:
+        return bool(league_pass.passes_for(user_id))
+    except Exception:
+        log.exception("league pass: coverage read failed for user %s", user_id)
+        return False
+
+
+def _covered(league_id: str, *user_ids) -> bool:
+    """Whether a pass covers any of `user_ids` in `league_id`. A failed
+    coverage read is not covered: the hook fails open on an exception, and a
+    pass must never widen access on an error (lld §4.2)."""
+    try:
+        return any(league_pass.covers(uid, league_id) is not None
+                   for uid in dict.fromkeys(user_ids) if uid)
+    except Exception:
+        log.exception("league pass: coverage read failed for league %s", league_id)
+        return False
 
 
 def decide(rule: str, method: str, user_id: str | None, is_mobile: bool,
@@ -753,3 +947,38 @@ def record_gate_hit(user_id: str, gate: str, rule: str, *, is_mobile: bool,
         source="mobile" if is_mobile else "web",
         props={"gate": gate, "route_family": family, "enforced": True},
         touch_user=False)
+
+
+# ── league_pass_coverage_used (league-pass lld §9) ─────────────────────────
+
+COVERAGE_USED_EVENT = "league_pass_coverage_used"
+
+
+def record_coverage_used(user_id: str, league_id: str, rule: str, *, is_mobile: bool,
+                         device_type: str | None = None, os_version: str | None = None,
+                         app_version: str | None = None) -> None:
+    """The league_pass_coverage_used row for a request a pass let through,
+    at most one per (user_id, league_id) per UTC day. The bounded
+    per-process de-dupe record_gate_hit uses is the fast path (its own key
+    shape, so the two never collide); on its miss (the first covered request
+    per user, league and day in this process: after a restart, on another
+    worker, or after an eviction) one indexed read (ix_user_events_user_
+    occurred) skips the write when a row for today already exists, in the
+    insert's transaction. Two processes in the same instant can still both
+    write. Non-touching; `family` is the closed route_family set. The caller
+    swallows any failure."""
+    if not _first_hit_today((COVERAGE_USED_EVENT, user_id, league_id)):
+        return
+    t = db.user_events_table
+    with db.engine.begin() as conn:
+        if conn.execute(select(t.c.id).where(
+                t.c.user_id == user_id, t.c.occurred_at >= f"{_utc_day()}T00:00:00",
+                t.c.event_type == COVERAGE_USED_EVENT, t.c.league_id == league_id,
+        ).limit(1)).first() is not None:
+            return
+        db.record_event(
+            user_id, COVERAGE_USED_EVENT, league_id=league_id,
+            device_type=device_type, os_version=os_version, app_version=app_version,
+            source="mobile" if is_mobile else "web",
+            props={"family": route_family(rule)},
+            touch_user=False, conn=conn)

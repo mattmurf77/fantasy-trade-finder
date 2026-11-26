@@ -24,6 +24,32 @@
 - Not (c), profiling only managers with an account: profiling league-mates who never signed up is the point of the feature: most suggestions go to league-mates who never ranked with us. The disclosure plus the deletion suppression is the mitigation.
 **Consequences:** the list is kept indefinitely, unlike `deletion_scrub_jobs`; it is the minimal record needed to honour the deletion and names no one. Changing `EXPERIMENT_SALT_KEY` would now also orphan it. Residual race: a league-mate capture already past its suppression read when a deletion commits can write that profile once more; the league's next capture removes it. The policy's effective date was not changed, and the new sentence did not go through legal-lead.
 
+## D-281 — League pass: hybrid coverage, derived at read time and never stored per member, with a league-match check on every gated handler
+
+**Date:** 2026-11-22 · **Who:** the operator's ask through the main session ("Build server now"); built by builder subagents on `feat/league-pass-server`. Design: [prd](../docs/plans/monetization/league-pass/prd.md), [hld](../docs/plans/monetization/league-pass/hld.md) §2, §7, [lld](../docs/plans/monetization/league-pass/lld.md) §3–§4.
+**Context:** one buyer's annual subscription should unlock a league's gated features for every member. Account-wide coverage turns a throwaway league into many full Pro accounts; storing a grant per member needs fan-out on every purchase, renewal, refund and roster change.
+**Decision:**
+- **Hybrid coverage.** The buyer holds ordinary account-level `pro` (source `league_pass_iap`). A member holds no entitlement row: coverage is a separate, league-keyed answer at the paywall gate, so a member is gated as normal in every other league and keeps the deck preview and the individual free month.
+- **Derived, not stored.** `league_pass.covers` joins three facts at read time, each with one writer: the buyer's live `entitlements` row (the billing projector), the `league_passes` binding (`league_pass.py`), current membership (league sync). Lapse, refund, grace, late joiners and leavers need no fan-out.
+- **The gate checks coverage after account-level pro and before the preview**, only with `monetize.league_pass` on, for the league `paywall_gate.LEAGUE_RESOLVERS` names for the rule. An unverified session is answered before coverage is read; an unresolvable league, a resolver error or a coverage-read error is not covered (never fails open). A Sleeper co-owner is tried under the session's league identity, in the session's active league only.
+- **League-match check.** A request let through by a pass carries `g.paywall_pass_league` and may act on that league only: resolvers that read the session also require a body-named league to agree (`active`), `_require_initialized_session` re-checks the session's league at the handler, and `GET /api/trades` lists only the pass league.
+**Consequences:** three indexed reads on gated requests by verified non-Pro users while the flag is on; no cross-request cache. Flag off is byte-identical (nothing resolved, coverage never read). Covered accounts per league are capped at `total_rosters` + `league_pass_seat_allowance`; unproven ESPN/MFL team links count as membership (accepted, measured).
+
+**Added 2026-11-24, after an independent test pass on `36a1666e`:**
+- The overhaul and Win Now modules, swipe and pass-reason now make the league-match check themselves, on the session league and on every row or card they load.
+- A covered member on a session with no league yet gets the handlers' 409 `session_not_initialized` from the hook, never a 402. A body-named league never stands in for the missing session league.
+- A Sleeper co-owner rides the roster owner's seat: covered when the owner is, listed in `league_passes` for the session's active league, not counted in `covered_count` and not capped beyond the owners' seats. So the cap in Consequences bounds stored members, not every covered account. PRD R7 calls the allowance a co-owner allowance; on Sleeper it is not used by co-owners. That wording is the operator's to settle.
+- Seats are ordered by `users.created_at`, then user id, so a re-sync cannot change who holds one. `league_pass_coverage_used` holds its once-per-day rule across processes with one indexed read.
+
+**Added 2026-11-24, operator ("Free month replaces discount"; trial chaining: "No limit"):**
+- One product, `ftf_league_annual`, $99.99 a year, with a one-month free trial as its App Store introductory offer. The year-one discount tiers (`ftf_league_annual_t1` $84.99, `_t2` $69.99), their promotional offers (`league_t1_y1`, `league_t2_y1`) and the paid-annual-leaguemate count that chose a tier are removed, with the `tier` columns and `tier_mismatch` refusal. No in-app purchase key is needed.
+- No per-league limit on trials. A buyer in the trial covers the league exactly like a paying buyer; a cancelled trial ends coverage at its end through the normal expiry path. Members chaining trials in one league is a risk the operator accepted; it is measured, not blocked.
+
+**Added 2026-11-25, operator ("existing pro users need the option to purchase a league pass"; the league pass is ON at the initial public launch, superseding plan D5):**
+- A Pro user who is not already a pass buyer can buy, from Settings › Subscription (the paywall's entry is never seen by a Pro user). Holding `pro` from another source is no refusal: only `already_buyer` and `refund_blocked` refuse the buyer.
+- Coverage follows the `league_pass_iap` row (or a comp's expiry) only. A buyer whose Pro also comes from a lifetime, comp, promo or Founder grant keeps that grant when the pass ends; the grant never keeps a lapsed pass alive.
+- An individual App Store subscriber's purchase is an upgrade in the one subscription group. The projector moves a RevenueCat `PRODUCT_CHANGE` whose `new_product_id` is the league product onto that product, and an activating event for a group product ends the user's other active group row on the same `original_transaction_id` (upgrade: the individual row; downgrade taking effect at renewal: the league row, which ends the pass). The real RevenueCat event sequence is not verified against the store (lld §13 item 4).
+
 ## D-280 — Sign-out and a sign-in as another account run one account reset; Team review "done" and roster setup are stored per account
 
 **Date:** 2026-11-22 · **Who:** the operator's report from a Release simulator build with two accounts on one device; fixed on `fix/signout-clears-account-state`.
