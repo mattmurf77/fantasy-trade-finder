@@ -1,5 +1,12 @@
 # Decisions — Fantasy Trade Finder
 
+## D-285 — The landing counts visits with a fresh random id per page load, not the stored web device id
+
+**Date:** 2026-11-25 · **Who:** owner's ask (restore anonymous visit counting on the marketing landing after D-284); the per-load id is the builder's choice, for the owner to confirm. Scope: `docs/plans/web-landing-visit-count/scope.md`.
+**Context:** D-284 stopped the landing loading `events.js`, so `app_opened` `{launch_type: web}` stopped. `POST /api/events` rejects an event with neither a live session nor a device id (`no_identity`), so some id must be sent. The old web id, `ftf.deviceId` in localStorage, sits in `user_events.device_id` next to real account ids for events sent while signed in, so reusing it would tie a landing visit to an earlier signed-in account.
+**Decision:** a tiny dedicated script, `web/js/landing-visit.js`, not `events.js` (which reads the session token, replays a stored queue and was the invite-capture path). Per load it reads `/api/feature-flags`, and if `analytics.client_events` is true posts one `app_opened` `{launch_type: web}` with `X-Device-Id: visit_<uuid>`, a random event id and session id, `X-Source: web`, `credentials: "omit"`. Nothing is read from or written to browser storage or cookies. Rejected: reusing `ftf.deviceId` (linkable, as above); `events.js` (pulls the signed-in app's behaviour back in).
+**Consequences:** web rows count visits, not visitors: unique and returning visitors cannot be measured from them. Each visit is its own `device:` pseudo-user, so it never resolves through `identity_links`. The per-device rate limit does not bind a visitor (each load is a new key). Privacy wording about the website's device identifier in local storage stays untrue (not edited; owner's ruling pending with the rest of D-284's wording).
+
 ## D-284 — Launch cuts: 36 features off by the owner's row-by-row calls; Calibration kept for testers through a new `operator` experiment layer
 
 **Date:** 2026-11-25 · **Who:** the owner's calls on the 62 rows the launch feature audit recommended cutting, given to the main session; built by three builder subagents on `chore/launch-cuts`. Scope: `docs/plans/launch-cuts/scope.md`.
