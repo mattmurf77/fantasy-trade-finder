@@ -1,3 +1,9 @@
+## 2026-11-26 — Release: TestFlight 1.22.0 (202) from `main` `28c0efb8`
+
+- **What it carries:** the first build since 201 (`df3bc0b4`). Standings display rows (D-285, PR #740, merged as `4f385af3` with `--match-head-commit` on twelve green CI jobs) plus every app change merged in between: PRs #717, #718, #719, #720, #729 (launch cuts), #715 (paid launch), #734, #731 (league pass client, flag off) and #732.
+- **App:** clean detached checkout of `28c0efb8`, `npm ci`, `npx tsc --noEmit` clean, `test:easignore` ok, all **212** `tests/check-*.js` exit 0, `scripts/testid-lint.sh` OK. EAS build `f2836374-a522-42f9-9073-fedd17421a2c` FINISHED (confirmed with `build:list`, commit `28c0efb8`), 1.22.0 (202); submission `b9ea1b33-daf7-48e7-8a7a-b277524242aa` uploaded to App Store Connect.
+- **Not verified:** Apple's processing and tester availability; anything on a device (D-056). No checklist has been run on 202: `docs/plans/standings-display-rows/testflight-checklist.md` (30 steps) for D-285, and the other merged changes' own checklists. Whether main was ready for a build from the other changes' side (the league pass entry in NEXT asks for Shop offers converted to `useProForLeague` first) was not checked by this session; the operator asked for the build.
+
 ## 2026-11-25 — Landing page visit count (D-287), branch `feat/web-landing-visit-count`
 
 - **Web:** `qa/web/check_web_structure.py` **231/231** (was 229 on `origin/main`; `CUT` group 9, new `CUT-landing-scripts`, `CUT-landing-visit-anonymous`); `check_trade_search.cjs` pass; `check_ranking_method_page.py` pass; `check_browser_auth.mjs` 23 pass; `mobile/tests/check-*.js` **207/207** (node_modules symlinked from the launch-cuts worktree).
@@ -5,6 +11,7 @@
 - **Backend (scratch pytest venv layered on the sim-test venv, Python 3.12.16):** new `test_landing_visit_event.py` 4 passed; with `test_events_source`, `test_events_api`, `test_cut_web_pages`, `test_analytics_taxonomy*`: **161 passed**. Full suite is CI's.
 - **Runtime (local server on 5061, `FTF_TEST_MODE=1`, throwaway SQLite, both analytics flags true):** headless Chrome loaded `/` three times (two profiles): 3 `app_opened` rows, 3 different `visit_` ids, props `{launch_type: web, seq: 1}`, source/platform `web`, session id hashed, account/league/screen/device/country NULL; no cookies, local storage empty. Through a local proxy making `POST /api/events` answer 500, then drop the connection: page renders, step picker works (browser pane: clicked step 1), only console line is the browser's 500 network log.
 - **Not verified:** production (no calls made); Postgres.
+
 ## 2026-11-25 — Calculator screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`
 
 - **Mobile:** `npx tsc --noEmit` clean; `mobile/tests/check-*.js` **208/208** (new `check-eveners-unfair-only`, 33 checks: executes `evenersWanted` and both calculators' real EvenerRows render conditions; item 2's row checks are structural only); `testid-lint` OK. Re-specced: `check-calc-merged-layout` 16 / 16b / 17e (no name clamp, one clamp left: the compact team-name header), `check-projected-pick-tag` 3.3 (TradeSide mounts the tag 2×).
