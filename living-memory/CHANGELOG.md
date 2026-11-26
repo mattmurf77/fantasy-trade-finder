@@ -12,12 +12,26 @@
 ---
 
 
-## 2026-11-25 — Landing page visit count, anonymous (D-285), branch `feat/web-landing-visit-count`
+## 2026-11-25 — Landing page visit count, anonymous (D-287), branch `feat/web-landing-visit-count`
 
 - **What:** owner ask after D-284: count website traffic again. New `web/js/landing-visit.js` on the landing sends one `app_opened` `{launch_type: web}` per load, gated on `analytics.client_events`; fails silently. Not `events.js`: no session token, no queue replay, no invite capture.
 - **Anonymous:** device id, session id and event id are fresh random per load; nothing in cookies or browser storage. Rows count visits, not visitors. Stored: `device:visit_<uuid>`, source/platform `web`, hashed session id, CDN country only.
 - **Guards:** `CUT-landing-scripts`, `CUT-landing-visit-anonymous` in `check_web_structure.py`; `test_landing_visit_event.py`. Scope `docs/plans/web-landing-visit-count/scope.md`.
 - **Open:** privacy wording not edited; the website device-id and local-storage sentences stay untrue (owner's ruling, with D-284's).
+## 2026-11-25 — Calculator and deck screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`, PR #732 open
+
+- **(1)** "Recommended to even it" rows only for an `unfair` verdict, both calculators, one predicate (`evenersWanted`); missing verdict renders as before; "Trade options" unchanged; no server change. Narrows #251.
+- **(2)** Merged in-league columns (`TradeSide compact`): names and the chip · detail · tier row wrap, no "…"; the detail keeps its one-line width (badge wraps instead) and reads "yo"; pick rows drop "PICK · 0 yrs"; PROJ beside the PICK chip. Reverses #411's one-line name.
+- **(3)** Deck trade card (`PlayerCard compact`, TradeCard only): names unclamped; the box grows. Dense rows (Tiers, Free agents, League Summary) unchanged.
+- **Guard:** `check-eveners-unfair-only.js`; `check-calc-merged-layout` 16/16b/17/17e and `check-projected-pick-tag` 3.3/4.2b re-specced. Scope: `docs/plans/eveners-unfair-only/scope.md`.
+- **Open:** items 2 and 3 seen only partly on the simulator; 402 pt recheck pending.
+
+## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`, not merged
+
+- **What:** mobile-only display change on Standings and the Home playoff card. Open team as stat rows; a client-computed SoS column in the Record view (stacked "Play/offs", tighter columns, sort arrow left of numeric headings); "Remaining schedule" replaces Weekly projections; Draft pick odds as rows with a likely pick range and the chance of the 1.01 at a 25%+ miss chance, and the same range under Home's Projected pick.
+- **Removed from the app:** model diagnostics, tie/loss odds, score SD, the "not calibrated", partial-data and "odds don't confirm a spot" text, the under-table status sentences and footnotes, the conditional expected pick.
+- **Not changed:** web, backend, flags, events. Rollback is a revert and a new build.
+- **Docs:** [scope](../docs/plans/standings-display-rows/scope.md), [code walk](../docs/plans/standings-display-rows/evidence.md), [checklist](../docs/plans/standings-display-rows/testflight-checklist.md) (not run).
 
 ## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
 

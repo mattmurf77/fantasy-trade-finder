@@ -18,13 +18,14 @@ import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
 import { useEntitlements } from '../state/useEntitlements';
+import { livePassFor } from '../utils/leaguePass';
 import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import {
   proposeTradeToSleeper,
   getSleeperLinkStatus,
   validateTradeSend,
 } from '../api/sendInSleeper';
-import { ApiError } from '../api/client';
+import { ApiError, gateSignalFor } from '../api/client';
 import { track } from '../api/events';
 import { recordGuideReceipt } from '../state/useGuide';
 import { GUIDE_RECEIPTS } from './analystScript';
@@ -68,8 +69,12 @@ import { GUIDE_RECEIPTS } from './analystScript';
  *    the tap, exactly as a fresh one: hand-off, link check, then its own
  *    "Send this trade?" confirm). Nothing is ever sent without the user's tap
  *    on that confirm (D16 a).
- *  - Verified and not entitled: the paywall's send variant. */
-export function sendPreCheck(resume: () => void, afterAsk = false): boolean {
+ *  - Verified and not entitled: the paywall's send variant.
+ *  League pass (D-281): `leagueId` is the league the send acts on (the
+ *  propose body's league, the server's `body` resolver). A live pass for it
+ *  counts as entitled while `monetize.league_pass` is on; with the flag off,
+ *  or no league, the check is exactly `pro`. */
+export function sendPreCheck(resume: () => void, leagueId?: string, afterAsk = false): boolean {
   if (!useFeatureFlags.getState().flags['monetize.paywall']) return false;
   // Unknown is not "not enforcing" (2026-11-22): when this user's answer has
   // not arrived, ask once and run the pre-check again on the answer (the
@@ -79,7 +84,7 @@ export function sendPreCheck(resume: () => void, afterAsk = false): boolean {
   if (!useEntitlements.getState().loaded) {
     if (afterAsk) return false;
     void useEntitlements.getState().refresh().then(() => {
-      if (!sendPreCheck(resume, true)) resume();
+      if (!sendPreCheck(resume, leagueId, true)) resume();
     });
     return true;
   }
@@ -88,13 +93,15 @@ export function sendPreCheck(resume: () => void, afterAsk = false): boolean {
     void openVerify({
       onVerified: () => {
         void useEntitlements.getState().refresh().then(() => {
-          if (!sendPreCheck(resume)) resume();
+          if (!sendPreCheck(resume, leagueId)) resume();
         });
       },
     });
     return true;
   }
   if (useEntitlements.getState().pro) return false;
+  if (leagueId && useFeatureFlags.getState().flags['monetize.league_pass'] === true
+    && livePassFor(useEntitlements.getState().leaguePasses, leagueId, Date.now())) return false;
   void openPaywall({ source: 'gate', kind: 'send' });
   return true;
 }
@@ -313,6 +320,11 @@ export default function SendInSleeperButton({
         from_deck: !!impressionId,
       });
       setState('idle');
+      // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+      // this gated route) already opened the paywall or the VerifySheet in
+      // api/client. No second, contradictory alert on top of it. Null while
+      // monetize.paywall is off, so today's alerts are unchanged.
+      if (gateSignalFor(err, '/api/trades/propose')) return;
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail;
 
@@ -492,9 +504,9 @@ export default function SendInSleeperButton({
   // after a verify it resumes with `proceed`, the same as a fresh tap.
   const onPress = useCallback(() => {
     if (state !== 'idle') return;
-    if (sendPreCheck(() => { void proceed(); })) return;
+    if (sendPreCheck(() => { void proceed(); }, leagueId)) return;
     void proceed();
-  }, [state, proceed]);
+  }, [state, proceed, leagueId]);
 
   // Platform routing (see header). An MFL league with `trade.send_in_mfl` ON
   // delegates to the MFL twin — one mount point, so the reconnect/confirm/

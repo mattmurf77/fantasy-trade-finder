@@ -1,4 +1,4 @@
-"""POST /api/events accepts the marketing landing's visit count (D-285).
+"""POST /api/events accepts the marketing landing's visit count (D-287).
 
 `web/js/landing-visit.js` sends ONE request per page load, exactly the one
 below: headers X-Device-Id (a fresh `visit_<uuid>`, never stored) and

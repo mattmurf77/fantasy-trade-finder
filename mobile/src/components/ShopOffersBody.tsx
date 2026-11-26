@@ -25,10 +25,12 @@ import {
 import { posColor } from '../theme/colors';
 import { Button, Icon, Text, TickLabel } from './chalkline';
 import PositionChip from './PositionChip';
+import PaywallGateNotice, { gateNoticeFor } from './PaywallGateNotice';
 import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 import { useFlag } from '../state/useFeatureFlags';
+import { useProForLeague } from '../state/useLeaguePass';
 import { getLeaguePreferences } from '../api/league';
 import {
   fetchAssetIdeas,
@@ -437,6 +439,17 @@ export default function ShopOffersBody({
   // defaults), and the suppression set + dismiss semantics apply to
   // widened tiles through the same `visibleByMode` filter as everything
   // else.
+  // Paid launch: a purchase or Restore while the gate notice shows sweeps
+  // again, so a new subscriber gets the ideas instead of See plans. A
+  // refetch, not routing (the notice's routing reads no entitlement).
+  // League pass (D-281): entitled here = Pro, or a live pass covering THIS
+  // league (the one the sweep runs in); flag off ⇒ exactly `pro`.
+  const entitled = useProForLeague(leagueId);
+  useEffect(() => {
+    if (entitled && ideasQuery.isError) void ideasQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entitled]);
+
   const widenKey = useMemo(
     () => [...offeredPositions].sort().join('+'),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -863,6 +876,17 @@ export default function ShopOffersBody({
         <View style={styles.loadingRow}>
           <ActivityIndicator color={chalk.dim} size="small" />
           <Text style={type.bodySm}>Sweeping rosters…</Text>
+        </View>
+      ) : ideasQuery.isError && gateNoticeFor(ideasQuery.error, '/api/trades/asset-ideas') ? (
+        // Paid launch: the sweep was refused by the paywall gate, not the
+        // network. The paywall already opened once; this says why the
+        // body is empty and offers the one way back (no Try again loop).
+        <View style={styles.empty}>
+          <PaywallGateNotice
+            testID="shop.gated"
+            notice={gateNoticeFor(ideasQuery.error, '/api/trades/asset-ideas')!}
+            onVerified={() => void ideasQuery.refetch()}
+          />
         </View>
       ) : ideasQuery.isError ? (
         <View style={styles.empty} testID="shop.error">

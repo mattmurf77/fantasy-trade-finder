@@ -34,6 +34,7 @@ const cardUtil = load('src/utils/directionCard.ts', (r) => {
 });
 const bannerUtil = load('src/utils/homePlayoffBanner.ts', noImports('homePlayoffBanner'));
 const playoffOdds = load('src/utils/playoffOdds.ts', noImports('playoffOdds'));
+const pickRange = load('src/utils/pickRange.ts', noImports('pickRange'));
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 function forecast(probability = 0.624, state = 'current') {
@@ -94,6 +95,7 @@ const modules = {
   '../../state/useFeatureFlags': { useFlag: (name) => { assert(name in state.flags, `unexpected flag ${name}`); return state.flags[name]; } },
   '../../utils/homePlayoffBanner': { homePlayoffBanner: (v, r, f, _now, saved) => bannerUtil.homePlayoffBanner(v, r, f, NOW, saved) },
   '../../utils/playoffOdds': playoffOdds,
+  '../../utils/pickRange': pickRange,
   '../../api/events': { track: (...a) => state.tracked.push(a) },
   '../../utils/directionCard': cardUtil,
   '../../utils/directionCardCopy': cardCopy,

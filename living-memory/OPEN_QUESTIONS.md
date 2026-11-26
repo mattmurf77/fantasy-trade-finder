@@ -7,6 +7,7 @@
 ---
 
 ## Table of Contents
+- [2026-11-25 — Open Items (mockups vs the capture freeze)](#2026-11-25--open-items-mockups-vs-the-capture-freeze)
 - [2026-11-10 — Open Items (manager profiles)](#2026-11-10--open-items-manager-profiles)
 - [2026-09-04 — Open Items (personal-market policy)](#2026-09-04--open-items-personal-market-policy)
 - [2026-09-02 — Open Items (#413 Sleeper pick send)](#2026-09-02--open-items-413-sleeper-pick-send)
@@ -29,6 +30,14 @@
 - [Conventions](#conventions)
 
 ---
+
+## 2026-11-25 — Open Items (mockups vs the capture freeze)
+
+### Q-041 — Is the mockups "embed the real capture" rule relaxed to "embed if captured, else a labelled reconstruction", or do screen captures get an exemption from D-056?
+- **Why it matters:** `mockups/CLAUDE.md` requires a mockup that revises a screen to embed its `screens/` capture, but D-056 froze `screens/` at 2026-08-11. Screens shipped or changed since (Standings, Home) have no usable capture, so the rule cannot be met. Labs run on an interim posture (embed if captured, else label the reconstruction). The D-285 design mockup (`data/review/dynastyhound-comparison-2026-11-24/display-mockups/`, gitignored, with real league-mates' usernames) was never registered in `mockups/` partly for this reason.
+- **Options:** (a) formally relax the rule to the interim posture; (b) exempt screen captures from D-056; (c) leave it as it is.
+- **Action to unblock:** operator decision. `mockups/CLAUDE.md` § "Unresolved" says not to resolve it without one.
+- **Owner:** operator · **Asked:** 2026-11-25 · **Related:** [D-056](DECISIONS.md), [D-285](DECISIONS.md)
 
 ## 2026-11-10 — Open Items (manager profiles)
 

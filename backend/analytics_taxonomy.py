@@ -1154,6 +1154,23 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # grants. Props, exactly: entitlement (pro | ad_free), source
     # (entitlements.VALID_SOURCES), expires_at.
     "entitlement_granted",
+    # ── League pass (docs/plans/monetization/league-pass/lld.md §9) ──────
+    # Server-fired, written non-touching, NON_INTENT (classified in
+    # analytics_queries in this same commit). Props, closed sets and counts
+    # only, never ids or prices:
+    #   league_pass_quote_viewed  — an intent is created (league_pass.
+    #     create_intent). platform (sleeper | espn | mfl), teams (int
+    #     count). league_id rides the envelope column.
+    #   league_pass_bound         — a league_passes row is inserted. origin
+    #     (purchase | comp), platform, via
+    #     (webhook | manual | repoint | rollover | comp).
+    #   league_pass_ended         — a pass stops being live. reason
+    #     (ended | refund | deleted | admin).
+    #   league_pass_coverage_used — a gated request is allowed by a pass;
+    #     first per user, league and UTC day (paywall gate, phase 1 part 2).
+    #     family (paywall_gate.route_family).
+    "league_pass_quote_viewed", "league_pass_bound", "league_pass_ended",
+    "league_pass_coverage_used",
 })
 
 # ---------------------------------------------------------------------------

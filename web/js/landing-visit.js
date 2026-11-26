@@ -1,4 +1,4 @@
-// landing-visit.js — one anonymous visit count per landing page load (D-285).
+// landing-visit.js — one anonymous visit count per landing page load (D-287).
 //
 // The landing has been marketing-only since the 2026-11-25 launch cut (D-284),
 // which also stopped it loading events.js, and with it the visit event. This

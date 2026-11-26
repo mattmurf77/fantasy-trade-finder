@@ -446,7 +446,7 @@ def run() -> int:
             "; ".join(loaders) if loaders
             else "no served page loads the signed-in web app's scripts")
 
-    # D-285 (2026-11-25): the landing counts visits again, through its own
+    # D-287 (2026-11-25): the landing counts visits again, through its own
     # tiny script, never events.js (queue replay, session token, invite
     # capture). The landing loads exactly these two scripts, no served page
     # loads events.js, and landing-visit.js sends one anonymous visit event:

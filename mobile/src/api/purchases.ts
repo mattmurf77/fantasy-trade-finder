@@ -27,12 +27,19 @@
 import type {
   CustomerInfo,
   MakePurchaseResult,
+  PurchasesOffering,
   PurchasesOfferings,
   PurchasesPackage,
   PurchasesStoreProduct,
 } from 'react-native-purchases';
 
-export type { CustomerInfo, PurchasesOfferings, PurchasesPackage, PurchasesStoreProduct };
+export type {
+  CustomerInfo,
+  PurchasesOffering,
+  PurchasesOfferings,
+  PurchasesPackage,
+  PurchasesStoreProduct,
+};
 
 /** Static side of the SDK's default export, as a type only — `import type`
  *  is erased at compile time, so this costs no runtime require. */
@@ -421,6 +428,28 @@ export async function checkIntroEligibility(
     // Unknown is not eligible.
   }
   return out;
+}
+
+// ── League pass (lld §7, §8; flag `monetize.league_pass`, dark) ─────────────
+// The one `ftf_league_annual` product lives in its OWN RevenueCat offering
+// ('league', from the config's `league_pass.offering`), never the default
+// one: PaywallScreen renders every configured product that matches a package
+// in `current`, and a launch binary must never show a pass as a plan row. It
+// is bought with the plain `purchasePackage` (identity-gated); its free month
+// is the product's introductory offer, which Apple applies to an eligible
+// buyer, and the screen asks `checkIntroEligibility` above whether to say so.
+
+/** The league pass offering, or null (no SDK, a failed fetch, or no such
+ *  offering configured). Never throws. */
+export async function getLeagueOffering(offeringId: string): Promise<PurchasesOffering | null> {
+  const P = sdk();
+  if (!P || !_configured || !offeringId) return null;
+  try {
+    const all = await P.getOfferings();
+    return all?.all?.[offeringId] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Tip jar (consumables) ───────────────────────────────────────────────────

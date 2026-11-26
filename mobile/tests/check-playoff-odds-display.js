@@ -92,9 +92,9 @@ assert(app.playoffOddsText(NaN, null, 0.1) === '<0.1%' && app.playoffOddsText(1.
 const pins = [
   ['mobile/src/utils/standingsTable.ts', [/return playoffOddsText\(probability, proof, 1\);/,
     /case 'playoffs': return f \? oddsText\(f\.playoff_probability, f\) : DASH;/,
-    /`Playoff odds \$\{oddsText\(f\.playoff_probability, f\)\}`/,
+    /\{ label: 'Playoff odds', value: oddsText\(f\.playoff_probability, f\) \}/,
     /case 'playoffs': return f \? playoffSortKey\(f\.playoff_probability, f\) : null;/], 'Standings table cell, open line, sort'],
-  ['mobile/src/components/LeagueProjectionDetail.tsx', [/Miss playoffs: \{missOddsText\(team\.nonplayoff_probability, team, 0\.1\)\}/],
+  ['mobile/src/components/LeagueProjectionDetail.tsx', [/<StatRow label="Miss playoffs" value=\{missOddsText\(team\.nonplayoff_probability, team, 0\.1\)\} \/>/],
     'team card "Miss playoffs"'],
   ['mobile/src/utils/homePlayoffBanner.ts', [/playoff_clinched: team\.playoff_clinched === true, playoff_eliminated: team\.playoff_eliminated === true/],
     'Home tile model carries the team proof'],

@@ -14,6 +14,7 @@
 | RootNav | `FeedbackInbox` | `FeedbackInboxScreen.tsx` |
 | RootNav | `Paywall` | `PaywallScreen.tsx` (modal; flag `monetize.paywall`, dark) |
 | RootNav | `TipJar` | `TipJarScreen.tsx` (modal; flag `monetize.paywall`, dark) |
+| RootNav | `LeaguePass` | `LeaguePassScreen.tsx` (modal; flags `monetize.league_pass` + `monetize.paywall`, dark) |
 | RootNav | `LeagueSummary` | `LeagueSummaryScreen.tsx` (legacy push; primary registration is the League tab root) |
 | RootNav | `FreeAgents` | `FreeAgentsScreen.tsx` |
 | RootNav | `Standings` | `StandingsScreen.tsx` |

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getEntitlements } from '../api/billing';
+import { getEntitlements, type LeaguePassEntry } from '../api/billing';
 import {
   currentIdentityUserId,
   hasProEntitlement,
@@ -49,6 +49,10 @@ interface CachedEntitlements {
   /** The user the answer is for (2026-11-22). Blobs written before it have
    *  none; see loadCached. */
   userId?: string;
+  /** League pass (D-281): the server's `league_passes` and `sources`, under
+   *  the same grace clock. Absent in older blobs ⇒ none. */
+  leaguePasses?: LeaguePassEntry[];
+  sources?: string[];
 }
 
 interface EntitlementState {
@@ -75,6 +79,17 @@ interface EntitlementState {
   /** Founding GMs member (S1). False on a blanked (unverified) response or an
    *  older server. Display only; never a gate input. Not persisted. */
   founder: boolean;
+  /** League pass (flag `monetize.league_pass`, D-281): the server's
+   *  `league_passes`, every live pass covering this user; [] when absent
+   *  (flag off server-side, unverified, an older server). Read through
+   *  `state/useLeaguePass` (`useProForLeague`), which ANDs in the client flag
+   *  and the `covered_until` clock; never read it as a grant on its own.
+   *  Server-only: no CustomerInfo push ever writes it. */
+  leaguePasses: LeaguePassEntry[];
+  /** The server's `sources` (grant provenance). Display decisions only: the
+   *  league pass's one-time notice (an individual subscriber) and the unbound
+   *  pass row. Never a gate input. */
+  sources: string[];
 
   /** Local AsyncStorage hydrate + the 72 h grace evaluation. No network. */
   loadCached: () => Promise<void>;
@@ -93,6 +108,8 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
   optimistic: false,
   enforcing: false,
   founder: false,
+  leaguePasses: [],
+  sources: [],
 
   loadCached: async () => {
     try {
@@ -113,6 +130,8 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
             // subscription for anyone who stays offline.
             pro: fresh ? !!c.pro : false,
             expiresAt: fresh ? (c.expiresAt ?? null) : null,
+            leaguePasses: fresh && Array.isArray(c.leaguePasses) ? c.leaguePasses : [],
+            sources: fresh && Array.isArray(c.sources) ? c.sources : [],
             optimistic: false,
             answerFor: uid,
             loaded: true,
@@ -141,10 +160,14 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
       // `enforcing` stays the server's state even on a blanked response; it
       // is never inferred from the subscription fields (#393 D7, D16).
       const enforcing = res?.enforcing === true;
+      // League pass: the server's list, or none (absent = flag off). Like
+      // `pro`, it is overwritten in both directions: an ended pass goes.
+      const leaguePasses = Array.isArray(res?.league_passes) ? res.league_passes : [];
+      const sources = Array.isArray(res?.sources) ? res.sources : [];
       // Server wins in BOTH directions, and clearing `optimistic` here is the
       // point: a refund or a failed webhook must be able to take Pro away.
-      set({ pro, expiresAt, founder, enforcing, loaded: true, answerFor: askedFor ?? null, optimistic: false });
-      const blob: CachedEntitlements = { pro, expiresAt, fetchedAt: Date.now(), ...(askedFor ? { userId: askedFor } : {}) };
+      set({ pro, expiresAt, founder, enforcing, leaguePasses, sources, loaded: true, answerFor: askedFor ?? null, optimistic: false });
+      const blob: CachedEntitlements = { pro, expiresAt, leaguePasses, sources, fetchedAt: Date.now(), ...(askedFor ? { userId: askedFor } : {}) };
       try {
         await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(blob));
       } catch {
@@ -176,6 +199,7 @@ export function resetEntitlements(): void {
   _askedFor = null;
   useEntitlements.setState({
     pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false, loaded: false, answerFor: null,
+    leaguePasses: [], sources: [],
   });
   AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
 }
@@ -231,7 +255,7 @@ export function initEntitlements(): void {
     const was = prev.user?.user_id;
     if (!was || s.user?.user_id === was) return;
     _askedFor = null;
-    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false, loaded: false, answerFor: null });
+    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false, loaded: false, answerFor: null, leaguePasses: [], sources: [] });
     AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
   });
   // The server is asked whenever a signed-in user with a token is present and

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Card, Meter } from './chalkline';
 import TradeValueBar from './TradeValueBar';
-import EvenerRows from './EvenerRows';
+import EvenerRows, { evenersWanted } from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import type { CalcEvaluation, CalcEvener } from '../api/calc';
 import { semantic, space, type } from '../theme/chalkline';
@@ -79,7 +79,10 @@ export default function ConsensusVerdictCard({
           studTaxMode={evaluation.stud_tax_mode}
         />
 
-        {onAddEvener && evaluation.eveners && evaluation.eveners.length > 0 && evaluation.gap?.add_to ? (
+        {/* [D-286] — only when the verdict says the trade needs evening;
+            same predicate as InLeagueCalculator so the two cannot drift. */}
+        {onAddEvener && evaluation.eveners && evaluation.eveners.length > 0 && evaluation.gap?.add_to
+          && evenersWanted(evaluation.verdict) ? (
           <EvenerRows
             eveners={evaluation.eveners}
             title={

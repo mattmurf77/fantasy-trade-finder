@@ -60,7 +60,11 @@ export function homePlayoffBanner(
   const proof = hasEstimate && team
     ? { playoff_clinched: team.playoff_clinched === true, playoff_eliminated: team.playoff_eliminated === true }
     : null;
+  // What the "likely …" pick note needs (utils/pickRange), passed through.
+  const pickRange = hasEstimate && team
+    ? { missProbability: team.nonplayoff_probability, pickProbabilities: team.pick_probabilities, draftRound: result!.config?.draft_round }
+    : null;
   return { probability: hasEstimate ? probability : null, proof, capturedAt: hasEstimate ? result!.captured_at : null,
     current, status, incomplete: hasEstimate && result!.coverage?.estimate_status === 'incomplete',
-    recommendation, explanation };
+    recommendation, explanation, pickRange };
 }
