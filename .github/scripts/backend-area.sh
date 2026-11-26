@@ -21,7 +21,7 @@ while IFS= read -r path || [[ -n "$path" ]]; do
     docs/config-reference.md | docs/cross-client-invariants.md | docs/plans/* | \
     mobile/src/* | mobile/App.tsx | mobile/app.json | mobile/ios/* | \
     .claude/skills/feedback/scripts/* | \
-    .github/workflows/ci.yml | .github/scripts/*)
+    .github/workflows/ci.yml | .github/scripts/* | .github/backend-test-durations.json)
       echo "backend suite needed: $path is read by backend tests or drives CI" >&2
       echo true
       exit 0
