@@ -1,3 +1,11 @@
+## 2026-11-25 — Calculator screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`
+
+- **Mobile:** `npx tsc --noEmit` clean; `mobile/tests/check-*.js` **208/208** (new `check-eveners-unfair-only`, 33 checks: executes `evenersWanted` and both calculators' real EvenerRows render conditions; item 2's row checks are structural only); `testid-lint` OK. Re-specced: `check-calc-merged-layout` 16 / 16b / 17e (no name clamp, one clamp left: the compact team-name header), `check-projected-pick-tag` 3.3 (TradeSide mounts the tag 2×).
+- **Sabotage checks, red then restored (7):** in-league gate removed (3 red); predicate lets `fair` through (3); predicate hides a missing verdict (4); gate applied to the one-sided state (3); Real values gate removed (2); compact name clamp restored (2); meta-row wrap removed (1). Restored: all passed.
+- **Round 2 (deck card + detail fix):** `npx tsc --noEmit` clean; `check-*.js` **208/208** (`check-eveners-unfair-only` now 41 checks, §4 deck card added); `testid-lint` OK. Re-specced `check-calc-merged-layout` 17 and `check-projected-pick-tag` 4.2b. Sabotage, red then restored (4): detail shrinks again (3.11), "yrs" back (3.13), deck 2-line clamp back (4.1, 4.2), detail clamped to one line (3.1, 3.3, 3.12).
+- **Simulator (coordinator, 402 pt, round-1 build):** no "Recommended to even it" rows; calculator names and pick labels not cut off; pick rows `[PICK] [PROJ]` then the tier; the player detail was squeezed letter by letter (fixed in round 2, not yet re-seen).
+- **Not verified:** the round-2 layout (detail on one line, deck card names) on any screen; a structural check cannot prove what 402 pt draws. Checklist: scope §3 steps 5-7.
+
 ## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`
 
 - **App (the branch, one commit on `origin/main` `c9091e5a`):** `npx tsc --noEmit` clean; all **210** `tests/check-*.js` exit 0; `scripts/testid-lint.sh` OK (main session's run).

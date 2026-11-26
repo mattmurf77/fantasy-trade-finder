@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-25 — Calculator and deck screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`, PR #732 open
+
+- **(1)** "Recommended to even it" rows only for an `unfair` verdict, both calculators, one predicate (`evenersWanted`); missing verdict renders as before; "Trade options" unchanged; no server change. Narrows #251.
+- **(2)** Merged in-league columns (`TradeSide compact`): names and the chip · detail · tier row wrap, no "…"; the detail keeps its one-line width (badge wraps instead) and reads "yo"; pick rows drop "PICK · 0 yrs"; PROJ beside the PICK chip. Reverses #411's one-line name.
+- **(3)** Deck trade card (`PlayerCard compact`, TradeCard only): names unclamped; the box grows. Dense rows (Tiers, Free agents, League Summary) unchanged.
+- **Guard:** `check-eveners-unfair-only.js`; `check-calc-merged-layout` 16/16b/17/17e and `check-projected-pick-tag` 3.3/4.2b re-specced. Scope: `docs/plans/eveners-unfair-only/scope.md`.
+- **Open:** items 2 and 3 seen only partly on the simulator; 402 pt recheck pending.
+
 ## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`, not merged
 
 - **What:** mobile-only display change on Standings and the Home playoff card. Open team as stat rows; a client-computed SoS column in the Record view (stacked "Play/offs", tighter columns, sort arrow left of numeric headings); "Remaining schedule" replaces Weekly projections; Draft pick odds as rows with a likely pick range and the chance of the 1.01 at a 25%+ miss chance, and the same range under Home's Projected pick.
