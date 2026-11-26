@@ -343,6 +343,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "monetize.paywall",            # purchase UI surfaces (mobile + web)
     "monetize.pro",                # Pro subscription SKUs + gate list (docs/plans/monetization/pro-subscription/)
     "monetize.season_pass",        # year-labeled season SKUs (docs/plans/monetization/season-pass/)
+    "monetize.league_pass",        # league pass: one buyer covers a league (docs/plans/monetization/league-pass/)
     "monetize.founder",            # Founder Lifetime offer window (docs/plans/monetization/founder-lifetime/)
     "monetize.affiliate",          # affiliate placements + partner registry (docs/plans/monetization/affiliate/)
     "monetize.ads_web",            # web display ads (docs/plans/monetization/ads/)

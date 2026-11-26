@@ -82,9 +82,16 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             priced_pick_value, elo_to_value, sleeper_credential, sleeper_write, record_event,
             fetch_json=None, mfl_propose=None, espn_propose=None, mfl_credential=None,
             espn_credential=None, platform_rosters=None, generation_identity=None,
-            pick_projection=None, pick_projection_fields=None):
+            pick_projection=None, pick_projection_fields=None, confirm_pass_league=None):
 
     # ── plumbing ────────────────────────────────────────────────────────
+    def confirm(league_id):
+        # League pass (lld §4.3): a request a pass let through acts on that
+        # league only. server._confirm_pass_league answers 402 on a mismatch
+        # and is a no-op (no read) when no pass let the request through.
+        if confirm_pass_league is not None:
+            confirm_pass_league(league_id)
+
     def guarded(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -116,6 +123,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         if (row is None or row["account_user_id"] != str(sess["user_id"])
                 or row["league_id"] != str(sess["league"].league_id)):
             raise _Conflict("not_found", status=404)
+        confirm(row["league_id"])
         return row
 
     def check_revision(row, data):
@@ -529,6 +537,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         client_key = data.get("client_key")
         if league_id != str(sess["league"].league_id) or not isinstance(client_key, str) or not client_key:
             raise service.ValidationError("bad_request", "league_id and client_key required")
+        confirm(league_id)
         user_id = str(sess["user_id"])
         existing = store.find_by_client_key(user_id, league_id, client_key)
         if existing is not None:
@@ -556,6 +565,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         league_id = request.args.get("league_id") or str(sess["league"].league_id)
         if league_id != str(sess["league"].league_id):
             raise _Conflict("not_found", status=404)
+        confirm(league_id)
         row = store.find_active(str(sess["user_id"]), league_id)
         return jsonify({"active": overhaul_view(sess, row) if row else None})
 

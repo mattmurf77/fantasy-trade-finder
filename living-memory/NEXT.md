@@ -11,6 +11,7 @@
 ## Table of Contents
 - [Priority Queue](#priority-queue)
 - [2026-11-25 — Standings display rows (D-285): operator merge, TestFlight build, then the checklist](#2026-11-25--standings-display-rows-d-285-operator-merge-testflight-build-then-the-checklist)
+- [2026-11-24 — League pass: merge the server branch, comp-pass test, then store products, legal copy and the client](#2026-11-24--league-pass-merge-the-server-branch-comp-pass-test-then-store-products-legal-copy-and-the-client)
 - [2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets ON (D-271): TestFlight 195, then the checklists](#2026-11-15--improve-pages-home-playoff-card-half-sheet-and-playoff-targets-on-d-271-testflight-195-then-the-checklists)
 - [2026-11-14 — Playoff targets (D-264): operator choices, merge, TestFlight checklist, then the flag](#2026-11-14--playoff-targets-d-264-operator-choices-merge-testflight-checklist-then-the-flag)
 - [2026-11-12 — Max PF moves (D-258): backtest gate, then the follow-ups](#2026-11-12--max-pf-moves-d-258-backtest-gate-then-the-follow-ups)
@@ -86,6 +87,20 @@ Built and verified on `feat/standings-display-rows` (PR open, not merged). Not q
 3. **Run [the checklist](../docs/plans/standings-display-rows/testflight-checklist.md)** on that build, after a weekly forecast, and log it in TEST_LEDGER. *Why:* it is the only runtime evidence (D-056); steps 19 and 20 cannot run until a doctored payload or the season's end.
 
 Deferred by the operator (not queued): the Luck and Median what-if views (need completed weekly scores in the saved forecast), the web version.
+
+## 2026-11-24 — League pass: merge the server branch, comp-pass test, then store products, legal copy and the client
+
+Server and client are both built dark (`monetize.league_pass` off) on `feat/league-pass-server` and `feat/league-pass-client`; see [HANDOFF](HANDOFF.md) and `docs/plans/monetization/league-pass/`. Not queued above the seven active items. In order:
+
+1. **Open the server PR and merge it** (operator's go-ahead). *Why now:* the client branch is stacked on it, and `main` conflicts with it again within hours in the living-memory files.
+2. **Check Postgres before the merge reaches production:** the two partial unique indexes (`uq_league_passes_active_league`, `uq_league_passes_active_buyer`) and the seat ordering. *Why now:* the suite only runs on SQLite.
+3. **Comp-pass test with real leagues** (PRD R39): turn the flag on with `LEAGUE_PASS_LEAGUE_ALLOWLIST` naming one or two leagues, comp them through `POST /api/admin/league-pass/comp`, and read `league_pass_coverage_used`. *Why now:* it shows whether covered members use Pro before any purchase is possible. The released app has no league pass code, so it still locks by account Pro on the device; this test reads server use only until a build carries the client.
+4. **App Store Connect and RevenueCat** (operator): one product `ftf_league_annual` with a 1-month free-trial introductory offer, offering `league`, no IAP key needed. App Store Connect side reported done 2026-11-24 by the App Store Connect session (Apple id 6838943409, $99.99, USA only, level above the individual plans, state MISSING_METADATA: review screenshot and notes still owed). Multiseat purchases are OFF on the product (operator, 2026-11-25; the App Store Connect session read back "Not Allowed" after the change). RevenueCat reported done 2026-11-25 by the same session: product attached to `pro`, offering `league` with one package `$rc_annual`, `default` offering unchanged. Neither is verified from this branch; no purchase has been tested.
+5. **Legal ruling on the covered-state disclosure**, then replace the placeholder `mon.lp.*` copy.
+6. **Decide the client's base** (operator): it must be combined with `feat/paid-launch` before a build, and Shop offers converted to `useProForLeague` there. Then the client PR, a TestFlight build, and the 24-step checklist in `evidence-client.md`.
+7. **In the first sandbox purchases, check** the refund event shape, the upgrade event sequence, and that a buyer who used the individual free month is charged from day one (one introductory offer per subscription group).
+
+Deferred: PRD R7 wording for Sleeper co-owners; a league name on `GET /api/league-pass`; Settings wording for a buyer who left their league; swipe's `impression_id` may name the user's own impression from another league (affects every user, not a pass bypass).
 
 ## 2026-11-15 — Improve pages, Home playoff card, half sheet and Playoff targets ON (D-271): TestFlight 195, then the checklists
 

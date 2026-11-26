@@ -52,6 +52,7 @@ import PickAssignmentScreen from '../screens/PickAssignmentScreen';
 import RecordPicksScreen from '../screens/RecordPicksScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import TipJarScreen from '../screens/TipJarScreen';
+import LeaguePassScreen from '../screens/LeaguePassScreen';
 import FounderWelcomeScreen from '../screens/FounderWelcomeScreen';
 import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
@@ -240,6 +241,12 @@ type AuthStack = {
   // Tip jar (same flag, same dark posture). Money with NO entitlement — see
   // screens/TipJarScreen.tsx.
   TipJar: { source: string };
+  // League pass (flag `monetize.league_pass`, dark; D-281): buy, attach and
+  // manage the pass. Registered unconditionally; the screen self-guards on
+  // the flag, the session and the server's config. `source` rides the
+  // paywall_purchase_* events; `mode: 'manage'` is Settings' entry (the
+  // screen decides what it shows from GET /api/league-pass either way).
+  LeaguePass: { source: string; mode?: 'manage' };
 };
 
 const Stack = createNativeStackNavigator<AuthStack>();
@@ -849,6 +856,16 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="TipJar"
           component={TipJarScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        {/* League pass (flag `monetize.league_pass`, dark; D-281). Paywall's
+            modal conventions: own header with the explicit ✕
+            (`league-pass.close`), no FeedbackFAB (#188), self-guards. Reached
+            from the paywall's separate entry (R30) and Settings ›
+            Subscription; deliberately no deep link, like Paywall. */}
+        <Stack.Screen
+          name="LeaguePass"
+          component={LeaguePassScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
         {/* #393 M3 — the Founding GMs welcome. The paywall REPLACES itself

@@ -30,7 +30,7 @@ import { TRADE_INTENT_LABEL } from './TradeDnaSheet';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 import { useSelectedOfferSignals } from '../hooks/useSelectedOfferSignals';
 import { useFlag } from '../state/useFeatureFlags';
-import { useEntitlements } from '../state/useEntitlements';
+import { useProForLeague } from '../state/useLeaguePass';
 import { getLeaguePreferences } from '../api/league';
 import {
   fetchAssetIdeas,
@@ -442,7 +442,9 @@ export default function ShopOffersBody({
   // Paid launch: a purchase or Restore while the gate notice shows sweeps
   // again, so a new subscriber gets the ideas instead of See plans. A
   // refetch, not routing (the notice's routing reads no entitlement).
-  const entitled = useEntitlements((s) => s.pro);
+  // League pass (D-281): entitled here = Pro, or a live pass covering THIS
+  // league (the one the sweep runs in); flag off ⇒ exactly `pro`.
+  const entitled = useProForLeague(leagueId);
   useEffect(() => {
     if (entitled && ideasQuery.isError) void ideasQuery.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
