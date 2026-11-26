@@ -279,9 +279,15 @@ assert(/webRef\.current\.injectJavaScript\(FLUSH_SCRIPT\);/.test(VIEW)
 assert(/onRequestClose=\{\(\) => \{ void requestClose\(\); \}\}/.test(VIEW)
   && /testID="founder-review\.pages\.close"[\s\S]{0,200}onPress=\{\(\) => \{ void requestClose\(\); \}\}/.test(VIEW),
   '8d. Close and the Android back button both take the flushing path');
-assert(/<Modal visible animationType="slide" presentationStyle="fullScreen"/.test(VIEW)
-  && /<SafeAreaView style=\{styles\.root\} edges=\{\['top', 'bottom', 'left', 'right'\]\}>/.test(VIEW),
-  '8e. full screen in a Modal, inside the safe area');
+assert(/<Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent navigationBarTranslucent\b/.test(VIEW)
+  && /const insets = useSafeAreaInsets\(\);/.test(VIEW)
+  && /navigationBarTranslucent\s+onRequestClose=\{\(\) => \{ void requestClose\(\); \}\}>\s*<View\s+style=\{\[styles\.root, \{ paddingTop: insets\.top, paddingBottom: insets\.bottom, paddingLeft: insets\.left, paddingRight: insets\.right \}\]\}\s*>/.test(VIEW),
+  '8e. full screen in a Modal, inside the safe area: the insets are read outside the Modal (useSafeAreaInsets) and applied as padding on all four edges');
+// A SafeAreaView inside a native Modal has no provider to measure against and
+// measured zero insets on an iPhone 17 Pro: Close sat under the Dynamic Island
+// and could not be tapped (2026-11-22). Never again inside this Modal.
+assert(!/\bSafeAreaView\b/.test(VIEW),
+  '8e2. no SafeAreaView in the viewer (it measured zero insets inside the Modal)');
 assert(/gcTime: 0/.test(VIEW) && /staleTime: Infinity/.test(VIEW) && /refetchOnWindowFocus: false/.test(VIEW),
   '8f. the 2.5 MB page is not cached after close and never refetched under the open page');
 for (const id of ['founder-review.pages.close', 'founder-review.pages.save-state', 'founder-review.pages.loading',
