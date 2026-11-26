@@ -27,8 +27,27 @@ python3 -m pytest backend/tests -q --durations=25     # find the slow ones
 the same thing. The only dev dependency is `pytest` (`requirements-dev.txt`); runtime deps
 (`flask`, `sqlalchemy`, `cryptography`, `Pillow`, …) come from `requirements.txt`.
 
-**CI** (`.github/workflows/ci.yml`) has three jobs: `backend-tests` runs
-`python -m pytest backend/tests -q` on **Python 3.12**; `mobile-typecheck` runs `npx tsc --noEmit`
+**CI** (`.github/workflows/ci.yml`) runs this suite on **Python 3.12** as `backend-suite`, an
+8-way matrix sharded by test file: each runner collects everything, then the
+`.github/scripts/ci_shard.py` plugin keeps only the files assigned to its shard (greedy packing by
+the per-file seconds in `.github/backend-test-durations.json`; a file missing from it just gets a
+1 s default, so stale durations unbalance shards but never drop a test). Each shard logs a
+`ci_shard: shard i/8 runs … of … collected tests` line. The required check `backend-tests` is a
+gate job that passes only if every shard passed. Reproduce one shard locally:
+
+```bash
+FTF_OWNER_PROOF_FAST_JSON=1 FTF_TEST_SHARD=3/8 PYTHONPATH=.github/scripts \
+  python3 -m pytest backend/tests -q -p ci_shard
+```
+
+Regenerate the durations after the suite's shape shifts (from a full serial run):
+
+```bash
+python3 -m pytest backend/tests -q --junitxml=/tmp/serial.xml
+python3 .github/scripts/ci_shard.py --from-junit /tmp/serial.xml
+```
+
+The other jobs: `mobile-typecheck` runs `npx tsc --noEmit`
 **and** every `mobile/tests/check-*.js` structural suite; `maestro-testid-lint` runs
 `mobile/scripts/testid-lint.sh`. There is no iOS-simulator tier in CI (no free macOS runner).
 

@@ -4,11 +4,12 @@ Two workflows. Nothing else lives here — no issue templates, no CODEOWNERS, no
 
 ## `workflows/ci.yml` — the only merge gate that runs automatically
 
-Triggers on every `pull_request` and every push to `main`. Three cheap Ubuntu jobs:
+Triggers on every `pull_request` and every push to `main`. Jobs:
 
 | Job | Command |
 |---|---|
-| `backend-tests` | `python -m pytest backend/tests -q` (Python 3.12, `requirements.txt` + `requirements-dev.txt`) |
+| `backend-suite (i/8)` | `python -m pytest backend/tests -q -p ci_shard`, 8 parallel shards split by test file (Python 3.12, `requirements.txt` + `requirements-dev.txt`); see [`backend/tests/CLAUDE.md`](../backend/tests/CLAUDE.md) § Running |
+| `backend-tests` | Gate: passes only when every `backend-suite` shard passed. This is the name the branch ruleset requires |
 | `mobile-typecheck` | `npx tsc --noEmit` in `mobile/` (Node 20, `npm ci`) |
 | `maestro-testid-lint` | `bash mobile/scripts/testid-lint.sh` |
 
