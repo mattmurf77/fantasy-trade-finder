@@ -69,7 +69,12 @@ interface InviteIntent {
 }
 
 export type RankMethodPref = 'quickset' | 'trio' | 'anchor' | 'tiers' | 'manual';
-const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'anchor', 'tiers', 'manual'];
+// The preferences a stored value may hydrate to. 'anchor' is deliberately
+// absent: Pick Anchors was cut for launch (owner call 2026-11-25), so a user
+// who saved it hydrates with NO preference and the Rank tab opens on the
+// default method (TabNav RankStackNav: Quick set, or Head-to-heads once all
+// four positions are set). The type keeps 'anchor' so the code can return.
+const RANK_METHOD_PREFS: readonly RankMethodPref[] = ['quickset', 'trio', 'tiers', 'manual'];
 
 // Throttle successful current-context background work, never awaited joins.
 const REVALIDATE_MIN_INTERVAL_MS = 60_000;

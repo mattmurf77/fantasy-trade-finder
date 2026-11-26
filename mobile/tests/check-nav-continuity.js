@@ -351,10 +351,11 @@ const NO_ARM = [
   assert(ordered, 'B1d. each arm comes after its track and before its navigate');
   // Rank-page tiles untouched.
   const rankTile = (hub.match(/testID="home\.tile\.rank"[\s\S]*?\/>/) || [''])[0];
-  const trendsTile = (hub.match(/testID="home\.tile\.trends"[\s\S]*?\/>/) || [''])[0];
+  // "Check trends" was cut for launch (owner call 2026-11-25): the tile no
+  // longer exists, so only Rank players remains as a rank-page tile.
   assert(/navigation\.navigate\('Rank'\);/.test(rankTile) && !/armReturn/.test(rankTile)
-    && /navigation\.navigate\('Rank', \{ screen: 'Trends' \}\);/.test(trendsTile) && !/armReturn/.test(trendsTile),
-    'B1e. Rank players and Check trends are exactly as before (rank pages, no control)');
+    && !/home\.tile\.trends/.test(hub),
+    'B1e. Rank players is exactly as before (rank page, no control); the Check trends tile is gone');
   const roster = (hub.match(/const onOpenRoster = [\s\S]*?\n  \};/) || [''])[0];
   assert(roster && /\n    if \(homeReturnUnified\) armReturn\('position_roster'\);\n/.test(roster)
     && (roster.match(/armReturn/g) || []).length === 1,

@@ -51,12 +51,18 @@ function statusText(row: UsageLeagueRow) {
 export function UsageLeagueList({
   player,
   rows,
+  canAdd,
   onAdd,
   onTrade,
   compact = false,
 }: {
   player: UsagePlayer;
   rows: UsageLeagueRow[];
+  /** Whether a free-agent row in this league gets an Add control. The host
+   *  decides from the league's move capability (launch rule, owner call
+   *  2026-11-25: Add only where the app can really submit the move). A free
+   *  agent without it shows its status and no button. */
+  canAdd: (leagueId: string) => boolean;
   onAdd: (leagueId: string) => void;
   onTrade: (leagueId: string) => void;
   compact?: boolean;
@@ -86,7 +92,7 @@ export function UsageLeagueList({
               {statusText(row)}
             </View>
           </View>
-          {row.status === 'free_agent' || row.status === 'rostered' ? (
+          {(row.status === 'free_agent' && canAdd(row.league_id)) || row.status === 'rostered' ? (
             <Pressable
               testID={`usage-trends.league-action.${player.player_id}.${row.league_id}`}
               accessibilityRole="button"
@@ -113,6 +119,7 @@ export function UsageLeagueList({
 export function UsageAvailabilitySheet({
   player,
   rows,
+  canAdd,
   onAdd,
   onTrade,
   onClose,
@@ -122,6 +129,7 @@ export function UsageAvailabilitySheet({
 }: {
   player: UsagePlayer;
   rows: UsageLeagueRow[];
+  canAdd: (leagueId: string) => boolean;
   onAdd: (leagueId: string) => void;
   onTrade: (leagueId: string) => void;
   onClose: () => void;
@@ -136,6 +144,8 @@ export function UsageAvailabilitySheet({
   }, [visible, immediateDismiss, onDismiss]);
   const known = rows.filter((r) => r.status !== 'unknown').length;
   const fa = rows.filter((r) => r.status === 'free_agent').length;
+  // The footer names Add only when some row shows one (launch rule above).
+  const anyAdd = rows.some((r) => r.status === 'free_agent' && canAdd(r.league_id));
   const summary =
     known === 0
       ? "Couldn't check your leagues right now."
@@ -171,9 +181,11 @@ export function UsageAvailabilitySheet({
                 <Icon name="x" size={20} color={chalk.dim} />
               </Pressable>
             </View>
-            <UsageLeagueList player={player} rows={rows} onAdd={onAdd} onTrade={onTrade} />
+            <UsageLeagueList player={player} rows={rows} canAdd={canAdd} onAdd={onAdd} onTrade={onTrade} />
             <Text style={styles.footer}>
-              Add opens a quick check before the move. Trade opens the trade finder in that league.
+              {anyAdd
+                ? 'Add opens a quick check before the move. Trade opens the trade finder in that league.'
+                : 'Trade opens the trade finder in that league.'}
             </Text>
           </ScrollView>
         </SafeAreaView>

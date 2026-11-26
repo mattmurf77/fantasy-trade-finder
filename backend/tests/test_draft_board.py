@@ -1474,19 +1474,73 @@ def _leagues_stub(monkeypatch):
     monkeypatch.setattr(server, "get_league_draft_context", ctxs.get)
 
 
-def test_placement_leagues_payload_is_byte_identical_with_the_flag_off(
+def test_placement_leagues_payload_with_the_flag_off_is_sleeper_rows_plus_platform(
     client, _leagues_stub,
 ):
-    """Flag off ⇒ the stamping block is skipped entirely: no field, no DB
-    read, and the response is exactly what shipped before this wave."""
-    saved = ff._flags_cache
+    """Flag off ⇒ no draft field at all. Since 2026-11-25 the `platform`
+    stamp no longer rides `draft.room`, so a Sleeper-only user's response is
+    exactly Sleeper's rows plus `"platform": "sleeper"` on each (an unknown or
+    Sleeper league reads 'sleeper', which mobile already assumed when the key
+    was absent)."""
+    saved = _pin_flags()
     try:
-        _pin_flags()
         off = client.get(LEAGUES_ROUTE)
-        assert off.status_code == 200
-        assert all("draft_status" not in lg for lg in off.get_json())
     finally:
         ff._flags_cache = saved
+    assert off.status_code == 200
+    assert off.get_json() == [
+        {"league_id": LAKEVIEW_LEAGUE, "name": "Lakeview", "platform": "sleeper"},
+        {"league_id": FFV3_LEAGUE, "name": "FFv3", "platform": "sleeper"},
+    ]
+
+
+def test_platform_stamp_survives_draft_room_off_for_a_test_profile_espn_league(
+    client, monkeypatch,
+):
+    """Owner launch ruling 2026-11-25 turned `draft.room` off. The onboarding
+    test profile stores a linked ESPN league under a `qa_tp:` id, so it comes
+    back through the local-league append; it must still say `platform:
+    'espn'` (mobile coerces a missing key to 'sleeper'), and no draft field
+    may leak with the flag off. Real database reads, in-memory SQLite."""
+    from unittest.mock import patch
+    from sqlalchemy import create_engine, insert
+    import backend.database as db
+
+    pid = "qa_tp_" + OPERATOR
+    espn_store = f"qa_tp:{OPERATOR}:77001234"
+    eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    db.metadata.create_all(eng)
+    with eng.begin() as conn:
+        conn.execute(insert(db.leagues_table).values(
+            sleeper_league_id=espn_store, user_id=pid, name="ESPN League",
+            season="2026", platform="espn", draft_status="not_drafted",
+            draft_status_confidence="high"))
+        conn.execute(insert(db.league_members_table).values(
+            league_id=espn_store, user_id=pid, username="me", display_name="Me",
+            roster_data="[]"))
+    monkeypatch.setattr(server, "_sleeper_get",
+                        lambda url: [{"league_id": LAKEVIEW_LEAGUE, "name": "Lakeview"}])
+    # A live test-profile session: `tp.` token; the profile gate itself
+    # (flag + TEST_PROFILE_ACCOUNTS) is test_profile's own tests' concern.
+    monkeypatch.setattr(server, "_test_profile_session_allowed", lambda sess: True)
+    tok = "tp.leagues-tok"
+    with server._sessions_lock:
+        server._sessions[tok] = {"user_id": pid, "verified": True, "last_active": 0.0}
+    saved = _pin_flags()                      # draft.room off, as shipped
+    try:
+        with patch.object(db, "engine", eng):
+            rows = client.get(f"/api/sleeper/leagues/{pid}",
+                              headers={"X-Session-Token": tok}).get_json()
+    finally:
+        ff._flags_cache = saved
+        with server._sessions_lock:
+            server._sessions.pop(tok, None)
+    by_id = {lg["league_id"]: lg for lg in rows}
+    assert set(by_id) == {f"qa_tp:{OPERATOR}:{LAKEVIEW_LEAGUE}", espn_store}
+    assert by_id[espn_store]["platform"] == "espn"
+    assert by_id[f"qa_tp:{OPERATOR}:{LAKEVIEW_LEAGUE}"]["platform"] == "sleeper"
+    for lg in rows:
+        assert "draft_status" not in lg and "draft_status_confidence" not in lg
 
 
 def test_placement_leagues_payload_carries_the_207_verdict_with_the_flag_on(

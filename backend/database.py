@@ -2810,7 +2810,7 @@ analytics_segments_table = Table("analytics_segments", metadata,
 # The layer salt is minted once per layer and NEVER rotated while any
 # experiment in the layer is un-decided (rotating it reshuffles every bucket).
 experiment_layers_table = Table("experiment_layers", metadata,
-    Column("layer",      String, primary_key=True),   # onboarding|ranking|trades_ui|engine|growth
+    Column("layer",      String, primary_key=True),   # onboarding|ranking|trades_ui|engine|growth|operator
     Column("salt",       String, nullable=False),      # secrets.token_hex(16), IMMUTABLE
     Column("created_at", String, nullable=False),
 )
@@ -5543,7 +5543,9 @@ def backfill_anchor_unlocked_formats(min_overrides: int) -> int:
     return written
 
 
-EXPERIMENT_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth")
+# `operator` (2026-11-25): allowlist operator rollouts (experiments.RESERVED_LAYERS).
+# Seeded on boot by _seed_experiment_layers (insert-if-missing, existing salts untouched).
+EXPERIMENT_LAYERS = ("onboarding", "ranking", "trades_ui", "engine", "growth", "operator")
 
 
 def _layer_salt(layer: str) -> str:

@@ -72,7 +72,7 @@ All routes: `_require_cron_auth()` first line (secret via `X-Cron-Secret` header
 |---|---|---|---|
 | `/api/admin/analytics/<report>` (`report ∈ waterfall,time,bottlenecks,churn,releases,adoption,engagement,pfo` — **`health` is NOT in this enum**; params `start,end` ISO date (default trailing 28 d), `format=json\|csv`, `include_demo=0\|1` (default 0), `segment=platform\|signin_method\|ranking_method\|league_count\|experiment:<key>`) | GET | 200 `{"report","window","generated_at","caveats":[…],"rows":[…]}`; insufficiency = `null` cells + `"n_too_small"` caveats — data, never an error | 400 `unknown_report`/`bad_param`; 200 `{"error":"query_timeout"}` cell on statement-guard abort |
 | `/api/admin/analytics/health` (dedicated static route — the Health tab calls this; keeping `health` out of the `<report>` enum avoids two responses claiming one URL, where Werkzeug would silently dead-letter the enum entry) | GET | 200 counters, each labeled `"since":"deploy"\|"all-time"`, plus `{wal, event_id_index_present, wal_file_bytes}` | — |
-| `/api/admin/experiments` | GET / POST (create draft) | 200 list (newest first) / 201 `{key, version}` | 400 (all errors at once, actionable strings): `layer_unknown, layer_overlap, bucket_range_invalid, weights_not_10000, metric_unknown, attr_unknown, attr_unit_incompatible, unit_type_invalid, targeting_too_deep, targeting_too_large, no_exposure_surface`; 409 `key_version_exists` |
+| `/api/admin/experiments` | GET / POST (create draft) | 200 list (newest first) / 201 `{key, version}` | 400 (all errors at once, actionable strings): `layer_unknown, layer_overlap, operator_layer_requires_tester_allowlist (2026-11-25), bucket_range_invalid, weights_not_10000, metric_unknown, attr_unknown, attr_unit_incompatible, unit_type_invalid, targeting_too_deep, targeting_too_large, no_exposure_surface`; 409 `key_version_exists` |
 | `/api/admin/experiments/<key>/transition` | POST `{to, actor, reason, override_underpowered?, override_rationale?}` | 200 status row (+ `experiment_transitions` insert) | **409** `illegal_transition` (conflict-class, matching `key_version_exists`/`immutable_running`); 400 `underpowered_needs_override`; 404 |
 | `/api/admin/experiments/<key>` | DELETE | 204 — **drafts only** (the §4.3 hard-delete) | 409 `immutable_running` for any non-draft; 404 |
 | `/api/admin/experiments/<key>/decide` | POST `{decision: ship\|revert\|iterate, rationale}` | 200; requires `status='stopped'`; permanent (FR-41) | 400 `not_stopped`; 404 |
@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS ix_user_events_device_occurred
 # link_identity()/_link_device_identity() already wired into sign-in — verify-only.
 
 experiment_layers_table = Table("experiment_layers", metadata,
-    Column("layer", String(32), primary_key=True),   # onboarding|ranking|trades_ui|engine|growth
+    Column("layer", String(32), primary_key=True),   # onboarding|ranking|trades_ui|engine|growth (+ operator, 2026-11-25)
     Column("salt",  String(64), nullable=False),     # secrets.token_hex(16), minted by P3 seed, IMMUTABLE
     Column("created_at", String(32), nullable=False))
 

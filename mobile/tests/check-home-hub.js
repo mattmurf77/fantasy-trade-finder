@@ -246,7 +246,8 @@ const handler = (name) => {
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
-    'position_roster', 'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry',
+    // 'trends' left the vocabulary with the Check trends tile (launch cut, 2026-11-25).
+    'position_roster', 'find_trade', 'rank', 'matches', 'usage_rates', 'free_agents', 'link_league', 'retry',
     // Home's next move (D-278): the row under the playoff card.
     'next_move'];
   const WITH_POS = new Set(['buy', 'sell', 'position_ranking']);
@@ -358,12 +359,18 @@ const handler = (name) => {
   for (const p of ['qb', 'rb', 'wr', 'te']) {
     IDS.push(`home.position.${p}`, `home.position.${p}.buy`, `home.position.${p}.sell`, `home.position.${p}.ranking`);
   }
-  IDS.push('home.tile.find-trade', 'home.tile.rank', 'home.tile.matches', 'home.tile.trends',
+  IDS.push('home.tile.find-trade', 'home.tile.rank', 'home.tile.matches',
     'home.tile.usage-rates', 'home.tile.free-agents', 'home.positions.error', 'home.positions.retry',
     'home.link-league');
+  // Launch cut (owner call 2026-11-25): the "Check trends" tile is gone and
+  // nothing on Home opens the Rank-stack Trends page. Usage Rates and Search
+  // free agents stay.
+  assert(!/home\.tile\.trends/.test(homeAll) && !/Check trends/.test(hub)
+      && !/screen: 'Trends'/.test(homeAll),
+    '11d. no "Check trends" tile and no Home link to the Rank-stack Trends page (launch cut)');
   // Usage Rates (docs/plans/usage-trends/): its own tile, gated on its own
   // flag, pushing the root-stack UsageTrends screen — never the Rank-stack
-  // Trends screen "Check trends" opens.
+  // Trends screen.
   {
     const t = (/<TaskTile\s+testID="home\.tile\.usage-rates"[\s\S]*?\/>/.exec(hub) || [''])[0];
     assert(/const usageOn = useFlag\('usage_trends\.enabled'\);/.test(hub)

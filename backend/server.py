@@ -18922,6 +18922,27 @@ def _block_dev_surfaces_in_prod():
     return None
 
 
+# Launch cut 2026-11-25 (keep/cut list section 13): web sign-in and every page
+# behind it are cut. These standalone signed-in pages stay in web/ (source
+# kept; mobile/tests read calculator.html) but are never served: a typed or
+# bookmarked URL lands on the landing page. Every environment; 302 so the
+# browser doesn't cache the cut. positional-tiers.html is the web Tiers
+# ranking tool: it loads and saves a stored session's personal tiers.
+_CUT_WEB_PAGES = frozenset({
+    "/calculator.html",
+    "/league-rankings.html",
+    "/player.html",
+    "/positional-tiers.html",
+})
+
+
+@app.before_request
+def _redirect_cut_web_pages():
+    if request.path in _CUT_WEB_PAGES:
+        return redirect("/", code=302)
+    return None
+
+
 @app.errorhandler(404)
 def _not_found(_e):
     """Browsers get an HTML page; API clients keep the JSON contract.
@@ -30142,24 +30163,30 @@ def sleeper_leagues(user_id):
     # Cached columns only — no detection, no platform read (the hourly tick +
     # session_init's sync path own refresh). A league we've never synced has
     # no row, so both fields come back null and it simply doesn't qualify.
-    # Flag OFF ⇒ this block is skipped and the payload is byte-identical.
-    if is_enabled("draft.room"):
-        for lg in sleeper_data:
-            if not isinstance(lg, dict):
-                continue
-            try:
-                ctx = get_league_draft_context(str(lg.get("league_id") or ""))
-            except Exception as e:
-                log.warning("  draft-status stamp failed for %s: %s",
-                            lg.get("league_id"), e)
-                ctx = None
+    # Flag OFF ⇒ no draft_status fields.
+    #
+    # `platform` is stamped whatever `draft.room` says (2026-11-25, when the
+    # owner's launch ruling turned draft.room off). Without the key
+    # `mobile/src/api/sleeper.ts` coerces every league to 'sleeper', and the
+    # onboarding test profile's linked ESPN / MFL leagues (stored as
+    # `qa_tp:…` ids, so they arrive in the local-league append above) would
+    # lose their platform: no ESPN badge, re-sync or Draft picks tile, and
+    # session init routed through Sleeper. get_league_draft_context carries
+    # the platform from the leagues row; an unknown league reads 'sleeper'.
+    draft_room_on = is_enabled("draft.room")
+    for lg in sleeper_data:
+        if not isinstance(lg, dict):
+            continue
+        try:
+            ctx = get_league_draft_context(str(lg.get("league_id") or ""))
+        except Exception as e:
+            log.warning("  league-context stamp failed for %s: %s",
+                        lg.get("league_id"), e)
+            ctx = None
+        if draft_room_on:
             lg["draft_status"] = (ctx or {}).get("status")
             lg["draft_status_confidence"] = (ctx or {}).get("confidence")
-            # The client's tab predicate also requires a BOUND platform adapter
-            # (ab5050f). Without this key `mobile/src/api/sleeper.ts` coerces every
-            # league to 'sleeper', which made that guard inert — it returned true
-            # for everything. get_league_draft_context already carries platform.
-            lg["platform"] = (ctx or {}).get("platform") or "sleeper"
+        lg["platform"] = (ctx or {}).get("platform") or "sleeper"
 
     return jsonify(sleeper_data)
 
@@ -37964,7 +37991,7 @@ def test_profile_reset():
 
 
 # ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
-# Tester-only value-core Gate 2: grade value-core vs current-engine cards
+# Value-core Gate 2 for tester-allowlisted accounts: grade value-core vs current-engine cards
 # without knowing which made them. All logic is in backend/blind_grading.py;
 # these routes gate, gather the league facts only the server has, and map
 # GradingError. They never touch trade_service, impressions or swipes.
@@ -37975,11 +38002,16 @@ from . import outlook_calibration as _outlook_calibration
 
 def _calibration_allowed(sess) -> bool:
     """THE Calibration audience predicate. Testers only on 2026-10-02; opened to every
-    app user by the operator on 2026-10-05. To restrict it again, restore the tester
-    allowlist check (_load_tester_allowlist on sess user_id / league_user_id) here."""
-    # Operator 2026-10-05: Calibration is open to EVERY app user (under 10 users; the app
-    # is TestFlight-only). grading.blind is the on/off switch.
-    return True
+    app user on 2026-10-05; testers only again by the owner's launch ruling of
+    2026-11-25. Session user id OR league user id on the tester allowlist (the
+    _value_core_live rule; lld.md §6). grading.blind is false in config/features.json
+    and reaches testers through the calibration_rollout overlay
+    (_grading_flag_for_caller). Opening Calibration to everyone again is
+    `return True` here plus grading.blind on."""
+    allow = _load_tester_allowlist()
+    user_id = str(sess.get("user_id") or "")
+    league_uid = str(sess.get("league_user_id") or "")
+    return bool((user_id and user_id in allow) or (league_uid and league_uid in allow))
 
 
 def _grading_flag_for_caller(sess) -> bool:

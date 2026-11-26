@@ -20,7 +20,7 @@ import type { RankRoute } from './TabNav';
 //   unification); the ManualRanks flow is "Overall ranks".
 
 export interface ChooserMethod {
-  /** Saved routing preference; null = navigate only (Trends). */
+  /** Saved routing preference; null = navigate only (no current row). */
   pref: RankMethodPref | null;
   route: RankRoute;
   icon: IconName;
@@ -77,16 +77,17 @@ export const PRIMARY_METHODS: ChooserMethod[] = [
   },
 ];
 
-/** "More ways to rank" disclosure rows (collapsed by default). */
+/** "More ways to rank" disclosure rows (collapsed by default).
+ *
+ *  Launch cuts (owner call 2026-11-25): Pick Anchors and Trends left both
+ *  chooser surfaces. Their routes (`Anchors`, `Trends`) stay registered in
+ *  TabNav for a later return, but nothing in the app opens them: a saved
+ *  'anchor' preference hydrates as no preference (state/useSession.ts), the
+ *  Settings slider has no anchor stop (components/SteerSlider.tsx), and the
+ *  `app/rank/anchors` / `app/rank/trends` links resolve to this chooser
+ *  (utils/deepLinks.ts rewriteUniversalPath). Pinned by
+ *  tests/check-launch-cuts.js. */
 export const MORE_METHODS: ChooserMethod[] = [
-  {
-    pref: 'anchor',
-    route: 'Anchors',
-    icon: 'swap',
-    title: 'Pick Anchors',
-    body: 'Price players in draft picks, one at a time',
-    key: 'anchor',
-  },
   {
     pref: 'manual',
     route: 'ManualRanks',
@@ -94,13 +95,5 @@ export const MORE_METHODS: ChooserMethod[] = [
     title: 'Overall ranks',
     body: 'Order every player 1-to-N yourself — drag rows or tap a rank number',
     key: 'manual',
-  },
-  {
-    pref: null,
-    route: 'Trends',
-    icon: 'trends',
-    title: 'Trends',
-    body: 'Your biggest movers vs consensus',
-    key: 'trends',
   },
 ];

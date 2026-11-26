@@ -5219,6 +5219,7 @@
         currentTradeAwayPositions = away;
         updateOutlookBadge();
         dismissOutlookModal();
+        if (window.loadLeagueProjectionBatch) window.loadLeagueProjectionBatch(); // D-277 parity: re-read the outlook prompt
 
         const meta = OUTLOOK_META[_pendingOutlookValue] || { emoji: '', short: _pendingOutlookValue };
         showToast('Preferences saved');
@@ -5255,6 +5256,7 @@
         currentTradeAwayPositions = [];
         updateOutlookBadge();
         dismissOutlookModal();
+        if (window.loadLeagueProjectionBatch) window.loadLeagueProjectionBatch(); // D-277 parity: re-read the outlook prompt
 
         const meta = OUTLOOK_META[_pendingOutlookValue] || { emoji: '', short: _pendingOutlookValue };
         showToast(`Outlook set: ${meta.label}`);

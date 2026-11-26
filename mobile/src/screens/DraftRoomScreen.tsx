@@ -133,6 +133,7 @@ import {
 import { setAssetPref } from '../api/league';
 import { getPickAssignments, pickAssignmentSubline } from '../api/pickAssignment';
 import { track } from '../api/events';
+import { ApiError } from '../api/client';
 import { readErrorCopy } from '../utils/verification';
 import { haptics } from '../utils/haptics';
 import { TIER_LABEL, tierForElo } from '../utils/tierBands';
@@ -172,6 +173,13 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const [showLastYear, setShowLastYear] = useState(false);
 
   const queryClient = useQueryClient();
+  // Launch cut (owner call 2026-11-25): `draft.room` is off, which removes
+  // every in-app entry (the Acquire Draft chip, the League home tile). The
+  // route stays registered, so an old link or the `app/league/draft-room`
+  // deep link still lands here: with the flag off — or a server that answers
+  // 404 feature_disabled — the screen shows an honest closed state with a
+  // working Back instead of a load error whose "Try again" can never succeed.
+  const roomOn = useFlag('draft.room');
   const livePollEnabled = useFlag('draft.live_poll');
   // W1 — per-player row actions. Off ⇒ the rows stay inert Views.
   const rowActionsOn = useFlag('draft.rank_inline');
@@ -211,7 +219,7 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
   const query = useQuery({
     queryKey: ['draft-board', leagueId, basis],
     queryFn: () => getDraftBoard(leagueId as string, basis),
-    enabled: !!leagueId,
+    enabled: !!leagueId && roomOn,
     staleTime: 10_000,
     // ── The polling contract (plan §M4, lld [RV-8]) ──────────────────────
     // FOUR conditions, every one required, and `false` (not a number) is
@@ -623,6 +631,36 @@ export default function DraftRoomScreen({ route, navigation }: any = {}) {
     }, 'DraftRoom');
     setMenuTarget(row);
   }, []);
+
+  const roomClosed =
+    !roomOn ||
+    (query.error instanceof ApiError &&
+      query.error.status === 404 &&
+      (query.error.body as { error?: string } | null)?.error === 'feature_disabled');
+  if (roomClosed) {
+    return (
+      <Shell inTabs={inTabs}>
+        <View style={styles.centerFill}>
+          <Text testID="draft-room.closed-text" style={styles.emptyBody}>
+            The draft room isn't available right now.
+          </Text>
+          {/* Inside the seasonal Draft tab the tab bar is the way out; the
+              root-stack push (old links) gets a Back that always works. */}
+          {inTabs ? null : (
+            <Button
+              testID="draft-room.closed-back"
+              label="Back"
+              variant="ghost"
+              compact
+              onPress={() =>
+                navigation?.canGoBack?.() ? navigation.goBack() : navigation?.navigate?.('Main')
+              }
+            />
+          )}
+        </View>
+      </Shell>
+    );
+  }
 
   if (!leagueId) {
     return (
