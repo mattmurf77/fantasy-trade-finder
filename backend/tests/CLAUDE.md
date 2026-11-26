@@ -27,8 +27,9 @@ python3 -m pytest backend/tests -q --durations=25     # find the slow ones
 the same thing. The only dev dependency is `pytest` (`requirements-dev.txt`); runtime deps
 (`flask`, `sqlalchemy`, `cryptography`, `Pillow`, …) come from `requirements.txt`.
 
-**CI** (`.github/workflows/ci.yml`) has three jobs: `backend-tests` runs
-`python -m pytest backend/tests -q` on **Python 3.12**; `mobile-typecheck` runs `npx tsc --noEmit`
+**CI** (`.github/workflows/ci.yml`): the `backend-suite` job runs
+`python -m pytest backend/tests -q` on **Python 3.12**, reported through the required `backend-tests`
+check and skipped on PRs that cannot affect it (see [`.github/CLAUDE.md`](../../.github/CLAUDE.md)); `mobile-typecheck` runs `npx tsc --noEmit`
 **and** every `mobile/tests/check-*.js` structural suite; `maestro-testid-lint` runs
 `mobile/scripts/testid-lint.sh`. There is no iOS-simulator tier in CI (no free macOS runner).
 
