@@ -446,6 +446,53 @@ def run() -> int:
             "; ".join(loaders) if loaders
             else "no served page loads the signed-in web app's scripts")
 
+    # D-287 (2026-11-25): the landing counts visits again, through its own
+    # tiny script, never events.js (queue replay, session token, invite
+    # capture). The landing loads exactly these two scripts, no served page
+    # loads events.js, and landing-visit.js sends one anonymous visit event:
+    # one POST /api/events carrying app_opened {launch_type: web}, ids fresh
+    # per load, no storage, cookie, session token or URL read.
+    want_scripts = ["/js/landing-steps.js", "/js/landing-visit.js"]
+    landing_scripts = [re.sub(r"\?.*$", "", s) for s in re.findall(
+        r'<script\b[^>]*\bsrc="([^"]+)"', strip_comments(all_sources["index.html"]))]
+    events_loaders = [f"{page} loads events.js" for page in PAGES
+                      for s in re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', strip_comments(all_sources[page]))
+                      if re.search(r"/js/events\.js(?:\?|$)", s)]
+    r.check("CUT-landing-scripts[index.html]",
+            landing_scripts == want_scripts and not events_loaders,
+            "; ".join(events_loaders) if events_loaders else
+            f"landing loads {landing_scripts}, want exactly {want_scripts}"
+            if landing_scripts != want_scripts else
+            "landing loads only landing-steps.js and landing-visit.js; no page loads events.js")
+
+    visit_code = re.sub(r"//[^\n]*", "", (WEB / "js" / "landing-visit.js").read_text(encoding="utf-8"))
+    visit_bad = []
+    if len(re.findall(r"\bfetch\(", visit_code)) != 2:
+        visit_bad.append("want exactly two fetch( calls (the flag read, then the one visit)")
+    if len(re.findall(r'fetch\("/api/events"', visit_code)) != 1:
+        visit_bad.append('want exactly one fetch("/api/events"')
+    if re.findall(r'event_type:\s*"([^"]+)"', visit_code) != ["app_opened"]:
+        visit_bad.append("want exactly one event, app_opened")
+    if re.findall(r"props:\s*\{([^}]*)\}", visit_code) != [' launch_type: "web" ']:
+        visit_bad.append('props must be exactly { launch_type: "web" }')
+    if '"analytics.client_events"] !== true' not in visit_code:
+        visit_bad.append("not gated on analytics.client_events")
+    if not re.search(r'"X-Device-Id":\s*"visit_"\s*\+\s*c\.randomUUID\(\)', visit_code):
+        visit_bad.append("X-Device-Id is not a fresh per-load random id")
+    for token in ("localStorage", "sessionStorage", "cookie", "X-Session-Token",
+                  "location", "sendBeacon", "setInterval", "FTFTrack", "deviceId",
+                  "referrer", "user_id", "league"):
+        if token in visit_code:
+            visit_bad.append(f"reads or sends {token}")
+    if visit_code.count('credentials: "omit"') != 2:
+        visit_bad.append('both requests must send credentials: "omit"')
+    if ".catch(function" not in visit_code:
+        visit_bad.append("no .catch: a failed request could surface")
+    r.check("CUT-landing-visit-anonymous[landing-visit.js]", not visit_bad,
+            "; ".join(visit_bad) if visit_bad else
+            "one app_opened {launch_type: web} per load, flag-gated, per-load ids, "
+            "no storage, cookie, session or URL read")
+
     panel = re.search(r'<div\b([^>]*\bid="entry-mobile"[^>]*)>(.*?)</div>', landing_body, flags=re.S)
     cta = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*>(.*?)</a>', panel.group(2), flags=re.S) if panel else []
     cta_href = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*href="([^"]*)"', panel.group(2)) if panel else []

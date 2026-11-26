@@ -9,7 +9,9 @@ Flask backend (`run.py`), so a page is live the moment the file exists.
 **Launch cut (2026-11-25, launch keep/cut list sections 13-14):** the owner cut web sign-in
 and every page behind it, and the browser extension's download links. The site is now
 marketing + legal only; Fleeced runs on iPhone. `index.html` is the landing page alone (no
-sign-in, no app shell, loads only `js/landing-steps.js`); `calculator.html`,
+sign-in, no app shell, loads only `js/landing-steps.js` and, since D-287, `js/landing-visit.js`:
+one anonymous `app_opened` `{launch_type: web}` per load, per-load random ids, no storage;
+never `events.js`; pinned by `CUT-landing-scripts` and `CUT-landing-visit-anonymous`); `calculator.html`,
 `league-rankings.html`, `player.html` and `positional-tiers.html` stay in the repo but `_CUT_WEB_PAGES` in
 `backend/server.py` 302s them to `/`. `js/app.js`, `browser-auth.js`, `events.js`,
 `win-now.js`, `league-projections.js` and `playoff-odds.js` stay in the repo (mobile/tests and
@@ -46,7 +48,7 @@ and only one of the twelve copies got it.
 
 ## The web CI gate
 
-`python3 qa/web/check_web_structure.py` — 224 structural checks (2026-11-25; the `CUT-*` group pins the launch cut) over the shipped
+`python3 qa/web/check_web_structure.py` — 231 structural checks (2026-11-25; the `CUT-*` group pins the launch cut and the landing visit count) over the shipped
 HTML/CSS/JS: design tokens, emoji-as-icons, radii, fonts, SEO metadata, a11y
 landmarks/headings, and hygiene. No browser, no server, no dependencies; runs in
 well under a second. Wired as the `web-structure` job in `.github/workflows/ci.yml`.
@@ -61,7 +63,8 @@ of the emoji check — `git grep qa:allow-emoji` lists every one.
 |---|---|---|
 | `js/app.js` | ~6.2k lines | Everything: fetch layer, rendering, page routing |
 | `js/playoff-odds.js` | ~25 lines | `window.FTFPlayoffOdds` — the playoff-odds display rule (D-262; `docs/cross-client-invariants.md`): `text` / `miss` / `rank`. 100% only when clinched, 0% only when eliminated. Loaded by `index.html` before `win-now.js` and `league-projections.js`, which print every playoff chance through it. Mirrors `mobile/src/utils/playoffOdds.ts`; executed by `mobile/tests/check-playoff-odds-display.js` |
-| `js/events.js` | ~175 lines | Analytics emission. Events must match `backend/analytics_taxonomy.py`; gated on the `analytics.client_events` flag |
+| `js/events.js` | ~225 lines | Analytics emission for the signed-in web app; **loaded by no page since the 2026-11-25 cut**. Events must match `backend/analytics_taxonomy.py`; gated on the `analytics.client_events` flag |
+| `js/landing-visit.js` | ~40 lines | The landing's visit count (D-287): one `app_opened` `{launch_type: web}` per load, gated on `analytics.client_events`, fresh random ids per load, no storage, no session token, fails silently. Not events.js on purpose (queue replay, session token, invite capture) |
 | `css/styles.css` | ~4.6k lines | Chalkline tokens + all page styles |
 
 ## Rules
