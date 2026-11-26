@@ -31,7 +31,10 @@ the same thing. The only dev dependency is `pytest` (`requirements-dev.txt`); ru
 8-way matrix sharded by test file: each runner collects everything, then the
 `.github/scripts/ci_shard.py` plugin keeps only the files assigned to its shard (greedy packing by
 the per-file seconds in `.github/backend-test-durations.json`; a file missing from it just gets a
-1 s default, so stale durations unbalance shards but never drop a test). Each shard logs a
+1 s default, so stale durations unbalance shards but never drop a test). A file heavier than one
+shard's share can be listed in the plugin's opt-in `SPLIT_FILES` (today only
+`test_rules_first_deck.py`, in 2 chunks) to spread its tests round-robin over several shards —
+only after checking its tests pass in separate processes. Each shard logs a
 `ci_shard: shard i/8 runs … of … collected tests` line. The required check `backend-tests` is a
 gate job that passes only if every shard passed. Reproduce one shard locally:
 

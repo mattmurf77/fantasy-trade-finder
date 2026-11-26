@@ -4,12 +4,12 @@ Pytest plugin, loaded in CI with:
 
     FTF_TEST_SHARD=3/8 PYTHONPATH=.github/scripts python -m pytest backend/tests -q -p ci_shard
 
-Pytest collects everything as usual; this plugin then keeps only the items whose test
-file is assigned to shard i and deselects the rest. Assignment is a pure function
-file -> exactly one shard, applied to pytest's own collection, so every collected
-test runs in exactly one shard. Durations (.github/backend-test-durations.json) only
-balance the shards: a stale or missing entry can unbalance them, never drop or
-duplicate a test. With FTF_TEST_SHARD unset or empty the plugin does nothing.
+Pytest collects everything as usual; this plugin then keeps only the items assigned to
+shard i and deselects the rest. Assignment is a pure function node id -> exactly one
+shard (by file, or by chunk for the files in SPLIT_FILES), applied to pytest's own
+collection, so every collected test runs in exactly one shard. Durations
+(.github/backend-test-durations.json) only balance the shards: a stale or missing
+entry can unbalance them, never drop or duplicate a test. With FTF_TEST_SHARD unset or empty the plugin does nothing.
 
 Regenerate the durations file from a junit XML of a full serial run:
 
@@ -28,6 +28,13 @@ ENV_VAR = "FTF_TEST_SHARD"
 DURATIONS_RELPATH = ".github/backend-test-durations.json"
 DEFAULT_WEIGHT = 1.0  # seconds, for test files not in the durations file
 
+# Files split into k chunks instead of running as one unit. Explicit and opt-in: a
+# file goes here only after someone has checked its tests pass in separate processes.
+# test_rules_first_deck.py alone is heavier than an even shard's share; its
+# module-level caches (_CACHE, _SEASON_WORLDS) fill lazily, so each chunk just
+# rebuilds what it needs. A listed file that is not collected is ignored.
+SPLIT_FILES = {"backend/tests/test_rules_first_deck.py": 2}
+
 
 def parse_shard(value):
     """'i/N' -> (i, N), 1-based. Empty/None -> None. Anything else raises ValueError."""
@@ -42,20 +49,40 @@ def parse_shard(value):
     return i, n
 
 
-def assign_shards(files, durations, n, default=DEFAULT_WEIGHT):
-    """Map each file to a shard in 1..n by greedy longest-processing-time packing.
-
-    Files are taken heaviest first (ties by path) and each goes into the currently
-    lightest shard (ties by lowest index). Deterministic for given inputs.
+def pack(weights, n):
+    """Map each unit in `weights` to a shard in 1..n by greedy longest-processing-time
+    packing: heaviest first (ties by key), each into the currently lightest shard
+    (ties by lowest index). Deterministic for given inputs.
     """
-    weights = {f: durations.get(f, default) for f in set(files)}
     loads = [0.0] * n
     assignment = {}
-    for f in sorted(weights, key=lambda f: (-weights[f], f)):
+    for u in sorted(weights, key=lambda u: (-weights[u], u)):
         k = min(range(n), key=lambda k: (loads[k], k))
-        assignment[f] = k + 1
-        loads[k] += weights[f]
+        assignment[u] = k + 1
+        loads[k] += weights[u]
     return assignment
+
+
+def assign_tests(tests, durations, n, split_files=SPLIT_FILES, default=DEFAULT_WEIGHT):
+    """Map each node id to a shard in 1..n. `tests` is an iterable of (nodeid, file).
+
+    Each file is one packing unit, except a file in `split_files` with k chunks: its
+    node ids, in sorted order, go round-robin into k units 'file#j/k', each weighing
+    file weight / k. Sorting makes the chunks depend only on the set of node ids.
+    """
+    by_file = {}
+    for nodeid, f in tests:
+        by_file.setdefault(f, set()).add(nodeid)
+    unit_of, weights = {}, {}
+    for f, nodeids in by_file.items():
+        k = split_files.get(f, 1)
+        w = durations.get(f, default)
+        for idx, nodeid in enumerate(sorted(nodeids)):
+            unit = f if k == 1 else f"{f}#{idx % k + 1}/{k}"
+            unit_of[nodeid] = unit
+            weights[unit] = w / k
+    shard_of_unit = pack(weights, n)
+    return {nodeid: shard_of_unit[u] for nodeid, u in unit_of.items()}
 
 
 def load_durations(root):
@@ -85,11 +112,12 @@ def pytest_collection_modifyitems(session, config, items):
         return
     i, n = shard
     files = [_item_file(it, config.rootpath) for it in items]
-    assignment = assign_shards(files, load_durations(config.rootpath), n)
-    keep = [it for it, f in zip(items, files) if assignment[f] == i]
-    drop = [it for it, f in zip(items, files) if assignment[f] != i]
-    total, total_files = len(items), len(assignment)
-    kept_files = sum(1 for s in assignment.values() if s == i)
+    shard_of = assign_tests(zip((it.nodeid for it in items), files),
+                            load_durations(config.rootpath), n)
+    keep = [it for it in items if shard_of[it.nodeid] == i]
+    drop = [it for it in items if shard_of[it.nodeid] != i]
+    total, total_files = len(items), len(set(files))
+    kept_files = len({f for it, f in zip(items, files) if shard_of[it.nodeid] == i})
     if drop:
         config.hook.pytest_deselected(items=drop)
     items[:] = keep
