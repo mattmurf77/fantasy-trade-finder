@@ -1,6 +1,9 @@
 name: CI
 
-# First CI for this repo (2026-08-08). Three cheap jobs.
+# First CI for this repo (2026-08-08). The backend pytest suite runs sharded by
+# test file across 8 parallel runners (backend-suite, via .github/scripts/ci_shard.py
+# and .github/backend-test-durations.json); backend-tests is the single gate over
+# all shards. The other jobs are cheap.
 # D-056 (2026-08-15) retired Maestro and the simulator entirely, so there is no
 # local simulator tier behind these jobs any more — CI plus the operator's manual
 # TestFlight pass is the whole verification story. The maestro-testid-lint job keeps
@@ -14,9 +17,20 @@ on:
   push:
     branches: [main]
 
+# A new push to a pull request cancels that PR's superseded run. Runs on main are
+# grouped by commit sha and never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  backend-tests:
+  backend-suite:
+    name: backend-suite (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,11 +38,26 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m pytest backend/tests -q
+      - run: python -m pytest backend/tests -q -p ci_shard
         env:
           # Exercise the optional path across the complete suite. Fresh-process
           # decoder tests separately prove default-off and startup-only behavior.
           FTF_OWNER_PROOF_FAST_JSON: '1'
+          FTF_TEST_SHARD: ${{ matrix.shard }}/8
+          PYTHONPATH: .github/scripts
+
+  # The single required status check over all backend shards (the branch ruleset
+  # requires this exact name). `if: always()` makes a failed or cancelled shard
+  # report failure here; without it this job would be skipped, and GitHub treats a
+  # skipped required check as passing.
+  backend-tests:
+    needs: [backend-suite]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "backend-suite: ${{ needs.backend-suite.result }}"
+          test "${{ needs.backend-suite.result }}" = success
 
   mobile-typecheck:
     runs-on: ubuntu-latest

@@ -6,11 +6,13 @@
 // are VERBATIM; change one only from that file. `{Club name}` is "Founding
 // GMs" (operator, 2026-10-25).
 //
-// EXCEPTION (operator, 2026-11-22, "Remove cut features."): `mon.lock.free`,
-// `mon.pay.b3` and `mon.pay.b4` no longer name features the 2026-11-21 launch
-// feature audit cuts (ESPN send, Win Now, the "More offers" shop window,
-// Calibration, trends, the Draft Room). tests/check-monetization-cut-features.js
-// keeps them out.
+// EXCEPTION (operator, 2026-11-22, "Remove cut features."): `mon.lock.free`
+// alone departs from that file. It no longer names Calibration, trends or the
+// Draft Room, which the owner's launch keep/cut calls (2026-11-25) still cut.
+// tests/check-monetization-cut-features.js keeps cut features out.
+// `mon.pay.b3` and `mon.pay.b4` were cut the same day and are back to the
+// source text since 2026-11-25: the owner KEPT ESPN send and the Win Now
+// trade search for launch ("Restore it with ESPN assumed live").
 //
 // ONE RUNTIME IMPORT, on purpose: the support address (utils/supportContact,
 // a constant-only module; check-feedback-public pin 3 keeps it the only
@@ -56,8 +58,8 @@ export const MON = {
   'mon.pay.value': 'A subscription covers finding and sending trades.',
   'mon.pay.b1': 'A trade deck that weighs your board and theirs',
   'mon.pay.b2': 'Matches when a leaguemate likes the same trade',
-  'mon.pay.b3': 'Proposals sent to Sleeper or MFL',
-  'mon.pay.b4': 'Trade ideas for a player you want to move',
+  'mon.pay.b3': 'Proposals sent to Sleeper, ESPN or MFL',
+  'mon.pay.b4': 'Shop a player and Win Now trade targets',
   'mon.pay.restore': 'Restore purchases',
   // §9.4 (row §2): the end card's button (M2) and Settings' non-member row
   'mon.pay.see_plans': 'See plans',

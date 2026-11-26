@@ -22,6 +22,7 @@ plus a restart.
 - [A. Before anything: what must be true outside the code](#a-before-anything-what-must-be-true-outside-the-code)
 - [B. Turn-on, in order](#b-turn-on-in-order)
 - [C. Device checklist (TestFlight, sandbox)](#c-device-checklist-testflight-sandbox--c1c14-before-b6-the-rest-right-after)
+- [L. Granting lifetime Pro to someone later](#l-granting-lifetime-pro-to-someone-later)
 - [R. Rollback](#r-rollback)
 - [F. The fixture rule](#f-the-fixture-rule)
 
@@ -47,8 +48,8 @@ Part 0 (P1–P8), cited here rather than repeated.
 4. **App Review.**
    - **Two review accounts:** demo A is entitled (grant it with the admin route below); demo B is never entitled, stays pristine, and is never used for testing.
    - **Review notes** must say that trade finding and sending need a subscription, that the first deck page is free, and where Restore is (the paywall, and Settings › Subscription).
-5. **Copy decisions** (operator, then marketing and legal). The paywall bullets (`mobile/src/copy/monetization.ts:51-54`) promise "Proposals sent to Sleeper, **ESPN** or MFL" and "Shop a player and **Win Now** trade targets".
-   - If the launch cuts ESPN send or Win Now (the 2026-11-21 audit's recommendation), those lines overclaim, so change them in the copy source before the binary.
+5. **Copy decisions** (operator, then marketing and legal). The paywall bullets (`mobile/src/copy/monetization.ts`, `mon.pay.b1`–`b4`) promise "Proposals sent to Sleeper, **ESPN** or MFL" and "Shop a player and **Win Now** trade targets".
+   - **Decided 2026-11-25:** the owner kept ESPN send and the Win Now trade search for launch ("Restore it with ESPN assumed live"), so both lines are back to the legal-approved text. If either is cut later, those lines overclaim again: change them in the copy source before the binary.
    - `mon.lock.free` says "trends" are free. Keep that true if any candidate in scope §8 is adopted.
 6. **Existing users** (operator decision, **decided 2026-11-22**: "All current app users get free pro for life."). Every account that exists when B6 turns enforcement on gets lifetime Pro; people who join after B6 pay. Without the grant, every current user would lose trade finding beyond the first page and lose sending the moment B6 lands.
    - **How:** `scripts/grant_lifetime_pro_existing_users.py`. It reads the user list from the database (read-only connection) and sends the grants through `POST /api/admin/entitlements/bulk-grant`: perpetual `pro`, source `manual_grant`, granted_by `operator`, note `lifetime-pro: existing user at paid launch (operator 2026-11-22)`. One grant per person, however they signed in (Sleeper, Sign in with Apple, or both linked). Anyone already on perpetual Pro is skipped, so it is safe to re-run.
@@ -56,7 +57,11 @@ Part 0 (P1–P8), cited here rather than repeated.
    - **Demo B stays out.** Create demo B (A4) **before** the first run, and pass it with `--exclude` on every run. Pass any never-entitled test account the same way (`--exclude-file` takes a list). An exclude that matches no user stops the run. Anything created after the B5a run is never granted, so a fresh account for §C is never-entitled by construction.
    - A current subscriber (trial or paid) also gets lifetime Pro. Their Apple subscription keeps billing until they cancel it in Apple's settings; the grant does not cancel it.
    - Lapsed rows read `lapsed`, so comped users who later expire get the lapsed copy, not a second trial. Lifetime grants never expire.
-7. **Web** (operator decision). `paywall_web_enforce_enabled` stays **0** unless the web 402 state ("continue on iPhone") and `IOS_INSTALL_URL` are ready. Mobile enforcement does not need it.
+7. **Web** (owner decision, **decided 2026-11-25**: "aligned. Close this"). The wall covers non-app requests too, so `paywall_web_enforce_enabled` goes to **1** at B6a. Nothing on the web has to be ready first:
+   - Since the launch cut of web sign-in (PR 729), no web page calls a gated route, and there is no web 402 state: "continue on iPhone" was never built. The only 402 handling on the web is in `web/js/app.js` (a toast), and no page loads that file.
+   - A browser visitor has no session, so a gated route gives that route's own sign-in answer, never a 402. The landing, legal, FAQ, contact, ranking-method, share (`/s/…`, `/og/…`) and join pages are free routes, so they are never gated, whatever the knob says.
+   - What the knob closes: a call with a session token but without the app's `X-Device` header (a script, an old web tab, a hand-made request). Until it is 1, such a call skips the wall.
+   - `IOS_INSTALL_URL` is not needed for this.
 
 ## B. Turn-on, in order
 
@@ -72,8 +77,9 @@ Run from the repo root with `CRON_SECRET` in `secrets.local.env`. Every `set_kno
 | **B5** | On a TestFlight build from A3 with a sandbox Apple ID, run **§C1 and C14** with the knob still 0 (purchase, Restore and the webhook can also be exercised now: C5–C8 work without enforcement, they just unlock nothing). | Those steps pass. |
 | **B5a** | **Lifetime Pro for every existing user (A6), immediately before B6.** `set -a; . ./secrets.local.env; set +a` then `export DATABASE_URL="$DATABASE_URL_PROD"`. Dry run: `python3 scripts/grant_lifetime_pro_existing_users.py --exclude <demo B> --out feedback-workspace/lifetime-pro/would-grant.txt`. If the counts look right, the same command with `--out feedback-workspace/lifetime-pro/granted.txt --apply --base-url https://<render-host>`. Then the dry run once more. | The first line names the prod database. The apply ends `SUMMARY: sent N; confirmed perpetual pro on read-back N; failures 0`, exit 0. Any failure: re-run the same command (granted users are skipped). The last dry run says `would grant: 0`. `GET /api/admin/entitlements?user=<a known existing user>` shows a `manual_grant` `pro` row with `expires_at` null; `?user=<demo B>` shows no active `pro` row. |
 | **B6** | **Turn on**, in a watched window with the kill command ready: `python3 scripts/set_knob.py paywall_enforce_enabled 1`. Then run **§C2–C15** straight away (they need enforcement; if a staging server is wired to the same RevenueCat project, run them there first instead). Any failure → §R1 at once. | Within one request: a never-entitled test account's second deck page → 402 `preview_used`; its Send → the paywall. `/api/me/entitlements` → `enforcing:true`. `paywall_gate_hit` rows start (`/api/admin/analytics/...`, once per user, gate and family per day). |
+| **B6a** | **Close the wall to non-app requests (A7)**, only once B6's §C checks pass: `python3 scripts/set_knob.py paywall_web_enforce_enabled 1`. Its own step, so a web misfire can be killed without touching the app (§R4). | `GET /api/admin/config` shows `paywall_web_enforce_enabled` 1. In a desktop browser, `/`, `/privacy`, `/terms`, `/faq.html`, `/contact.html` and `/ranking-method.html` load as before, with no 402 anywhere. On the never-entitled test account, the app's Send still opens the paywall (C3, unchanged). If you hold that account's session token: `POST /api/trades/propose` with it and **no** `X-Device` header → 402 `{"error": "pro_required", "gate": "never_trialed"}`, the app's answer. |
 | **B7** | Watch the first 24 h. | K0 alarm: any 402 `preview_used` to a user never served a card should be zero. Webhook 200s in the Render logs for every sandbox or real purchase. No spike in `api_request_failed` on free routes. |
-| **B8** | (Later, optional) web: `python3 scripts/set_knob.py paywall_web_enforce_enabled 1`, only with A7 done. | A desktop browser's Find a trade shows the continue-on-iPhone state; sign-in, settings, legal and delete still work. |
+| **B8** | Re-read the live state, as in B0. | `paywall_enforce_enabled` 1 and `paywall_web_enforce_enabled` 1. `paywall_gate_hit` rows with `source` `web` are expected only from calls without the app's header (scripts, old tabs); the website itself sends none. |
 
 Do **not** edit `config/features.json`. Production is driven by `FTF_FLAGS`. The file's defaults stay dark so a fresh environment or a test run is never enforcing by accident (§F).
 
@@ -139,6 +145,17 @@ This adds to the launch scope's T1–T20 (`plan/monetization-launch` scope §3, 
 
 Log every step's result in `living-memory/TEST_LEDGER.md` with the build number.
 
+## L. Granting lifetime Pro to someone later
+
+After B5a, people who join pay. To give one or more named people lifetime Pro anyway (a friend, a tester, a support make-good), use `scripts/grant_pro_to_users.py`. It resolves each identifier read-only against the database the way the admin routes do (Sleeper id, Sleeper username, `acct_*`, or bare account id), then sends the grants through `POST /api/admin/entitlements/bulk-grant`: perpetual `pro`, source `manual_grant`, granted_by `operator`, and your `--note` stored on the row so a later audit says why. Several identifiers for one person count once; anyone already on perpetual Pro is skipped, so a re-run sends nothing.
+
+1. `set -a; . ./secrets.local.env; set +a` then `export DATABASE_URL="$DATABASE_URL_PROD"`.
+2. **Dry run:** `python3 scripts/grant_pro_to_users.py --user <sleeper username or id>` (repeat `--user`, or `--users-file <path>` with one identifier per line; blank lines and `#` comments are ignored). Add `--verbose` to see each identifier's outcome (would grant / already holds perpetual Pro / not found); without it the output is counts only.
+3. **Apply:** the same command plus `--apply --base-url https://<render-host> --note "<why, e.g. make-good for support ticket>"`. Optional `--out feedback-workspace/lifetime-pro/granted-<date>.txt` keeps the list of keys sent.
+4. Run the dry run once more.
+
+Check: the first line names the prod database. The dry run says `not found: 0` (any identifier that matches no user makes `--apply` refuse before sending anything, exit 2). The apply ends `SUMMARY: sent N; confirmed perpetual pro on read-back N; failures 0`, exit 0; on any failure re-run the same command. The last dry run says `would grant: 0`. `GET /api/admin/entitlements?user=<the person>` shows a `manual_grant` `pro` row with `expires_at` null and your note. To take a grant back, `DELETE /api/admin/entitlements/<id>` (a status flip; the row is kept).
+
 ## R. Rollback
 
 1. **Instant (no deploy):** `python3 scripts/set_knob.py paywall_enforce_enabled 0`.
@@ -148,7 +165,7 @@ Log every step's result in `living-memory/TEST_LEDGER.md` with the build number.
    - **Use this for any gate misfire.**
 2. **If you also want observe mode off:** remove `monetize.entitlements` from `FTF_FLAGS` (leave every other key), then restart. With it off, every user is implicitly Pro (`check_pro` → True).
 3. **Do not turn `monetize.paywall` off** to roll back the gate. It hides the paywall, Restore and Manage subscription from paying subscribers (App Store guideline 3.1.1 needs Restore), and with G-076's `FTF_FLAGS` it is shared with other features' config. The knob is the lever.
-4. **Web only:** `python3 scripts/set_knob.py paywall_web_enforce_enabled 0`.
+4. **Web only:** `python3 scripts/set_knob.py paywall_web_enforce_enabled 0`. Requests without the app's `X-Device` header go back to ungated; the app stays walled.
 5. **Preview mis-sized:** `paywall_preview_pages` is live. 0 removes the free page (Product decision, copy rewrites); 1 is the launch value.
 
 ## F. The fixture rule
