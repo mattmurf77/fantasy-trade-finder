@@ -286,6 +286,17 @@ export function faMoveOpensSheet(move: unknown, row?: FaMoveRow | null): boolean
   return isSubmitCapability(move) && faMoveGate({ move, row, consentValid: false, ticked: false }) !== 'unsupported';
 }
 
+/** Launch rule (owner call 2026-11-25, "no Add button that cannot add"):
+ *  whether a host shows an Add control for this row at all. Only where the
+ *  in-app move flow opens AND the row is not held in hand-off: a submit-mode
+ *  row the server holds (`move_mode` set, or a claim while claims are off)
+ *  gets no Add, the same as no capability, 'handoff' or 'unsupported'. A row
+ *  that passes opens the sheet exactly as before (faMoveOpensSheet). */
+export function faMoveShowsAdd(move: unknown, row?: FaMoveRow | null): boolean {
+  return faMoveOpensSheet(move, row)
+    && faMoveGate({ move, row, consentValid: false, ticked: false }) !== 'handoff';
+}
+
 /** The capability, or null when it's absent, malformed or an unknown mode:
  *  then nothing of it is used, `move.copy` included (fully legacy). */
 export function capabilityOrNull(move: unknown): FaMoveCapability | null {

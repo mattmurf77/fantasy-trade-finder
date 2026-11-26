@@ -11,6 +11,9 @@ AUTH={'X-Session-Token':TOKEN}
 @pytest.fixture
 def route_client(engine,monkeypatch):
     monkeypatch.setattr(ff,'_flags_cache',{**ff.DEFAULT_FLAGS,'grading.blind':True,'grading.outlook_round':True})
+    # Owner launch ruling 2026-11-25: Calibration is tester-allowlist only; both accounts
+    # these tests sign in as are testers, so the routes' own checks are what is under test.
+    monkeypatch.setattr(server,'_load_tester_allowlist',lambda:{'account','foreign'})
     monkeypatch.setattr(oc,'kick_worker',lambda:None)
     from backend import outlook_calibration_adapter as adapter
     monkeypatch.setattr(adapter,'is_current',lambda *a,**k:True)

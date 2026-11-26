@@ -31,7 +31,7 @@ Bias toward caution over speed; use judgment for trivial tasks.
 - `run.py` — Flask dev server on port 5000 (`PORT` to override; macOS AirPlay squats 5000)
 - `backend/server.py` — the Flask `app` object itself; what gunicorn imports in prod
 - `mobile/App.tsx` — Expo entry
-- `web/index.html` — single-page web app
+- `web/index.html` — the landing page (marketing only since the 2026-11-25 launch cut of web sign-in; see `web/CLAUDE.md`)
 - `extension/manifest.json` — MV3 extension
 - `render.yaml` + `build.sh` — prod deploy (web service + 3 cron tick services)
 

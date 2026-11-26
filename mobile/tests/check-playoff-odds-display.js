@@ -126,10 +126,32 @@ for (const [file, patterns, what] of pins) {
   assert(missing.length === 0, `B1. ${what} (${file})`, missing.join(' | '));
 }
 {
-  const html = read('web/index.html');
-  const at = (name) => html.indexOf(`/js/${name}`);
-  assert(at('playoff-odds.js') > 0 && at('playoff-odds.js') < at('win-now.js') && at('playoff-odds.js') < at('league-projections.js'),
-    'B2. web/index.html loads playoff-odds.js before win-now.js and league-projections.js');
+  // B2. The helper must be loaded before its callers, wherever they load.
+  // Every web/*.html page that loads win-now.js or league-projections.js
+  // (both read window.FTFPlayoffOdds) must load playoff-odds.js first; a page
+  // that loads neither passes. (Since the 2026-11-25 launch cuts the landing
+  // web/index.html is marketing-only and loads none of them; the rule still
+  // protects any page that does.)
+  const pages = fs.readdirSync(path.join(ROOT, 'web')).filter((f) => f.endsWith('.html')).sort();
+  const scriptAt = (html, name) => {
+    const m = new RegExp(`<script[^>]*\\bsrc=["'][^"']*/js/${name.replace('.', '\\.')}(?:[?#][^"']*)?["']`, 'i').exec(html);
+    return m ? m.index : -1;
+  };
+  const bad = [];
+  let callers = 0;
+  for (const page of pages) {
+    const html = read(`web/${page}`);
+    const helper = scriptAt(html, 'playoff-odds.js');
+    for (const caller of ['win-now.js', 'league-projections.js']) {
+      const at = scriptAt(html, caller);
+      if (at === -1) continue;
+      callers += 1;
+      if (helper === -1 || helper > at) bad.push(`web/${page}: ${caller} without playoff-odds.js before it`);
+    }
+  }
+  assert(pages.length > 0 && bad.length === 0,
+    `B2. every web page that loads win-now.js / league-projections.js loads playoff-odds.js first (${pages.length} pages, ${callers} caller loads)`,
+    bad.join(' | '));
 }
 {
   // Sweep: a playoff chance never formatted any other way. A line that names a

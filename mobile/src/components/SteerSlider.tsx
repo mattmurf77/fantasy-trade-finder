@@ -6,11 +6,15 @@ import { useFlag } from '../state/useFeatureFlags';
 import { haptics } from '../utils/haptics';
 import type { RankMethodPref } from '../state/useSession';
 
-// "We steer ↔ You steer" ranking-method selector (Settings). Five dots on a
+// "We steer ↔ You steer" ranking-method selector (Settings). Four dots on a
 // track, one per ranking flow, ordered most-guided → most-manual — the same
 // axis the Build-your-board chooser (RankHomeScreen) presents as cards. The
 // selected dot names the flow by its process; changing it re-routes where
 // the Rank tab opens at next launch.
+//
+// No Pick Anchors stop ("Price players in picks"): cut for launch (owner
+// call 2026-11-25) together with its chooser row. Pinned by
+// tests/check-launch-cuts.js.
 
 const STOPS: { pref: RankMethodPref; title: string; sub: string }[] = [
   // #119 — Quick set: the lowest-effort flow, leading the guided end in the
@@ -24,11 +28,6 @@ const STOPS: { pref: RankMethodPref; title: string; sub: string }[] = [
     pref: 'trio',
     title: 'Answer quick head-to-heads',
     sub: 'We show three players, you order them — your board builds itself.',
-  },
-  {
-    pref: 'anchor',
-    title: 'Price players in picks',
-    sub: 'One player at a time: worth two 1sts? A mid 2nd? You set the price.',
   },
   {
     pref: 'tiers',

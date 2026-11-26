@@ -101,7 +101,7 @@ export default function HomeHub() {
   // `nav.home_return`, D-275, decision Q1 (a)). Armed AFTER the tap is
   // tracked and BEFORE it navigates, so the destination tab's focus finds
   // it. navigation/navContinuity.homeReturnTabFor decides which taps arm:
-  // rank pages (Rank players, Check trends) do not; D-269's roster arrival
+  // rank pages (Rank players) do not; D-269's roster arrival
   // does only in unified mode (D-276: `nav.home_return_unified` on top of
   // `nav.home_return`), where League rankings drops its own header "Home"
   // control so the bar is the one control. Off ⇒ nothing is armed.
@@ -519,19 +519,11 @@ export default function HomeHub() {
             navigation.navigate('Matches');
           }}
         />
-        <TaskTile
-          testID="home.tile.trends"
-          icon="trends"
-          title="Check trends"
-          detail="Movers this week"
-          onPress={() => {
-            track('home_tile_tapped', { tile: 'trends' }, 'Home');
-            navigation.navigate('Rank', { screen: 'Trends' });
-          }}
-        />
-        {/* Usage Rates: RB/WR/TE snaps, carries and targets by week — a
-            different screen from "Check trends" (ranking movers). Root-stack
-            push; hidden while usage_trends.enabled is off. */}
+        {/* No "Check trends" tile: the Rank-stack Trends page was cut for
+            launch (owner call 2026-11-25; route kept, no entry points).
+            Usage Rates: RB/WR/TE snaps, carries and targets by week — a
+            different screen (Usage Trends). Root-stack push; hidden while
+            usage_trends.enabled is off. */}
         {usageOn ? (
           <TaskTile
             testID="home.tile.usage-rates"

@@ -33,7 +33,7 @@ the engine; the operator (Matt) makes the ship/revert call.
 ## What you own
 
 - **Design:** hypothesis → a complete, VALID spec. Layer (one of onboarding/ranking/
-  trades_ui/engine/growth), unit (`account` or `device` — onboarding must be device),
+  trades_ui/engine/growth; `operator` only for allowlist-targeted operator rollouts, which must target `is_tester_allowlist: true`), unit (`account` or `device` — onboarding must be device),
   a non-overlapping bucket range within the layer, variants with `weight_bp` summing to
   10000, a primary metric from the program-plan catalog, targeting from the FR-33b
   attribute registry (device units get header attrs only), an exposure surface, and the
