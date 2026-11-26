@@ -1,3 +1,4 @@
+import { gateSignalFor } from '../api/client';
 import { track } from '../api/events';
 import { queueTradeForOpponent, type CalcQueueReason, type SwipeSignal } from '../api/trades';
 import { haptics } from './haptics';
@@ -66,8 +67,13 @@ export async function queueCalcTrade(args: {
    *  hosts of the canvas. */
   screen: string;
   signal?: SwipeSignal;
-}): Promise<{ queued: boolean; alreadyQueued?: boolean; toast: QueueToast }> {
+}): Promise<{ queued: boolean; alreadyQueued?: boolean; toast: QueueToast | null }> {
   let res: Awaited<ReturnType<typeof queueTradeForOpponent>> | null = null;
+  // Paid launch: a gate answer (402 pro_required, or the verify 403) already
+  // opened the paywall or the VerifySheet in api/client. The host then shows
+  // NO toast: "Couldn't queue that. Try again." on top of the paywall would
+  // read as a bug. Null while monetize.paywall is off (today's toast).
+  let gated = false;
   try {
     res = await queueTradeForOpponent({
       leagueId: args.leagueId,
@@ -76,8 +82,9 @@ export async function queueCalcTrade(args: {
       receiveIds: args.receiveIds,
       ...(args.signal ? { signal: args.signal } : {}),
     });
-  } catch {
+  } catch (err) {
     res = null;
+    gated = !!gateSignalFor(err, '/api/trades/queue');
   }
   const queued = !!res?.queued;
   // ONE event, both outcomes. `reason` is absent on a success — the taxonomy
@@ -105,6 +112,7 @@ export async function queueCalcTrade(args: {
       },
     };
   }
+  if (gated) return { queued: false, toast: null };
   haptics.warning();
   return {
     queued: false,

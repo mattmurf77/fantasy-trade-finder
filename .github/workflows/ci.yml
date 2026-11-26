@@ -1,11 +1,12 @@
 name: CI
 
-# First CI for this repo (2026-08-08). Started as three cheap jobs; now the
-# backend suite (changes, backend-suite, backend-tests gate) plus three cheap
-# jobs (mobile-typecheck, web-structure, maestro-testid-lint).
+# First CI for this repo (2026-08-08). The backend pytest suite runs sharded by
+# test file across 8 parallel runners (backend-suite, via .github/scripts/ci_shard.py
+# and .github/backend-test-durations.json); backend-tests is the single gate over
+# all shards. The other jobs are cheap.
 # Skip by area: on pull requests the backend suite runs only when a changed path
-# can affect it (.github/scripts/backend-area.sh); every push to main runs it in
-# full. The rule and its evidence are in .github/CLAUDE.md.
+# can affect it, decided by .github/scripts/backend-area.sh. Every push to main runs
+# it in full. The rules are in .github/CLAUDE.md.
 # D-056 (2026-08-15) retired Maestro and the simulator entirely, so there is no
 # local simulator tier behind these jobs any more — CI plus the operator's manual
 # TestFlight pass is the whole verification story. The maestro-testid-lint job keeps
@@ -18,6 +19,12 @@ on:
   pull_request:
   push:
     branches: [main]
+
+# A new push to a pull request cancels that PR's superseded run. Runs on main are
+# grouped by commit sha and never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -67,11 +74,15 @@ jobs:
           echo "backend=$decision" >> "$GITHUB_OUTPUT"
 
   backend-suite:
-    # Another change will turn this job into a matrix. Keep the needs and if
-    # lines below: the backend-tests gate depends on them.
+    name: backend-suite (${{ matrix.shard }}/8)
+    # Keep the needs and if lines below: the backend-tests gate depends on them.
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -79,15 +90,22 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m pytest backend/tests -q
+      - run: python -m pytest backend/tests -q -p ci_shard
         env:
           # Exercise the optional path across the complete suite. Fresh-process
           # decoder tests separately prove default-off and startup-only behavior.
           FTF_OWNER_PROOF_FAST_JSON: '1'
+          FTF_TEST_SHARD: ${{ matrix.shard }}/8
+          PYTHONPATH: .github/scripts
 
+  # The single required status check over all backend shards (the branch ruleset
+  # requires this exact name). `if: always()` makes a failed or cancelled shard
+  # report failure here; without it this job would be skipped, and GitHub treats a
+  # skipped required check as passing. It also passes when the suite was correctly
+  # skipped by the area rule, and it fails if change detection fails.
+  # When the matrix job is skipped by its `if`, needs.backend-suite.result is
+  # `skipped`. With shards, the result is `success` only if every shard succeeded.
   backend-tests:
-    # The required status check. Always reports: success when the suite passed or
-    # was correctly skipped, failure when detection or the suite failed.
     needs: [changes, backend-suite]
     if: always()
     runs-on: ubuntu-latest

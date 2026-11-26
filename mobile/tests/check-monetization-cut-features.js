@@ -27,10 +27,15 @@
 // Features the owner KEPT (Send in ESPN, Win Now, the "More offers" shop
 // window, standing offers, Usage Trends, free agents, leaderboards,
 // contrarian ranks, Max PF moves, Playoff targets, ESPN pick assignment) are
-// deliberately absent: this guard does not decide what the paywall sells
-// (the paywall rows are undecided), it only keeps cut features out. When a
-// cut feature returns, drop its entry here in the same commit that names it
-// in the copy again.
+// deliberately absent: this guard does not decide what the paywall sells, it
+// only keeps cut features out. When a cut feature returns, drop its entry
+// here in the same commit that names it in the copy again.
+//
+// 2026-11-25: `mon.pay.b3` / `mon.pay.b4` are back to their source text
+// ("Proposals sent to Sleeper, ESPN or MFL", "Shop a player and Win Now trade
+// targets") on the owner's keep calls for ESPN send and Win Now. Both name
+// kept features only, so this guard passes them unchanged; `mon.lock.free`
+// stays cut down (Calibration, trends and the Draft Room are still cut).
 //
 // HONEST LABEL (G-035): this proves the source holds no such string, not what
 // renders. Text the server sends (paywall config) is out of its reach.

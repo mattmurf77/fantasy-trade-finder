@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MemberEnteredMarker, {
   MEMBER_ENTERED_COPY,
   isMemberEntered,
@@ -146,6 +146,12 @@ export default function PlayerPickerModal({
   onPick,
   onClose,
 }: Props) {
+  // Insets read here, outside the Modal, from the app's SafeAreaProvider. A
+  // SafeAreaView inside a native Modal has no provider to measure against
+  // (the FounderPageViewer defect: zero insets), and this sheet is full
+  // height, so its header and Done could sit under the status bar. Same
+  // window insets either way, so this is a no-op wherever the old one worked.
+  const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [posFilter, setPosFilter] = useState<CalcPos | null>(null);
   // W3 M-C (D17). The row Pressable is an accessible container, so on iOS
@@ -275,9 +281,9 @@ export default function PlayerPickerModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.backdrop} edges={['top']}>
+      <View style={[styles.backdrop, { paddingTop: insets.top }]}>
         <View style={styles.sheet}>
-          <SafeAreaView style={styles.sheetInner} edges={['bottom']}>
+          <View style={[styles.sheetInner, { paddingBottom: insets.bottom }]}>
             <View style={styles.grabber} />
             <View style={styles.header}>
               <Text style={type.heading}>{title}</Text>
@@ -364,9 +370,9 @@ export default function PlayerPickerModal({
               }
               renderItem={({ item }) => renderRow(item, `calc.picker.row.${item.id}`)}
             />
-          </SafeAreaView>
+          </View>
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
