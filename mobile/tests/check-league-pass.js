@@ -496,7 +496,7 @@ check('6a. sendPreCheck(resume, leagueId): a live pass for THAT league lets the 
 });
 
 // ═══ 7. the gate sites [shape] ════════════════════════════════════════════
-check('7a. [shape] the league-scoped pre-checks read proForLeague for the league they act on: Trades (active league), Win Now (session league), the Send router and both twins (the button\'s league)', () => {
+check('7a. [shape] the league-scoped pre-checks read proForLeague for the league they act on: Trades (active league, deck and ideas panel), Win Now (session league), Shop (its league), the Send router and both twins (the button\'s league)', () => {
   const trades = strip(read('screens/TradesScreen.tsx'));
   assert(/const payEntitled = useProForLeague\(leagueId\);/.test(trades), 'TradesScreen: payEntitled = useProForLeague(leagueId)');
   assert(/import \{ useProForLeague \} from '\.\.\/state\/useLeaguePass';/.test(trades), 'TradesScreen imports it');
@@ -510,13 +510,19 @@ check('7a. [shape] the league-scoped pre-checks read proForLeague for the league
     const s = strip(read(rel));
     assert(/sendPreCheck\?\.\(\(\) => \{ void proceed\(\); \}, leagueId\)/.test(s), `${rel}: passes its league`);
   }
-  // ShopOffersBody's refetch-on-entitled effect (LLD §8) is not on this
-  // branch (it lands with feat/paid-launch). When it arrives it must read
-  // the league-aware value, never bare `pro`.
+  // Paid launch's "sweep again once entitled" effects (LLD §8): a member a
+  // pass covers in the swept league must get the ideas, not the gate notice,
+  // so both read the league-aware value for the league the sweep runs in.
+  // Shop: its own `leagueId` prop, the one `fetchAssetIdeas` sends.
   const shop = strip(read('components/ShopOffersBody.tsx'));
-  if (/useEntitlements/.test(shop)) {
-    assert(!/useEntitlements\(\(s\) => s\.pro\)/.test(shop) && /useProForLeague\(/.test(shop), 'ShopOffersBody: its entitled read must be useProForLeague');
-  }
+  assert(/import \{ useProForLeague \} from '\.\.\/state\/useLeaguePass';/.test(shop), 'ShopOffersBody imports useProForLeague');
+  assert(/const entitled = useProForLeague\(leagueId\);\s*useEffect\(\(\) => \{\s*if \(entitled && ideasQuery\.isError\) void ideasQuery\.refetch\(\);/.test(shop),
+    'ShopOffersBody: the refetch-on-entitled effect reads useProForLeague(leagueId)');
+  assert(/queryKey: \['shop-ideas', leagueId,/.test(shop) && /fetchAssetIdeas\(\{\s*league_id: leagueId,/.test(shop), 'ShopOffersBody: that leagueId is the one the sweep runs in');
+  assert(!/useEntitlements/.test(shop), 'ShopOffersBody reads no account-level entitlement');
+  // The single-pin ideas panel (TradesScreen): the same payEntitled as the deck.
+  assert(/if \(payEntitled && assetIdeasQuery\.isError\) void assetIdeasQuery\.refetch\(\);\s*\}, \[payEntitled\]\);/.test(trades),
+    'TradesScreen: the ideas panel refetches on the league-aware payEntitled');
 });
 
 check('7b. [shape] the only `pro` reads off useEntitlements are the account-level ones this feature left alone (an allowlist — a new league-scoped site must use useProForLeague)', () => {

@@ -71,6 +71,16 @@ the tier fields on the intent / config / view types, and their copy.
   expects the Send tap to pass its league; the PaywallScreen harness stubs the one new
   child-component import), `check-win-now-recovery.js` (stubs `useProForLeague`),
   `check-monetization-cut-features.js` (scans the three new UI files too).
+- [x] **Combined with `main` (launch cuts) and `feat/paid-launch`, 2026-11-25:** paid
+  launch's Shop "sweep again once entitled" effect (`ShopOffersBody.tsx`) now reads
+  `useProForLeague(leagueId)` (the league the sweep runs in) instead of account `pro`,
+  so a covered member's notice gives way to ideas after a refresh, and only in the
+  covered league. The single-pin ideas panel's effect already read TradesScreen's
+  `payEntitled`. `check-league-pass` 7a now pins both unconditionally (it was
+  conditional on paid launch being present); `check-paid-launch` 1c accepts
+  `sendPreCheck`'s league parameter and 7a expects the league-aware Shop read.
+  `check-launch-cuts` and `check-monetization-cut-features` pass with no league pass
+  change (no `mon.lp.*` string names a cut feature).
 - [x] **Code-walk proof:** [evidence-client.md](evidence-client.md) §1.
 - [x] **Manual TestFlight checklist — REQUIRED, NOT YET RUN:**
   [evidence-client.md](evidence-client.md) §2. It needs the App Store Connect product
@@ -111,7 +121,8 @@ the tier fields on the intent / config / view types, and their copy.
 
 - **CI green:** `tsc --noEmit` clean, `scripts/testid-lint.sh` OK, `pytest backend/tests`
   unaffected (no backend change), all 207 `mobile/tests/check-*.js` suites green on the
-  pushed sha.
+  pushed sha (211 of 211 locally after the 2026-11-25 merge of `main` and
+  `feat/paid-launch`).
 - **Before the flag turns on for anyone** (not before merge; the build is dark):
   1. Legal's league pass copy replaces the placeholder `mon.lp.*` block (marked PENDING
      LEGAL REVIEW in `mobile/src/copy/monetization.ts`).

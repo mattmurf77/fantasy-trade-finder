@@ -35,6 +35,15 @@ the same for Win Now's session league. `SendInSleeperButton.tsx:502` passes the 
 theirs (`SendInMflButton.tsx:336`, `SendInEspnButton.tsx:373`); `sendPreCheck` lets the
 send on only for a live pass of that league (`:103-104`).
 
+**Paid launch's refetch-once-entitled effects (merged 2026-11-25).** Shop:
+`ShopOffersBody.tsx:447` `entitled = useProForLeague(leagueId)`, the same `leagueId` prop
+the sweep sends (`:399` query key, `:402` `league_id`), so when a refresh brings a live
+pass for that league the gated sweep is re-run and the server decides; a pass for
+another league leaves `entitled` false and the gate notice stays. The single-pin ideas
+panel: `TradesScreen.tsx:5683` refetches on `payEntitled` (`:5566`, the active league).
+The notice itself (`PaywallGateNotice`) renders only from a 402 on the sweep and reads
+no entitlement, so a covered member whose sweep the server lets through never sees it.
+
 **Buying: the free month is promised only when StoreKit confirms it** (free-month
 revision, operator 2026-11-24). `LeaguePassScreen.tsx:206` `choose` → `POST
 /api/league-pass/intent` (always `ftf_league_annual`) → the `league` offering
@@ -93,6 +102,10 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
    Win Now's search runs; Send in Sleeper reaches its "Send this trade?" confirm.
 6. Settings › Subscription shows "Your league pass covers L1 through <date>." and
    "Paid for by a leaguemate." (comp passes have no buyer).
+6a. Shop a player in L1 (a player's Shop action): the ideas load, no "See plans"
+   notice. In L2 the same Shop shows the gate notice (enforcement on).
+6b. With M not yet covered and the Shop notice showing in L1, comp the pass, then
+   foreground the app: the sweep re-runs and the ideas replace the notice.
 
 ### C. Other-league paywall line
 
