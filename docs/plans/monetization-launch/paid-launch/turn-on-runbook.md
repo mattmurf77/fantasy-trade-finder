@@ -22,6 +22,7 @@ plus a restart.
 - [A. Before anything: what must be true outside the code](#a-before-anything-what-must-be-true-outside-the-code)
 - [B. Turn-on, in order](#b-turn-on-in-order)
 - [C. Device checklist (TestFlight, sandbox)](#c-device-checklist-testflight-sandbox--c1c14-before-b6-the-rest-right-after)
+- [L. Granting lifetime Pro to someone later](#l-granting-lifetime-pro-to-someone-later)
 - [R. Rollback](#r-rollback)
 - [F. The fixture rule](#f-the-fixture-rule)
 
@@ -138,6 +139,17 @@ This adds to the launch scope's T1–T20 (`plan/monetization-launch` scope §3, 
     - Back to 1 → gated again (T11).
 
 Log every step's result in `living-memory/TEST_LEDGER.md` with the build number.
+
+## L. Granting lifetime Pro to someone later
+
+After B5a, people who join pay. To give one or more named people lifetime Pro anyway (a friend, a tester, a support make-good), use `scripts/grant_pro_to_users.py`. It resolves each identifier read-only against the database the way the admin routes do (Sleeper id, Sleeper username, `acct_*`, or bare account id), then sends the grants through `POST /api/admin/entitlements/bulk-grant`: perpetual `pro`, source `manual_grant`, granted_by `operator`, and your `--note` stored on the row so a later audit says why. Several identifiers for one person count once; anyone already on perpetual Pro is skipped, so a re-run sends nothing.
+
+1. `set -a; . ./secrets.local.env; set +a` then `export DATABASE_URL="$DATABASE_URL_PROD"`.
+2. **Dry run:** `python3 scripts/grant_pro_to_users.py --user <sleeper username or id>` (repeat `--user`, or `--users-file <path>` with one identifier per line; blank lines and `#` comments are ignored). Add `--verbose` to see each identifier's outcome (would grant / already holds perpetual Pro / not found); without it the output is counts only.
+3. **Apply:** the same command plus `--apply --base-url https://<render-host> --note "<why, e.g. make-good for support ticket>"`. Optional `--out feedback-workspace/lifetime-pro/granted-<date>.txt` keeps the list of keys sent.
+4. Run the dry run once more.
+
+Check: the first line names the prod database. The dry run says `not found: 0` (any identifier that matches no user makes `--apply` refuse before sending anything, exit 2). The apply ends `SUMMARY: sent N; confirmed perpetual pro on read-back N; failures 0`, exit 0; on any failure re-run the same command. The last dry run says `would grant: 0`. `GET /api/admin/entitlements?user=<the person>` shows a `manual_grant` `pro` row with `expires_at` null and your note. To take a grant back, `DELETE /api/admin/entitlements/<id>` (a status flip; the row is kept).
 
 ## R. Rollback
 

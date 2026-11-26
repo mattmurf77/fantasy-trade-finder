@@ -88,6 +88,16 @@ read-only connection and grants through `POST /api/admin/entitlements/bulk-grant
 already on perpetual Pro. See the paid-launch
 [turn-on runbook](../docs/plans/monetization-launch/paid-launch/turn-on-runbook.md) A6 and B5a.
 
+## Entitlement grant to named people
+
+`grant_pro_to_users.py` gives lifetime (perpetual) Pro to people you name, after launch:
+`--user ID` (repeatable) and/or `--users-file PATH` (Sleeper id or username, `acct_*`,
+account id). It imports its helpers from `grant_lifetime_pro_existing_users.py`, resolves
+read-only, and grants through the same `bulk-grant` route. The default is a dry run;
+`--apply --base-url URL --note "<why>"` grants, and refuses before sending if any
+identifier matches no one. Re-runs skip people already on perpetual Pro. See the turn-on
+runbook § L.
+
 ## One-time index build
 
 `create_outcome_owner_index.py` builds `ix_deck_outcomes_user` (G3-e) on an
