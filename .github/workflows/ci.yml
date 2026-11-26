@@ -4,6 +4,9 @@ name: CI
 # test file across 8 parallel runners (backend-suite, via .github/scripts/ci_shard.py
 # and .github/backend-test-durations.json); backend-tests is the single gate over
 # all shards. The other jobs are cheap.
+# Skip by area: on pull requests the backend suite runs only when a changed path
+# can affect it, decided by .github/scripts/backend-area.sh. Every push to main runs
+# it in full. The rules are in .github/CLAUDE.md.
 # D-056 (2026-08-15) retired Maestro and the simulator entirely, so there is no
 # local simulator tier behind these jobs any more — CI plus the operator's manual
 # TestFlight pass is the whole verification story. The maestro-testid-lint job keeps
@@ -24,8 +27,57 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    # Decides whether the backend suite must run. Pull requests only; a push to
+    # main always runs the full suite.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.area.outputs.backend }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          # The pull_request checkout is the PR merge commit, so HEAD^1 is the
+          # base branch tip and HEAD^1..HEAD is exactly what the PR changes.
+          fetch-depth: 2
+      - id: area
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Push to main: the full backend suite always runs."
+            echo "Backend suite: runs (push to main)" >> "$GITHUB_STEP_SUMMARY"
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # --no-renames lists both the old and the new path of a rename.
+          git diff --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          decision="$(bash .github/scripts/backend-area.sh < "$RUNNER_TEMP/changed.txt")"
+          if [ "$decision" != "true" ] && [ "$decision" != "false" ]; then
+            echo "::error::backend-area.sh printed '$decision', expected true or false"
+            exit 1
+          fi
+          echo "Changed files:"
+          cat "$RUNNER_TEMP/changed.txt"
+          echo "Backend suite needed: $decision"
+          {
+            echo "### Skip by area"
+            echo "Backend suite needed: \`$decision\`"
+            echo ""
+            echo "Changed files:"
+            echo '```'
+            cat "$RUNNER_TEMP/changed.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "backend=$decision" >> "$GITHUB_OUTPUT"
+
   backend-suite:
     name: backend-suite (${{ matrix.shard }}/8)
+    # Keep the needs and if lines below: the backend-tests gate depends on them.
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,15 +101,43 @@ jobs:
   # The single required status check over all backend shards (the branch ruleset
   # requires this exact name). `if: always()` makes a failed or cancelled shard
   # report failure here; without it this job would be skipped, and GitHub treats a
-  # skipped required check as passing.
+  # skipped required check as passing. It also passes when the suite was correctly
+  # skipped by the area rule, and it fails if change detection fails.
+  # When the matrix job is skipped by its `if`, needs.backend-suite.result is
+  # `skipped`. With shards, the result is `success` only if every shard succeeded.
   backend-tests:
-    needs: [backend-suite]
+    needs: [changes, backend-suite]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - run: |
-          echo "backend-suite: ${{ needs.backend-suite.result }}"
-          test "${{ needs.backend-suite.result }}" = success
+      - env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_NEEDED: ${{ needs.changes.outputs.backend }}
+          SUITE_RESULT: ${{ needs.backend-suite.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::change detection did not succeed (result: $CHANGES_RESULT)"
+            exit 1
+          fi
+          if [ "$BACKEND_NEEDED" = "true" ]; then
+            if [ "$SUITE_RESULT" = "success" ]; then
+              echo "backend suite ran and passed"
+              exit 0
+            fi
+            echo "::error::backend suite was needed and did not pass (result: $SUITE_RESULT)"
+            exit 1
+          fi
+          if [ "$BACKEND_NEEDED" = "false" ]; then
+            if [ "$SUITE_RESULT" = "skipped" ]; then
+              echo "backend suite not needed for this change, skipped by the area rule"
+              exit 0
+            fi
+            echo "::error::backend suite was not needed but its result is $SUITE_RESULT, expected skipped"
+            exit 1
+          fi
+          echo "::error::change detection gave no usable decision (backend: '$BACKEND_NEEDED')"
+          exit 1
 
   mobile-typecheck:
     runs-on: ubuntu-latest

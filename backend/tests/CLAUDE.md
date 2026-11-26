@@ -35,8 +35,9 @@ the per-file seconds in `.github/backend-test-durations.json`; a file missing fr
 shard's share can be listed in the plugin's opt-in `SPLIT_FILES` (today only
 `test_rules_first_deck.py`, in 2 chunks) to spread its tests round-robin over several shards —
 only after checking its tests pass in separate processes. Each shard logs a
-`ci_shard: shard i/8 runs … of … collected tests` line. The required check `backend-tests` is a
-gate job that passes only if every shard passed. Reproduce one shard locally:
+`ci_shard: shard i/8 runs … of … collected tests` line. The suite is reported through the required
+`backend-tests` check, a gate job that passes only if every shard passed, and is skipped on PRs
+that cannot affect it (see [`.github/CLAUDE.md`](../../.github/CLAUDE.md)). Reproduce one shard locally:
 
 ```bash
 FTF_OWNER_PROOF_FAST_JSON=1 FTF_TEST_SHARD=3/8 PYTHONPATH=.github/scripts \
