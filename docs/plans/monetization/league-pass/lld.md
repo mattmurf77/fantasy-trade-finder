@@ -519,6 +519,32 @@ All in `mobile/src/`. JavaScript only; no new native module.
 | `copy/monetization.ts` | New `mon.lp.*` keys, verbatim from legal. No hard-coded strings elsewhere |
 | `tests/check-league-pass.js` (new) | Structural suite, in the style of `check-paid-launch.js` |
 
+**As built (phase 2, `feat/league-pass-client`; [scope-client.md](scope-client.md)).**
+Where the build differs from the table above:
+
+- `proForLeague` is not a method on the `useEntitlements` store. The store holds
+  `leaguePasses` (and `sources`); the rule is the pure `utils/leaguePass.proForLeague`
+  (pro, or a live pass for that league, with the client flag on), read through
+  `state/useLeaguePass.useProForLeague` / `proForLeagueNow`. This keeps the store's import
+  set, which two suites execute, unchanged, and puts the flag read with the callers.
+- `sendPreCheck(resume, leagueId?, afterAsk?)`: the league is the second argument and
+  `afterAsk` (added on main after this LLD) third.
+- `ShopOffersBody` has no entitlement read on this branch (its refetch-on-entitled
+  effect is on `feat/paid-launch`, not merged here). `check-league-pass.js` 7a requires
+  `useProForLeague` there as soon as it reads `useEntitlements`.
+- `PaywallGateNotice` does not exist on this branch; nothing to change.
+- Settings › Subscription shows the member's league and date, the buyer's league and a
+  "Manage league pass" row, and an unbound pass's row, from memory only (the Settings
+  hub fires no requests). The buyer's renewal state, covered count, Move with its
+  cooldown date and the name toggle need `GET /api/league-pass`, so they are on
+  `LeaguePassScreen`'s manage view, one tap away.
+- R29's notice is a new `components/LeaguePassCoveredNotice` on TradesScreen, keyed
+  per user and league in device storage.
+- R38 needed no change: the delete-account dialog's sub-note ("Deleting your account
+  doesn't cancel an active subscription…") already shows to every account, a pass buyer
+  included, with no subscription condition (legal 5c).
+- The `mon.lp.*` copy is placeholder, marked pending legal review.
+
 **Purchase path in `LeaguePassScreen`**
 
 1. `createIntent(leagueId)` returns `ftf_league_annual`.
@@ -526,6 +552,15 @@ All in `mobile/src/`. JavaScript only; no new native module.
    when the buyer is eligible; the screen shows it from the store's product.
 3. After the purchase, refresh entitlements until `league_passes` shows the buyer's
    pass, or fall back to the choose-a-league state.
+
+As built: the path and its prices are resolved before the quote shows
+(`utils/leaguePass.purchasePlan`). "Eligible" means StoreKit answers ELIGIBLE and the
+product carries an introductory price. The promotional offer is signed at quote time
+(`getPromotionalOffer` on the product's `discounts[]` entry with the config's
+`promo_offer_id`) and its own price is shown. If it cannot be signed, the quote shows
+the full price with a notice and Continue at full price / Cancel. The refresh is 6
+polls, 2.5 s apart; after them `GET /api/league-pass` decides (unbound → choose a
+league; nothing yet → "can take a few minutes").
 
 The routing rule in `usePaywallGate.ts` is not touched: it still reads no entitlement
 field. The pre-checks above are the existing `pro` pre-checks made league-aware.

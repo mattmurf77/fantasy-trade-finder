@@ -298,7 +298,9 @@ check('1b. [shape] the Sleeper button still returns to idle before the gate chec
 
 check('1c. [shape] the send pre-check still runs first on the tap (unchanged)', () => {
   const src = strip(read('components/SendInSleeperButton.tsx'));
-  assert(/export function sendPreCheck\(resume: \(\) => void(, afterAsk = false)?\): boolean/.test(src), 'sendPreCheck');
+  // League pass (D-281) adds the button's league as the second parameter
+  // (check-league-pass 6a / 7a pin what it does with it).
+  assert(/export function sendPreCheck\(resume: \(\) => void(, leagueId\?: string)?(, afterAsk = false)?\): boolean/.test(src), 'sendPreCheck');
   for (const f of ['components/SendInMflButton.tsx', 'components/SendInEspnButton.tsx']) {
     assert(/preCheck\??\.?\(/.test(strip(read(f))) || /sendPreCheck/.test(strip(read(f))), `${f}: pre-check call`);
   }
@@ -337,7 +339,9 @@ check('4b. [shape] no locked-feature card (R28.8 #5): the notice is mounted only
 
 check('7a. [shape] a purchase/Restore while a notice shows sweeps again (Shop and the panel refetch on pro), no routing read', () => {
   const shop = strip(read('components/ShopOffersBody.tsx'));
-  assert(/const entitled = useEntitlements\(\(s\) => s\.pro\);\s*useEffect\(\(\) => \{\s*if \(entitled && ideasQuery\.isError\) void ideasQuery\.refetch\(\);/.test(shop),
+  // League pass (D-281): entitled = Pro, or a pass covering Shop's league
+  // (check-league-pass 7a pins the league).
+  assert(/const entitled = useProForLeague\(leagueId\);\s*useEffect\(\(\) => \{\s*if \(entitled && ideasQuery\.isError\) void ideasQuery\.refetch\(\);/.test(shop),
     'Shop refetches on pro');
   const host = strip(read('screens/TradesScreen.tsx'));
   assert(/if \(payEntitled && assetIdeasQuery\.isError\) void assetIdeasQuery\.refetch\(\);\s*\}, \[payEntitled\]\);/.test(host),

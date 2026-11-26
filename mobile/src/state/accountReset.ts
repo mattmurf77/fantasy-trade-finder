@@ -42,7 +42,8 @@ import { usePremiumImport } from './premiumImport';
 // the device id, the last username behind SignIn's "Continue as @…" (Keychain
 // `ftf.lastUsername`), the analytics and pick-recording queues, and every key
 // that already carries the user id (trade queue, outlook strip, paywall offer
-// marker, founder welcome, new-partner dismissals, the platform credential
+// marker, founder welcome, new-partner dismissals, the league pass covered
+// notice (`ftf_lp_covered_notice_<user>_<league>`), the platform credential
 // vault — bound to its user_id at read). The feedback notes stay too: their
 // inbox already hides notes /api/feedback/mine does not return for the
 // signed-in account.

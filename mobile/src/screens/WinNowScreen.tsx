@@ -9,6 +9,7 @@ import { useFlag } from '../state/useFeatureFlags';
 import { searchWinNow, getWinNowJob, evaluateWinNow, decideWinNow } from '../api/winNow';
 import { gateSignalFor } from '../api/client';
 import { useEntitlements } from '../state/useEntitlements';
+import { useProForLeague } from '../state/useLeaguePass';
 import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
 import { probability, playoffChance, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
@@ -102,7 +103,9 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   // is on AND the server is enforcing.
   const paywallOn = useFlag('monetize.paywall');
   const payEnforcing = useEntitlements(state => state.enforcing);
-  const payEntitled = useEntitlements(state => state.pro);
+  // League pass (D-281): Pro, or a live pass for this league (Win Now's
+  // routes act on the session's league, LEAGUE_RESOLVERS `session`).
+  const payEntitled = useProForLeague(leagueId);
   const [searchAfterVerify, setSearchAfterVerify] = useState(false);
   const cancel = () => {
     epoch.current += 1;

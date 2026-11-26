@@ -158,6 +158,8 @@ function mountWinNow(h) {
     // monetize.paywall off: no gate answer, no enforcement, no pre-check.
     '../api/client': {gateSignalFor: () => null},
     '../state/useEntitlements': {useEntitlements: Object.assign(sel => sel({enforcing: false, pro: false}), {getState: () => ({enforcing: false, pro: false})})},
+    // League pass (D-281): payEntitled = useProForLeague(leagueId); not entitled here, as above.
+    '../state/useLeaguePass': {useProForLeague: () => false},
     '../state/usePaywallGate': {isUnverifiedSession: () => false, openPaywall: () => {}, openVerify: () => {}},
     '../utils/winNow': {seasonStale: () => false},
     '../utils/standingsTable': {NO_FORECAST_LINE: 'Projections aren’t available for this league yet.'},

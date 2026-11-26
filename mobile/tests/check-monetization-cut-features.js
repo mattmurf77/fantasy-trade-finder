@@ -66,6 +66,10 @@ const FILES = [
   'screens/FounderWelcomeScreen.tsx',
   'components/SubscriptionSection.tsx',
   'components/VerifySheet.tsx',
+  // League pass (D-281): its screen and rows render subscription copy too.
+  'screens/LeaguePassScreen.tsx',
+  'components/LeaguePassRows.tsx',
+  'components/LeaguePassCoveredNotice.tsx',
 ];
 
 // Cut for launch per the owner's calls of 2026-11-25 (keep-cut-list.md).
