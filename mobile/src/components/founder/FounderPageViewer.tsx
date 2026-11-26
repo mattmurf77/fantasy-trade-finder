@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 import { useQuery } from '@tanstack/react-query';
@@ -73,6 +73,15 @@ export default function FounderPageViewer({ slug, title, onClose }: { slug: stri
   const loaded = useRef(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [closing, setClosing] = useState(false);
+  // The insets come from the app's SafeAreaProvider, read here, outside the
+  // Modal, and applied as padding (the TopBar / TradeDnaSheet pattern). A
+  // SafeAreaView inside a native Modal has no provider in the modal's native
+  // view tree and measured zero insets on device, which left Close under the
+  // status bar and Dynamic Island, where taps did not reach it, and nothing
+  // kept the web view off the home indicator. statusBarTranslucent +
+  // navigationBarTranslucent pin the modal edge to edge on Android (already
+  // forced by edgeToEdgeEnabled) so the same window insets apply there.
+  const insets = useSafeAreaInsets();
 
   useEffect(() => () => {
     mounted.current = false;
@@ -173,8 +182,11 @@ export default function FounderPageViewer({ slug, title, onClose }: { slug: stri
   const stateText = saveStateText(saveState);
 
   return (
-    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => { void requestClose(); }}>
-      <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+    <Modal visible animationType="slide" presentationStyle="fullScreen" statusBarTranslucent navigationBarTranslucent
+      onRequestClose={() => { void requestClose(); }}>
+      <View
+        style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}
+      >
         <View style={styles.bar}>
           <Pressable
             testID="founder-review.pages.close"
@@ -231,7 +243,7 @@ export default function FounderPageViewer({ slug, title, onClose }: { slug: stri
             style={styles.web}
           />
         )}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }

@@ -8,7 +8,7 @@ import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
-import { ApiError } from '../api/client';
+import { ApiError, gateSignalFor } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
 import { beginSend, getSendRecord, settleSend, subscribeSends, tradeSendKey } from '../api/sendRegistry';
 import {
@@ -202,6 +202,12 @@ export default function SendInEspnButton({
           { text: 'OK', style: 'cancel' },
           { text: 'Open ESPN', onPress: openEspn },
         ]);
+      } else if (gateSignalFor(err, '/api/trades/propose-espn')) {
+        // Paid launch: a gate answer (402 pro_required, or the verify 403 on
+        // this gated route) already opened the paywall or the VerifySheet in
+        // api/client. No second, contradictory alert on top of it. Null while
+        // monetize.paywall is off, so today's alerts are unchanged. (A gate
+        // answer is never an unknown outcome, so the branch above is first.)
       } else if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // (the server drops a dead pair on a rejected pre-flight) — send
