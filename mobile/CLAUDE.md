@@ -124,3 +124,4 @@ Flags come from `/api/flags` via `state/useFeatureFlags`. `onboarding.*` feature
 - Version bumps live in `app.json → expo.version`; `eas.json` uses `appVersionSource: remote` with `autoIncrement` on production builds.
 - Secrets never land here — credentials live in the gitignored `secrets.local.env` at the repo root.
 - New wire fields go in `src/shared/types.ts` and must match the backend's JSON (`docs/api-reference.md`).
+<!-- skip-by-area proof, never merged -->
