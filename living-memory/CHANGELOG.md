@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`, not merged
+
+- **What:** mobile-only display change on Standings and the Home playoff card. Open team as stat rows; a client-computed SoS column in the Record view (stacked "Play/offs", tighter columns, sort arrow left of numeric headings); "Remaining schedule" replaces Weekly projections; Draft pick odds as rows with a likely pick range and the chance of the 1.01 at a 25%+ miss chance, and the same range under Home's Projected pick.
+- **Removed from the app:** model diagnostics, tie/loss odds, score SD, the "not calibrated", partial-data and "odds don't confirm a spot" text, the under-table status sentences and footnotes, the conditional expected pick.
+- **Not changed:** web, backend, flags, events. Rollback is a revert and a new build.
+- **Docs:** [scope](../docs/plans/standings-display-rows/scope.md), [code walk](../docs/plans/standings-display-rows/evidence.md), [checklist](../docs/plans/standings-display-rows/testflight-checklist.md) (not run).
+
 ## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
 
 - **What:** 36 features cut for launch from the audit's 62 candidates (22 kept, 4 paywall rows undecided and untouched). Scope and the full list: `docs/plans/launch-cuts/scope.md`.

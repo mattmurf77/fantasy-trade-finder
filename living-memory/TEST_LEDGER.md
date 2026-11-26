@@ -1,3 +1,11 @@
+## 2026-11-25 — Standings display rows (D-285), branch `feat/standings-display-rows`
+
+- **App (the branch, one commit on `origin/main` `c9091e5a`):** `npx tsc --noEmit` clean; all **210** `tests/check-*.js` exit 0; `scripts/testid-lint.sh` OK (main session's run).
+- **Suites touched:** `check-standings-table` **147 passed** (107 at base `30ee823c`); `check-league-projections` passes (prints no count; 101 assertion call sites, 43 at base); `check-home-playoff-banner` passes (no count; 197 call sites, 180 at base); `check-playoff-odds-display` **21 passed** (two pins moved to the row form); `check-direction-card` **94 passed** (harness loads `utils/pickRange`); `check-league-projections-web` passes untouched. The six re-run by the docs writer on the same tree: same results.
+- **Code-walk proof:** `docs/plans/standings-display-rows/evidence.md` §1.
+- **Backend / web:** not run locally (no backend or web file changed); CI on the PR.
+- **Not verified:** nothing on a device. Text metrics and truncation at 375pt, large Dynamic Type, the two-line SoS cell, VoiceOver order, and the Home card with three notes are left to the TestFlight checklist (`docs/plans/standings-display-rows/testflight-checklist.md`, 30 steps, not run).
+
 ## 2026-11-25 — Paywall bullets b3/b4 restored and the web knob made a turn-on step, branch `fix/paywall-copy-restore-and-web-wall`
 
 - **What changed:** `mon.pay.b3` back to "Proposals sent to Sleeper, ESPN or MFL", `mon.pay.b4` back to "Shop a player and Win Now trade targets" (the text before `00290ddb9`; owner kept ESPN send and Win Now on 2026-11-25). `mon.lock.free` unchanged. `paywall_web_enforce_enabled` seed stays 0; the turn-on runbook makes setting it to 1 step B6a.

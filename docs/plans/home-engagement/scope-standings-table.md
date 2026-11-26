@@ -1,5 +1,7 @@
 # Feature Scope — Standings as one sortable table
 
+> **Superseded in part, 2026-11-25 ([D-285](../../../living-memory/DECISIONS.md), [standings-display-rows/scope.md](../standings-display-rows/scope.md)):** the Record view gains a fourth column (SoS) with new widths, the sort arrow sits left of a numeric heading, the open team's two lines become stat rows, "Weekly projections" becomes "Remaining schedule", Draft pick odds become rows, and under the table only the caption and the tiebreak note remain (the status sentence, the incomplete sentence, "Partial Sleeper data" and both view footnotes are gone). The rest of this scope stands.
+
 **Date:** 2026-11-12
 **Entry point:** direct ask (operator, 2026-11-12): "explore a version of the standings page that doesn't need the current and projected tabs … include a Max PF column … make the columns sortable"; after the mockups: "one row. W-L, Projected W-L, Playoff Odds %. A pill in the top right of the table to toggle to Points summary. That changes the columns to 'PF', 'Max PF', 'Proj Max PF'"; on the open team: "a stronger, higher contrast border … to focus on the expanded card" (outlined card, treatment B, not objected to).
 **Builder:** builder agent on `feat/standings-single-table` (stacked on `feat/league-rankings-playoff-tile` + `fix/projection-drop-fa-fill-line`)

@@ -7,15 +7,18 @@
 // PART A EXECUTES src/utils/standingsTable.ts (and standings.ts's Max PF
 // reader) under plain node: sorting for every column in both directions with
 // ties and dashes, the heading-tap rule, the number formats ("<1%", "100%",
-// "1,498"), the no-forecast dash rules, which lines the open team shows in
-// each view, and the no-forecast line.
+// "1,498"), the no-forecast dash rules, the open team's stat rows in each
+// view, the no-forecast line, and the SoS column (strength of schedule,
+// 2026-11-25 display build) against a real league's saved forecast.
 //
 // PART B PINS THE STRUCTURE of screens/StandingsScreen.tsx: no segments; the
-// Record | Points pill; one table; the outlined open-team card; the old
-// Projected status line still on the page; the shared forecast query key; no
-// simulation or outlook request on open; league-switch behaviour; one
-// FeedbackFAB; the LeagueTopBarHeader unchanged; the one analytics emitter;
-// callers no longer send `{ segment }`; LeagueProjectionSection gone.
+// Record | Points pill; one table with four Record columns; the outlined
+// open-team card with StatRow rows; the caption under the table (footers,
+// status sentences and "Partial Sleeper data" gone); the sort caret left of
+// number headings; the shared forecast query key; no simulation or outlook
+// request on open; league-switch behaviour; one FeedbackFAB; the
+// LeagueTopBarHeader unchanged; the one analytics emitter; callers no longer
+// send `{ segment }`; LeagueProjectionSection gone.
 //
 // Run: node tests/check-standings-table.js
 'use strict';
@@ -82,7 +85,7 @@ assert(s.maxPointsFor({ fpts: 1500 }) === null && s.maxPointsFor(null) === null,
 // Fixture: six teams. Standings order (place) is W–L then PF then roster id.
 const F = (rid, modal, expected, odds, maxMean, curMax) => ({
   roster_id: rid, modal_record: modal, expected_record: expected, playoff_probability: odds,
-  bye_probability: 0.033, maxpf_mean: maxMean, current_maxpf: curMax,
+  bye_probability: 0.033, maxpf_mean: maxMean, current_maxpf: curMax, weeks: [],
 });
 const R = (rid, name, place, w, l, t, pf, maxPf) => ({
   rosterId: rid, name, isYou: rid === 4, place, wins: w, losses: l, ties: t,
@@ -152,10 +155,13 @@ assert(eq(u.nextSort({ column: 'wl', dir: 'asc' }, 'playoffs'), { column: 'playo
   'A4b. a new heading starts best / biggest first; Team starts A–Z');
 assert(eq(u.DEFAULT_SORT, { record: { column: 'wl', dir: 'desc' }, points: { column: 'pf', dir: 'desc' } }),
   'A4c. Record opens on W–L best first, Points on PF most first');
-assert(eq(u.VIEW_COLUMNS, { record: ['wl', 'projWl', 'playoffs'], points: ['pf', 'maxPf', 'projMaxPf'] }),
-  'A4d. Record = W–L · Proj. W–L · Playoffs; Points = PF · Max PF · Proj. Max PF');
+assert(eq(u.VIEW_COLUMNS, { record: ['wl', 'projWl', 'playoffs', 'sos'], points: ['pf', 'maxPf', 'projMaxPf'] }),
+  'A4d. Record = W–L · Proj. W–L · Playoffs · SoS; Points = PF · Max PF · Proj. Max PF');
 assert(u.COLUMN_LABEL.projMaxPf === 'Proj.\nMax PF' && u.COLUMN_LABEL.projWl === 'Proj. W–L' &&
-    u.COLUMN_LABEL.playoffs === 'Playoffs', 'A4e. headings; Proj. Max PF breaks after "Proj."');
+    u.COLUMN_LABEL.playoffs === 'Play\noffs' && u.COLUMN_LABEL.sos === 'SoS',
+  'A4e. headings: Proj. Max PF breaks after "Proj.", Playoffs stacks "Play" over "offs", SoS keeps its lowercase o');
+assert(u.COLUMN_SPOKEN.sos === 'strength of schedule' && u.COLUMN_SPOKEN.playoffs === 'playoff odds',
+  'A4f. VoiceOver names: "strength of schedule", "playoff odds"');
 
 // A5 — number formats.
 // D-262: 100% only with a proven clinch, 0% only with a proven elimination.
@@ -178,8 +184,8 @@ assert(badOdds.length === 0, 'A5a. playoff odds: whole percent; "100%" / "0%" on
     'A5f. playoffs sort: proven 100% above unproven >99%; proven 0% below unproven <1%', `${ord('desc')} / ${ord('asc')}`);
   assert(u.cellText(rs[0], 'playoffs') === '>99%' && u.cellText(rs[1], 'playoffs') === '100%'
       && u.cellText(rs[2], 'playoffs') === '0%' && u.cellText(rs[3], 'playoffs') === '<1%'
-      && u.openTeamLines('points', rs[0], 0).leftOut.endsWith('Playoff odds >99%'),
-    'A5g. the cell and the open team line pass the team\'s proof');
+      && u.openTeamStats('points', rs[0], 0).some((x) => x.label === 'Playoff odds' && x.value === '>99%'),
+    'A5g. the cell and the open team\'s stat row pass the team\'s proof');
 }
 const PTS = [[1498.2, '1,498'], [999.6, '1,000'], [12345.4, '12,345'], [0, '0'], [87.5, '88']];
 assert(PTS.every(([n, w]) => u.pointsText(n) === w), 'A5b. points: whole, thousands commas, no toLocaleString',
@@ -192,10 +198,10 @@ assert(u.averageRecordText([8.26, 5.74, 0]) === '8.3–5.7' && u.averageRecordTe
 
 // A6 — cells and dash rules.
 const cells = (r, view) => u.VIEW_COLUMNS[view].map((c) => u.cellText(r, c));
-assert(eq(cells(rows[3], 'record'), ['5–4', '8–6', '96%']) && eq(cells(rows[3], 'points'), ['1,306', '1,589', '2,470']),
-  'A6a. a forecast team fills all six columns');
-assert(eq(cells(rows[5], 'record'), ['1–8', '—', '—']) && eq(cells(rows[5], 'points'), ['1,012', '—', '—']),
-  'A6b. no forecast: W–L and PF still show; Proj. W–L, Playoffs, Proj. Max PF are a dash; unknown Max PF is a dash');
+assert(eq(cells(rows[3], 'record'), ['5–4', '8–6', '96%', '—']) && eq(cells(rows[3], 'points'), ['1,306', '1,589', '2,470']),
+  'A6a. a forecast team fills the forecast columns (SoS is a dash: this fixture has no weeks)');
+assert(eq(cells(rows[5], 'record'), ['1–8', '—', '—', '—']) && eq(cells(rows[5], 'points'), ['1,012', '—', '—']),
+  'A6b. no forecast: W–L and PF still show; Proj. W–L, Playoffs, SoS, Proj. Max PF are a dash; unknown Max PF is a dash');
 assert(u.cellText(rows[2], 'maxPf') === '1,640', "A6c. Max PF from the forecast when Sleeper sent no ppts");
 {
   const noFc = u.buildTableRows(standingsRows, null);
@@ -203,22 +209,33 @@ assert(u.cellText(rows[2], 'maxPf') === '1,640', "A6c. Max PF from the forecast 
     "A6d. with no forecast at all, Max PF still shows from Sleeper's ppts (dash only where Sleeper sent none)");
 }
 
-// A7 — the open team: what the current view leaves out, then the average.
+// A7 — the open team: one stat per row — what the current view leaves out, then the average.
 {
-  const rec = u.openTeamLines('record', rows[3], 1);
-  assert(rec.leftOut === 'Points for 1306.0 · Max PF 1,589 · Projected Max PF 2,470',
-    'A7a. Record view opens on what it leaves out: points for, Max PF, projected Max PF', rec.leftOut);
-  assert(rec.average === 'Average final record: 8.3–5.7 · Bye odds: 3.3%',
-    'A7b. then the exact average record (expected_record) and bye odds where the league has byes', rec.average);
-  const pts = u.openTeamLines('points', rows[3], 0);
-  assert(pts.leftOut === 'Record 5–4 · Projected 8–6 · Playoff odds 96%',
-    'A7c. Points view opens on record, projected record and playoff odds', pts.leftOut);
-  assert(pts.average === 'Average final record: 8.3–5.7', 'A7d. no byes ⇒ no bye odds', pts.average);
-  const none = u.openTeamLines('record', rows[5], 1);
-  assert(none.leftOut === 'Points for 1011.5' && none.average === null,
-    'A7e. no forecast: only the current numbers that exist, and no average line', JSON.stringify(none));
-  const nonePts = u.openTeamLines('points', rows[5], 1);
-  assert(nonePts.leftOut === 'Record 1–8' && nonePts.average === null, 'A7f. Points view with no forecast: the record only');
+  const S = (view, row, byes) => u.openTeamStats(view, row, byes).map((x) => `${x.label}=${x.value}`).join(' | ');
+  const cases = [
+    ['record', 3, 1, 'Points for=1306.0 | Max PF=1,589 | Projected Max PF=2,470 | Average final record=8.3–5.7 | Bye odds=3.3%',
+      'A7a. Record view, forecast, byes: points for, Max PF, projected Max PF, average record, bye odds'],
+    ['record', 3, 0, 'Points for=1306.0 | Max PF=1,589 | Projected Max PF=2,470 | Average final record=8.3–5.7',
+      'A7b. no byes in the league ⇒ no Bye odds row'],
+    ['points', 3, 1, 'Record=5–4 | Projected=8–6 | Playoff odds=96% | Average final record=8.3–5.7 | Bye odds=3.3%',
+      'A7c. Points view, forecast, byes: record, projected record, playoff odds, average record, bye odds'],
+    ['points', 3, 0, 'Record=5–4 | Projected=8–6 | Playoff odds=96% | Average final record=8.3–5.7',
+      'A7d. Points view, no byes'],
+    ['record', 5, 1, 'Points for=1011.5', 'A7e. Record view, no forecast and no Sleeper Max PF: points for only (no forecast rows, no bye row)'],
+    ['points', 5, 1, 'Record=1–8', 'A7f. Points view, no forecast: the record only'],
+    ['record', 2, 1, 'Points for=1391.7 | Max PF=1,640 | Projected Max PF=2,548 | Average final record=9.7–4.3 | Bye odds=3.3%',
+      'A7g. Max PF row from the forecast fallback when Sleeper sent none'],
+  ];
+  for (const [view, i, byes, want, why] of cases) {
+    const got = S(view, rows[i], byes);
+    assert(got === want, why, `got ${got}`);
+  }
+  const noFc = u.buildTableRows(standingsRows, null);
+  assert(S('record', noFc[0], 1) === 'Points for=1498.2 | Max PF=1,721',
+    'A7h. no forecast at all: Sleeper Max PF still shows; no forecast-only rows');
+  assert(u.openTeamStats('record', rows[3], 1).every((x) => !/[.:]$/.test(x.value) && !/ · /.test(x.value)),
+    'A7i. values are bare numbers, no sentences or dot-joined lines');
+  assert(typeof u.openTeamLines === 'undefined', 'A7j. the old string-joining openTeamLines is gone');
 }
 
 // A8 — the no-forecast line and the status words.
@@ -241,6 +258,92 @@ assert(u.cellText(rows[2], 'maxPf') === '1,640', "A6c. Max PF from the forecast 
   assert(u.forecastStatusText({ isLoading: false, isError: false, state: 'current' }) === '' &&
       u.forecastStatusText({ isLoading: false, isError: false, state: 'stale' }) === 'Weekly update due.',
     'A8b. a current forecast adds no status sentence; a stale one says so');
+}
+
+// A9 — SoS (strength of schedule) against a real league: "Fantasy Football
+// Version 3", saved forecast captured 2026-11-24, week 11 completed, weeks
+// 12–14 left (the display-mockups' values.json; each team's modeled_score_mean
+// per remaining week, its opponent, and the expected mean / rank / band).
+{
+  const LEAGUE = [
+    // [rid, name, w, l, pf, [[week, opponent, own modeled_score_mean]…], sos mean, rank, band]
+    [1, 'Team 1', 7, 4, 1612.48, [[12, 5, 137.4], [13, 3, 148.0], [14, 4, 147.6]], 135.0, 5, 'average'],
+    [2, 'Team 2', 3, 8, 1299.7, [[12, 10, 122.0], [13, 4, 121.7], [14, 9, 128.7]], 138.4, 4, 'hard'],
+    [3, 'Team 3', 6, 5, 1557.2, [[12, 4, 153.4], [13, 1, 143.2], [14, 6, 139.2]], 143.0, 1, 'hard'],
+    [4, 'Team 4', 7, 4, 1661.86, [[12, 3, 147.2], [13, 2, 149.5], [14, 1, 150.8]], 140.9, 2, 'hard'],
+    [5, 'Team 5', 5, 6, 1196.52, [[12, 1, 111.0], [13, 6, 108.2], [14, 8, 113.0]], 140.2, 3, 'hard'],
+    [6, 'Team 6', 6, 5, 1415.44, [[12, 7, 137.5], [13, 5, 133.8], [14, 3, 133.7]], 122.3, 11, 'easy'],
+    [7, 'Team 7', 2, 9, 1317.36, [[12, 6, 119.6], [13, 8, 110.5], [14, 11, 118.7]], 128.9, 8, 'average'],
+    [8, 'Team 8', 9, 2, 1572.92, [[12, 12, 143.6], [13, 7, 142.5], [14, 5, 149.5]], 122.7, 10, 'easy'],
+    [9, 'Team 9', 9, 2, 1654.84, [[12, 11, 142.2], [13, 10, 131.0], [14, 2, 133.1]], 119.9, 12, 'easy'],
+    [10, 'Team 10', 6, 5, 1349.0, [[12, 2, 132.7], [13, 9, 123.9], [14, 12, 135.5]], 131.4, 7, 'average'],
+    [11, 'Team 11', 1, 10, 1174.76, [[12, 9, 107.1], [13, 12, 98.6], [14, 7, 106.6]], 131.8, 6, 'average'],
+    [12, 'Team 12', 5, 6, 1408.46, [[12, 8, 144.7], [13, 11, 134.6], [14, 10, 141.3]], 125.9, 9, 'easy'],
+  ];
+  const byPlace = [...LEAGUE].sort((a, b) => (b[2] / 11 - a[2] / 11) || (b[4] - a[4]) || (a[0] - b[0]));
+  const place = new Map(byPlace.map((t, i) => [t[0], i + 1]));
+  const sRows = LEAGUE.map(([rid, name, w, l, pf]) => R(rid, name, place.get(rid), w, l, 0, pf, null));
+  // Week 11 is played: a huge observed score that must not count. Opponent 99 is unknown.
+  const fTeam = ([rid, , , , , weeks]) => ({
+    ...F(rid, [9, 5, 0], [9, 5, 0], 0.5, 2000, 1500),
+    weeks: [{ week: 11, opponent_roster_id: rid === 1 ? 2 : 1, modeled_score_mean: 999, actual_score_observed: true },
+      ...weeks.map(([week, opp, mean]) => ({ week, opponent_roster_id: opp, modeled_score_mean: mean, actual_score_observed: false }))],
+  });
+  const fc = LEAGUE.map(fTeam);
+  const lr = u.buildTableRows(sRows, fc);
+  const bad = LEAGUE.filter(([rid, , , , , , mean, rank, band]) => {
+    const r = lr.find((x) => x.rosterId === rid);
+    return !r.sos || r.sos.mean.toFixed(1) !== mean.toFixed(1) || r.sos.rank !== rank ||
+      r.sos.band !== (band === 'average' ? null : band) || u.cellText(r, 'sos') !== u.ordinal(rank);
+  });
+  assert(bad.length === 0, 'A9a. SoS = mean of each opponent\'s projected score that week over remaining weeks; ranks and hard / easy thirds match the review build',
+    bad.map((t) => `${t[1]}: ${JSON.stringify(lr.find((x) => x.rosterId === t[0]).sos)}`).join('; '));
+  assert(u.cellText(lr.find((r) => r.rosterId === 3), 'sos') === '1st' && u.cellText(lr.find((r) => r.rosterId === 9), 'sos') === '12th' &&
+      ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '111th'].join() === [1, 2, 3, 4, 11, 12, 13, 21, 22, 111].map(u.ordinal).join(),
+    'A9b. the cell is an ordinal ("1st", "12th")');
+  const ord = (dir, input = lr) => u.sortRows(input, { column: 'sos', dir }).map((r) => r.rosterId).join(',');
+  assert(ord('desc') === '3,4,5,2,1,11,10,7,12,8,6,9' && ord('asc') === '9,6,8,12,7,10,11,1,2,5,4,3',
+    'A9c. SoS sorts toughest first, then reversed', `${ord('desc')} / ${ord('asc')}`);
+  assert(eq(u.nextSort(u.DEFAULT_SORT.record, 'sos'), { column: 'sos', dir: 'desc' }) && u.DEFAULT_SORT.record.column === 'wl',
+    'A9d. the first tap on SoS sorts toughest first; Record still opens on W–L');
+
+  // Dash cases: no forecast; no remaining weeks; an unknown opponent; the opponent's week missing.
+  const fc2 = fc.map((t) => {
+    if (t.roster_id === 1) return { ...t, weeks: t.weeks.map((w) => ({ ...w, actual_score_observed: true })) };
+    if (t.roster_id === 2) return { ...t, weeks: t.weeks.map((w) => (w.week === 13 ? { ...w, opponent_roster_id: 99 } : w)) };
+    if (t.roster_id === 4) return { ...t, weeks: t.weeks.filter((w) => w.week !== 12) }; // team 3 plays team 4 in week 12
+    return t;
+  }).filter((t) => t.roster_id !== 7);
+  const dr = u.buildTableRows(sRows, fc2);
+  const dash = (rid) => u.cellText(dr.find((r) => r.rosterId === rid), 'sos') === '—' && dr.find((r) => r.rosterId === rid).sos === null;
+  assert(dash(7), 'A9e. no forecast for the team ⇒ dash');
+  assert(dash(6) && dash(8) && dash(11), "A9e2. a team whose opponent has no forecast ⇒ dash (6, 8 and 11 play 7)");
+  assert(dash(1), 'A9f. no remaining weeks (every week observed) ⇒ dash');
+  assert(dash(2), 'A9g. an opponent missing from the forecast ⇒ dash');
+  assert(dash(3), "A9h. the opponent's week missing ⇒ dash");
+  assert(u.remainingScheduleMean({ ...fc[0], weeks: [] }, new Map()) === null, 'A9i. a team with no weeks has no SoS');
+  {
+    const ranked = dr.filter((r) => r.sos).sort((a, b) => a.sos.rank - b.sos.rank).map((r) => r.rosterId).join(',');
+    const placeOf = (rid) => dr.find((r) => r.rosterId === rid).place;
+    const dashes = dr.filter((r) => !r.sos).map((r) => r.rosterId).sort((a, b) => placeOf(a) - placeOf(b)).join(',');
+    assert(ord('desc', dr) === `${ranked},${dashes}`, 'A9j. SoS desc: ranked teams toughest first, dashes last in standings order',
+      `${ord('desc', dr)} vs ${ranked},${dashes}`);
+    const rev = ranked.split(',').reverse().join(',');
+    assert(ord('asc', dr) === `${rev},${dashes}`, 'A9k. SoS asc: easiest first, dashes still last in standings order', ord('asc', dr));
+    assert(dr.filter((r) => !r.sos).length === 7 && dr.filter((r) => r.sos).map((r) => r.sos.rank).sort((a, b) => a - b).join() === '1,2,3,4,5',
+      'A9l. teams with a dash take no rank; the rest rank 1..n');
+    assert(dr.filter((r) => r.sos && r.sos.rank <= 4).every((r) => r.sos.band === 'hard') &&
+        dr.filter((r) => r.sos && r.sos.rank > 8).length === 0 && dr.filter((r) => r.sos && r.sos.band === 'easy').length === 0,
+      "A9m. thirds are of the league's team count (12): ranks 1–4 hard, 9–12 easy");
+  }
+  {
+    // An exact tie: the lower roster id takes the higher rank (compute.py's order).
+    const tie = u.buildTableRows([R(1, 'A', 2, 1, 0, 0, 10, null), R(2, 'B', 1, 1, 0, 0, 20, null)], [
+      { ...F(1, [1, 0, 0], [1, 0, 0], 0.5, 0, 0), weeks: [{ week: 5, opponent_roster_id: 2, modeled_score_mean: 100 }] },
+      { ...F(2, [1, 0, 0], [1, 0, 0], 0.5, 0, 0), weeks: [{ week: 5, opponent_roster_id: 1, modeled_score_mean: 100 }] },
+    ]);
+    assert(tie[0].sos.rank === 1 && tie[1].sos.rank === 2, 'A9n. an exact SoS tie ranks the lower roster id first');
+  }
 }
 
 // ═══ B. The screen ══════════════════════════════════════════════════════
@@ -290,16 +393,30 @@ assert(/numberOfLines=\{1\}>\s*\{r\.name\}/.test(st) && /num: \{ \.\.\.type\.dat
 assert(/\{ width: COL_WIDTH\[column\], justifyContent: 'flex-end' \}/.test(st) && /\{ minWidth: COL_WIDTH\[c\] \}/.test(st),
   'B3g. headings are exactly the column width (long ones wrap); number cells are at least that wide');
 {
-  // Layout arithmetic for a 375pt phone, from the screen's own numbers.
+  // Layout arithmetic, from the screen's own numbers. Record has five 4pt
+  // gaps (team, four numbers, chevron), Points four.
   const W = Function(`return (${(/const COL_WIDTH: Record<StandingsColumn, number> = (\{[\s\S]*?\});/.exec(st) || ['', 'null'])[1]});`)();
+  const chev = Number((/const CHEVRON = (\d+);/.exec(st) || [])[1]);
   const pad = /scroll: \{ padding: space\.lg,/.test(st) ? 16 : NaN; // space.lg
   const rowPad = /row: \{ paddingHorizontal: space\.xs,/.test(st) ? 4 : NaN; // space.xs
   const gap = /rowHead: \{ flexDirection: 'row', alignItems: 'center', gap: space\.xs,/.test(st) ? 4 : NaN;
-  const avail = 375 - 2 * pad - 2 * rowPad - 16 - 4 * gap;
-  const team = (v) => avail - u.VIEW_COLUMNS[v].reduce((n, c) => n + W[c], 0);
-  assert(avail === 303 && team('record') === 123 && team('points') === 135,
-    'B3h. 375pt: 303pt for team + numbers; the team column keeps 123pt (Record) / 135pt (Points)',
-    `avail ${avail}, record ${team('record')}, points ${team('points')}`);
+  const team = (screen, v) => screen - 2 * pad - 2 * rowPad - chev - (u.VIEW_COLUMNS[v].length + 1) * gap
+    - u.VIEW_COLUMNS[v].reduce((n, c) => n + W[c], 0);
+  assert(chev === 16 && /chevronCol: \{ width: CHEVRON,/.test(st) && /size=\{CHEVRON\}/.test(st), 'B3h. the chevron column is 16pt');
+  assert(eq([W.pf, W.maxPf, W.projMaxPf], [48, 60, 60]) && team(375, 'points') === 135,
+    'B3i. Points view columns unchanged (48 / 60 / 60): the team keeps 135pt at 375pt');
+  // Measured (Archivo 600 11pt +0.88 tracking, uppercase; Plex Mono 13pt = 7.8pt a character):
+  // "W–L" 24.9, "PROJ." 38.0, "PLAY" 32.4, "OFFS" 32.9, "SoS" 23.9; caret 10 + 2.
+  // Cells: "8–5–1" 39.0, "22–6" 31.2, ">99%" / "100%" 31.2, "12th" 31.2, "easy" 23.2.
+  const need = { wl: Math.max(24.9 + 12, 5 * 7.8), projWl: Math.max(38.0 + 12, 5 * 7.8), playoffs: Math.max(32.9 + 12, 4 * 7.8), sos: Math.max(23.9 + 12, 4 * 7.8, 23.2) };
+  const tight = Object.keys(need).filter((c) => W[c] < need[c] || W[c] > Math.ceil(need[c]) + 1);
+  assert(tight.length === 0, 'B3j. each Record column is its widest cell or heading + caret, whichever is larger (≤ 1pt over)',
+    tight.map((c) => `${c} ${W[c]} vs ${need[c]}`).join('; '));
+  assert(team(375, 'record') === 125 && team(390, 'record') === 140 && team(393, 'record') === 143,
+    'B3k. Record team column: 125pt at 375, 140 at 390, 143 at 393 (today 123 at 375 with three columns)',
+    `${team(375, 'record')} / ${team(390, 'record')} / ${team(393, 'record')}`);
+  // A 16-character name measured 102.4pt in body 14 (open, semi-bold: 106.9): it fits 125.
+  assert(team(375, 'record') >= 107, 'B3l. a 16-character name (about 107pt open) fits at 375pt');
 }
 
 // B4 — the open team: one at a time, an outlined card.
@@ -319,26 +436,34 @@ assert(/\{ width: COL_WIDTH\[column\], justifyContent: 'flex-end' \}/.test(st) &
     'B4e. tapping the open team closes it; tapping another opens that one instead');
   const sel = (/const selectView = [\s\S]*?\n  \};/.exec(st) || [''])[0];
   assert(/setOpen\(null\);/.test(sel), 'B4f. switching view closes the open team');
-  assert(/openTeamLines\(view, r, result\?\.playoff_byes \?\? 0\)/.test(st) &&
-      /testID="standings\.open\.left-out">\{lines\.leftOut\}/.test(st) &&
+  assert(/openTeamStats\(view, r, result\?\.playoff_byes \?\? 0\)/.test(st) &&
+      /testID="standings\.open\.stats">\s*\{stats\.map\(\(x\) => <StatRow key=\{x\.label\} label=\{x\.label\} value=\{x\.value\} \/>\)\}/.test(st) &&
+      !/openTeamLines|standings\.open\.(left-out|average)/.test(st) &&
       // Max PF moves (2026-11-12) adds the `maxPf` inputs; check-max-pf-moves.js pins them.
       // Playoff targets (2026-11-14) adds the `targets` inputs; check-playoff-targets.js pins them.
       // Improve pages (direction-pages spec P-13) add `pageLinks`; check-direction-pages.js pins it.
       /\{r\.forecast && result \? <ProjectionTeamDetail team=\{r\.forecast\} result=\{result\} maxPf=\{\{[^}]*\}\} targets=\{\{[^}]*\}\} pageLinks=\{pageLinks\} \/> : null\}/.test(st),
-    'B4g. the open team shows the util lines, then the moved forecast sub-sections');
+    'B4g. the open team shows one StatRow per util stat, then the moved forecast sub-sections');
+  assert(/stats: \{ marginRight: space\.xs \+ CHEVRON \}/.test(st),
+    "B4i. stat values end under the last number column (the chevron and its gap are kept clear)");
   assert(/paddingHorizontal: space\.xs - 1,/.test(card) && /row: \{ paddingHorizontal: space\.xs,/.test(st),
     "B4h. card border + padding = the closed row's padding, so columns do not move");
 }
 
-// B5 — the old Projected status line, still on the page.
+// B5 — under the table: the caption with its tags, the tiebreak note; footers and status sentences gone.
 {
   const status = st.slice(st.indexOf('testID="standings.forecast-status"'), st.indexOf('testID="standings.no-forecast"'));
   assert(/lastSaved \? `Last saved: \$\{date\(result\.captured_at\)\}` : 'Weekly estimate'/.test(status) &&
-      /incomplete \? 'Incomplete' : null/.test(status) &&
-      /result\.coverage\?\.estimated \? 'Partial Sleeper data' : null/.test(status) &&
-      /result\.provisional \? 'Provisional' : null/.test(status) &&
-      /testID="league-projections\.incomplete">\{incompleteSentence\(missingSlots\)\}/.test(status),
-    'B5a. Weekly estimate / Last saved / Incomplete / Partial Sleeper data / Provisional + the incomplete sentence render with a forecast');
+      /incomplete \? 'Incomplete' : null/.test(status) && /result\.provisional \? 'Provisional' : null/.test(status),
+    'B5a. the caption keeps Weekly estimate / Last saved with its Incomplete and Provisional tags');
+  assert(count(status, '<Text') === 1, 'B5a2. with a forecast the caption is the only line (no status or incomplete sentence)');
+  const GONE = ['Partial Sleeper data', 'VIEW_FOOT', 'Projected W–L is the most likely final record',
+    'Odds don’t confirm a playoff spot', 'Max PF is the season so far', 'Projected Max PF is the forecast for the full regular season',
+    'incompleteSentence', 'league-projections.incomplete', 'forecastStatusText'];
+  const left = GONE.filter((g) => stRaw.includes(g));
+  assert(left.length === 0, 'B5a3. removed: "Partial Sleeper data", the view footers, the status and incomplete sentences', left.join(', '));
+  assert(st.includes('Your league’s own tiebreakers and divisions may order tied records differently.'),
+    'B5a4. the tiebreak line stays');
   assert(st.includes("const lastSaved = !!result && (forecastQuery.isError || state !== 'current' || data?.model_current === false);"),
     'B5b. an older-model or failed-refresh run reads as last saved');
   assert(st.indexOf('testID="standings.forecast-status"') > st.indexOf('testID="standings.table"'),
@@ -418,8 +543,9 @@ assert(count(st, '<FeedbackFAB') === 1 && /<FeedbackFAB activeScreen="Standings"
   const importers = srcFiles.filter((f) => /from '[./]*components\/LeagueProjectionSection'|from '\.\/LeagueProjectionSection'/.test(read(f)));
   assert(importers.length === 0, 'B11b. nothing imports it', importers.join(', '));
   const detail = read('src/components/LeagueProjectionDetail.tsx');
-  assert(['label="Final record odds"', 'label="Weekly projections"', 'label="Draft pick odds"', 'label="Pick odds and range"']
-    .every((l) => detail.includes(l)), 'B11c. the open team mounts Final record odds, Weekly projections, Draft pick odds');
+  // The middle section (Remaining schedule, replacing Weekly projections) is pinned by check-league-projections.js.
+  assert(['label="Final record odds"', 'label="Draft pick odds"', 'label="Pick odds and range"']
+    .every((l) => detail.includes(l)), 'B11c. the open team mounts Final record odds and Draft pick odds (with Pick odds and range)');
   assert(!/useQuery|useSession|useFlag/.test(detail), 'B11d. the detail reads nothing (the screen owns the one query)');
   assert(/disclosure: \{borderTopWidth: 1, borderTopColor: ink\.ink3\}/.test(detail) && /sections: \{paddingLeft: space\.md\}/.test(detail),
     'B11e. sub-sections are indented with a quieter separator');
@@ -441,6 +567,36 @@ assert(!/styles\.odds\b/.test(st), 'B12e. numbers are not ice (ice is for intera
     'standings.table', 'standings.forecast-status', 'standings.no-forecast', 'standings.current.unavailable']) {
     assert(stRaw.includes(`testID="${id}"`), `B13b. testID ${id} is a static literal`);
   }
+}
+
+// B14 — the SoS column and the heading caret.
+{
+  const head = (/function HeadCell[\s\S]*?\n\}\n/.exec(st) || [''])[0];
+  assert(/\{isTeam \? null : caret\}\s*<Text/.test(head) && /<\/Text>\s*\{isTeam \? caret : null\}/.test(head),
+    'B14a. number headings draw the caret LEFT of the text (text keeps the cells\' right edge); Team keeps it on the right');
+  assert(/column === 'sos' && styles\.asWritten/.test(head) && /asWritten: \{ textTransform: 'none' \}/.test(st),
+    'B14b. "SoS" is exempt from the label style\'s uppercase (never "SOS")');
+  assert(/column === 'sos'\s*\? \(sort\.dir === 'desc' \? 'toughest first' : 'easiest first'\)/.test(head),
+    'B14c. VoiceOver: the SoS sort says toughest / easiest first');
+  assert(/if \(c === 'sos' && r\.sos\) \{/.test(st) && /\{r\.sos\.band \? <Text scale="dense" style=\{styles\.band\}>\{r\.sos\.band\}<\/Text> : null\}/.test(st) &&
+      /band: \{ \.\.\.type\.bodySm, fontSize: type\.label\.fontSize, lineHeight: type\.label\.lineHeight, textAlign: 'right' \}/.test(st),
+    'B14d. the SoS cell: the ordinal in the number style, "hard" / "easy" under it in small muted text');
+  assert(!/sos[^\n]*(semantic|flare|ice\.)/.test(st), 'B14e. no colour coding on SoS');
+  assert(/\$\{c === 'sos' && r\.sos\?\.band \? `, \$\{r\.sos\.band\}` : ''\}/.test(st), 'B14f. the row\'s spoken label includes the band');
+  assert(/rowHead: \{ flexDirection: 'row', alignItems: 'center', gap: space\.xs, minHeight: 44 \}/.test(st), 'B14g. rows stay 44pt');
+}
+
+// B15 — StatRow (shared with LeagueProjectionDetail).
+{
+  const sr = read('src/components/StatRow.tsx');
+  assert(/export function StatRow\(\{ label, value, mono = true, testID \}: \{\s*label: string;\s*value: string;\s*mono\?: boolean;\s*testID\?: string;\s*\}\)/.test(sr),
+    'B15a. StatRow({label, value, mono = true, testID}) — the agreed signature');
+  assert(/minHeight: 28,/.test(sr) && /borderTopColor: ink\.ink3,/.test(sr), 'B15b. 28pt minimum, the open card\'s quiet ink-3 separator');
+  assert(/variant="bodySm" numberOfLines=\{1\} style=\{styles\.label\}/.test(sr) && /label: \{ flex: 1, minWidth: 0, color: chalk\.dim \}/.test(sr),
+    'B15c. label: muted body-sm, one line, truncates');
+  assert(/numberOfLines=\{1\} style=\{\[mono \? styles\.mono : styles\.text, styles\.value\]\}/.test(sr) && /value: \{ flexShrink: 0, textAlign: 'right' \}/.test(sr) &&
+      /mono: \{ \.\.\.type\.data \}/.test(sr), 'B15d. value: right-aligned, never shrinks or wraps; Plex Mono unless mono={false}');
+  assert(!/#[0-9a-fA-F]{3,8}\b|rgba?\(|borderRadius/.test(sr), 'B15e. tokens only');
 }
 
 console.log(failures ? `\n${failures} standings-table check(s) FAILED, ${passes} passed.` : `\nAll standings-table checks passed (${passes}).`);
