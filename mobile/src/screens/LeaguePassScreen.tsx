@@ -46,6 +46,7 @@ import { openWebLink } from '../utils/openExternal';
 import { MON } from '../copy/monetization';
 import {
   buyerPass,
+  currentProOnBuy,
   fill,
   leagueNameFor,
   passDate,
@@ -77,6 +78,17 @@ import {
 //                                (R12, R15) → Apple's sheet → refresh the
 //                                entitlements until the buyer's pass shows,
 //                                else the choose-a-league state.
+//
+// AN EXISTING PRO USER CAN BUY (operator 2026-11-25), from Settings ›
+// Subscription. Nothing here assumes a not-Pro buyer: the screen never reads
+// `pro` to decide a state, and the post-purchase loop waits for the buyer's
+// PASS to show (`buyerPass`), never for `pro`, which was already true. Before
+// Buy the quote says what happens to their Pro (utils/leaguePass
+// .currentProOnBuy): an App Store individual subscription is REPLACED (an
+// upgrade in the one subscription group; Apple prorates); any other Pro (a
+// lifetime, comp or promo grant) stays. A subscriber who used the individual
+// plan's free month is not eligible for this one, which the rule below
+// already handles.
 //
 // THE FREE MONTH ONLY WHEN STOREKIT CONFIRMS IT (operator 2026-11-24, "Free
 // month replaces discount"; the individual paywall's rule, R28.8 #1). The
@@ -145,6 +157,10 @@ export default function LeaguePassScreen({ navigation, route }: any) {
   const userId = useSession((s) => s.user?.user_id ?? null);
   const leagues = useSession((s) => s.leagues);
   const refreshEntitlements = useEntitlements((s) => s.refresh);
+  // An existing Pro user may buy (operator 2026-11-25): what the purchase does
+  // to their current Pro is said before Buy. Account-level, display only.
+  const pro = useEntitlements((s) => s.pro);
+  const sources = useEntitlements((s) => s.sources);
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const queryClient = useQueryClient();
 
@@ -484,6 +500,7 @@ export default function LeaguePassScreen({ navigation, route }: any) {
   } else if (step.kind === 'quote') {
     const { plan, intent, leagueId } = step;
     const leagueName = nameOf(leagueId);
+    const onBuy = currentProOnBuy(pro, sources);
     const price = plan.price ?? '';
     const priceLine = plan.freeMonth
       ? fill(MON['mon.lp.quote.trial'], { price })
@@ -503,6 +520,14 @@ export default function LeaguePassScreen({ navigation, route }: any) {
             StoreKit confirmed it (plan.freeMonth). */}
         <ChalkText variant="dataLg" testID="league-pass.quote.price">{priceLine}</ChalkText>
         <ChalkText variant="bodySm" style={styles.dim} testID="league-pass.disclosure">{disclosure}</ChalkText>
+        {/* Existing Pro (operator 2026-11-25): an App Store individual
+            subscriber is told the pass REPLACES that subscription (an Apple
+            upgrade in the same group, prorated); any other Pro is kept. */}
+        {onBuy === 'replaces' ? (
+          <ChalkText variant="body" testID="league-pass.quote.replaces">{MON['mon.lp.quote.replaces']}</ChalkText>
+        ) : onBuy === 'keeps' ? (
+          <ChalkText variant="bodySm" style={styles.dim} testID="league-pass.quote.keeps">{MON['mon.lp.quote.keeps']}</ChalkText>
+        ) : null}
         {lineSlot}
         <Button
           testID="league-pass.buy"

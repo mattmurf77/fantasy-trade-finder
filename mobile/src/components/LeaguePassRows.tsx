@@ -17,6 +17,7 @@ import {
   looksUnbound,
   memberPasses,
   passDate,
+  proBuyEntry,
 } from '../utils/leaguePass';
 
 // League pass rows on the existing monetization surfaces (flag
@@ -33,8 +34,10 @@ import {
 //   LeaguePassSettingsRows  — R25 / R27 / R28 in Settings › Subscription:
 //                             the member's covered league and date (the buyer
 //                             shown as "a leaguemate" unless named), the
-//                             buyer's league and date with a Manage row, and
-//                             the unbound pass's choose-a-league row.
+//                             buyer's league and date with a Manage row, the
+//                             unbound pass's choose-a-league row, and, for a
+//                             Pro user who is not a buyer, the buy row
+//                             (operator 2026-11-25).
 //
 // ZERO REQUESTS: everything here reads the entitlement answer already in
 // memory (Settings' hub fires no queries). The buyer's renewal state, covered
@@ -104,7 +107,11 @@ export function LeaguePassSettingsRows() {
   const mine = buyerPass(passes, now);
   const covered = memberPasses(passes, now);
   const unbound = looksUnbound(pro, sources, passes, now);
-  if (!mine && covered.length === 0 && !unbound) return null;
+  // Existing Pro users (operator 2026-11-25): the paywall's entry is never
+  // seen by a Pro user, so Settings offers the purchase. Shown also to a
+  // Pro user a leaguemate's pass covers (they may buy for another league).
+  const buy = proBuyEntry(pro, sources, passes, now);
+  if (!mine && covered.length === 0 && !unbound && !buy) return null;
   const open = () => navigation.navigate('LeaguePass', { source: 'settings', mode: 'manage' });
   return (
     <View testID="settings-league-pass">
@@ -134,6 +141,18 @@ export function LeaguePassSettingsRows() {
           <ChalkText variant="title" style={styles.flex}>
             {mine ? MON['mon.lp.manage'] : MON['mon.lp.unbound.row']}
           </ChalkText>
+          <Icon name="chevron-right" color={chalk.dim} size={16} />
+        </Pressable>
+      ) : null}
+      {buy ? (
+        <Pressable
+          testID="settings-league-pass-buy"
+          accessibilityRole="button"
+          accessibilityLabel={MON['mon.lp.pro.row_a11y']}
+          onPress={() => navigation.navigate('LeaguePass', { source: 'settings' })}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
+        >
+          <ChalkText variant="title" style={styles.flex}>{MON['mon.lp.pro.row']}</ChalkText>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
       ) : null}

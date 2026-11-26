@@ -15,13 +15,13 @@ Line numbers are at the build's working tree; re-check after a merge.
 
 **Flag off is today's app.**
 `api/billing.ts:136` builds the config path through
-`utils/leaguePass.ts:248` `paywallConfigPath`, which adds `caps=league_pass` only when
+`utils/leaguePass.ts:292` `paywallConfigPath`, which adds `caps=league_pass` only when
 `monetize.league_pass` is true. Every converted pre-check reads
-`utils/leaguePass.ts:51` `proForLeague`, which returns `pro` when the flag is off
+`utils/leaguePass.ts:53` `proForLeague`, which returns `pro` when the flag is off
 (`state/useLeaguePass.ts`, `SendInSleeperButton.tsx:103-104` short-circuits on the flag).
 `components/LeaguePassRows.tsx` returns null from each export unless both
 `monetize.league_pass` and `monetize.paywall` are on; `LeaguePassCoveredNotice` is
-not due with the flag off (`utils/leaguePass.ts:219`). `screens/LeaguePassScreen.tsx:166`
+not due with the flag off (`utils/leaguePass.ts:221`). `screens/LeaguePassScreen.tsx:182`
 dismisses with the flag off and renders nothing (`if (!verified) return null`).
 
 **Coverage reaches the pre-checks for the right league.**
@@ -45,32 +45,44 @@ The notice itself (`PaywallGateNotice`) renders only from a 402 on the sweep and
 no entitlement, so a covered member whose sweep the server lets through never sees it.
 
 **Buying: the free month is promised only when StoreKit confirms it** (free-month
-revision, operator 2026-11-24). `LeaguePassScreen.tsx:206` `choose` → `POST
+revision, operator 2026-11-24). `LeaguePassScreen.tsx:222` `choose` → `POST
 /api/league-pass/intent` (always `ftf_league_annual`) → the `league` offering
-(`api/purchases.ts:444`) → the package for that product → `:218` asks
+(`api/purchases.ts:444`) → the package for that product → `:234` asks
 `checkIntroEligibility([sp])` (`api/purchases.ts:416`, the individual paywall's call) and
 reads the answer with `=== true`. That call returns true only for RevenueCat status
 ELIGIBLE with an intro of exactly one free month at price 0 (`isConfirmedFreeMonth`,
 `:405`); status UNKNOWN, INELIGIBLE (this Apple ID already used an intro in the
 subscription group, e.g. the individual plan's free month), NO_INTRO_OFFER_EXISTS, a
-missing product, an SDK error or no SDK all give no `true`. `utils/leaguePass.ts:130`
+missing product, an SDK error or no SDK all give no `true`. `utils/leaguePass.ts:132`
 `purchasePlan` then sets `freeMonth` only when that answer is true AND a StoreKit price
 exists; with no StoreKit the config's display price shows, `canBuy` is false and no free
-month is promised. The quote (`LeaguePassScreen.tsx:488`) shows "1 month free, then
+month is promised. The quote (`LeaguePassScreen.tsx:505`) shows "1 month free, then
 <price> a year", the trial disclosure (charged when the free month ends; renews until
 cancelled; cancel 24 hours before the free month or the period ends) and "Start 1-month
 trial" when `freeMonth`; otherwise "<price> a year", the paid disclosure and "Buy league
-pass". `buy` (`:259`) always runs the plain `purchasePackage(pkg, userId)` (`:274`);
+pass". `buy` (`:275`) always runs the plain `purchasePackage(pkg, userId)` (`:290`);
 Apple decides whether the intro applies. No promotional-offer or discounted call exists.
 
-**After the purchase.** `settle` (`LeaguePassScreen.tsx:235`) refreshes the entitlements
+**After the purchase.** `settle` (`LeaguePassScreen.tsx:251`) refreshes the entitlements
 until a `buyer` entry appears; else `GET /api/league-pass` decides: `unbound` shows the
-choose-a-league list (`bind`, `:298`), nothing yet shows "can take a few minutes".
+choose-a-league list (`bind`, `:314`), nothing yet shows "can take a few minutes".
 
 **Settings and the paywall.** `SubscriptionSection.tsx:228,240` mount
 `LeaguePassSettingsRows` in both verified branches; `PaywallScreen.tsx:700` the R26 line
 under the body and `:658` the R30 entry closing the anchored block. Navigation:
 `RootNav.tsx:867` registers `LeaguePass` once, as a modal.
+
+**Existing Pro users can buy (operator 2026-11-25).** `LeaguePassRows.tsx:113`
+`buy = proBuyEntry(pro, sources, passes, now)` (`utils/leaguePass.ts:268`: pro, no
+`league_pass_iap` source, no live buyer entry; a covered member still qualifies) adds
+the row at `:149`, which navigates to `LeaguePass` with `{ source: 'settings' }`. It is
+mounted through the existing Pro branch (`SubscriptionSection.tsx:242`); the non-Pro
+branch (`:228`) never shows it because `proBuyEntry` needs `pro`. In the screen nothing
+decides a state on `pro`: `pro` and `sources` are read only for
+`currentProOnBuy` (`utils/leaguePass.ts:280`, `LeaguePassScreen.tsx:503`), which puts
+the replace line (`apple_iap`) or the keep line (anything else) in the quote above the
+Buy button (`:527`). The post-purchase loop (`:251`) waits for a `buyer` entry in
+`league_passes` (`:254`), never for `pro`, which a Pro buyer already had.
 
 ## 2. TestFlight checklist (required, not yet run)
 
@@ -191,3 +203,25 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
     league shows it once for that league.
 24. Sign out and sign in as another account on the same device: no pass rows, lines or
     coverage from the previous account appear anywhere.
+
+### K. Existing Pro users (operator 2026-11-25)
+
+25. User A with an active `ftf_pro_annual` (or `ftf_pro_monthly`) subscription, not a
+    buyer: Settings › Subscription shows "Buy a league pass for your league". Tap it:
+    the league list opens. Choose a league: the quote shows "The league pass replaces
+    your current Fleeced Pro subscription. Apple refunds the unused part of it, and your
+    individual plan stops renewing." above the Buy button, and the paid price (no "1
+    month free" if A used the individual free month). Buy in sandbox: Apple's sheet
+    shows an upgrade; afterwards the done state names the league, a leaguemate is
+    covered there, and Settings shows "League pass: <league>" with Manage, no buy row.
+    Check `subscription_events` for the event sequence the upgrade produced (lld §13
+    item 4).
+26. User B with a lifetime grant (`manual_grant`, no store subscription): the same row;
+    the quote shows "Your current Pro stays as it is. The league pass is a separate
+    subscription." and no replace line. After the sandbox purchase (24 h lapse), B's
+    league is covered; once the sandbox row lapses the leaguemate is gated again and B
+    is still Pro.
+27. User C covered as a member by a leaguemate's pass and Pro by their own plan: sees
+    the member line AND the buy row; choosing the covered league shows "That league
+    already has a league pass."
+28. A non-Pro user: no buy row in Settings (See plans → the paywall's entry instead).

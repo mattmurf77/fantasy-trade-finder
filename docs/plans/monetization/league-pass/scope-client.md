@@ -23,6 +23,21 @@ used the individual plan's free month sees the plain yearly price. Removed: the
 promotional-offer wrappers, the tier → purchase-path decision, the full-price notice,
 the tier fields on the intent / config / view types, and their copy.
 
+**Revision 2026-11-25, "existing pro users need the option to purchase a league pass"
+(operator; the pass is ON at the initial public launch).** A Pro user never sees the
+paywall's entry, so Settings › Subscription gets a buy row (`settings-league-pass-buy`)
+for any Pro user who is not already a buyer (no `league_pass_iap` source, no live
+`buyer` entry), shown also when a leaguemate's pass covers them as a member (decided:
+they may buy for another league; the server refuses a covered league). It opens the
+existing `LeaguePass` route (`source: 'settings'`). On the quote, before Buy, an App
+Store individual subscriber (`apple_iap`) reads that the pass replaces their
+subscription (an upgrade in the same group; Apple refunds the unused part); any other
+Pro (lifetime, comp, promo grant, Founder, a web plan) reads that it stays. No free
+month is promised unless StoreKit confirms it, unchanged. New copy keys (placeholder,
+pending legal): `mon.lp.pro.row`, `mon.lp.pro.row_a11y`, `mon.lp.quote.replaces`,
+`mon.lp.quote.keeps`. No new event, flag, route or schema. The server's upgrade and
+downgrade handling is on `feat/league-pass-server` (lld §5.1).
+
 ---
 
 ## 1. Analytics scope

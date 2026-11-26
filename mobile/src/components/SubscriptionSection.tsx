@@ -235,8 +235,10 @@ function VerifiedRows() {
       {/* B8: the status block waits for update 1. */}
       {STATUS_ROWS_AT_LAUNCH ? <MemberStatus active={active} founder={founder} /> : null}
       {/* League pass (D-281): the buyer's league + Manage (R27, R28), an
-          unbound pass's choose-a-league row (R19), and any league a pass
-          covers. Self-gated on monetize.league_pass; reads memory only. */}
+          unbound pass's choose-a-league row (R19), any league a pass
+          covers, and for a Pro user who is not a buyer the buy row
+          (operator 2026-11-25: existing Pro users can buy a pass).
+          Self-gated on monetize.league_pass; reads memory only. */}
       <LeaguePassSettingsRows />
       <ManageSubscriptionLink />
       {restoreRows}

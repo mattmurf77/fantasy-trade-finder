@@ -231,6 +231,27 @@ check('1g. R29 notice: due only for a flag-on individual subscriber (not a pass 
   eq(lp.looksUnbound(true, ['apple_iap'], [], NOW), false, 'an individual plan');
 });
 
+check('1i. existing Pro users (operator 2026-11-25): the Settings buy entry is for any Pro user who is not already a buyer (a covered member included); the quote replaces only an App Store individual subscription', () => {
+  const E = lp.proBuyEntry;
+  eq(E(true, ['apple_iap'], [], NOW), true, 'annual or monthly subscriber');
+  eq(E(true, ['manual_grant'], [], NOW), true, 'lifetime grant to existing users');
+  eq(E(true, ['promo_referral'], [], NOW), true, 'promo grant');
+  eq(E(true, ['apple_iap'], [pass('L1')], NOW), true, 'covered as a member elsewhere: still offered');
+  eq(E(false, [], [], NOW), false, 'not Pro: the paywall entry is theirs');
+  eq(E(false, [], [pass('L1')], NOW), false, 'a covered member who is not Pro');
+  eq(E(true, ['league_pass_iap'], [pass('L1', 'buyer')], NOW), false, 'already a buyer');
+  eq(E(true, ['league_pass_iap'], [], NOW), false, 'a league product held, unbound: the unbound row instead');
+  eq(E(true, ['manual_grant'], [pass('L1', 'buyer')], NOW), false, 'a live buyer entry');
+  const C = lp.currentProOnBuy;
+  eq(C(true, ['apple_iap']), 'replaces', 'an App Store individual subscription is replaced');
+  eq(C(true, ['apple_iap', 'manual_grant']), 'replaces', 'a subscriber who also holds a grant: the subscription is replaced');
+  eq(C(true, ['manual_grant']), 'keeps', 'a lifetime grant is kept');
+  eq(C(true, ['founder_iap']), 'keeps', 'Founder lifetime is kept');
+  eq(C(true, ['stripe']), 'keeps', 'a web plan is not in the App Store group');
+  eq(C(false, ['apple_iap']), 'none', 'not Pro');
+  eq(C(true, null), 'keeps', 'no sources');
+});
+
 check('1h. dates and slots: passDate is the copy\'s date style or null; fill inserts values literally', () => {
   eq(lp.passDate('2027-01-15T12:00:00+00:00'), 'January 15, 2027', 'date');
   eq(lp.passDate('garbage'), null, 'unreadable');
@@ -531,6 +552,7 @@ check('7b. [shape] the only `pro` reads off useEntitlements are the account-leve
     'components/SendInSleeperButton.tsx',      // sendPreCheck: pro first, then the league's pass (6a)
     'components/LeaguePassRows.tsx',           // the unbound-pass row (a league product held), display only
     'components/LeaguePassCoveredNotice.tsx',  // R29: an individual subscriber, display only
+    'screens/LeaguePassScreen.tsx',            // what buying does to the account's Pro (replace / keep), display only
     'state/useLeaguePass.ts',                  // the selector itself
     'state/useEntitlements.ts',                // the store
   ]);
@@ -621,8 +643,29 @@ check('8b. FLAG ON: the entry opens LeaguePass with the paywall\'s source; R26 n
   eq(JSON.stringify(navs[0]), JSON.stringify(['LeaguePass', { source: 'settings', mode: 'manage' }]), 'Manage → LeaguePass manage');
   ({ m } = mountRows(flags, { pro: true, sources: ['league_pass_iap'], leaguePasses: [] }, { league: null, leagues }));
   assert(findId(m.LeaguePassSettingsRows(), 'settings-league-pass-unbound'), 'R19: the unbound row');
-  ({ m } = mountRows(flags, { pro: true, sources: ['apple_iap'], leaguePasses: [] }, { league: null, leagues }));
-  eq(m.LeaguePassSettingsRows(), null, 'an individual subscriber with no pass: nothing');
+  assert(!findId(m.LeaguePassSettingsRows(), 'settings-league-pass-buy'), 'an unbound buyer gets no buy row');
+  ({ m } = mountRows(flags, { pro: true, sources: ['league_pass_iap'], leaguePasses: [pass('L2', 'buyer')] }, { league: null, leagues }));
+  assert(!findId(m.LeaguePassSettingsRows(), 'settings-league-pass-buy'), 'a buyer gets no buy row');
+});
+
+check('8c. existing Pro users (operator 2026-11-25): Settings shows the buy row to an individual subscriber, a lifetime-grant holder and a covered Pro member; it opens LeaguePass with source settings; never to a non-Pro user', () => {
+  const flags = { 'monetize.paywall': true, 'monetize.league_pass': true };
+  const leagues = [{ league_id: 'L1', name: 'Alpha' }];
+  for (const sources of [['apple_iap'], ['manual_grant'], ['founder_iap']]) {
+    const { m, navs } = mountRows(flags, { pro: true, sources, leaguePasses: [] }, { league: null, leagues });
+    const row = findId(m.LeaguePassSettingsRows(), 'settings-league-pass-buy');
+    assert(row, `buy row for ${sources}`);
+    eq(textOf(row), copy.MON['mon.lp.pro.row'], 'its copy');
+    row.props.onPress();
+    eq(JSON.stringify(navs[0]), JSON.stringify(['LeaguePass', { source: 'settings' }]), 'opens the buy flow');
+  }
+  let { m } = mountRows(flags, { pro: true, sources: ['apple_iap'], leaguePasses: [pass('L1')] }, { league: null, leagues });
+  const rows = m.LeaguePassSettingsRows();
+  assert(findId(rows, 'settings-league-pass-member-L1') && findId(rows, 'settings-league-pass-buy'), 'a covered Pro member: the member line AND the buy row');
+  ({ m } = mountRows(flags, { pro: false, sources: [], leaguePasses: [] }, { league: null, leagues }));
+  eq(m.LeaguePassSettingsRows(), null, 'not Pro: nothing (See plans → the paywall entry)');
+  ({ m } = mountRows({ 'monetize.paywall': true }, { pro: true, sources: ['apple_iap'], leaguePasses: [] }, { league: null, leagues }));
+  eq(m.LeaguePassSettingsRows(), null, 'flag off: nothing');
 });
 
 // ═══ 9. screens, navigation, testIDs, analytics [shape] ═══════════════════
@@ -681,6 +724,22 @@ check('9c. analytics: the new surfaces fire only the existing paywall_purchase_*
   const s = read('screens/LeaguePassScreen.tsx');
   for (const id of want) assert(s.includes(`testID="${id}"`), `LeaguePassScreen: ${id}`);
   assert(/testID=\{`league-pass\.league\.\$\{l\.league_id\}`\}/.test(s), 'league rows: league-pass.league.<id>');
+});
+
+check('9g. [shape] existing Pro buyers: the quote says, before Buy, that the pass REPLACES an App Store individual subscription (else that their Pro stays); the screen gates no state on `pro`; after the purchase it waits for the PASS, not for pro', () => {
+  const s = strip(read('screens/LeaguePassScreen.tsx'));
+  assert(/const onBuy = currentProOnBuy\(pro, sources\);/.test(s), 'the replace / keep answer comes from utils/leaguePass.currentProOnBuy');
+  const quote = s.slice(s.indexOf('testID="league-pass.quote"'), s.indexOf('testID="league-pass.buy"'));
+  assert(/onBuy === 'replaces' \?[\s\S]*testID="league-pass\.quote\.replaces">\{MON\['mon\.lp\.quote\.replaces'\]\}/.test(quote), 'the replace line sits in the quote BEFORE the Buy button');
+  assert(/onBuy === 'keeps' \?[\s\S]*testID="league-pass\.quote\.keeps">\{MON\['mon\.lp\.quote\.keeps'\]\}/.test(quote), 'the keep line likewise');
+  const proUses = [...s.matchAll(/\bpro\b/g)].length;
+  eq(proUses, 3, 'pro is read once and used only by currentProOnBuy (selector, const, call)');
+  assert(!/hasProEntitlement\([^)]*\)\s*\)\s*(\{|return|setStep)/.test(s), 'no state decided on the purchase result\'s pro');
+  const settleFn = s.slice(s.indexOf('const settle = async'), s.indexOf('const buy = async'));
+  assert(/buyerPass\(useEntitlements\.getState\(\)\.leaguePasses, Date\.now\(\)\)/.test(settleFn) && !/\.pro\b/.test(settleFn), 'the loop keys on the buyer\'s pass appearing, never on pro');
+  const r = copy.MON['mon.lp.quote.replaces'];
+  assert(/replaces your current Fleeced Pro subscription/.test(r) && /Apple refunds the unused part/.test(r), `replace copy: ${r}`);
+  assert(!/\bfree\b/i.test(r + copy.MON['mon.lp.quote.keeps']), 'never promises a free month');
 });
 
 check('9d. [shape] PaywallScreen: the R30 entry sits in the anchored block after the links (not a plan row); the R26 line after the body; Settings mounts the rows in both branches', () => {

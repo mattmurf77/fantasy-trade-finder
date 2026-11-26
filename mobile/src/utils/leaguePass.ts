@@ -13,6 +13,8 @@
 //   - the 409 refusal reason → copy key table (`refusalCopyKey`);
 //   - the one-time "your league is now covered" notice (R29): its storage key
 //     and when it is due;
+//   - existing Pro users buying (`proBuyEntry`, `currentProOnBuy`): the
+//     Settings entry, and whether the purchase replaces their subscription;
 //   - the paywall config path (`paywallConfigPath`): `caps=league_pass` rides
 //     only while the flag is on, so a flag-off request is byte-identical.
 
@@ -239,6 +241,48 @@ export function looksUnbound(
   nowMs: number,
 ): boolean {
   return pro && (sources ?? []).includes('league_pass_iap') && !buyerPass(passes, nowMs);
+}
+
+// ── Existing Pro users buying a pass (operator 2026-11-25) ──────────────────
+//
+// "Existing pro users need the option to purchase a league pass." The
+// paywall's entry is never seen by a Pro user, so Settings › Subscription
+// offers it. Two kinds of Pro user can buy:
+//   - an App Store individual subscriber (`apple_iap`, monthly or annual, in
+//     the free month or paying): the pass is in the SAME subscription group,
+//     ranked above the individual plans, so buying it is an Apple upgrade
+//     that REPLACES the individual subscription (Apple prorates);
+//   - Pro with no App Store subscription (a lifetime grant to existing users
+//     at launch, a comp or promo grant, Founder lifetime, a web plan):
+//     nothing is replaced, and that Pro stays when the pass ends.
+
+/** The App Store individual subscription source (the one group the league
+ *  pass shares). Not Stripe: a web plan is not in the App Store group. */
+export const APP_STORE_INDIVIDUAL_SOURCE = 'apple_iap';
+
+/** The Settings buy entry for a Pro user: Pro, and not already a pass buyer
+ *  (no league product held, bound or unbound, and no live buyer entry).
+ *  Shown whether or not a leaguemate's pass covers them as a member: they
+ *  may buy for another league (the server refuses a league that already has
+ *  a pass, `already_covered`). */
+export function proBuyEntry(
+  pro: boolean,
+  sources: readonly string[] | null | undefined,
+  passes: readonly LeaguePassEntryLike[] | null | undefined,
+  nowMs: number,
+): boolean {
+  return pro && !(sources ?? []).includes('league_pass_iap') && !buyerPass(passes, nowMs);
+}
+
+/** What buying the pass does to the caller's current Pro, said before Buy:
+ *  'replaces' an App Store individual subscription; 'keeps' Pro from
+ *  anything else; 'none' when the caller is not Pro. */
+export function currentProOnBuy(
+  pro: boolean,
+  sources: readonly string[] | null | undefined,
+): 'replaces' | 'keeps' | 'none' {
+  if (!pro) return 'none';
+  return (sources ?? []).includes(APP_STORE_INDIVIDUAL_SOURCE) ? 'replaces' : 'keeps';
 }
 
 // ── The paywall config request ──────────────────────────────────────────────

@@ -183,6 +183,13 @@ export const MON = {
   'mon.lp.buyer.count': '{count} leaguemates covered',
   'mon.lp.manage': 'Manage league pass',
   'mon.lp.unbound.row': 'Choose a league for your league pass',
+  // Existing Pro users (operator 2026-11-25): the Settings entry, and the
+  // quote's line on what happens to their current Pro, shown before Buy.
+  'mon.lp.pro.row': 'Buy a league pass for your league',
+  'mon.lp.pro.row_a11y': 'Buy a league pass',
+  'mon.lp.quote.replaces':
+    'The league pass replaces your current Fleeced Pro subscription. Apple refunds the unused part of it, and your individual plan stops renewing.',
+  'mon.lp.quote.keeps': 'Your current Pro stays as it is. The league pass is a separate subscription.',
   'mon.lp.move': 'Move the pass to another league',
   'mon.lp.move.after': 'You can move it again on {date}.',
   'mon.lp.move.title': 'Move your league pass to {league_name}?',
