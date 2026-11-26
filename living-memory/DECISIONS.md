@@ -45,6 +45,11 @@
 - One product, `ftf_league_annual`, $99.99 a year, with a one-month free trial as its App Store introductory offer. The year-one discount tiers (`ftf_league_annual_t1` $84.99, `_t2` $69.99), their promotional offers (`league_t1_y1`, `league_t2_y1`) and the paid-annual-leaguemate count that chose a tier are removed, with the `tier` columns and `tier_mismatch` refusal. No in-app purchase key is needed.
 - No per-league limit on trials. A buyer in the trial covers the league exactly like a paying buyer; a cancelled trial ends coverage at its end through the normal expiry path. Members chaining trials in one league is a risk the operator accepted; it is measured, not blocked.
 
+**Added 2026-11-25, operator ("existing pro users need the option to purchase a league pass"; the league pass is ON at the initial public launch, superseding plan D5):**
+- A Pro user who is not already a pass buyer can buy, from Settings › Subscription (the paywall's entry is never seen by a Pro user). Holding `pro` from another source is no refusal: only `already_buyer` and `refund_blocked` refuse the buyer.
+- Coverage follows the `league_pass_iap` row (or a comp's expiry) only. A buyer whose Pro also comes from a lifetime, comp, promo or Founder grant keeps that grant when the pass ends; the grant never keeps a lapsed pass alive.
+- An individual App Store subscriber's purchase is an upgrade in the one subscription group. The projector moves a RevenueCat `PRODUCT_CHANGE` whose `new_product_id` is the league product onto that product, and an activating event for a group product ends the user's other active group row on the same `original_transaction_id` (upgrade: the individual row; downgrade taking effect at renewal: the league row, which ends the pass). The real RevenueCat event sequence is not verified against the store (lld §13 item 4).
+
 ## D-280 — Sign-out and a sign-in as another account run one account reset; Team review "done" and roster setup are stored per account
 
 **Date:** 2026-11-22 · **Who:** the operator's report from a Release simulator build with two accounts on one device; fixed on `fix/signout-clears-account-state`.

@@ -40,7 +40,7 @@ people that manager needs.
 | D2 | **One auto-renewable annual subscription** at $99.99, in the existing "Fleeced Pro" group, ranked above the individual plans. No monthly plan. | Recommended; not yet contested |
 | D3 | **One-month free trial; the year-one discount is dropped.** One product, `ftf_league_annual`, with a one-month free trial as its introductory offer. Trial chaining is accepted with no server limit. | Operator, 2026-11-24 |
 | D4 | **No offer codes.** The trial is delivered inside the normal purchase, as the product's introductory offer. | Operator, 2026-11-22 |
-| D5 | **Ships after the paid launch**, not in it. | Recommended; not yet contested |
+| D5 | ~~**Ships after the paid launch**, not in it.~~ **Superseded:** the league pass is ON at the initial public launch, and existing Pro users (individual subscribers, and lifetime, comp or promo grant holders) can buy it (D-281 addendum 2026-11-25). | Operator, 2026-11-25 |
 | D6 | **Coverage is derived at read time**, not stored as one grant per member. | Recommended |
 | D7 | **New flag `monetize.league_pass`.** `growth.group_unlock` and the `promo_group_unlock` source stay reserved for their original idea (a free 14-day unlock at eight activated members, foundation §5). | Recommended |
 
@@ -233,6 +233,9 @@ It is worth keeping if revenue per active league rises and covered leagues gain 
 managers, without individual cancellations costing more than the passes bring in.
 
 ## 14. Timing
+
+**Superseded 2026-11-25 (operator):** the league pass is ON at the initial public
+launch (D5, D-281 addendum 2026-11-25). The reasoning below is kept as history.
 
 The pass ships after the paid launch, for three reasons:
 

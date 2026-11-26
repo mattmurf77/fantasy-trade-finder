@@ -154,6 +154,11 @@ equals it, or answers 402 (LLD §4.3).
 | Expiry | `expired` | Ends at once | A hygiene job marks the pass `ended` (reporting only) |
 | Refund | `refunded` | Ends at once | The buyer is blocked from buying again (R36) |
 | Transfer to another account | Re-keyed | Follows the new owner if they are a member, else released | — |
+| Upgrade from an individual plan (prd R42) | A league row; the individual row on the same chain `expired` | Starts at the bind | Binds from the intent on the first league event (LLD §5.1) |
+| Downgrade to an individual plan | At the renewal into the individual plan, `expired` | Ends then | The pass is ended |
+
+A buyer whose Pro also comes from a grant (lifetime, comp, promo, Founder) keeps the
+grant through all of the above: coverage reads only the `league_pass_iap` row.
 
 ### 3.4 Re-point
 
@@ -210,6 +215,9 @@ itself stays on the existing rule: `monetize.entitlements` ∧ `monetize.paywall
   surface.
 
 ## 6. Sequencing and dependencies
+
+Operator, 2026-11-25: the pass is ON at the initial public launch, so the phase 0
+experiment no longer comes first (plan D5 superseded).
 
 ```
 paid launch live ──▶ phase 0 comp experiment (existing bulk-grant route)
