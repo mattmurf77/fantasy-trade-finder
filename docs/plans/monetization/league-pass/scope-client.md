@@ -140,7 +140,8 @@ downgrade handling is on `feat/league-pass-server` (lld §5.1).
   `feat/paid-launch`).
 - **Before the flag turns on for anyone** (not before merge; the build is dark):
   1. Legal's league pass copy replaces the placeholder `mon.lp.*` block (marked PENDING
-     LEGAL REVIEW in `mobile/src/copy/monetization.ts`).
+     LEGAL REVIEW in `mobile/src/copy/monetization.ts`). Done 2026-11-26 (legal
+     R29.1-R29.63).
   2. `ftf_league_annual` ($99.99 a year) with its one-month free-trial introductory
      offer and the `league` offering exist in App Store Connect and RevenueCat.
   3. The TestFlight checklist in [evidence-client.md](evidence-client.md) §2 is run on

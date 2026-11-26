@@ -100,7 +100,7 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 
 1. Sign in as a verified, non-subscribed user. Open the paywall from Settings › See
    plans. There is no "Paying for your whole league?" link under Restore / Terms /
-   Privacy, and no "Your league pass covers …" line.
+   Privacy, and no "A league pass covers you in …" line.
 2. In the backend request log, the `/api/paywall/config` request from the device has
    `platform=ios` and no `caps` parameter.
 3. Settings › Subscription shows exactly the rows it showed before this build.
@@ -112,7 +112,8 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 5. User M (verified, no subscription, a team in L1 and in L2). Pull to refresh or
    foreground the app. In L1: Find a Trade runs past the first page with no paywall;
    Win Now's search runs; Send in Sleeper reaches its "Send this trade?" confirm.
-6. Settings › Subscription shows "Your league pass covers L1 through <date>." and
+6. Settings › Subscription shows "A league pass covers you in L1 through <date>. It
+   can end sooner, or be renewed." and
    "Paid for by a leaguemate." (comp passes have no buyer).
 6a. Shop a player in L1 (a player's Shop action): the ideas load, no "See plans"
    notice. In L2 the same Shop shows the gate notice (enforcement on).
@@ -122,16 +123,20 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 ### C. Other-league paywall line
 
 7. Still as M, switch to L2. Find a Trade hits the paywall at the page end; the paywall
-   shows "Your league pass covers L1 only. It does not cover this league." under the
+   shows "A league pass covers you in L1 only. It does not cover this league." under the
    headline. Send in L2 opens the send paywall.
 
 ### D. Purchase with the free month (an eligible buyer)
 
 8. Buyer B (sandbox Apple ID that has never subscribed in the group) in league L3.
    Paywall → "Paying for your whole league? See the league pass" → choose L3. The quote
-   shows L3, its team count, "1 month free, then <$99.99> a year", the disclosure
-   "… Payment is charged to your Apple ID when the free month ends. Renews automatically
-   until cancelled …", and the button "Start 1-month trial". Apple's sheet shows the
+   shows L3, its team count, "<$99.99> a year" as the largest text with "1 month free,
+   then <$99.99> a year" in small text beneath it, the four cover lines ("Covers finding
+   and sending trades for the managers in L3 …", "Coverage lasts while …", "You can move
+   the pass …", "Leaguemates can see …"), the disclosure "Fleeced League Pass for L3: …
+   Payment is charged to your Apple ID when the free month ends. Renews automatically
+   until cancelled …", the button "Start 1-month trial", and Restore purchases · Terms ·
+   Privacy below. At 375 pt wide nothing is clipped and the links row fits. Apple's sheet shows the
    one-month free trial, then $99.99 a year. Confirm.
 9. No charge now: the sandbox purchase history shows the trial, not a $99.99 charge.
    The screen shows "Confirming your league pass…", then "Your league pass covers L3."
@@ -147,13 +152,17 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 
 12. Buyer C (sandbox Apple ID that already took the individual plan's free month) in
     league L4. The quote shows "<$99.99> a year", the paid disclosure ("… charged to your
-    Apple ID when you confirm …"), the button "Buy league pass", and no "free" anywhere
+    Apple ID when you confirm …"), the button "Subscribe", and no "free" anywhere
     on the screen. Apple's sheet shows $99.99 a year with no trial. Confirm: C is charged
     $99.99 now, and the pass binds to L4 as in step 9.
 13. Unknown eligibility falls back to paid: with the network to StoreKit unavailable
     while the quote loads (or on a build without the RevenueCat key), the screen never
-    says "free"; with no StoreKit package it shows the config price and "Purchases
-    aren't available on this build yet." on Buy.
+    says "free"; with no StoreKit package it shows the config price and "The league
+    pass can't be bought right now. Try again later." on Buy.
+13a. Restore purchases on the quote (and on the choose-a-league step): tap it as a
+    user with no purchases: "No subscription found for this Apple ID. …" (the
+    paywall's `mon.pay.restore_none`); as a buyer on a fresh install: "Welcome back.
+    Your subscription is restored." and the pass shows after the refresh.
 
 ### F. Cancelling during the trial
 
@@ -169,7 +178,9 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 15. Buy with no intent on record (buy, then let the intent expire before the webhook
     lands, or buy the product from a second device without choosing a league). Open
     Settings › Subscription → "Choose a league for your league pass" → the screen shows
-    "Choose a league for your pass"; pick a league → "Your league pass covers <league>."
+    "Choose a league for your pass" and "… It covers that league only, and you can't
+    move it for 30 days after you choose."; pick a league → "Your league pass covers
+    <league>."
 
 ### H. Move and settings
 
@@ -198,7 +209,8 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 
 23. User S with an individual `ftf_pro_annual` plan in a league that a leaguemate then
     covers: on the next visit to Find a Trade in that league, the strip "<league> is
-    now covered by a leaguemate's league pass. Your own subscription hasn't changed."
+    now covered by a leaguemate's league pass. Your own subscription hasn't changed and
+    still renews."
     shows once. Dismiss, leave and return: it does not show again. A second covered
     league shows it once for that league.
 24. Sign out and sign in as another account on the same device: no pass rows, lines or
@@ -208,17 +220,18 @@ sandbox durations you saw. Record each step's result (pass / fail + screenshot) 
 
 25. User A with an active `ftf_pro_annual` (or `ftf_pro_monthly`) subscription, not a
     buyer: Settings › Subscription shows "Buy a league pass for your league". Tap it:
-    the league list opens. Choose a league: the quote shows "The league pass replaces
-    your current Fleeced Pro subscription. Apple refunds the unused part of it, and your
-    individual plan stops renewing." above the Buy button, and the paid price (no "1
+    the league list opens. Choose a league: the quote shows "Buying the league pass
+    replaces your current Fleeced Pro subscription. … If your plan is at the Founder
+    price, you may lose the Founder price." above the Buy button, and the paid price (no "1
     month free" if A used the individual free month). Buy in sandbox: Apple's sheet
     shows an upgrade; afterwards the done state names the league, a leaguemate is
     covered there, and Settings shows "League pass: <league>" with Manage, no buy row.
     Check `subscription_events` for the event sequence the upgrade produced (lld §13
     item 4).
 26. User B with a lifetime grant (`manual_grant`, no store subscription): the same row;
-    the quote shows "Your current Pro stays as it is. The league pass is a separate
-    subscription." and no replace line. After the sandbox purchase (24 h lapse), B's
+    the quote shows "You already have Fleeced Pro, and it stays as it is. This pass is a
+    separate subscription for your leaguemates. If the pass ends, your Pro is not
+    affected." and no replace line. After the sandbox purchase (24 h lapse), B's
     league is covered; once the sandbox row lapses the leaguemate is gated again and B
     is still Pro.
 27. User C covered as a member by a leaguemate's pass and Pro by their own plan: sees

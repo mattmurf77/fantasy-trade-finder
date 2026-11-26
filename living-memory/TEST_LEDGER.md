@@ -1,3 +1,12 @@
+## 2026-11-26 — League pass legal wording (legal R29.1-R29.63), branch `feat/league-pass-legal-copy`
+
+- **What changed:** 14 `mon.lp.*` strings to legal's final text, 4 new quote lines (`mon.lp.quote.t1`-`t4`), the pending-legal marker replaced by the approval note and the 30-day knob tie; quote shows the billed price large and the free month small beneath; Restore purchases beside Terms and Privacy (the paywall's restore). Terms §14.2 and new §14.12 (a)-(h), Privacy P1-P4, both effective November 26, 2026. Terms §14.1 (T4) not done, per the owner.
+- **Mobile:** `npx tsc --noEmit` clean; all **212** `tests/check-*.js` exit 0; `scripts/testid-lint.sh` OK. `check-league-pass` **29 passed** (new 9h: the 18 strings verbatim, quote order price > trial > cover lines > disclosure > Buy, Restore in the links row running the paywall's restore; 2b, 9b, 9c re-specced). `check-paywall-gate` **115 passed** (4n exempts only the three 30-day move-lock strings; 4o's "ends soon" ban no longer matches "end sooner").
+- **Web:** `qa/web/check_web_structure.py` **225/225** (new `POL-r29-league-pass`: 10 terms + 3 privacy runs verbatim once in their section; §14 subsections now 1-12).
+- **Backend:** `pytest backend/tests` **16349 passed, 43 skipped, 0 failed** (no backend change).
+- **Sabotage, red then restored (2):** Restore testID renamed → 9c and 9h red; Terms §14.12(g) altered → `POL-r29-league-pass` red.
+- **Not verified:** anything on a device (D-056). Layout at 375 pt, the links row fit, and Restore on a store build are in `docs/plans/monetization/league-pass/evidence-client.md` steps 8, 12, 13, 13a.
+
 ## 2026-11-25 — Landing page visit count (D-287), branch `feat/web-landing-visit-count`
 
 - **Web:** `qa/web/check_web_structure.py` **231/231** (was 229 on `origin/main`; `CUT` group 9, new `CUT-landing-scripts`, `CUT-landing-visit-anonymous`); `check_trade_search.cjs` pass; `check_ranking_method_page.py` pass; `check_browser_auth.mjs` 23 pass; `mobile/tests/check-*.js` **207/207** (node_modules symlinked from the launch-cuts worktree).
