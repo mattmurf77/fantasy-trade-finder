@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-25 — Landing page visit count, anonymous (D-285), branch `feat/web-landing-visit-count`
+
+- **What:** owner ask after D-284: count website traffic again. New `web/js/landing-visit.js` on the landing sends one `app_opened` `{launch_type: web}` per load, gated on `analytics.client_events`; fails silently. Not `events.js`: no session token, no queue replay, no invite capture.
+- **Anonymous:** device id, session id and event id are fresh random per load; nothing in cookies or browser storage. Rows count visits, not visitors. Stored: `device:visit_<uuid>`, source/platform `web`, hashed session id, CDN country only.
+- **Guards:** `CUT-landing-scripts`, `CUT-landing-visit-anonymous` in `check_web_structure.py`; `test_landing_visit_event.py`. Scope `docs/plans/web-landing-visit-count/scope.md`.
+- **Open:** privacy wording not edited; the website device-id and local-storage sentences stay untrue (owner's ruling, with D-284's).
+
 ## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
 
 - **What:** 36 features cut for launch from the audit's 62 candidates (22 kept, 4 paywall rows undecided and untouched). Scope and the full list: `docs/plans/launch-cuts/scope.md`.
