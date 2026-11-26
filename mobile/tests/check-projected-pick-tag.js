@@ -149,7 +149,7 @@ assert(!/\bice\b|\bsemantic\b|#[0-9A-Fa-f]{6}/.test(tagSrc.replace(/\/\/.*$/gm, 
 console.log('§3 surfaces (structural, G-035)');
 const SURFACES = {
   'components/PlayerCard.tsx': 2,          // dense + classic branch
-  'components/TradeSide.tsx': 1,
+  'components/TradeSide.tsx': 2,           // stacked line + column chip slot [D-286]
   'components/PlayerPickerModal.tsx': 1,
   'screens/LeagueSummaryScreen.tsx': 1,
 };

@@ -155,6 +155,7 @@
     "test:trade-text": "node tests/check-trade-text.js",
     "test:value-bar-b2": "node tests/check-value-bar-b2.js",
     "test:projected-pick-tag": "node tests/check-projected-pick-tag.js",
+    "test:eveners-unfair-only": "node tests/check-eveners-unfair-only.js",
     "test:web-calc-favors": "node tests/check-web-calc-favors.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",

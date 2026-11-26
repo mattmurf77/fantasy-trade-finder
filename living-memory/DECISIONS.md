@@ -1,5 +1,15 @@
 # Decisions — Fantasy Trade Finder
 
+## D-286 — "Recommended to even it" only for an unfair verdict (narrows #251); merged-calculator trade rows wrap instead of ellipsizing (reverses #411's one-line name)
+
+**Date:** 2026-11-25 · **Who:** the owner, reviewing App Store screenshots, through the main session; built by a builder subagent on `fix/eveners-only-when-unfair`. Scope: `docs/plans/eveners-unfair-only/scope.md`.
+**Context:** (1) The server sends `eveners` for any two-sided trade whose `favors` is not even, and #251 put the rows directly under the trade window, above the fairness summary. So a trade the app itself rated fair ("You win by +463 · an Early 3rd") still said "Recommended to even it — add from your roster": it told a user already ahead in a fair trade to give more, and pushed the value bar off the first screenshot. (2) In the merged calculator's half-width columns, #411 kept the name to one line ("wrapping was declined") and clamped the chip · detail · tier row; on a 440 pt phone rows still read "CHI ·…", "DET…", "PICK…".
+**Decision:**
+- The two-sided "Recommended to even it" rows render only when `evenersWanted(verdict)`: true unless the verdict is `fair` or `even`. Missing or unknown verdict renders them (fail safe, the pre-D-286 behaviour). One predicate in `EvenerRows.tsx`, called by `InLeagueCalculator` and `ConsensusVerdictCard`, so the two calculators cannot drift. #251's placement stands; only the condition narrows. The #264 half-built "Trade options" state is not gated. The client decides; the server is unchanged.
+- `TradeSide` column mode: the name and the meta row wrap (no `numberOfLines`, `flexWrap: 'wrap'`); a pick row prints no detail text beside its PICK chip; the PROJ tag sits beside the chip. The stacked page is unchanged. #411's one-line name ruling is reversed by the owner's "Names can't be cutoff".
+- Not changed, reported to the owner: `TradeValueBar`'s collapsed "Why?" line ("Ask them to add ≈ … to even it out." / "offer a small give-back") reads `favors` + `gap`, not the verdict; the in-league "To balance" rows (two-board `mutual_gain` rule); the picker's "Suggested" rows; the deck card's `PlayerCard`, which clamps names the same way.
+**Consequences:** a fair trade shows no one-tap evening; a user who wants to tighten it can still add from the pickers. Rows in the merged columns can be taller (two or three lines). Needs the next mobile build; not yet seen on a simulator.
+
 ## D-284 — Launch cuts: 36 features off by the owner's row-by-row calls; Calibration kept for testers through a new `operator` experiment layer
 
 **Date:** 2026-11-25 · **Who:** the owner's calls on the 62 rows the launch feature audit recommended cutting, given to the main session; built by three builder subagents on `chore/launch-cuts`. Scope: `docs/plans/launch-cuts/scope.md`.

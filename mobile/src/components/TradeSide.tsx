@@ -97,33 +97,38 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                     name and ellipsizing all but one of the top 100 dynasty
                     assets; it moved to the meta line below (it is MOVED,
                     never dropped — the hex is a cross-client data
-                    encoding). Still one line: wrapping was declined. */}
+                    encoding). [D-286] item 2 (owner, App Store screenshot
+                    review: "Names can't be cutoff") reverses #411's
+                    one-line ruling: the name WRAPS, never ellipsizes. */}
                 {compact ? (
                   <Text
                     style={[type.title, styles.compactName]}
-                    numberOfLines={1}
                     accessibilityLabel={proj ? `${proj.name}, ${projectedPickA11y(proj)}` : undefined}
                   >
                     {proj ? proj.name : p.name}
                   </Text>
                 ) : (
-                  <Text
-                    style={type.title}
-                    accessibilityLabel={proj ? `${proj.name}, ${projectedPickA11y(proj)}` : undefined}
-                  >
-                    {proj ? proj.name : p.name}
-                  </Text>
+                  <>
+                    <Text
+                      style={type.title}
+                      accessibilityLabel={proj ? `${proj.name}, ${projectedPickA11y(proj)}` : undefined}
+                    >
+                      {proj ? proj.name : p.name}
+                    </Text>
+                    {/* Stacked page: the tag keeps its own line under the
+                        name, exactly as before [D-286]. */}
+                    {proj ? <ProjectedPickTag /> : null}
+                  </>
                 )}
-                {/* The tag gets its own line under the name: column mode's
-                    meta line is already chip + text + tier on ~97pt, and
-                    the name line is one line by ruling (#411). */}
-                {proj ? <ProjectedPickTag short={compact} /> : null}
                 <View style={compact ? styles.compactMetaLine : undefined}>
                   {compact ? (
                     // #411 — the chip leads the meta line. flexShrink 0: a
                     // data encoding is never the thing that yields.
+                    // [D-286] — column mode's PROJ tag rides beside the PICK
+                    // chip instead of taking a line of its own.
                     <View style={styles.compactChipSlot}>
                       <PositionChip position={p.pos} size="sm" />
+                      {proj ? <ProjectedPickTag short /> : null}
                     </View>
                   ) : null}
                   {/* flexShrink so this line yields before the tier badge:
@@ -133,12 +138,16 @@ export default function TradeSide({ title, teamName, players, valueOf, tierOf, a
                       it can actually reach zero — with the chip now sharing
                       the line, the chip+badge pair is the binding
                       constraint and the TEXT must be the only yielder. */}
-                  <Text
-                    style={[type.bodySm, compact && styles.compactMetaText]}
-                    numberOfLines={compact ? 1 : undefined}
-                  >
-                    {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
-                  </Text>
+                  {/* [D-286] item 2 — column mode no longer clamps this
+                      line (the meta row WRAPS instead, see compactMetaLine),
+                      and a pick row prints no detail text there: the PICK
+                      chip already says it, and the in-league pick's
+                      "PICK · 0 yrs" was the ellipsized duplicate on screen. */}
+                  {compact && (p.pick || p.pos === 'PICK') ? null : (
+                    <Text style={[type.bodySm, compact && styles.compactMetaText]}>
+                      {p.pick ? 'Draft capital' : `${p.nflTeam} · ${p.age} yrs`}
+                    </Text>
+                  )}
                   {/* Column mode has no room for a trailing value column, so
                       the tier/value rides the meta line. It is MOVED, never
                       dropped — a narrower row that silently stops pricing an
@@ -267,13 +276,20 @@ const styles = StyleSheet.create({
     lineHeight: type.bodySm.lineHeight,
     flexShrink: 1,
   },
-  compactMetaText: { flexShrink: 1, minWidth: 0 },
+  // [D-286] — flexGrow keeps the tier badge right-aligned when the line
+  // fits, and lets the detail take the line's slack when the badge wraps.
+  compactMetaText: { flexShrink: 1, minWidth: 0, flexGrow: 1 },
   // #411 — the meta line's two DATA ENCODINGS (position hex, tier label).
   // Neither shrinks or clips: the meta text yields first, always.
-  compactChipSlot: { flexShrink: 0 },
+  // [D-286] — the chip slot also holds a projected pick's PROJ tag.
+  compactChipSlot: { flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: space.xs },
   compactPriceSlot: { flexShrink: 0 },
+  // [D-286] item 2 — flexWrap: when chip + detail + tier do not fit the
+  // half-width column, the tier badge (or the detail) drops to a second
+  // line instead of the detail ellipsizing.
   compactMetaLine: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space.xs,

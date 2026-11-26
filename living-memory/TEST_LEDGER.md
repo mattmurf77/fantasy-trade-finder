@@ -1,3 +1,9 @@
+## 2026-11-25 — Calculator screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`
+
+- **Mobile:** `npx tsc --noEmit` clean; `mobile/tests/check-*.js` **208/208** (new `check-eveners-unfair-only`, 33 checks: executes `evenersWanted` and both calculators' real EvenerRows render conditions; item 2's row checks are structural only); `testid-lint` OK. Re-specced: `check-calc-merged-layout` 16 / 16b / 17e (no name clamp, one clamp left: the compact team-name header), `check-projected-pick-tag` 3.3 (TradeSide mounts the tag 2×).
+- **Sabotage checks, red then restored (7):** in-league gate removed (3 red); predicate lets `fair` through (3); predicate hides a missing verdict (4); gate applied to the one-sided state (3); Real values gate removed (2); compact name clamp restored (2); meta-row wrap removed (1). Restored: all passed.
+- **Not verified:** nothing seen on a simulator or device. That the 402 pt layout shows no "…" is not provable by a structural check; the coordinator runs the scope's checklist (`docs/plans/eveners-unfair-only/scope.md` §3).
+
 ## 2026-11-25 — Launch cuts (D-284), branch `chore/launch-cuts`
 
 - **Mobile (combined branch):** `npx tsc --noEmit` clean; `mobile/tests/check-*.js` **207/207** (new `check-launch-cuts`, 20 checks); `testid-lint` OK. With the cuts merged onto the paid-launch test branch (throwaway, not pushed): tsc clean, **210/210**.

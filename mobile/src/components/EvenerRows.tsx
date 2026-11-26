@@ -4,7 +4,7 @@ import MemberEnteredMarker from './MemberEnteredMarker';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import { Icon, TickLabel } from './chalkline';
-import type { CalcEvener } from '../api/calc';
+import type { CalcEvener, CalcVerdict } from '../api/calc';
 import { chalk, ice, ink, radii, space, type } from '../theme/chalkline';
 
 interface Props {
@@ -26,6 +26,21 @@ interface Props {
 // evaluate re-run refreshes or clears these rows as the trade evens. Renders
 // nothing without candidates — honest empty state. Chalkline: ice = action
 // (the + affordance), transparent-bordered rows, no new hues.
+
+// [D-286] (narrows #251): the "Recommended to even it" rows offer to EVEN a
+// trade, so they render only when the evaluate verdict says it needs
+// evening. A 'fair' or 'even' read hides them (the server may still send
+// `eveners` for any non-even `favors`; the client decides), and the value
+// bar then follows the trade window directly. Fail safe: a missing or
+// unknown verdict keeps the pre-D-286 behaviour (rows render). BOTH
+// calculators (InLeagueCalculator, ConsensusVerdictCard) call this one
+// predicate so the rule cannot drift. It gates the two-sided "Recommended"
+// state only — the #264 half-built "Trade options" state (no gap) never
+// reaches it. Pinned by mobile/tests/check-eveners-unfair-only.js.
+export function evenersWanted(verdict: CalcVerdict | null | undefined): boolean {
+  return verdict !== 'fair' && verdict !== 'even';
+}
+
 export default function EvenerRows({ eveners, title, onAdd, leagueId }: Props) {
   if (eveners.length === 0) return null;
   return (

@@ -12,6 +12,13 @@
 ---
 
 
+## 2026-11-25 — Calculator screenshot fixes (D-286), branch `fix/eveners-only-when-unfair`, PR open
+
+- **What (1):** "Recommended to even it" rows show only when the evaluate verdict is `unfair`; `fair` / `even` hide them, so the value bar follows the trade window. One predicate, `evenersWanted` in `EvenerRows.tsx`, used by the in-league calculator and Real values. A missing verdict renders as before; the half-built "Trade options" rows are unchanged. No server change. Narrows #251.
+- **What (2):** merged in-league columns (`TradeSide compact`): names and the chip · detail · tier row wrap instead of ending in "…"; pick rows drop the duplicate "PICK" detail; PROJ sits beside the PICK chip. Reverses #411's one-line name ruling. Stacked page and the deck card unchanged.
+- **Guard:** new `check-eveners-unfair-only.js`; `check-calc-merged-layout` 16/16b/17e and `check-projected-pick-tag` 3.3 re-specced. Scope: `docs/plans/eveners-unfair-only/scope.md`.
+- **Open:** not seen on a simulator yet; the deck card clamps names the same way (reported).
+
 ## 2026-11-25 — Launch cuts: the owner's keep/cut calls applied (D-284), branch `chore/launch-cuts`
 
 - **What:** 36 features cut for launch from the audit's 62 candidates (22 kept, 4 paywall rows undecided and untouched). Scope and the full list: `docs/plans/launch-cuts/scope.md`.

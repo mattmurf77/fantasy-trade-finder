@@ -23,7 +23,7 @@ import TradeSide from './TradeSide';
 import TradeValueBar from './TradeValueBar';
 import PlayerPickerModal, { type SuggestedPlayer } from './PlayerPickerModal';
 import SuggestionCard from './SuggestionCard';
-import EvenerRows from './EvenerRows';
+import EvenerRows, { evenersWanted } from './EvenerRows';
 import AdjustmentsDisclosure from './AdjustmentsDisclosure';
 import TierBadge from './TierBadge';
 import SendInSleeperButton from './SendInSleeperButton';
@@ -1498,8 +1498,13 @@ export default function InLeagueCalculator({
           #264: ONE block covers both states — uneven two-sided (eveners) and
           half-built one-sided (trade options for the empty side). A second
           card would have re-stacked the screen (#205); the label carries the
-          difference instead. */}
-      {anySide && ev?.eveners && ev.eveners.length > 0 && evenerAddTo ? (
+          difference instead.
+          [D-286] narrows #251: the two-sided "Recommended to even it" state
+          renders only when `evenersWanted(ev.verdict)` — a fair/even trade
+          no longer offers to give more away, and the value bar follows the
+          trade window. The half-built state (no gap.add_to) is ungated. */}
+      {anySide && ev?.eveners && ev.eveners.length > 0 && evenerAddTo
+        && (!ev.gap?.add_to || evenersWanted(ev.verdict)) ? (
         <EvenerRows
           eveners={ev.eveners}
           title={

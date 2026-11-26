@@ -259,17 +259,20 @@ assert(/onHiddenChange\?:/.test(read(path.join(SRC, 'components/OutlookBiasRecei
 // modes reaches the shipped stacked page behind the flag, where a long
 // "@username" used to wrap and would now ellipsize.
 {
-  // The ONE bare clamp left is the compact-only name line — it lives inside
-  // the `compact ? (…) : (…)` branch, so it cannot reach the stacked page.
-  const bare = [...side.matchAll(/numberOfLines=\{1\}/g)].map((m) =>
-    side.slice(Math.max(0, m.index - 120), m.index),
-  );
-  assert(bare.length === 1 && /styles\.compactName/.test(bare[0]),
-    '16. TradeSide adds no line clamp that reaches the stacked page',
-    'flag-off must stay byte-identical — a shared row clamps on `compact` only');
+  // [D-286] item 2 re-spec: there is NO bare clamp left. The compact-only
+  // name line used to be the one `numberOfLines={1}` here (#411); the owner's
+  // App Store review ruled names never truncate, so it wraps now — and a
+  // bare clamp anywhere in TradeSide would also reach the stacked page.
+  const bare = [...side.matchAll(/numberOfLines=\{1\}/g)];
+  assert(bare.length === 0,
+    '16. TradeSide adds no bare line clamp (names wrap in both modes) [D-286]',
+    `found ${bare.length}; a bare clamp reaches the stacked page, and on the name it is the cut-off the owner ruled out`);
 }
-assert((side.match(/numberOfLines=\{compact \? 1 : undefined\}/g) || []).length === 2,
-  '16b. both clamped lines are gated on compact');
+// Only the team-name header is still clamped, and only in column mode. The
+// compact meta line lost its clamp in [D-286] (the row wraps instead).
+assert((side.match(/numberOfLines=\{compact \? 1 : undefined\}/g) || []).length === 1
+  && /<Text style=\{type\.bodySm\} numberOfLines=\{compact \? 1 : undefined\}>\{teamName\}<\/Text>/.test(side),
+  '16b. the one remaining clamp is the compact team-name header [D-286]');
 // 17 — re-specced by #411. The meta line now carries the position chip too,
 // so the chip + tier badge pair is the binding constraint on 97.5pt of info
 // width; `flexShrink` alone is not enough, because a flex child will not
@@ -303,9 +306,9 @@ assert(/compactChipSlot: \{[^}]*flexShrink: 0[^}]*\}/.test(side)
     '17d. …the stacked one in its 44pt chipCol, the column one in the meta line\'s chip slot');
   // The projected-slot pick (check-projected-pick-tag.js) prints the
   // server's `proj_name` here and adds a VoiceOver label; line 1 is still the
-  // name alone — the PROJECTED tag gets its own line after the conditional.
-  assert(/\{compact \? \(\s*<Text\s+style=\{\[type\.title, styles\.compactName\]\}\s+numberOfLines=\{1\}(?:\s+accessibilityLabel=\{proj \? `\$\{proj\.name\}, \$\{projectedPickA11y\(proj\)\}` : undefined\})?\s*>\s*\{(?:p\.name|proj \? proj\.name : p\.name)\}\s*<\/Text>\s*\) : \(/.test(side),
-    '17e. compact line 1 holds the name and nothing else',
+  // name alone — [D-286]: the PROJ tag moved down beside the PICK chip.
+  assert(/\{compact \? \(\s*<Text\s+style=\{\[type\.title, styles\.compactName\]\}(?:\s+accessibilityLabel=\{proj \? `\$\{proj\.name\}, \$\{projectedPickA11y\(proj\)\}` : undefined\})?\s*>\s*\{(?:p\.name|proj \? proj\.name : p\.name)\}\s*<\/Text>\s*\) : \(/.test(side),
+    '17e. compact line 1 holds the name and nothing else (unclamped since [D-286])',
     'the chip sharing line 1 is what left ~67pt for the name and ellipsized all but 1 of the top 100 dynasty assets');
 }
 {
