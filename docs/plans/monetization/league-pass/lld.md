@@ -543,7 +543,8 @@ Where the build differs from the table above:
 - R38 needed no change: the delete-account dialog's sub-note ("Deleting your account
   doesn't cancel an active subscription…") already shows to every account, a pass buyer
   included, with no subscription condition (legal 5c).
-- The `mon.lp.*` copy is placeholder, marked pending legal review.
+- The `mon.lp.*` copy is legal's approved wording (legal R29.1-R29.63, 2026-11-26),
+  including the four cover lines on the quote (`mon.lp.quote.t1`-`t4`).
 
 **Purchase path in `LeaguePassScreen`**
 
@@ -553,13 +554,17 @@ Where the build differs from the table above:
 3. After the purchase, refresh entitlements until `league_passes` shows the buyer's
    pass, or fall back to the choose-a-league state.
 
-As built: the path and its prices are resolved before the quote shows
-(`utils/leaguePass.purchasePlan`). "Eligible" means StoreKit answers ELIGIBLE and the
-product carries an introductory price. The promotional offer is signed at quote time
-(`getPromotionalOffer` on the product's `discounts[]` entry with the config's
-`promo_offer_id`) and its own price is shown. If it cannot be signed, the quote shows
-the full price with a notice and Continue at full price / Cancel. The refresh is 6
-polls, 2.5 s apart; after them `GET /api/league-pass` decides (unbound → choose a
+As built: one product (`ftf_league_annual`) and no promotional offers (D-281
+addendum 2026-11-24). The path and its prices are resolved before the quote shows
+(`utils/leaguePass.purchasePlan`). The purchase is always a plain `purchasePackage`;
+Apple applies the product's introductory offer (one free month) to an eligible buyer
+by itself. The quote promises the free month only when StoreKit confirms it
+(`checkIntroEligibility` answers ELIGIBLE and the intro is exactly one free month);
+unknown, not eligible or an error shows the paid price, the paid disclosure and
+"Subscribe", with no "free" anywhere. The billed price is always the largest text; a
+confirmed free month is a small line beneath it. With no StoreKit product the quote
+shows the config's display price and Buy answers `mon.lp.unavailable`. The refresh is
+6 polls, 2.5 s apart; after them `GET /api/league-pass` decides (unbound → choose a
 league; nothing yet → "can take a few minutes").
 
 The routing rule in `usePaywallGate.ts` is not touched: it still reads no entitlement

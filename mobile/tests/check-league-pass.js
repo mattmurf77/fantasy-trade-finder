@@ -281,9 +281,10 @@ check('2a. every mon.lp key the sources use exists in copy/monetization.ts, and 
   assert(copy.MON['mon.lp.refused.generic'], 'generic refusal');
 });
 
-check('2b. the mon.lp block: marked pending legal review; plain text — no hard-coded price, no em dash, "free" only in the .trial keys, no raw {league}; no tier or discount wording left', () => {
+check('2b. the mon.lp block: marked approved per legal R29.x (2026-11-26), with the 30-day knob tie; plain text — no hard-coded price, no em dash, "free" only in the .trial keys, no raw {league}; no tier or discount wording left', () => {
   const src = read('copy/monetization.ts');
-  assert(/League pass[\s\S]{0,200}PENDING LEGAL REVIEW/.test(src), 'the block carries its pending-legal comment');
+  assert(!/PENDING LEGAL REVIEW|PLACEHOLDER COPY/.test(src.slice(src.indexOf('League pass (flag'))), 'no pending-legal marker left on the block');
+  assert(/League pass[\s\S]{0,200}approved per legal R29/.test(src) && /league_pass_repoint_cooldown_days/.test(src), 'the block carries its legal-approval note and the 30-day knob tie');
   const lpEntries = Object.entries(copy.MON).filter(([k]) => k.startsWith('mon.lp.'));
   assert(lpEntries.length >= 40, `${lpEntries.length} mon.lp keys`);
   for (const [k, v] of lpEntries) {
@@ -690,7 +691,8 @@ check('9b. [shape] the purchase is a plain package purchase; the free month copy
   assert(/const plan = purchasePlan\(\{/.test(s), 'the plan comes from utils/leaguePass.purchasePlan');
   const trialUses = [...s.matchAll(/MON\['(mon\.lp\.[a-z_.]+\.trial)'\]/g)].map((m) => m[1]).sort();
   eq(JSON.stringify(trialUses), JSON.stringify(['mon.lp.buy.trial', 'mon.lp.disclosure.trial', 'mon.lp.quote.trial']), 'each trial key used once');
-  assert(/const priceLine = plan\.freeMonth\s*\?\s*fill\(MON\['mon\.lp\.quote\.trial'\], \{ price \}\)\s*:\s*fill\(MON\['mon\.lp\.quote\.paid'\], \{ price \}\);/.test(s), 'price line');
+  assert(/const priceLine = fill\(MON\['mon\.lp\.quote\.paid'\], \{ price \}\);/.test(s), 'price line: always the billed price');
+  assert(/const trialLine = plan\.freeMonth \? fill\(MON\['mon\.lp\.quote\.trial'\], \{ price \}\) : null;/.test(s), 'trial line: only on plan.freeMonth');
   assert(/const disclosure = plan\.freeMonth\s*\?\s*fill\(MON\['mon\.lp\.disclosure\.trial'\][^)]*\)\s*:\s*fill\(MON\['mon\.lp\.disclosure\.paid'\]/.test(s), 'disclosure');
   assert(/label=\{plan\.freeMonth \? MON\['mon\.lp\.buy\.trial'\] : MON\['mon\.lp\.buy'\]\}/.test(s), 'button');
   assert(/await refreshEntitlements\(\);\s*const mine = buyerPass\(/.test(s), 'after the purchase: refresh until the buyer\'s pass shows');
@@ -699,8 +701,11 @@ check('9b. [shape] the purchase is a plain package purchase; the free month copy
 
 check('9c. analytics: the new surfaces fire only the existing paywall_purchase_* events (no new event names); every new interactive element carries a testID', () => {
   const OK = new Set(['paywall_purchase_initiated', 'paywall_purchase_completed', 'paywall_purchase_failed']);
+  // paywall_restore: the paywall's existing Restore event (legal R29 §3 put
+  // Restore on this screen too). Not a new name.
+  const EXISTING = new Set([...OK, 'paywall_restore']);
   for (const rel of NEW_FILES) {
-    for (const m of strip(read(rel)).matchAll(/track\('([a-z_]+)'/g)) assert(OK.has(m[1]), `${rel}: a new event name ${m[1]}`);
+    for (const m of strip(read(rel)).matchAll(/track\('([a-z_]+)'/g)) assert(EXISTING.has(m[1]), `${rel}: a new event name ${m[1]}`);
   }
   const fired = new Set([...strip(read('screens/LeaguePassScreen.tsx')).matchAll(/track\('([a-z_]+)'/g)].map((m) => m[1]));
   for (const e of OK) assert(fired.has(e), `LeaguePassScreen fires ${e}`);
@@ -720,7 +725,7 @@ check('9c. analytics: the new surfaces fire only the existing paywall_purchase_*
     assert(n > 0, `${rel}: positive control (found interactive elements)`);
   }
   const want = ['league-pass-screen', 'league-pass.close', 'league-pass.buy', 'league-pass.change-league',
-    'league-pass.move', 'league-pass.show-name', 'league-pass.terms', 'league-pass.privacy', 'league-pass.done-close'];
+    'league-pass.move', 'league-pass.show-name', 'league-pass.terms', 'league-pass.privacy', 'league-pass.restore', 'league-pass.done-close'];
   const s = read('screens/LeaguePassScreen.tsx');
   for (const id of want) assert(s.includes(`testID="${id}"`), `LeaguePassScreen: ${id}`);
   assert(/testID=\{`league-pass\.league\.\$\{l\.league_id\}`\}/.test(s), 'league rows: league-pass.league.<id>');
@@ -767,6 +772,57 @@ check('9f. R38 [shape]: account deletion tells EVERY subscriber, a pass buyer in
   for (const rel of ['screens/settings/sections/AccountDataSection.tsx', 'screens/SettingsScreen.tsx']) {
     assert(/DELETE_ACCOUNT_BODY \+ '\\n\\n' \+ DELETE_ACCOUNT_SUB_NOTE/.test(strip(read(rel))), `${rel}: the sub-note is in the message for everyone`);
   }
+});
+
+check('9h. legal R29 (2026-11-26): the 14 changed strings and the 4 new quote lines are verbatim; the quote renders, in order, the billed price (large), the free month (small, only when confirmed), the four cover lines (body, not dim), the disclosure, then Buy; Restore sits beside Terms and Privacy and runs the paywall\'s restore', () => {
+  const FINAL = {
+    'mon.lp.other_league': 'A league pass covers you in {league_name} only. It does not cover this league.',
+    'mon.lp.other_league.unnamed': 'A league pass covers you in one of your other leagues only. It does not cover this league.',
+    'mon.lp.pick.body': "One pass covers finding and sending trades for the managers in the league you choose, in that league only. You're covered in all your leagues.",
+    'mon.lp.disclosure.trial': 'Fleeced League Pass for {league_name}: 1 month free, then {price} a year. Payment is charged to your Apple ID when the free month ends. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the free month or the current period ends.',
+    'mon.lp.disclosure.paid': 'Fleeced League Pass for {league_name}: {price} a year, charged to your Apple ID when you confirm. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
+    'mon.lp.buy': 'Subscribe',
+    'mon.lp.unavailable': "The league pass can't be bought right now. Try again later.",
+    'mon.lp.unbound.body': "Your purchase went through, but it isn't attached to a league yet. Choose the league it covers. It covers that league only, and you can't move it for 30 days after you choose.",
+    'mon.lp.member.line': 'A league pass covers you in {league_name} through {date}. It can end sooner, or be renewed.',
+    'mon.lp.quote.replaces': 'Buying the league pass replaces your current Fleeced Pro subscription. Your individual plan ends and stops renewing, and Apple refunds the unused part of what you paid for it. If your plan is at the Founder price, you may lose the Founder price.',
+    'mon.lp.quote.keeps': 'You already have Fleeced Pro, and it stays as it is. This pass is a separate subscription for your leaguemates. If the pass ends, your Pro is not affected.',
+    'mon.lp.move.body': "The managers in {league_name} are covered from now on. The league it covers now loses coverage right away. You can't move the pass again for 30 days.",
+    'mon.lp.show_name.hint': 'On: covered leaguemates see your Fleeced display name. Off: they see "a leaguemate".',
+    'mon.lp.notice': "{league_name} is now covered by a leaguemate's league pass. Your own subscription hasn't changed and still renews.",
+    'mon.lp.quote.t1': 'Covers finding and sending trades for the managers in {league_name}, in that league only. Each manager needs a verified Fleeced account.',
+    'mon.lp.quote.t2': 'Coverage lasts while your subscription is active. It ends for everyone if the pass ends or is refunded.',
+    'mon.lp.quote.t3': 'You can move the pass to another of your leagues, but not within 30 days of buying it or of your last move.',
+    'mon.lp.quote.t4': 'Leaguemates can see that the league is covered. They see your name only if you turn that on.',
+  };
+  for (const [k, v] of Object.entries(FINAL)) eq(copy.MON[k], v, `${k} verbatim`);
+  const s = strip(read('screens/LeaguePassScreen.tsx'));
+  // The four cover lines: every t-key filled with the league name, rendered as body text (no dim style).
+  assert(/\(\['mon\.lp\.quote\.t1', 'mon\.lp\.quote\.t2', 'mon\.lp\.quote\.t3', 'mon\.lp\.quote\.t4'\] as const\)\.map\(\s*\(k\) => fill\(MON\[k\], \{ league_name: leagueName \}\),?\s*\)/.test(s), 'the four cover lines, filled with {league_name}');
+  assert(/<ChalkText key=\{i\} variant="body" testID=\{`league-pass\.quote\.t\$\{i \+ 1\}`\}>\{text\}<\/ChalkText>/.test(s), 'cover lines: body variant, not dim');
+  const quote = s.slice(s.indexOf('testID="league-pass.quote"'), s.indexOf('testID="league-pass.change-league"'));
+  const at = (re, what) => { const m = quote.search(re); assert(m >= 0, `quote has ${what}`); return m; };
+  const order = [
+    at(/variant="dataLg" testID="league-pass\.quote\.price">\{priceLine\}/, 'the billed price, large'),
+    at(/\{trialLine \? \([\s\S]*?variant="bodySm"[^>]*testID="league-pass\.quote\.trial">\{trialLine\}/, 'the free month, small, only when set'),
+    at(/covers\.map\(/, 'the cover lines'),
+    at(/testID="league-pass\.disclosure"/, 'the disclosure'),
+    at(/testID="league-pass\.buy"/, 'the Buy button'),
+  ];
+  for (let i = 1; i < order.length; i++) assert(order[i - 1] < order[i], `quote order step ${i}`);
+  assert(!/variant="dataLg"[^>]*>\{trialLine\}/.test(s), 'the free-month line is never the large text');
+  // Restore beside Terms and Privacy, in the shared links row (quote and picker).
+  const links = s.slice(s.indexOf('const legalLinks = ('), s.indexOf('let body: React.ReactNode;'));
+  const r = links.indexOf('testID="league-pass.restore"'), t = links.indexOf('testID="league-pass.terms"'), p = links.indexOf('testID="league-pass.privacy"');
+  assert(r >= 0 && r < t && t < p, 'Restore · Terms · Privacy in one row');
+  assert(/onPress=\{\(\) => void restore\(\)\}/.test(links) && /\{MON\['mon\.pay\.restore'\]\}/.test(links), 'Restore runs restore() with the paywall\'s label');
+  const fn = s.slice(s.indexOf('const restore = async'), s.indexOf('if (!verified) return null;'));
+  assert(/if \(!\(await customerInfoAppliesNow\(\)\)\)/.test(fn), 'restore: only when RevenueCat is this user');
+  assert(/await restorePurchases\(userId\)/.test(fn) && /track\('paywall_restore', \{ restored \}\)/.test(fn), 'restore: the paywall\'s call and event');
+  assert(/await refreshEntitlements\(\);/.test(fn), 'restore: always re-asks the server');
+  assert(/MON\['mon\.pay\.restore_ok'\] : MON\['mon\.pay\.restore_none'\]/.test(fn), 'restore: the paywall\'s result lines');
+  const quoteAll = s.slice(s.indexOf('testID="league-pass.quote"'), s.indexOf("} else {\n    body = ("));
+  assert(/\{legalLinks\}/.test(quoteAll), 'the quote renders the links row');
 });
 
 (async () => {

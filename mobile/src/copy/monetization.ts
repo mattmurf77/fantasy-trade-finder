@@ -127,19 +127,21 @@ export const MON = {
     "Use Sign in with Apple to subscribe. It's a new sign-in: reconnect your league in Settings, and nothing from this session carries over.",
 
   // ── League pass (flag `monetize.league_pass`, dark; D-281) ────────────────
-  // PLACEHOLDER COPY, PENDING LEGAL REVIEW (prd §8 q7, plan §10): plain and
-  // accurate, but not legal's wording. Replace the block from legal's file
-  // before the flag turns on. No price is written here: every price comes from
-  // StoreKit or the server's `league_pass` config and fills `{…}` slots.
+  // Wording approved per legal R29.1-R29.63 (2026-11-26). Cite as "legal
+  // R29.x" (not the PRD's R29 requirement). "30 days" in R29.26, R29.53 and
+  // R29.62 is tied to the server knob `league_pass_repoint_cooldown_days`: if
+  // the knob changes, change this copy and Terms §14.12(c) first. No price is
+  // written here: every price comes from StoreKit or the server's
+  // `league_pass` config and fills `{…}` slots.
   'mon.lp.title': 'League pass',
   'mon.lp.entry': 'Paying for your whole league? See the league pass',
   'mon.lp.entry_a11y': 'See the league pass',
   'mon.lp.close_a11y': 'Close',
-  'mon.lp.other_league': 'Your league pass covers {league_name} only. It does not cover this league.',
-  'mon.lp.other_league.unnamed': 'Your league pass covers one of your other leagues only. It does not cover this league.',
+  'mon.lp.other_league': 'A league pass covers you in {league_name} only. It does not cover this league.',
+  'mon.lp.other_league.unnamed': 'A league pass covers you in one of your other leagues only. It does not cover this league.',
   'mon.lp.pick.title': 'Choose a league',
   'mon.lp.pick.body':
-    'One pass covers everyone in the league you choose, in that league. You get a subscription in all your leagues.',
+    "One pass covers finding and sending trades for the managers in the league you choose, in that league only. You're covered in all your leagues.",
   'mon.lp.pick.empty': "You don't have a team in any league yet.",
   'mon.lp.quote.teams': '{teams} teams',
   // The quote. The `.trial` keys (the only mon.lp lines that say "free") render
@@ -148,15 +150,22 @@ export const MON = {
   // the `.paid` keys. Same disclosure pattern as `mon.pay.disc.trial/.paid`.
   'mon.lp.quote.trial': '1 month free, then {price} a year',
   'mon.lp.quote.paid': '{price} a year',
+  // legal R29.60-R29.63: what the pass covers, shown on the quote as body text
+  // between the price line and the disclosure.
+  'mon.lp.quote.t1':
+    'Covers finding and sending trades for the managers in {league_name}, in that league only. Each manager needs a verified Fleeced account.',
+  'mon.lp.quote.t2': 'Coverage lasts while your subscription is active. It ends for everyone if the pass ends or is refunded.',
+  'mon.lp.quote.t3': 'You can move the pass to another of your leagues, but not within 30 days of buying it or of your last move.',
+  'mon.lp.quote.t4': 'Leaguemates can see that the league is covered. They see your name only if you turn that on.',
   'mon.lp.disclosure.trial':
-    'League pass for {league_name}: 1 month free, then {price} a year. Payment is charged to your Apple ID when the free month ends. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the free month or the current period ends.',
+    'Fleeced League Pass for {league_name}: 1 month free, then {price} a year. Payment is charged to your Apple ID when the free month ends. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the free month or the current period ends.',
   'mon.lp.disclosure.paid':
-    'League pass for {league_name}: {price} a year, charged to your Apple ID when you confirm. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
+    'Fleeced League Pass for {league_name}: {price} a year, charged to your Apple ID when you confirm. Renews automatically until cancelled. Cancel in your Apple ID settings at least 24 hours before the current period ends.',
   'mon.lp.buy.trial': 'Start 1-month trial',
-  'mon.lp.buy': 'Buy league pass',
+  'mon.lp.buy': 'Subscribe',
   'mon.lp.cancel': 'Cancel',
   'mon.lp.change_league': 'Choose another league',
-  'mon.lp.unavailable': "Purchases aren't available on this build yet.",
+  'mon.lp.unavailable': "The league pass can't be bought right now. Try again later.",
   'mon.lp.confirming': 'Confirming your league pass…',
   'mon.lp.done': 'Your league pass covers {league_name}.',
   'mon.lp.done.unnamed': 'Your league pass is active.',
@@ -164,7 +173,8 @@ export const MON = {
   'mon.lp.pending':
     'Your purchase went through. Attaching it to your league can take a few minutes. Check Settings › Subscription.',
   'mon.lp.unbound.title': 'Choose a league for your pass',
-  'mon.lp.unbound.body': "Your purchase went through, but it isn't attached to a league yet. Choose the league it covers.",
+  'mon.lp.unbound.body':
+    "Your purchase went through, but it isn't attached to a league yet. Choose the league it covers. It covers that league only, and you can't move it for 30 days after you choose.",
   'mon.lp.refused.not_member': "You don't have a team in that league, so you can't buy a pass for it.",
   'mon.lp.refused.league_not_allowed': "League passes aren't available for that league yet.",
   'mon.lp.refused.already_covered': 'That league already has a league pass.',
@@ -175,7 +185,7 @@ export const MON = {
   'mon.lp.refused.cooldown': 'You can move your pass again on {date}.',
   'mon.lp.refused.generic': 'Something went wrong. Try again.',
   // Settings › Subscription and the manage view
-  'mon.lp.member.line': 'Your league pass covers {league_name} through {date}.',
+  'mon.lp.member.line': 'A league pass covers you in {league_name} through {date}. It can end sooner, or be renewed.',
   'mon.lp.member.by': 'Paid for by {buyer}.',
   'mon.lp.member.leaguemate': 'a leaguemate',
   'mon.lp.buyer.line': 'League pass: {league_name}',
@@ -190,18 +200,21 @@ export const MON = {
   'mon.lp.pro.row': 'Buy a league pass for your league',
   'mon.lp.pro.row_a11y': 'Buy a league pass',
   'mon.lp.quote.replaces':
-    'The league pass replaces your current Fleeced Pro subscription. Apple refunds the unused part of it, and your individual plan stops renewing.',
-  'mon.lp.quote.keeps': 'Your current Pro stays as it is. The league pass is a separate subscription.',
+    'Buying the league pass replaces your current Fleeced Pro subscription. Your individual plan ends and stops renewing, and Apple refunds the unused part of what you paid for it. If your plan is at the Founder price, you may lose the Founder price.',
+  'mon.lp.quote.keeps':
+    'You already have Fleeced Pro, and it stays as it is. This pass is a separate subscription for your leaguemates. If the pass ends, your Pro is not affected.',
   'mon.lp.move': 'Move the pass to another league',
   'mon.lp.move.after': 'You can move it again on {date}.',
   'mon.lp.move.title': 'Move your league pass to {league_name}?',
-  'mon.lp.move.body': 'Everyone in {league_name} is covered from now on, and the league it covers now is not.',
+  'mon.lp.move.body':
+    "The managers in {league_name} are covered from now on. The league it covers now loses coverage right away. You can't move the pass again for 30 days.",
   'mon.lp.move.confirm': 'Move pass',
   'mon.lp.show_name': 'Show my name to the league',
-  'mon.lp.show_name.hint': 'Off: covered leaguemates see "a leaguemate".',
+  'mon.lp.show_name.hint': 'On: covered leaguemates see your Fleeced display name. Off: they see "a leaguemate".',
   'mon.lp.unknown_league': 'Your league',
   // R29: the one-time notice to an individual subscriber
-  'mon.lp.notice': "{league_name} is now covered by a leaguemate's league pass. Your own subscription hasn't changed.",
+  'mon.lp.notice':
+    "{league_name} is now covered by a leaguemate's league pass. Your own subscription hasn't changed and still renews.",
   'mon.lp.notice.dismiss_a11y': 'Dismiss',
 } as const;
 

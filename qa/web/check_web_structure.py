@@ -747,8 +747,9 @@ def run() -> int:
         problems.append(f"sections {[n for n, _ in terms_secs]}, want 1-14 in order")
     if not s14_text.startswith("14. Subscriptions, free trial and billing"):
         problems.append('no "14. Subscriptions, free trial and billing" heading')
-    if subs != list(range(1, 12)):
-        problems.append(f"§14 subsections {subs}, want 1-11 in order (14.11 Tips, legal R28.26)")
+    if subs != list(range(1, 13)):
+        problems.append(f"§14 subsections {subs}, want 1-12 in order (14.11 Tips, legal R28.26; "
+                        "14.12 League pass, legal R29 2026-11-26)")
     problems += [f'§14 lacks "{t}"' for t in (
         "Deleting the app or your Fleeced account does not cancel your subscription",
         "reportaproblem.apple.com",
@@ -757,7 +758,7 @@ def run() -> int:
     if s14_text.count("at least 24 hours before") < 2:
         problems.append('"at least 24 hours before" not in both 14.3 (trial) and 14.4 (renewal)')
     r.check("POL-terms-subscriptions[terms.html]", not problems,
-            "; ".join(problems) if problems else "§14 with 14.1-14.11 and the cancel/refund/Apple lines")
+            "; ".join(problems) if problems else "§14 with 14.1-14.12 and the cancel/refund/Apple lines")
 
     priv = dict(numbered("privacy.html"))
     item = re.search(r"<li>\s*<strong>Subscriptions and purchases\.</strong>(.*?)</li>",
@@ -1179,6 +1180,71 @@ def run() -> int:
             ("not verbatim once (legal R28.26): " + "; ".join(miss26)) if miss26 else
             ("superseded text still there: " + "; ".join(stale26)) if stale26 else
             f"{len(R28_26_PRIVACY)} privacy + {len(R28_26_TERMS)} terms R28.26 runs verbatim")
+
+    # Legal R29 (2026-11-26), the league pass: Terms T1 (§14.2) and T2
+    # (§14.12, (g) included while the refund block stands), Privacy P1 (§1),
+    # P2 (§3) and P4 (§5), word for word, once each, in their section. The
+    # "30 days" in §14.12(c) is tied to the server knob
+    # league_pass_repoint_cooldown_days (and to mobile mon.lp copy).
+    R29_TERMS = (
+        ("§14.2",
+         "14.2 How you subscribe. Subscriptions are sold in the iPhone app through Apple's App Store as "
+         "auto-renewable subscriptions: an individual plan, monthly or yearly, or a yearly league pass "
+         "(§14.12). Apple handles the payment."),
+        ("§14.12 intro",
+         "14.12 League pass. A league pass is a yearly subscription that one manager buys for one league."),
+        ("§14.12(a)",
+         "(a) What it covers. While the pass is active, finding and sending trades work in that league for "
+         "its managers who use Fleeced with a verified account. They don't need their own subscription "
+         "there. The pass doesn't cover them in any other league. The buyer is covered in all their "
+         "leagues. A pass covers up to the league's number of teams, plus two more accounts for co-managers."),
+        ("§14.12(b)",
+         "(b) The buyer. You need a team in the league to buy a pass for it. A league can have one pass, "
+         "and you can hold one pass. §§14.3 to 14.7 apply to a league pass. Only the buyer is charged, and "
+         "only the buyer can cancel it or ask Apple for a refund. A pass can't be transferred to another person."),
+        ("§14.12(c)",
+         "(c) Moving it. The buyer can move the pass to another of their leagues, but not within 30 days "
+         "of buying it or of the last move. The league it covered loses coverage right away. When a Sleeper "
+         "league renews for a new season, the pass follows it. On other platforms, if the new season has a "
+         "new league ID, the buyer may need to move the pass."),
+        ("§14.12(d)",
+         "(d) When coverage ends. Coverage ends when the pass expires, is refunded or is moved, or when the "
+         "buyer deletes their Fleeced account. It ends for a manager who leaves the league. We don't send a "
+         "notice. Covered managers can see the date coverage runs to in Settings › Subscription. No one is "
+         "owed a refund or credit because coverage ended, beyond what Apple gives the buyer under §14.6."),
+        ("§14.12(e)",
+         "(e) If a pass covers you. You didn't buy the pass, and it isn't yours. The buyer chose to share "
+         "it, and it can end at any time. It doesn't change any subscription of your own, which keeps "
+         "renewing until you cancel it."),
+        ("§14.12(f)",
+         "(f) If you already subscribe. Buying a league pass replaces an individual App Store subscription. "
+         "Apple refunds the unused part under its rules, and you may lose the Founder price (§14.8)."),
+        ("§14.12(g)",
+         "(g) Refunded passes. If a league pass is refunded, that account can't buy another one unless we "
+         "allow it. Email us if that happens."),
+        ("§14.12(h)",
+         "(h) What others see. Managers in the league can see that it has a league pass. They see the "
+         "buyer's display name only if the buyer turns that on."),
+    )
+    R29_PRIVACY = (
+        ("§1 league pass record",
+         "RevenueCat also receives your account identifier when you sign in. If you buy a league pass, we "
+         "also record which league it covers. To give that league's managers access, we use the league "
+         "data described above to check who is in the league."),
+        ("§3 league pass",
+         "League pass. If a league pass covers one of your leagues, managers in that league can see in the "
+         "app that the league is covered and the date coverage runs to. They see the buyer as \"a "
+         "leaguemate\" unless the buyer turns on \"Show my name to the league\", which shows the buyer's "
+         "display name. The buyer sees how many leaguemates are covered, not who they are."),
+        ("§5 league pass retention",
+         "Subscription and purchase records: kept while your account exists, and deleted with it. A league "
+         "pass record stays, with your account ID removed."),
+    )
+    miss29 = [f"privacy {label}" for label, s in R29_PRIVACY if not once(label, s)]
+    miss29 += [f"terms {label}" for label, s in R29_TERMS if not terms_once(label, s)]
+    r.check("POL-r29-league-pass[privacy|terms]", not miss29,
+            ("not verbatim once (legal R29, 2026-11-26): " + "; ".join(miss29)) if miss29 else
+            f"{len(R29_PRIVACY)} privacy + {len(R29_TERMS)} terms legal R29 runs verbatim")
 
     # R28.26 item 1, M11: which text ships depends on prod at this page's
     # deploy. (b), M11_ENTRY_LIVE, while landing.platform_options is ON in

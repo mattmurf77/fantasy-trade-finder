@@ -29,6 +29,7 @@ import {
   purchasePackage,
   PurchaseIdentityError,
   purchasesReady,
+  restorePurchases,
   whenIdentityReady,
   type PurchasesPackage,
 } from '../api/purchases';
@@ -100,7 +101,14 @@ import {
 // utils/leaguePass.purchasePlan BEFORE the button shows: confirmed → "1 month
 // free, then <price> a year", the trial disclosure and "Start 1-month trial";
 // not eligible, unknown or an error → "<price> a year", the paid disclosure
-// and "Buy league pass", with no "free" anywhere.
+// and "Subscribe", with no "free" anywhere. The billed price is always the
+// largest text (`mon.lp.quote.paid`, dataLg); the free-month line sits small
+// beneath it, as on the paywall (R28.8 #2, legal R29 §3).
+//
+// LEGAL (legal R29.1-R29.63, 2026-11-26): the quote also states what the pass
+// covers (R29.60-R29.63, body text between the price and the disclosure), and
+// Restore purchases sits beside Terms and Privacy (Guideline 3.1.1), with the
+// paywall's restore behaviour.
 // Every price is StoreKit's (or, with no StoreKit, the server config's display
 // string, when nothing can be bought). No price is written in this file.
 //
@@ -366,6 +374,34 @@ export default function LeaguePassScreen({ navigation, route }: any) {
     }
   };
 
+  // ── Restore purchases: the paywall's Restore (verified only, RevenueCat
+  // identity confirmed as this user, then always re-ask the server).
+  const restore = async () => {
+    if (busy || !userId) return;
+    setBusy(true);
+    setLine(null);
+    try {
+      if (!(await customerInfoAppliesNow())) {
+        if (alive.current) setLine(MON['mon.pay.error']);
+        return;
+      }
+      const info = await restorePurchases(userId);
+      const restored = hasProEntitlement(info);
+      track('paywall_restore', { restored });
+      const s = useSession.getState();
+      if (restored && s.user?.user_id === userId && customerInfoApplies(s, currentIdentityUserId())) {
+        noteCustomerInfo(true);
+      }
+      await refreshEntitlements();
+      void viewQuery.refetch();
+      if (alive.current) setLine(restored ? MON['mon.pay.restore_ok'] : MON['mon.pay.restore_none']);
+    } catch {
+      if (alive.current) setLine(MON['mon.pay.error']);
+    } finally {
+      if (alive.current) setBusy(false);
+    }
+  };
+
   if (!verified) return null;
 
   const loading = configQuery.isLoading || viewQuery.isLoading;
@@ -403,6 +439,17 @@ export default function LeaguePassScreen({ navigation, route }: any) {
 
   const legalLinks = (
     <View style={styles.linkRow}>
+      <Pressable
+        testID="league-pass.restore"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: busy }}
+        onPress={() => void restore()}
+        disabled={busy}
+        style={styles.linkHit}
+      >
+        <ChalkText variant="bodySm" style={styles.linkChalk}>{MON['mon.pay.restore']}</ChalkText>
+      </Pressable>
+      <ChalkText variant="bodySm" style={styles.dim}>·</ChalkText>
       <Pressable
         testID="league-pass.terms"
         accessibilityRole="link"
@@ -502,9 +549,13 @@ export default function LeaguePassScreen({ navigation, route }: any) {
     const leagueName = nameOf(leagueId);
     const onBuy = currentProOnBuy(pro, sources);
     const price = plan.price ?? '';
-    const priceLine = plan.freeMonth
-      ? fill(MON['mon.lp.quote.trial'], { price })
-      : fill(MON['mon.lp.quote.paid'], { price });
+    // The billed price is always the largest text; the free month, when
+    // StoreKit confirmed it, is a small line beneath (PaywallScreen's rule).
+    const priceLine = fill(MON['mon.lp.quote.paid'], { price });
+    const trialLine = plan.freeMonth ? fill(MON['mon.lp.quote.trial'], { price }) : null;
+    const covers = (['mon.lp.quote.t1', 'mon.lp.quote.t2', 'mon.lp.quote.t3', 'mon.lp.quote.t4'] as const).map(
+      (k) => fill(MON[k], { league_name: leagueName }),
+    );
     const disclosure = plan.freeMonth
       ? fill(MON['mon.lp.disclosure.trial'], { league_name: leagueName, price })
       : fill(MON['mon.lp.disclosure.paid'], { league_name: leagueName, price });
@@ -518,7 +569,16 @@ export default function LeaguePassScreen({ navigation, route }: any) {
         ) : null}
         {/* R12 / R15: the yearly price, with the free month only when
             StoreKit confirmed it (plan.freeMonth). */}
-        <ChalkText variant="dataLg" testID="league-pass.quote.price">{priceLine}</ChalkText>
+        <View>
+          <ChalkText variant="dataLg" testID="league-pass.quote.price">{priceLine}</ChalkText>
+          {trialLine ? (
+            <ChalkText variant="bodySm" style={styles.trialLine} testID="league-pass.quote.trial">{trialLine}</ChalkText>
+          ) : null}
+        </View>
+        {/* legal R29.60-R29.63: what the pass covers, before the disclosure. */}
+        {covers.map((text, i) => (
+          <ChalkText key={i} variant="body" testID={`league-pass.quote.t${i + 1}`}>{text}</ChalkText>
+        ))}
         <ChalkText variant="bodySm" style={styles.dim} testID="league-pass.disclosure">{disclosure}</ChalkText>
         {/* Existing Pro (operator 2026-11-25): an App Store individual
             subscriber is told the pass REPLACES that subscription (an Apple
@@ -608,4 +668,6 @@ const styles = StyleSheet.create({
   linkRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' },
   linkHit: { minHeight: 44, justifyContent: 'center', paddingHorizontal: space.xs },
   linkUnderline: { color: chalk.base, textDecorationLine: 'underline' },
+  linkChalk: { color: chalk.base },
+  trialLine: { color: chalk.base },
 });
