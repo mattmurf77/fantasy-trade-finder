@@ -80,11 +80,11 @@ Launch handoff 2026-11-04; refreshed 2026-11-09 after the #629/#628 release (`b1
 
 ## 2026-11-25 — Standings display rows (D-285): operator merge, TestFlight build, then the checklist
 
-Built and verified on `feat/standings-display-rows` (PR open, not merged). Not queued above the seven active items. In order:
+Merged and built (TestFlight 1.22.0 (202)); the device checklist is what remains. Not queued above the seven active items. In order:
 
-1. **Operator reviews and merges the PR.** *Why now:* nothing else is blocked on it, and no flag exists, so merging is the release decision for the next build.
-2. **Cut the next TestFlight build** from `main` after the merge. *Why:* the change is app-only; no server deploy changes anything.
-3. **Run [the checklist](../docs/plans/standings-display-rows/testflight-checklist.md)** on that build, after a weekly forecast, and log it in TEST_LEDGER. *Why:* it is the only runtime evidence (D-056); steps 19 and 20 cannot run until a doctored payload or the season's end.
+1. **~~Operator reviews and merges the PR~~ — DONE 2026-11-26** (PR #740, merged as `4f385af3`). *Why now:* nothing else is blocked on it, and no flag exists, so merging is the release decision for the next build.
+2. **~~Cut the next TestFlight build~~ — DONE 2026-11-26** (1.22.0 (202) from `main` `28c0efb8`, EAS build `f2836374`, submitted). *Why:* the change is app-only; no server deploy changes anything.
+3. **Run [the checklist](../docs/plans/standings-display-rows/testflight-checklist.md)** on build 202, after a weekly forecast, and log it in TEST_LEDGER. *Why:* it is the only runtime evidence (D-056); steps 19 and 20 cannot run until a doctored payload or the season's end.
 
 Deferred by the operator (not queued): the Luck and Median what-if views (need completed weekly scores in the saved forecast), the web version.
 
