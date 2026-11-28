@@ -4,6 +4,14 @@
 - **App:** clean detached checkout of `28c0efb8`, `npm ci`, `npx tsc --noEmit` clean, `test:easignore` ok, all **212** `tests/check-*.js` exit 0, `scripts/testid-lint.sh` OK. EAS build `f2836374-a522-42f9-9073-fedd17421a2c` FINISHED (confirmed with `build:list`, commit `28c0efb8`), 1.22.0 (202); submission `b9ea1b33-daf7-48e7-8a7a-b277524242aa` uploaded to App Store Connect.
 - **Not verified:** Apple's processing and tester availability; anything on a device (D-056). No checklist has been run on 202: `docs/plans/standings-display-rows/testflight-checklist.md` (30 steps) for D-285, and the other merged changes' own checklists. Whether main was ready for a build from the other changes' side (the league pass entry in NEXT asks for Shop offers converted to `useProForLeague` first) was not checked by this session; the operator asked for the build.
 
+## 2026-11-26 — Backend CI sharding (PR #739, merged as `cb248ccf`)
+
+- **Serial baseline (local, Python 3.12, `origin/main` `30ee823c`, `FTF_OWNER_PROOF_FAST_JSON=1`):** `pytest backend/tests` **15995 passed, 42 skipped** in 26 min 35 s (1,471 s user CPU). 4 files are 39% of the time, 40 of 652 are 81%.
+- **Sharded, real CI (run 45764512817):** 8 shards, all green; per-shard selected counts sum to **16,068** = collected total; **16,026 passed, 42 skipped**. Workflow wall clock 12 min 26 s (first run, split by file only: 14 min 48 s).
+- **Partition, local:** sorted union of the 8 shards' collected node ids identical to the unsharded collection, no duplicates. `test_ci_shard.py` **22 passed**. Both halves of `test_rules_first_deck.py` pass alone in fresh processes.
+- **Also seen, not adopted:** full suite passed once under `pytest-xdist -n 4 --dist loadfile` locally (9 min 36 s). One run only; not evidence of no flakiness.
+- **Not verified:** shard balance on CI hardware beyond those two runs.
+
 ## 2026-11-26 — League pass legal wording (legal R29.1-R29.63), branch `feat/league-pass-legal-copy`
 
 - **What changed:** 14 `mon.lp.*` strings to legal's final text, 4 new quote lines (`mon.lp.quote.t1`-`t4`), the pending-legal marker replaced by the approval note and the 30-day knob tie; quote shows the billed price large and the free month small beneath; Restore purchases beside Terms and Privacy (the paywall's restore). Terms §14.2 and new §14.12 (a)-(h), Privacy P1-P4, both effective November 26, 2026. Terms §14.1 (T4) not done, per the owner.

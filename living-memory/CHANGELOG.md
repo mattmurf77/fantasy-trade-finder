@@ -12,6 +12,14 @@
 ---
 
 
+## 2026-11-26 — Backend CI sharded across 8 runners, merged as `cb248ccf` (PR #739)
+
+- **What:** the serial `backend-tests` pytest job (54-89 min per run) became `backend-suite`, an 8-way matrix. Every runner collects the whole suite; the `.github/scripts/ci_shard.py` plugin keeps its shard's tests, split by test file and balanced by `.github/backend-test-durations.json`. `test_rules_first_deck.py` is split in two (`SPLIT_FILES`, opt-in). No new dependency.
+- **Gate:** `backend-tests` is now a job that passes only when every shard passed, so the ruleset's required check name is unchanged. PR #735 (skip by area) later added the `changes` job on top.
+- **Concurrency:** a new push to a PR cancels that PR's superseded run; runs on `main` are never cancelled. A cancelled run shows `backend-tests` failed on the old commit; expected.
+- **Result:** 12-14 min per run on `main`. Details and the exactly-once proof are in the PR #739 description.
+- **Open:** durations were measured on a Mac, so shards range about 7-12 min in CI; regenerate from a CI junit run for tighter balance (`backend/tests/CLAUDE.md` § Running).
+
 ## 2026-11-25 — Landing page visit count, anonymous (D-287), branch `feat/web-landing-visit-count`
 
 - **What:** owner ask after D-284: count website traffic again. New `web/js/landing-visit.js` on the landing sends one `app_opened` `{launch_type: web}` per load, gated on `analytics.client_events`; fails silently. Not `events.js`: no session token, no queue replay, no invite capture.
